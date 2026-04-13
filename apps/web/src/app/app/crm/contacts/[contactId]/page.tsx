@@ -3,6 +3,8 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useNavigationContext } from "@/lib/navigation-context";
+import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { Badge, Button, Input } from "@keyflow/ui";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -22,6 +24,7 @@ import {
   fetchContactPlaybook,
   updateContactPlaybook,
 } from "@/lib/client";
+import { loadInterruptedTasks, markSourceChanged } from "@/lib/resume-task-registry";
 
 type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[] };
 type TaskWithContactTags = Omit<ContactTask, "contact"> & { contact?: ContactWithTags | null };
@@ -50,6 +53,7 @@ export default function ContactDetailPage() {
   const params = useParams();
   const router = useRouter();
   const isMobile = useIsMobile();
+  const { setCurrentMeta, getOriginContext } = useNavigationContext();
   const contactId = params?.contactId as string;
   const [data, setData] = useState<Detail | null>(null);
   const [noteBody, setNoteBody] = useState("");
@@ -114,9 +118,14 @@ export default function ContactDetailPage() {
       setEventFilter("ALL");
       setNotesQuery("");
       setPlaybookEdit(false);
+      if (normalized?.contact) {
+        const c = normalized.contact;
+        const label = `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.email || "Contact";
+        setCurrentMeta({ selectedEntityId: contactId, selectedEntityLabel: label });
+      }
     };
     if (contactId) void load();
-  }, [contactId, refreshDetail, loadPlaybook]);
+  }, [contactId, refreshDetail, loadPlaybook, setCurrentMeta]);
 
   const addNoteAction = useCallback(() => {
     if (!noteBody.trim()) return;
@@ -164,6 +173,10 @@ export default function ContactDetailPage() {
       const normalized = await refreshDetail();
       setStatus(normalized?.contact?.status ?? status);
       setTags(normalized?.contact?.tags?.join(", ") ?? tags);
+      const relatedTasks = loadInterruptedTasks().filter(
+        (t) => t.draftId === contactId || t.formData?.contactId === contactId
+      );
+      relatedTasks.forEach((t) => markSourceChanged(t.id));
     });
   };
 
@@ -413,12 +426,42 @@ export default function ContactDetailPage() {
   );
 
   if (!data) return <div className="p-4 text-sm text-muted-foreground">Loading contact...</div>;
-  if (!contact) return <div className="p-4 text-sm text-muted-foreground">Contact not found.</div>;
+
+  if (!contact) {
+    const origin = getOriginContext();
+    return (
+      <div className="p-4 space-y-4">
+        {origin && (
+          <TaskContinuityHeader
+            taskLabel="Contact Detail"
+            returnHref={origin.route}
+            returnLabel={`Back to ${origin.workspace ?? "CRM"}${origin.tab ? ` › ${origin.tab}` : ""}`}
+          />
+        )}
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">Contact not found</p>
+          <p className="mt-1">This contact may have been deleted or you may not have access.</p>
+          {origin && (
+            <button
+              onClick={() => router.push(origin.route)}
+              className="mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+            >
+              ← Return to {origin.workspace ?? "CRM"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const c = contact;
 
   return (
     <div className="space-y-4">
+      <TaskContinuityHeader
+        taskLabel={`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.email || "Contact"}
+        returnHref={getOriginContext()?.route ?? "/app/crm/pipeline"}
+      />
       <div className="flex items-start justify-between gap-3 md:sticky md:top-0 md:bg-slate-950/80 md:backdrop-blur md:p-2 md:rounded-xl md:z-10">
         <div>
           <h1 className="text-xl font-semibold">{`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}</h1>

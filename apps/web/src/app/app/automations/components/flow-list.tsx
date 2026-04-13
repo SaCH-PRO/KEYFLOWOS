@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap, Power, PowerOff, Brain, Settings2, Clock, Plus, Search, Pencil,
@@ -10,6 +10,7 @@ import {
   Playbook, updatePlaybook,
   CrossModuleWorkflow, updateCrossModuleWorkflow,
 } from "@/lib/client";
+import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import {
   getTriggerLabel, getActionLabels, getWorkflowActionSummary,
   getFlowModules, getTriggerModule, MODULE_COLORS,
@@ -46,6 +47,7 @@ export function FlowList({
   const [expandedWf, setExpandedWf] = useState<string | null>(null);
   const [updatingWf, setUpdatingWf] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
+  const activeTaskIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (templateToUse) {
@@ -120,12 +122,29 @@ export function FlowList({
   }
 
   function handleEditorClose() {
+    if (activeTaskIdRef.current) {
+      markTaskCompleted(activeTaskIdRef.current);
+      activeTaskIdRef.current = null;
+    }
     setShowEditor(false);
     setEditingPlaybook(null);
     onTemplateClear();
   }
 
   function handleEditPlaybook(pb: Playbook) {
+    const taskId = registerInterruptedTask({
+      id: `automations-flow-${pb.id}`,
+      module: "automations",
+      label: pb.name || "Unnamed flow",
+      description: "Resume editing this automation flow",
+      route: "/app/automations",
+      draftId: pb.id,
+      originRoute: "/app/automations",
+      originLabel: "Automations",
+      taskIntent: "edit-flow",
+      formData: null,
+    });
+    activeTaskIdRef.current = taskId;
     setEditingPlaybook(pb);
     setShowEditor(true);
   }

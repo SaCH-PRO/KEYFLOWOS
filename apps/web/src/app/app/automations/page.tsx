@@ -5,6 +5,7 @@ import { LayoutGrid, Clock, Workflow } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
+import { useNavigationContext } from "@/lib/navigation-context";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { AiBadge } from "@/components/ui/ai-badge";
 
@@ -18,6 +19,8 @@ import { FlowHealthStrip } from "./components/flow-health-strip";
 import { CoverageMap } from "./components/coverage-map";
 import { RecommendedFlows } from "./components/recommended-flows";
 import type { AutomationTemplate } from "./components/automation-constants";
+import { ResumePrompt } from "@/components/ui/resume-task-system";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { Playbook, CrossModuleWorkflow, fetchPlaybooks, fetchCrossModuleWorkflows } from "@/lib/client";
 
 const TABS = [
@@ -27,9 +30,11 @@ const TABS = [
 ];
 
 export default function FlowsPage() {
+  useReturnNavigation({ restoreScrollOnMount: true });
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("flows");
   const { isFreePlan } = usePlan();
+  const { setCurrentMeta } = useNavigationContext();
   const [selectedTemplate, setSelectedTemplate] = useState<AutomationTemplate | null>(null);
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [workflows, setWorkflows] = useState<CrossModuleWorkflow[]>([]);
@@ -40,6 +45,10 @@ export default function FlowsPage() {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
   }, []);
+
+  useEffect(() => {
+    setCurrentMeta({ selectedEntityLabel: "Flows" });
+  }, [setCurrentMeta]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -111,6 +120,7 @@ export default function FlowsPage() {
 
   return (
     <div className="space-y-4">
+      <ResumePrompt module="automations" />
       <PageHeader
         icon={Workflow}
         title="Flows"

@@ -9,6 +9,7 @@ import {
   Share2,
   ExternalLink,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { TODAY_WALKTHROUGH } from "@/lib/walkthrough-definitions";
@@ -24,9 +25,26 @@ import { NextBestActionWidget } from "@/components/ai/next-best-action-widget";
 import { CashFlowWidget } from "./_command/cash-flow-widget";
 import { ProgressivePrompts } from "./profile/components/progressive-prompts";
 import { getBusinessById, fetchServices } from "@/lib/client";
+import { ResumePrompt, useResumeTaskRegistry } from "@/components/ui/resume-task-system";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
+import { DeletedTargetBanner } from "@/components/ui/redirect-explainer-banner";
 
 export default function CommandPage() {
   const d = useCommandData();
+  const router = useRouter();
+  useReturnNavigation({ restoreScrollOnMount: true });
+  const { tasks: onboardingTasks } = useResumeTaskRegistry("onboarding");
+  const prevOnboardingCountRef = useRef(onboardingTasks.length);
+
+  useEffect(() => {
+    const prev = prevOnboardingCountRef.current;
+    const curr = onboardingTasks.length;
+    if (prev > 0 && curr === 0) {
+      router.refresh();
+    }
+    prevOnboardingCountRef.current = curr;
+  }, [onboardingTasks.length, router]);
+
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const [shareModalOpen, setShareModalOpen] = useState(false);
@@ -59,6 +77,8 @@ export default function CommandPage() {
 
   return (
     <div className="flex flex-col gap-5 max-w-3xl mx-auto px-4 sm:px-0 pb-10" aria-label="Today View">
+      <DeletedTargetBanner />
+      <ResumePrompt module="onboarding" maxShown={1} />
       {d.error && (
         <div
           className="p-4 kf-radius-lg"

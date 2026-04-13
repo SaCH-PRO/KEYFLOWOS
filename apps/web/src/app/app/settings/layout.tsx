@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard } from "lucide-react";
+import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
+import { useNavigationContext } from "@/lib/navigation-context";
 
 const navItems = [
   { href: "/app/settings/business", label: "Payments", icon: CreditCard, description: "Billing & gateways" },
@@ -18,9 +20,24 @@ const navItems = [
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { getOriginContext } = useNavigationContext();
+  const origin = getOriginContext();
+
+  const showContinuityHeader = !!origin && origin.workspace !== "Studio";
+
+  const getTaskLabel = () => {
+    const item = navItems.find((n) => pathname === n.href || pathname.startsWith(n.href));
+    return item ? `Configure ${item.label}` : `Studio`;
+  };
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      {showContinuityHeader && (
+        <TaskContinuityHeader
+          taskLabel={getTaskLabel()}
+        />
+      )}
+
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}

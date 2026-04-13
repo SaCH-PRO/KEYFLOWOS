@@ -43,6 +43,9 @@ import {
   createProduct,
   IndustryTemplatePreview,
 } from "@/lib/client";
+import { RedirectExplainerBanner } from "@/components/ui/redirect-explainer-banner";
+import { useNavigationContext } from "@/lib/navigation-context";
+import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 
 interface TemplateCard {
   id: string;
@@ -441,15 +444,22 @@ function HelpDrawer({
 export default function OnboardingPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { getOriginContext, setCurrentMeta, setTaskOrigin, getTaskOrigin } = useNavigationContext();
+  const originSnapshotRef = useRef<ReturnType<typeof getOriginContext>>(null);
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(0);
+  const [resumeTaskId, setResumeTaskId] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [products, setProducts] = useState<EditableProduct[]>([]);
   const [configuring, setConfiguring] = useState(false);
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+
+  useEffect(() => {
+    originSnapshotRef.current = getOriginContext();
+  }, [getOriginContext]);
 
   useEffect(() => {
     const init = async () => {
@@ -490,8 +500,25 @@ export default function OnboardingPage() {
         console.error("Failed to init onboarding:", err);
       }
       setLoading(false);
+
+      const origin = originSnapshotRef.current;
+      const taskId = registerInterruptedTask({
+        id: `onboarding-${bid}`,
+        module: "onboarding",
+        label: "Business Setup",
+        description: "Complete your business configuration to start using the app",
+        route: "/app/onboarding",
+        draftId: null,
+        originRoute: origin?.route ?? null,
+        originLabel: origin?.workspace ?? null,
+        taskIntent: "onboarding-setup",
+        formData: null,
+      });
+      setResumeTaskId(taskId);
+      setCurrentMeta({ taskIntent: "onboarding-setup" });
     };
     void init();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   const handleSelectTemplate = async (templateId: string) => {
@@ -646,14 +673,20 @@ export default function OnboardingPage() {
     if (businessId) {
       await markConciergeComplete(businessId);
     }
-    router.push("/app");
+    if (resumeTaskId) markTaskCompleted(resumeTaskId);
+    const returnEntry = getTaskOrigin();
+    setTaskOrigin(null);
+    router.push(returnEntry?.route ?? "/app");
   };
 
   const handleSkip = async () => {
+    if (resumeTaskId) markTaskCompleted(resumeTaskId);
     if (businessId) {
       await markConciergeComplete(businessId);
     }
-    router.push("/app");
+    const returnEntry = getTaskOrigin();
+    setTaskOrigin(null);
+    router.push(returnEntry?.route ?? "/app");
   };
 
   if (loading) {
@@ -677,8 +710,26 @@ export default function OnboardingPage() {
     );
   }
 
+  const origin = getOriginContext();
+  const wasRedirected = !!origin && origin.taskIntent !== "onboarding-setup";
+
   return (
     <div className="h-full flex flex-col bg-background">
+      {wasRedirected && origin && (
+        <div className="px-4 sm:px-6 pt-3">
+          <RedirectExplainerBanner
+            reason="Business setup is required before using the app"
+            missingRequirement="Complete your business profile and initial configuration"
+            postCompletionNote="After finishing setup you'll be taken to the dashboard"
+            primaryCta={{ label: "Complete Setup" }}
+            backCta={{
+              label: `Back to ${origin.workspace ?? "Previous"}${origin.tab ? ` › ${origin.tab.charAt(0).toUpperCase() + origin.tab.slice(1)}` : ""}`,
+              href: origin.route,
+            }}
+            variant="info"
+          />
+        </div>
+      )}
       <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b" style={{ borderColor: "hsl(var(--kf-border) / 0.4)" }}>
         <StepIndicator current={step} />
         <div className="flex items-center gap-2">

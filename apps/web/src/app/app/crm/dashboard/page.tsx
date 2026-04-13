@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode, useEffect, useMemo, useState, useTransition } from "react";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
 import Link from "next/link";
 import { Badge, Button, Card, CardGrid, ContentContainer, Drawer, Input, PageHeader } from "@keyflow/ui";
 import {
@@ -41,6 +42,7 @@ function SectionCard({
 }
 
 export default function CrmDashboardPage() {
+  useReturnNavigation({ restoreScrollOnMount: true });
   const [segments, setSegments] = useState<SegmentCounts>({});
   const [tasks, setTasks] = useState<ContactTask[]>([]);
   const [events, setEvents] = useState<ContactEvent[]>([]);

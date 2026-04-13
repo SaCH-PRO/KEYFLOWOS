@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useNavigationContext } from "@/lib/navigation-context";
+import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple, apiPatch, apiDelete } from "@/lib/api";
 import {
@@ -308,6 +311,8 @@ function AiInsightsPanel({ meta, createdAt }: { meta: Record<string, unknown>; c
 export default function DocumentDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { getOriginContext, setCurrentMeta } = useNavigationContext();
+  const { navigateBackWithFallback, getReturnLabel, getReturnHref } = useReturnNavigation({ fallback: "/app/documents" });
   const instanceId = params.instanceId as string;
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [doc, setDoc] = useState<DocInstance | null>(null);
@@ -337,6 +342,12 @@ export default function DocumentDetailPage() {
   }, [instanceId]);
 
   useEffect(() => { loadDoc(); }, [loadDoc]);
+
+  useEffect(() => {
+    if (doc?.title) {
+      setCurrentMeta({ selectedEntityLabel: doc.title });
+    }
+  }, [doc?.title, setCurrentMeta]);
 
   const handleSaveSection = async (sectionKey: string) => {
     if (!businessId || !doc) return;
@@ -504,20 +515,40 @@ export default function DocumentDetailPage() {
   }
 
   if (!doc) {
+    const returnLabel = getReturnLabel() ?? "Documents";
+    const returnHref = getReturnHref() ?? "/app/documents";
     return (
-      <div className="text-center py-16">
+      <div className="text-center py-16 space-y-3">
         <p className="text-[hsl(var(--muted-foreground))]">Document not found</p>
-        <button type="button" onClick={() => router.push("/app/documents")} className="mt-3 text-sm text-[hsl(var(--kf-accent1))] min-h-[44px]">
-          Back to Documents
-        </button>
+        <p className="text-sm text-[hsl(var(--muted-foreground))/60]">
+          This document may have been deleted or you may not have access.
+        </p>
+        <div className="flex items-center justify-center gap-3 mt-4">
+          <button
+            type="button"
+            onClick={() => navigateBackWithFallback({ targetExists: false, targetDeletedMessage: "This document is no longer available." })}
+            className="text-sm text-[hsl(var(--kf-accent1))] min-h-[44px] underline-offset-2 hover:underline"
+          >
+            Return to {returnLabel}
+          </button>
+          <a href={returnHref} className="text-xs text-[hsl(var(--muted-foreground))] underline-offset-2 hover:underline">
+            or go to Documents
+          </a>
+        </div>
       </div>
     );
   }
 
   const pendingReviews = doc.reviewTasks.filter((r) => r.status === "PENDING");
 
+  const origin = getOriginContext();
+  const showContinuityHeader = !!origin;
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {showContinuityHeader && (
+        <TaskContinuityHeader taskLabel={doc.title} />
+      )}
       <div className="flex items-center gap-3">
         <button type="button" onClick={() => router.push("/app/documents")} className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center">
           <ArrowLeft className="w-5 h-5 text-[hsl(var(--muted-foreground))]" />

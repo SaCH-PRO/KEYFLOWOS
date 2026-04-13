@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { useNavigationContext } from "@/lib/navigation-context";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   User, CheckCircle2, AlertCircle, FileText,
@@ -78,6 +79,7 @@ interface IntelligenceTier {
 export default function ProfileSettingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { setCurrentMeta } = useNavigationContext();
   const rawTab = searchParams.get("tab") || "overview";
   const initialTab = mapLegacyTab(rawTab);
 
@@ -131,9 +133,10 @@ export default function ProfileSettingsPage() {
   const handleTabChange = useCallback((tab: ActiveTab | TabId | string) => {
     const mapped = mapLegacyTab(tab);
     setActiveTab(mapped);
+    setCurrentMeta({ tab: mapped === "overview" ? null : mapped });
     const url = mapped === "overview" ? "/app/profile" : `/app/profile?tab=${mapped}`;
     router.replace(url, { scroll: false });
-  }, [router]);
+  }, [router, setCurrentMeta]);
 
   const [isPersonalDirty, setIsPersonalDirty] = useState(false);
   const [isBizDirty, setIsBizDirty] = useState(false);

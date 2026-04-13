@@ -25,6 +25,7 @@ import {
   Settings,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useNavigationContext } from "@/lib/navigation-context";
 import { toast } from "sonner";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -579,6 +580,7 @@ export function BillingPanel({
   onAiDraftReminder,
 }: BillingPanelProps) {
   const router = useRouter();
+  const { pushContext, setTaskOrigin, current } = useNavigationContext();
   const [segment, setSegment] = useState<BillingSegment>(defaultSegment);
   const [savedView, setSavedView] = useState<SavedViewKey>("all_invoices");
   const emitEvent = useModuleEmit();
@@ -719,7 +721,11 @@ export function BillingPanel({
         )}
 
         <button
-          onClick={() => router.push("/app/settings/connections")}
+          onClick={() => {
+            if (current) setTaskOrigin(current);
+            pushContext({ taskIntent: "connect-email", workspace: "Revenue" });
+            router.push("/app/settings/connections");
+          }}
           className={`ml-auto inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm transition-all duration-200 shrink-0 ${
             gmailStatus?.connected
               ? "border-green-500/30 bg-green-500/[0.06] hover:bg-green-500/10"

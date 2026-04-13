@@ -6,7 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
-import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { OriginAwareBreadcrumbs } from "@/components/ui/origin-aware-breadcrumbs";
+import { NavigationContextProvider, useNavigationContext } from "@/lib/navigation-context";
 import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDisplayName, getUserInitials, refreshWorkspace, getCachedBusiness } from "@/lib/workspace";
 import { apiGet, apiPatch } from "@/lib/api";
 import { useThemeColors } from "@/lib/theme-context";
@@ -263,9 +264,18 @@ const mobileBottomNav = [
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <NavigationContextProvider>
+      <AppLayoutInner>{children}</AppLayoutInner>
+    </NavigationContextProvider>
+  );
+}
+
+function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { pushContext, setTaskOrigin, current } = useNavigationContext();
 
   const activePrimary = useMemo(() => detectPrimarySection(pathname), [pathname]);
   const [expandedSection, setExpandedSection] = useState<PrimarySectionId | null>(null);
@@ -353,6 +363,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           if (data.secondaryColor) setAccent2(data.secondaryColor);
           
           if (data.onboardingComplete === false && !pathname.startsWith("/app/onboarding")) {
+            if (current) {
+              setTaskOrigin(current);
+            }
+            pushContext({
+              taskIntent: "onboarding-setup",
+              draftId: null,
+            });
             router.push("/app/onboarding");
             return;
           }
@@ -770,9 +787,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </header>
 
           <div className="px-3 md:px-6 pt-1">
-            <Breadcrumbs />
+            <OriginAwareBreadcrumbs />
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6">{children}</div>
+          <div data-scroll-root="app" className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6">{children}</div>
         </main>
         <AiCopilotTrigger />
       </div>
