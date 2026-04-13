@@ -14,7 +14,7 @@ import {
   createOutboundContent, updateOutboundContent, upsertOutboundVariant,
   publishContentNow, scheduleContent, getOutboundContent,
   aiGenerateDraft, aiRewriteContent, aiSuggestSubjects, aiSuggestCta,
-  aiSuggestHashtags, aiShortenExpand, aiSuggestSendTime,
+  aiSuggestHashtags, aiShortenExpand, aiSuggestSendTime, aiSuggestChannels,
 } from "@/lib/client";
 import type { ChannelDestination, OutboundContent } from "@/lib/client";
 import { ChannelSelector } from "./channel-selector";
@@ -82,6 +82,7 @@ const AI_ACTIONS: { key: string; label: string; icon: LucideIcon; desc: string; 
   { key: "shorten", label: "Shorten", icon: Minimize2, desc: "Make it concise", needsBody: true },
   { key: "expand", label: "Expand", icon: Maximize2, desc: "Add more detail", needsBody: true },
   { key: "send_time", label: "Best Time", icon: Clock, desc: "Optimal send time" },
+  { key: "channels", label: "Suggest Channels", icon: Layers, desc: "Best channels for this", needsBody: true },
 ];
 
 const STEPS: { key: ComposerStep; label: string; num: number }[] = [
@@ -493,6 +494,14 @@ export function UnifiedComposer({
           }
           break;
         }
+        case "channels": {
+          const res = await aiSuggestChannels({ body, objective, audience, contentType }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.channels?.length) {
+            setAiSuggestions({ type: "channels", data: res.data.channels });
+          }
+          break;
+        }
       }
     } catch {
       toast.error("AI action failed — try again");
@@ -790,7 +799,7 @@ export function UnifiedComposer({
                           <div className="rounded-lg bg-purple-500/10 border border-purple-500/20 p-2 space-y-1.5">
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">
-                                {aiSuggestions.type === "subjects" ? "Subject Line Suggestions" : aiSuggestions.type === "cta" ? "CTA Suggestions" : "Send Time Suggestions"}
+                                {aiSuggestions.type === "subjects" ? "Subject Line Suggestions" : aiSuggestions.type === "cta" ? "CTA Suggestions" : aiSuggestions.type === "channels" ? "Channel Suggestions" : "Send Time Suggestions"}
                               </span>
                               <button onClick={() => setAiSuggestions(null)} className="p-0.5 rounded hover:bg-purple-500/20">
                                 <X className="w-3 h-3 text-purple-400" />
@@ -831,6 +840,19 @@ export function UnifiedComposer({
                                     Best window: {(aiSuggestions.data as { bestWindow: string }).bestWindow}
                                   </div>
                                 )}
+                              </div>
+                            )}
+                            {aiSuggestions.type === "channels" && (
+                              <div className="space-y-1">
+                                {(aiSuggestions.data as { channel: string; reason: string; score: number }[]).map((ch, i) => (
+                                  <div key={i} className="flex items-center justify-between text-[11px] text-purple-200 px-2 py-1.5 rounded-md bg-purple-500/5">
+                                    <div>
+                                      <span className="font-medium capitalize">{ch.channel}</span>
+                                      <span className="text-[9px] text-purple-400/50 ml-2">{ch.reason}</span>
+                                    </div>
+                                    <span className="text-[9px] font-medium text-purple-400">{ch.score}%</span>
+                                  </div>
+                                ))}
                               </div>
                             )}
                           </div>

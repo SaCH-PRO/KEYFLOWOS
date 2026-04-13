@@ -5,8 +5,10 @@ import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
 import { AdapterRegistryService } from './adapters/adapter-registry.service';
 import { ContentAiService } from './content-ai.service';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
+  imports: [AiModule],
   controllers: [CommunicationsController],
   providers: [
     ChannelConnectionService,
