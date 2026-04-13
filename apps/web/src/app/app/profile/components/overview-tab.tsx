@@ -4,7 +4,8 @@ import { useMemo } from "react";
 import {
   Sparkles, Brain, ArrowRight, CheckCircle2, AlertCircle,
   Briefcase, TrendingUp, Users, Target, Building2,
-  FileText, Zap, BarChart3, Shield, Clock,
+  FileText, Zap, BarChart3, Clock,
+  DollarSign, Globe, Lightbulb,
 } from "lucide-react";
 import type { ProfileBusinessData } from "./profile-types";
 
@@ -32,13 +33,28 @@ interface NextStep {
   priority: "high" | "medium" | "low";
 }
 
-const FIELD_ICONS: Record<string, React.ElementType> = {
-  Business: Building2,
-  Industry: Briefcase,
-  Stage: TrendingUp,
-  Team: Users,
-  Location: Target,
-};
+const MODULE_IMPACT = [
+  { icon: Users, label: "Clients", fields: ["Industry", "Stage", "Skills"], color: "--kf-accent1" },
+  { icon: DollarSign, label: "Revenue", fields: ["Name", "Description", "Team Size"], color: "--kf-success" },
+  { icon: BarChart3, label: "Content", fields: ["Industry", "Description", "Tagline"], color: "--kf-accent2" },
+  { icon: Zap, label: "Flows", fields: ["Stage", "Team Size", "Industry"], color: "--kf-warning" },
+  { icon: Target, label: "Projects", fields: ["Skills", "Team Size", "Stage"], color: "--kf-info" },
+  { icon: FileText, label: "Documents", fields: ["Name", "Industry", "Description"], color: "--kf-accent1" },
+];
+
+const TOP_DOCUMENTS = [
+  { name: "Client Service Agreement", modules: "Clients + Projects", priority: "high" as const },
+  { name: "Privacy Policy", modules: "Store + Compliance", priority: "high" as const },
+  { name: "Terms of Service", modules: "Store + Revenue", priority: "medium" as const },
+  { name: "Budget Template", modules: "Revenue + Reports", priority: "medium" as const },
+  { name: "Business Plan", modules: "Intelligence Package", priority: "low" as const },
+];
+
+const AI_PROMPTS = [
+  { label: "Generate business plan", description: "Create a comprehensive plan using your profile data", tab: "intelligence" },
+  { label: "Draft service agreement", description: "AI-powered contract from your business context", tab: "intelligence" },
+  { label: "Write tagline & description", description: "AI generates your brand messaging", tab: "business" },
+];
 
 export function OverviewTab({
   businessData,
@@ -178,6 +194,14 @@ export function OverviewTab({
         active: true,
       });
     }
+    if (businessData?.industry && businessData?.skills?.length) {
+      unlocks.push({
+        label: "Market Intelligence",
+        description: "Industry-specific insights and competitor awareness",
+        icon: BarChart3,
+        active: true,
+      });
+    }
 
     if (!businessData?.industry || !businessData?.businessStage) {
       unlocks.push({
@@ -195,8 +219,32 @@ export function OverviewTab({
         active: false,
       });
     }
+    if (!businessData?.teamSize) {
+      unlocks.push({
+        label: "Automation Intelligence",
+        description: "Set Team Size to unlock",
+        icon: Zap,
+        active: false,
+      });
+    }
 
-    return unlocks.slice(0, 5);
+    return unlocks.slice(0, 6);
+  }, [businessData]);
+
+  const moduleImpactData = useMemo(() => {
+    const filledFields = new Set<string>();
+    if (businessData?.name) filledFields.add("Name");
+    if (businessData?.industry) filledFields.add("Industry");
+    if (businessData?.businessStage) filledFields.add("Stage");
+    if (businessData?.description) filledFields.add("Description");
+    if (businessData?.tagline) filledFields.add("Tagline");
+    if (businessData?.teamSize) filledFields.add("Team Size");
+    if (businessData?.skills?.length) filledFields.add("Skills");
+
+    return MODULE_IMPACT.map((mod) => {
+      const filled = mod.fields.filter((f) => filledFields.has(f)).length;
+      return { ...mod, filled, total: mod.fields.length };
+    });
   }, [businessData]);
 
   const completedSteps = completenessItems.filter((i) => i.done).length;
@@ -245,7 +293,7 @@ export function OverviewTab({
           </div>
           {missingFields.length > 0 && (
             <p className="text-[10px] mt-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-              {missingFields.length} field{missingFields.length > 1 ? "s" : ""} missing
+              {missingFields.length} field{missingFields.length > 1 ? "s" : ""} remaining to complete your foundation
             </p>
           )}
         </div>
@@ -349,6 +397,61 @@ export function OverviewTab({
         )}
       </div>
 
+      <div
+        className="rounded-xl p-4"
+        style={{
+          background: "hsl(var(--kf-card))",
+          border: "1px solid hsl(var(--kf-border) / 0.3)",
+        }}
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <Globe className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+          <span className="text-xs font-semibold">Cross-Module Impact</span>
+        </div>
+        <p className="text-[10px] mb-3" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          Your profile data feeds into these modules. Green bars indicate data coverage — fill more fields to strengthen each module.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {moduleImpactData.map((mod) => {
+            const Icon = mod.icon;
+            const pct = mod.total > 0 ? Math.round((mod.filled / mod.total) * 100) : 0;
+            const isComplete = mod.filled === mod.total;
+            return (
+              <div
+                key={mod.label}
+                className="p-2.5 rounded-lg"
+                style={{
+                  background: `hsl(var(${mod.color}) / 0.04)`,
+                  border: `1px solid hsl(var(${mod.color}) / 0.08)`,
+                }}
+              >
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Icon className="w-3.5 h-3.5" style={{ color: `hsl(var(${mod.color}))` }} />
+                  <span className="text-[11px] font-medium">{mod.label}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted) / 0.15)" }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${pct}%`,
+                        background: isComplete ? "hsl(var(--kf-success))" : `hsl(var(${mod.color}))`,
+                      }}
+                    />
+                  </div>
+                  <span className="text-[9px] font-medium" style={{ color: `hsl(var(${mod.color}))` }}>
+                    {mod.filled}/{mod.total}
+                  </span>
+                </div>
+                <p className="text-[9px] mt-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                  Needs: {mod.fields.join(", ")}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {intelligenceTiers.length > 0 && (
         <div
           className="rounded-xl p-4"
@@ -420,6 +523,9 @@ export function OverviewTab({
           <div className="flex items-center gap-2 mb-3">
             <Target className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
             <span className="text-xs font-semibold">Recommended Next Steps</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full ml-auto" style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}>
+              {nextSteps.length} action{nextSteps.length !== 1 ? "s" : ""}
+            </span>
           </div>
           <div className="space-y-2">
             {nextSteps.map((step, idx) => {
@@ -464,6 +570,85 @@ export function OverviewTab({
           </div>
         </div>
       )}
+
+      <div
+        className="rounded-xl p-4"
+        style={{
+          background: "linear-gradient(135deg, hsl(var(--kf-accent2) / 0.04), hsl(var(--kf-accent1) / 0.03))",
+          border: "1px solid hsl(var(--kf-accent2) / 0.1)",
+        }}
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <Lightbulb className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+          <span className="text-xs font-semibold">AI-Powered Actions</span>
+        </div>
+        <p className="text-[10px] mb-3" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          KeyFlow can generate content and documents using your profile data. The more complete your profile, the better the results.
+        </p>
+        <div className="space-y-1.5">
+          {AI_PROMPTS.map((prompt, i) => (
+            <button
+              key={i}
+              onClick={() => onNavigateTab(prompt.tab)}
+              className="w-full flex items-center gap-3 p-2.5 rounded-lg text-left transition-colors hover:bg-[hsl(var(--kf-muted)/0.08)]"
+              style={{ border: "1px solid hsl(var(--kf-border) / 0.1)" }}
+            >
+              <Sparkles className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium">{prompt.label}</p>
+                <p className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{prompt.description}</p>
+              </div>
+              <ArrowRight className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div
+        className="rounded-xl p-4"
+        style={{
+          background: "hsl(var(--kf-card))",
+          border: "1px solid hsl(var(--kf-border) / 0.3)",
+        }}
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <FileText className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span className="text-xs font-semibold">Recommended Documents</span>
+        </div>
+        <p className="text-[10px] mb-3" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          Based on your business type, these documents will strengthen your operations and compliance readiness.
+        </p>
+        <div className="space-y-1.5">
+          {TOP_DOCUMENTS.map((doc, i) => (
+            <button
+              key={i}
+              onClick={() => onNavigateTab("intelligence")}
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors hover:bg-[hsl(var(--kf-muted)/0.06)]"
+              style={{ background: "hsl(var(--kf-muted) / 0.03)" }}
+            >
+              <FileText className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <span className="text-[11px] font-medium flex-1">{doc.name}</span>
+              <span
+                className="text-[9px] px-1.5 py-0.5 rounded flex-shrink-0"
+                style={{
+                  background: doc.priority === "high" ? "hsl(var(--kf-accent1) / 0.08)" : "hsl(var(--kf-muted) / 0.1)",
+                  color: doc.priority === "high" ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
+                }}
+              >
+                {doc.modules}
+              </span>
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => onNavigateTab("intelligence")}
+          className="mt-3 w-full flex items-center justify-center gap-1 text-xs font-medium py-2 rounded-lg transition-colors"
+          style={{ background: "hsl(var(--kf-muted) / 0.08)", color: "hsl(var(--kf-accent1))" }}
+        >
+          View all documents & intelligence
+          <ArrowRight className="w-3 h-3" />
+        </button>
+      </div>
 
       {keyUnlocks.length > 0 && (
         <div
