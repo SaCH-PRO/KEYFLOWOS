@@ -7,12 +7,14 @@ import {
   Target, Hash, MessageSquare, Eye, EyeOff,
   Mail, PenSquare, Globe, Calendar, AlertCircle,
   CheckCircle, ArrowRight, Layers, FileText, Image as ImageIcon,
-  Upload, AlertTriangle, Info,
+  Upload, AlertTriangle, Info, Minimize2, Maximize2, Zap, type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   createOutboundContent, updateOutboundContent, upsertOutboundVariant,
   publishContentNow, scheduleContent, getOutboundContent,
+  aiGenerateDraft, aiRewriteContent, aiSuggestSubjects, aiSuggestCta,
+  aiSuggestHashtags, aiShortenExpand, aiSuggestSendTime,
 } from "@/lib/client";
 import type { ChannelDestination, OutboundContent } from "@/lib/client";
 import { ChannelSelector } from "./channel-selector";
@@ -71,12 +73,15 @@ const CONTENT_TYPE_OPTIONS: { key: ContentTypeOption; label: string; icon: React
   { key: "multi", label: "Multi-Channel", icon: Layers, desc: "Distribute everywhere" },
 ];
 
-const AI_ACTIONS = [
+const AI_ACTIONS: { key: string; label: string; icon: LucideIcon; desc: string; needsBody?: boolean }[] = [
   { key: "generate", label: "Generate Draft", icon: Sparkles, desc: "AI writes based on your objective" },
-  { key: "improve", label: "Improve Hook", icon: Wand2, desc: "Strengthen the opening" },
-  { key: "cta", label: "Add CTA", icon: Target, desc: "Compelling call-to-action" },
-  { key: "hashtags", label: "Hashtags", icon: Hash, desc: "Auto-generate tags" },
-  { key: "rewrite", label: "Rewrite", icon: MessageSquare, desc: "Optimize for engagement" },
+  { key: "rewrite", label: "Rewrite", icon: Wand2, desc: "Optimize for channel", needsBody: true },
+  { key: "cta", label: "Add CTA", icon: Target, desc: "Compelling call-to-action", needsBody: true },
+  { key: "hashtags", label: "Hashtags", icon: Hash, desc: "Auto-generate tags", needsBody: true },
+  { key: "subjects", label: "Subject Lines", icon: Mail, desc: "AI subject suggestions", needsBody: true },
+  { key: "shorten", label: "Shorten", icon: Minimize2, desc: "Make it concise", needsBody: true },
+  { key: "expand", label: "Expand", icon: Maximize2, desc: "Add more detail", needsBody: true },
+  { key: "send_time", label: "Best Time", icon: Clock, desc: "Optimal send time" },
 ];
 
 const STEPS: { key: ComposerStep; label: string; num: number }[] = [
@@ -254,6 +259,8 @@ export function UnifiedComposer({
   const [draftRestored, setDraftRestored] = useState(false);
   const [segmentTags, setSegmentTags] = useState<string[]>([]);
   const [emailValidation, setEmailValidation] = useState<import("@/lib/client").EmailValidationResult | null>(null);
+  const [aiRunning, setAiRunning] = useState<string | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<{ type: string; data: unknown } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -407,6 +414,92 @@ export function UnifiedComposer({
     if (!hasBlockingWarnings && selectedDestinations.length > 0) score += 5;
     return Math.min(score, 100);
   }, [body, objective, tone, selectedDestinations, contentType, subject, scheduleMode, scheduledAt, mediaUrls, hasBlockingWarnings]);
+
+  const handleAiAction = useCallback(async (actionKey: string) => {
+    if (aiRunning) return;
+    const action = AI_ACTIONS.find(a => a.key === actionKey);
+    if (!action) return;
+    if (action.needsBody && !body.trim()) {
+      toast.error("Write some content first, then use AI to enhance it");
+      return;
+    }
+    setAiRunning(actionKey);
+    setAiSuggestions(null);
+    try {
+      switch (actionKey) {
+        case "generate": {
+          const res = await aiGenerateDraft({ contentType, objective, tone, audience, existingBody: body || undefined }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.body) {
+            setBody(res.data.body);
+            if (res.data.subject && (contentType === "email" || contentType === "multi")) setSubject(res.data.subject);
+            toast.success("Draft generated");
+          }
+          break;
+        }
+        case "rewrite": {
+          const res = await aiRewriteContent({ body, targetChannel: contentType, tone, objective }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.body) {
+            setBody(res.data.body);
+            if (res.data.subject && (contentType === "email" || contentType === "multi")) setSubject(res.data.subject);
+            toast.success("Content rewritten");
+          }
+          break;
+        }
+        case "cta": {
+          const res = await aiSuggestCta({ body, objective, contentType }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.ctas?.length) {
+            setAiSuggestions({ type: "cta", data: res.data.ctas });
+          }
+          break;
+        }
+        case "hashtags": {
+          const res = await aiSuggestHashtags({ body }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.hashtags?.length) {
+            const tags = res.data.hashtags.map(h => h.startsWith("#") ? h : `#${h}`).join(" ");
+            setBody(prev => prev.trimEnd() + "\n\n" + tags);
+            toast.success(`Added ${res.data.hashtags.length} hashtags`);
+          }
+          break;
+        }
+        case "subjects": {
+          const res = await aiSuggestSubjects({ body, objective, tone, audience }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.subjects?.length) {
+            setAiSuggestions({ type: "subjects", data: res.data.subjects });
+          }
+          break;
+        }
+        case "shorten": {
+          const res = await aiShortenExpand({ body, action: "shorten", targetChannel: contentType }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.body) { setBody(res.data.body); toast.success("Content shortened"); }
+          break;
+        }
+        case "expand": {
+          const res = await aiShortenExpand({ body, action: "expand", targetChannel: contentType }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.body) { setBody(res.data.body); toast.success("Content expanded"); }
+          break;
+        }
+        case "send_time": {
+          const res = await aiSuggestSendTime({ contentType, audience, timezone }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.suggestions?.length) {
+            setAiSuggestions({ type: "send_time", data: res.data });
+          }
+          break;
+        }
+      }
+    } catch {
+      toast.error("AI action failed — try again");
+    } finally {
+      setAiRunning(null);
+    }
+  }, [aiRunning, body, contentType, objective, tone, audience, businessId, timezone]);
 
   const handleMediaUpload = useCallback(async (files: FileList) => {
     if (files.length === 0) return;
@@ -669,20 +762,79 @@ export function UnifiedComposer({
                 <AnimatePresence>
                   {showAiPanel && (
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-1.5 p-2 rounded-xl border border-purple-500/20 bg-purple-500/5">
-                        {AI_ACTIONS.map((action) => {
-                          const AIcon = action.icon;
-                          return (
-                            <button
-                              key={action.key}
-                              className="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-purple-500/10 transition-colors text-center"
-                              onClick={() => toast.info(`AI ${action.label} — connect your AI provider in Settings`)}
-                            >
-                              <AIcon className="w-4 h-4 text-purple-400" />
-                              <span className="text-[10px] font-medium text-purple-300">{action.label}</span>
-                            </button>
-                          );
-                        })}
+                      <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-2 space-y-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                          {AI_ACTIONS.map((action) => {
+                            const AIcon = action.icon;
+                            const isRunning = aiRunning === action.key;
+                            const disabled = !!aiRunning || (action.needsBody && !body.trim());
+                            return (
+                              <button
+                                key={action.key}
+                                disabled={disabled}
+                                className={`flex items-center gap-2 p-2 rounded-lg transition-colors text-left ${
+                                  isRunning ? "bg-purple-500/20 ring-1 ring-purple-500/40" : disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-purple-500/10"
+                                }`}
+                                onClick={() => void handleAiAction(action.key)}
+                              >
+                                {isRunning ? <Loader2 className="w-3.5 h-3.5 text-purple-400 animate-spin shrink-0" /> : <AIcon className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
+                                <div className="min-w-0">
+                                  <span className="text-[10px] font-medium text-purple-300 block truncate">{action.label}</span>
+                                  <span className="text-[9px] text-purple-400/50 block truncate">{action.desc}</span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {aiSuggestions && (
+                          <div className="rounded-lg bg-purple-500/10 border border-purple-500/20 p-2 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">
+                                {aiSuggestions.type === "subjects" ? "Subject Line Suggestions" : aiSuggestions.type === "cta" ? "CTA Suggestions" : "Send Time Suggestions"}
+                              </span>
+                              <button onClick={() => setAiSuggestions(null)} className="p-0.5 rounded hover:bg-purple-500/20">
+                                <X className="w-3 h-3 text-purple-400" />
+                              </button>
+                            </div>
+                            {aiSuggestions.type === "subjects" && (
+                              <div className="space-y-1">
+                                {(aiSuggestions.data as string[]).map((s, i) => (
+                                  <button key={i} onClick={() => { setSubject(s); setAiSuggestions(null); toast.success("Subject applied"); }} className="block w-full text-left text-[11px] text-purple-200 px-2 py-1.5 rounded-md hover:bg-purple-500/15 transition-colors">
+                                    {s}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            {aiSuggestions.type === "cta" && (
+                              <div className="space-y-1">
+                                {(aiSuggestions.data as { text: string; style: string }[]).map((c, i) => (
+                                  <button key={i} onClick={() => { setBody(prev => prev.trimEnd() + "\n\n" + c.text); setAiSuggestions(null); toast.success("CTA added"); }} className="flex items-center justify-between w-full text-left text-[11px] text-purple-200 px-2 py-1.5 rounded-md hover:bg-purple-500/15 transition-colors">
+                                    <span>{c.text}</span>
+                                    <span className="text-[9px] text-purple-400/50 ml-2">{c.style}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            {aiSuggestions.type === "send_time" && (
+                              <div className="space-y-1">
+                                {((aiSuggestions.data as { suggestions: { day: string; time: string; reason: string; score: number }[]; bestWindow: string }).suggestions || []).map((s, i) => (
+                                  <div key={i} className="flex items-center justify-between text-[11px] text-purple-200 px-2 py-1.5 rounded-md bg-purple-500/5">
+                                    <div>
+                                      <span className="font-medium">{s.day} {s.time}</span>
+                                      <span className="text-[9px] text-purple-400/50 ml-2">{s.reason}</span>
+                                    </div>
+                                    <span className="text-[9px] font-medium text-purple-400">{s.score}%</span>
+                                  </div>
+                                ))}
+                                {(aiSuggestions.data as { bestWindow?: string }).bestWindow && (
+                                  <div className="text-[10px] text-purple-400/70 px-2 pt-1">
+                                    Best window: {(aiSuggestions.data as { bestWindow: string }).bestWindow}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}
