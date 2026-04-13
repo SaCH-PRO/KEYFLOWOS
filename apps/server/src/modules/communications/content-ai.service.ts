@@ -57,6 +57,26 @@ interface SuggestTimeInput {
   timezone?: string;
 }
 
+interface SuggestPreviewTextInput {
+  subject: string;
+  body: string;
+  objective?: string;
+}
+
+interface SuggestAudienceSegmentsInput {
+  body: string;
+  contentType?: string;
+  objective?: string;
+  existingSegments?: string[];
+}
+
+interface SuggestContentIdeasInput {
+  objective?: string;
+  audience?: string;
+  recentTopics?: string[];
+  contentType?: string;
+}
+
 function sanitize(input: string, maxLen = 500): string {
   let s = input;
   const patterns = [
@@ -350,6 +370,122 @@ Respond in valid JSON:
     });
 
     return this.parseJsonResponse(result.content, { suggestions: [], bestWindow: '' });
+  }
+
+  async suggestPreviewText(businessId: string, input: SuggestPreviewTextInput) {
+    if (!this.aiUsage) throw new Error('AI service unavailable');
+
+    const prompt = `Generate email preview text (preheader) options for an email.
+Subject line: ${sanitize(input.subject, 200)}
+${input.objective ? `Objective: ${sanitize(input.objective, 100)}` : ''}
+
+Rules:
+- Preview text appears after the subject line in the inbox
+- Keep each option 40-90 characters
+- Should complement the subject, not repeat it
+- Create curiosity or urgency to drive opens
+- Generate 5 variations with different approaches
+
+Respond in valid JSON:
+{
+  "previews": [
+    { "text": "Preview text here", "approach": "curiosity|urgency|benefit|social-proof|question", "charCount": 45 }
+  ]
+}`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'content_preview_text',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: `Generate preview text for email body: ${sanitize(input.body, 500)}` },
+      ],
+      maxTokens: 600,
+      temperature: 0.7,
+      responseMode: 'structured_json',
+    });
+
+    return this.parseJsonResponse(result.content, { previews: [] });
+  }
+
+  async suggestAudienceSegments(businessId: string, input: SuggestAudienceSegmentsInput) {
+    if (!this.aiUsage) throw new Error('AI service unavailable');
+
+    const biz = await this.getBusinessContext(businessId);
+
+    const prompt = `Recommend audience segments for distributing this content.
+Business: ${biz?.name || 'Business'} (${biz?.industry || 'Service'})
+${input.contentType ? `Content Type: ${sanitize(input.contentType, 50)}` : ''}
+${input.objective ? `Objective: ${sanitize(input.objective, 100)}` : ''}
+${input.existingSegments?.length ? `Existing segments: ${input.existingSegments.map(s => sanitize(s, 50)).join(', ')}` : ''}
+
+Recommend 3-5 audience segments that would benefit most from this content.
+Consider demographics, behavior, purchase history, and engagement level.
+
+Respond in valid JSON:
+{
+  "segments": [
+    { "name": "Segment Name", "description": "Who this is", "reason": "Why target them", "expectedImpact": "high|medium|low", "estimatedReach": "broad|moderate|narrow" }
+  ],
+  "primarySegment": "Name of the single best segment"
+}`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'content_audience_segments',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: `Recommend segments for: ${sanitize(input.body, 500)}` },
+      ],
+      maxTokens: 800,
+      temperature: 0.5,
+      responseMode: 'structured_json',
+    });
+
+    return this.parseJsonResponse(result.content, { segments: [], primarySegment: '' });
+  }
+
+  async suggestContentIdeas(businessId: string, input: SuggestContentIdeasInput) {
+    if (!this.aiUsage) throw new Error('AI service unavailable');
+
+    const biz = await this.getBusinessContext(businessId);
+
+    const prompt = `Generate content ideas for a Caribbean service business.
+Business: ${biz?.name || 'Business'} (${biz?.industry || 'Service'})
+${biz?.tagline ? `Tagline: ${biz.tagline}` : ''}
+Currency: ${biz?.currency || 'TTD'}
+${input.objective ? `Objective: ${sanitize(input.objective, 100)}` : ''}
+${input.audience ? `Target Audience: ${sanitize(input.audience, 100)}` : ''}
+${input.contentType ? `Content Type: ${sanitize(input.contentType, 50)}` : ''}
+${input.recentTopics?.length ? `Recent topics (avoid repeating): ${input.recentTopics.map(t => sanitize(t, 80)).join('; ')}` : ''}
+
+Generate 5 fresh content ideas drawing from:
+- Client engagement patterns and retention
+- Revenue opportunities and promotions
+- Seasonal/calendar events relevant to Caribbean businesses
+- Industry trends
+- Customer success stories / social proof angles
+
+Respond in valid JSON:
+{
+  "ideas": [
+    { "title": "Idea title", "brief": "2-3 sentence description", "contentType": "social_post|campaign_email|whatsapp_message", "category": "engagement|promotion|education|social-proof|seasonal", "effort": "low|medium|high" }
+  ]
+}`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'content_idea_suggestions',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: `Suggest content ideas for my ${biz?.industry || 'service'} business` },
+      ],
+      maxTokens: 1000,
+      temperature: 0.8,
+      responseMode: 'structured_json',
+    });
+
+    return this.parseJsonResponse(result.content, { ideas: [] });
   }
 
   private getChannelContext(contentType: string) {

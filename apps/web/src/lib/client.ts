@@ -6218,6 +6218,19 @@ export interface AiSendTimeResult {
   bestWindow: string;
 }
 
+export interface AiPreviewTextResult {
+  previews: { text: string; approach: string; charCount: number }[];
+}
+
+export interface AiAudienceSegmentsResult {
+  segments: { name: string; description: string; reason: string; expectedImpact: string; estimatedReach: string }[];
+  primarySegment: string;
+}
+
+export interface AiContentIdeasResult {
+  ideas: { title: string; brief: string; contentType: string; category: string; effort: string }[];
+}
+
 export async function aiGenerateDraft(data: { contentType: string; objective?: string; tone?: string; audience?: string; topic?: string; existingBody?: string }, businessId?: string): Promise<ApiResult<AiDraftResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<AiDraftResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/generate-draft`, body: data });
@@ -6256,6 +6269,21 @@ export async function aiSuggestChannels(data: { body: string; objective?: string
 export async function aiSuggestSendTime(data: { contentType: string; audience?: string; timezone?: string }, businessId?: string): Promise<ApiResult<AiSendTimeResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<AiSendTimeResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-time`, body: data });
+}
+
+export async function aiSuggestPreviewText(data: { subject: string; body: string; objective?: string }, businessId?: string): Promise<ApiResult<AiPreviewTextResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiPreviewTextResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-preview-text`, body: data });
+}
+
+export async function aiSuggestAudienceSegments(data: { body: string; contentType?: string; objective?: string; existingSegments?: string[] }, businessId?: string): Promise<ApiResult<AiAudienceSegmentsResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiAudienceSegmentsResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-audience-segments`, body: data });
+}
+
+export async function aiSuggestContentIdeas(data: { objective?: string; audience?: string; recentTopics?: string[]; contentType?: string }, businessId?: string): Promise<ApiResult<AiContentIdeasResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiContentIdeasResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-content-ideas`, body: data });
 }
 
 // --- Delivery Log ---
