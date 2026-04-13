@@ -156,10 +156,20 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     const variantMeta = effectiveVariant?.variantMeta as Record<string, unknown> | null;
 
     const recipientEmail =
+      delivery.recipientEmail ??
       (variantMeta?.recipientEmail as string) ??
       (contentMeta?.recipientEmail as string) ??
       (destMeta?.recipientEmail as string) ??
       undefined;
+
+    const recipientPhone =
+      delivery.recipientPhone ??
+      (variantMeta?.recipientPhone as string) ??
+      undefined;
+
+    const mergedMeta: Record<string, unknown> = { ...(variantMeta ?? {}) };
+    if (recipientPhone) mergedMeta.recipientPhone = recipientPhone;
+    if (delivery.contactId) mergedMeta.contactId = delivery.contactId;
 
     const payload = {
       textBody: effectiveVariant?.textBody ?? content?.body ?? '',
@@ -167,7 +177,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       mediaUrls: effectiveVariant?.mediaUrls ?? [],
       subject: content?.subject,
       recipientEmail,
-      meta: variantMeta ?? undefined,
+      meta: Object.keys(mergedMeta).length > 0 ? mergedMeta : undefined,
     };
 
     try {
@@ -193,6 +203,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
         this.events.emit('content.published', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId, destinationId: delivery.destinationId });
         this.events.emit('delivery.completed', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId });
+
+        if (delivery.contactId && delivery.recipientEmail) {
+          await this.updateCampaignContactStatus(delivery.contentId, delivery.contactId, 'SENT');
+        }
 
         await this.updateContentStatus(delivery.contentId);
       } else {
@@ -323,23 +337,61 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const destinations = await this.prisma.client.channelDestination.findMany({
       where: { id: { in: destinationIds }, businessId, isActive: true },
+      include: { connection: { select: { provider: true } } },
     });
 
     if (destinations.length === 0) throw new BadRequestException('No valid active destinations found');
 
-    const deliveries = await this.prisma.client.outboundDelivery.createManyAndReturn({
-      data: destinations.map(dest => {
+    const contentMeta = content.contentMeta as Record<string, unknown> | null;
+    const segmentTags = (contentMeta?.segmentTags as string[] | undefined) ?? [];
+    const isAudienceSend = content.contentType === 'campaign_email' || segmentTags.length > 0;
+
+    const deliveryData: Array<{
+      contentId: string; variantId: string | null; destinationId: string;
+      businessId: string; status: string; scheduledAt: Date;
+      contactId: string | null; recipientEmail: string | null; recipientPhone: string | null;
+    }> = [];
+
+    if (isAudienceSend) {
+      const recipients = await this.expandRecipientsForDelivery(businessId, segmentTags);
+
+      for (const dest of destinations) {
         const variant = content.variants.find(v => v.platform === dest.platform) || content.variants.find(v => v.platform === 'DEFAULT');
-        return {
-          contentId,
-          variantId: variant?.id ?? null,
-          destinationId: dest.id,
-          businessId,
-          status: 'Queued',
-          scheduledAt: new Date(),
-        };
-      }),
-    });
+        const isWhatsApp = dest.connection.provider === 'WHATSAPP';
+        const isEmail = dest.connection.provider === 'EMAIL' || dest.connection.provider === 'GOOGLE';
+
+        if (isEmail || isWhatsApp) {
+          for (const r of recipients) {
+            if (isEmail && !r.email) continue;
+            if (isWhatsApp && !r.phone) continue;
+            deliveryData.push({
+              contentId, variantId: variant?.id ?? null, destinationId: dest.id,
+              businessId, status: 'Queued', scheduledAt: new Date(),
+              contactId: r.id, recipientEmail: isEmail ? r.email : null, recipientPhone: isWhatsApp ? r.phone : null,
+            });
+          }
+        } else {
+          deliveryData.push({
+            contentId, variantId: variant?.id ?? null, destinationId: dest.id,
+            businessId, status: 'Queued', scheduledAt: new Date(),
+            contactId: null, recipientEmail: null, recipientPhone: null,
+          });
+        }
+      }
+    } else {
+      for (const dest of destinations) {
+        const variant = content.variants.find(v => v.platform === dest.platform) || content.variants.find(v => v.platform === 'DEFAULT');
+        deliveryData.push({
+          contentId, variantId: variant?.id ?? null, destinationId: dest.id,
+          businessId, status: 'Queued', scheduledAt: new Date(),
+          contactId: null, recipientEmail: null, recipientPhone: null,
+        });
+      }
+    }
+
+    if (deliveryData.length === 0) throw new BadRequestException('No eligible recipients found for this audience');
+
+    const deliveries = await this.prisma.client.outboundDelivery.createManyAndReturn({ data: deliveryData });
 
     await this.prisma.client.outboundContent.update({
       where: { id: contentId },
@@ -350,9 +402,86 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       await this.recordEvent(delivery.id, 'attempt', 'Queued', 'Queued', 0);
     }
 
+    if (content.contentType === 'campaign_email') {
+      await this.createCampaignContactRecords(businessId, contentId, deliveryData);
+    }
+
     setTimeout(() => this.tick(), 500);
 
     return { queued: deliveries.length, deliveryIds: deliveries.map(d => d.id) };
+  }
+
+  private async expandRecipientsForDelivery(businessId: string, segmentTags: string[]): Promise<Array<{ id: string; email: string | null; phone: string | null }>> {
+    const where: Record<string, unknown> = {
+      businessId, deletedAt: null,
+      doNotContact: { not: true },
+      marketingOptIn: { not: false },
+    };
+    if (segmentTags.length > 0) {
+      where.tags = { hasSome: segmentTags };
+    }
+
+    const contacts = await this.prisma.client.contact.findMany({
+      where,
+      select: { id: true, email: true, phone: true },
+      take: 10000,
+    });
+
+    return contacts.map(c => ({ id: c.id, email: c.email, phone: c.phone }));
+  }
+
+  private async createCampaignContactRecords(
+    businessId: string,
+    contentId: string,
+    deliveryData: Array<{ contactId: string | null; recipientEmail: string | null }>,
+  ) {
+    const contentMeta = (await this.prisma.client.outboundContent.findUnique({
+      where: { id: contentId },
+      select: { contentMeta: true },
+    }))?.contentMeta as Record<string, unknown> | null;
+
+    const campaignId = contentMeta?.campaignId as string | undefined;
+    if (!campaignId) return;
+
+    const campaignContactData = deliveryData
+      .filter(d => d.contactId && d.recipientEmail)
+      .map(d => ({
+        campaignId,
+        contactId: d.contactId as string,
+        email: d.recipientEmail as string,
+        businessId,
+        status: 'PENDING',
+      }));
+
+    if (campaignContactData.length > 0) {
+      await this.prisma.client.emailCampaignContact.createMany({
+        data: campaignContactData,
+        skipDuplicates: true,
+      });
+    }
+  }
+
+  private async updateCampaignContactStatus(contentId: string, contactId: string, status: string) {
+    try {
+      const contentMeta = (await this.prisma.client.outboundContent.findUnique({
+        where: { id: contentId },
+        select: { contentMeta: true },
+      }))?.contentMeta as Record<string, unknown> | null;
+
+      const campaignId = contentMeta?.campaignId as string | undefined;
+      if (!campaignId) return;
+
+      const updateData: Record<string, unknown> = { status };
+      if (status === 'SENT') updateData.sentAt = new Date();
+      if (status === 'OPENED') updateData.openedAt = new Date();
+
+      await this.prisma.client.emailCampaignContact.updateMany({
+        where: { campaignId, contactId },
+        data: updateData,
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to update campaign contact status: ${(err as Error).message}`);
+    }
   }
 
   async schedule(businessId: string, contentId: string, destinationIds: string[], scheduledAt: string, timezone?: string) {
@@ -368,22 +497,59 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const destinations = await this.prisma.client.channelDestination.findMany({
       where: { id: { in: destinationIds }, businessId, isActive: true },
+      include: { connection: { select: { provider: true } } },
     });
     if (destinations.length === 0) throw new BadRequestException('No valid active destinations found');
 
-    const deliveries = await this.prisma.client.outboundDelivery.createManyAndReturn({
-      data: destinations.map(dest => {
+    const contentMeta = content.contentMeta as Record<string, unknown> | null;
+    const segmentTags = (contentMeta?.segmentTags as string[] | undefined) ?? [];
+    const isAudienceSend = content.contentType === 'campaign_email' || segmentTags.length > 0;
+
+    const deliveryData: Array<{
+      contentId: string; variantId: string | null; destinationId: string;
+      businessId: string; status: string; scheduledAt: Date;
+      contactId: string | null; recipientEmail: string | null; recipientPhone: string | null;
+    }> = [];
+
+    if (isAudienceSend) {
+      const recipients = await this.expandRecipientsForDelivery(businessId, segmentTags);
+      for (const dest of destinations) {
         const variant = content.variants.find(v => v.platform === dest.platform) || content.variants.find(v => v.platform === 'DEFAULT');
-        return {
-          contentId,
-          variantId: variant?.id ?? null,
-          destinationId: dest.id,
-          businessId,
-          status: 'Scheduled',
-          scheduledAt: scheduleDate,
-        };
-      }),
-    });
+        const isWhatsApp = dest.connection.provider === 'WHATSAPP';
+        const isEmail = dest.connection.provider === 'EMAIL' || dest.connection.provider === 'GOOGLE';
+
+        if (isEmail || isWhatsApp) {
+          for (const r of recipients) {
+            if (isEmail && !r.email) continue;
+            if (isWhatsApp && !r.phone) continue;
+            deliveryData.push({
+              contentId, variantId: variant?.id ?? null, destinationId: dest.id,
+              businessId, status: 'Scheduled', scheduledAt: scheduleDate,
+              contactId: r.id, recipientEmail: isEmail ? r.email : null, recipientPhone: isWhatsApp ? r.phone : null,
+            });
+          }
+        } else {
+          deliveryData.push({
+            contentId, variantId: variant?.id ?? null, destinationId: dest.id,
+            businessId, status: 'Scheduled', scheduledAt: scheduleDate,
+            contactId: null, recipientEmail: null, recipientPhone: null,
+          });
+        }
+      }
+    } else {
+      for (const dest of destinations) {
+        const variant = content.variants.find(v => v.platform === dest.platform) || content.variants.find(v => v.platform === 'DEFAULT');
+        deliveryData.push({
+          contentId, variantId: variant?.id ?? null, destinationId: dest.id,
+          businessId, status: 'Scheduled', scheduledAt: scheduleDate,
+          contactId: null, recipientEmail: null, recipientPhone: null,
+        });
+      }
+    }
+
+    if (deliveryData.length === 0) throw new BadRequestException('No eligible recipients found for this audience');
+
+    const deliveries = await this.prisma.client.outboundDelivery.createManyAndReturn({ data: deliveryData });
 
     await this.prisma.client.outboundContent.update({
       where: { id: contentId },
@@ -400,7 +566,8 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     });
     if (!delivery) throw new NotFoundException('Pending delivery not found');
 
-    const tz = timezone || (delivery as any).content?.timezone || DEFAULT_TIMEZONE;
+    const contentRecord = delivery.content as { timezone?: string } | null;
+    const tz = timezone || contentRecord?.timezone || DEFAULT_TIMEZONE;
     const newDate = resolveScheduledAtUtc(newScheduledAt, tz);
     if (newDate <= new Date()) throw new BadRequestException('New scheduled date must be in the future');
 

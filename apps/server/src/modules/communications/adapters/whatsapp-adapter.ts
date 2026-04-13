@@ -150,6 +150,43 @@ export class WhatsAppAdapter implements ChannelAdapter {
     return { code: 'UNKNOWN', message: String(error), isTransient: false };
   }
 
+  async validateConnection(connection: ChannelConnection): Promise<{ valid: boolean; error?: string }> {
+    const accessToken = connection.token;
+    if (!accessToken) return { valid: false, error: 'Missing access token' };
+
+    try {
+      const response = await fetch(
+        'https://graph.facebook.com/v19.0/me?fields=id,name',
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!response.ok) {
+        const errorData: WhatsAppApiError = await response.json() as WhatsAppApiError;
+        return { valid: false, error: errorData?.error?.message || `API error: ${response.status}` };
+      }
+      return { valid: true };
+    } catch (err) {
+      return { valid: false, error: (err instanceof Error) ? err.message : String(err) };
+    }
+  }
+
+  async listPhoneNumbers(accessToken: string, waBusinessAccountId: string): Promise<Array<{ id: string; displayPhoneNumber: string; verifiedName: string }>> {
+    try {
+      const response = await fetch(
+        `https://graph.facebook.com/v19.0/${waBusinessAccountId}/phone_numbers?fields=id,display_phone_number,verified_name`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!response.ok) return [];
+      const data = await response.json() as { data?: Array<{ id?: string; display_phone_number?: string; verified_name?: string }> };
+      return (data?.data ?? []).map(p => ({
+        id: p.id ?? '',
+        displayPhoneNumber: p.display_phone_number ?? '',
+        verifiedName: p.verified_name ?? '',
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   getCapabilities(_platform: string): AdapterCapabilities {
     return {
       supports_text_post: false,
