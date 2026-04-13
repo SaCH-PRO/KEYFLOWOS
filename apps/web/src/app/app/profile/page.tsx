@@ -5,25 +5,23 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   User, CheckCircle2, AlertCircle, FileText,
-  Building2, Briefcase, Palette, Globe,
+  Building2, Briefcase, Globe, Brain,
+  LayoutDashboard, Shield, Sparkles,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
-import PersonalInfoSection from "./components/personal-info-section";
-import MyBusinessSection from "./components/my-business-section";
-import ProfessionalProfileSection from "./components/professional-profile-section";
-import DocumentsTab from "./components/documents-tab";
-import BusinessBuilderCard from "./components/business-builder-card";
-import SecuritySection from "./components/security-section";
-import BrandIdentityTab from "./components/brand-identity-tab";
 import { JourneyIndicator, type CompletenessItem } from "./components/journey-indicator";
-import { BusinessContextCard } from "./components/business-context-card";
-import { ContextDepthCard } from "./components/context-depth-card";
-import { ProgressivePrompts } from "./components/progressive-prompts";
 import { SkeletonProfile } from "./components/skeleton-profile";
+import { OverviewTab } from "./components/overview-tab";
+import { BusinessTab } from "./components/business-tab";
+import { ProfessionalTab } from "./components/professional-tab";
+import { IntelligenceTab } from "./components/intelligence-tab";
+import SecuritySection from "./components/security-section";
 import { ProfileSectionErrorBoundary } from "./components/profile-section-error-boundary";
 import type { ProfileBusinessData, ProfileCompletenessField, StatusMessage, TabId } from "./components/profile-types";
+
+type ActiveTab = "overview" | "business" | "professional" | "intelligence" | "security";
 
 function checkFieldCompletion(key: string, bd: ProfileBusinessData | null): boolean {
   if (!bd) return false;
@@ -51,17 +49,37 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-
-const TAB_CONFIG: { id: TabId; label: string; icon: React.ElementType }[] = [
-  { id: "profile", label: "Profile", icon: User },
-  { id: "brand", label: "Brand & Identity", icon: Palette },
-  { id: "documents", label: "Documents", icon: FileText },
+const TAB_CONFIG: { id: ActiveTab; label: string; icon: React.ElementType; shortLabel: string }[] = [
+  { id: "overview", label: "Overview", shortLabel: "Overview", icon: LayoutDashboard },
+  { id: "business", label: "Business", shortLabel: "Business", icon: Building2 },
+  { id: "professional", label: "Professional", shortLabel: "Professional", icon: User },
+  { id: "intelligence", label: "Documents & Intelligence", shortLabel: "Intelligence", icon: Brain },
+  { id: "security", label: "Security & Preferences", shortLabel: "Security", icon: Shield },
 ];
+
+const VALID_TABS = new Set<string>(TAB_CONFIG.map((t) => t.id));
+const PROFESSIONAL_FIELD_KEYS = new Set(["headline", "bio", "industry", "skills", "businessStage", "interests", "location"]);
+
+function mapLegacyTab(tab: string): ActiveTab {
+  if (tab === "profile") return "overview";
+  if (tab === "brand") return "business";
+  if (tab === "documents") return "intelligence";
+  if (VALID_TABS.has(tab)) return tab as ActiveTab;
+  return "overview";
+}
+
+interface IntelligenceTier {
+  tierId: string;
+  label: string;
+  score: number;
+  description: string;
+}
 
 export default function ProfileSettingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const initialTab = (searchParams.get("tab") as TabId) || "profile";
+  const rawTab = searchParams.get("tab") || "overview";
+  const initialTab = mapLegacyTab(rawTab);
 
   const [loading, setLoading] = useState(true);
   const [status, setStatusRaw] = useState<StatusMessage | null>(null);
@@ -81,8 +99,18 @@ export default function ProfileSettingsPage() {
     linkedin?: string | null;
   } | null>(null);
   const [completenessFields, setCompletenessFields] = useState<ProfileCompletenessField[]>([]);
+  const [intelligenceTiers, setIntelligenceTiers] = useState<IntelligenceTier[]>([]);
+  const [overallIntelligenceScore, setOverallIntelligenceScore] = useState(0);
 
-  const [activeTab, setActiveTab] = useState<TabId>(TAB_CONFIG.some(t => t.id === initialTab) ? initialTab : "profile");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
+
+  useEffect(() => {
+    const current = searchParams.get("tab") || "overview";
+    const mapped = mapLegacyTab(current);
+    if (mapped !== activeTab) {
+      setActiveTab(mapped);
+    }
+  }, [searchParams]);
 
   const setStatus = useCallback((s: StatusMessage | null) => {
     setStatusRaw(s);
@@ -100,9 +128,10 @@ export default function ProfileSettingsPage() {
     };
   }, []);
 
-  const handleTabChange = useCallback((tab: TabId) => {
-    setActiveTab(tab);
-    const url = tab === "profile" ? "/app/profile" : `/app/profile?tab=${tab}`;
+  const handleTabChange = useCallback((tab: ActiveTab | TabId | string) => {
+    const mapped = mapLegacyTab(tab);
+    setActiveTab(mapped);
+    const url = mapped === "overview" ? "/app/profile" : `/app/profile?tab=${mapped}`;
     router.replace(url, { scroll: false });
   }, [router]);
 
@@ -126,20 +155,20 @@ export default function ProfileSettingsPage() {
       ? completenessFields.map((field) => ({
           label: field.label,
           done: checkFieldCompletion(field.key, businessData),
-          tab: "profile" as TabId,
-          icon: Building2,
+          tab: (PROFESSIONAL_FIELD_KEYS.has(field.key) ? "professional" : "business") as TabId,
+          icon: PROFESSIONAL_FIELD_KEYS.has(field.key) ? Briefcase : Building2,
         }))
       : [
-          { label: "Set industry & business stage", done: !!(businessData?.industry && businessData?.businessStage), tab: "profile" as TabId, icon: Briefcase },
-          { label: "Complete professional profile", done: profileCompleteness >= 60, tab: "profile" as TabId, icon: Building2 },
+          { label: "Set industry & business stage", done: !!(businessData?.industry && businessData?.businessStage), tab: "professional" as TabId, icon: Briefcase },
+          { label: "Complete professional profile", done: profileCompleteness >= 60, tab: "professional" as TabId, icon: Building2 },
         ];
     return [
-      { label: "Add your name", done: hasPersonalName, tab: "profile" as TabId, icon: User },
-      { label: "Add phone number", done: hasPhone, tab: "profile" as TabId, icon: User },
+      { label: "Add your name", done: hasPersonalName, tab: "professional" as TabId, icon: User },
+      { label: "Add phone number", done: hasPhone, tab: "professional" as TabId, icon: User },
       ...bizItems,
-      { label: "Set up branding", done: hasBranding, tab: "brand" as TabId, icon: Palette },
-      { label: "Connect social accounts", done: hasSocial, tab: "brand" as TabId, icon: Globe },
-      { label: "Generate your first document", done: docCount > 0, tab: "documents" as TabId, icon: FileText },
+      { label: "Set up branding", done: hasBranding, tab: "business" as TabId, icon: Globe },
+      { label: "Connect social accounts", done: hasSocial, tab: "business" as TabId, icon: Globe },
+      { label: "Generate your first document", done: docCount > 0, tab: "intelligence" as TabId, icon: FileText },
     ];
   }, [savedForm, businessData, profileCompleteness, docCount, bizBrandData, completenessFields]);
 
@@ -190,6 +219,17 @@ export default function ProfileSettingsPage() {
         .finally(() => {
           setBusinessLoading(false);
         });
+
+      apiGet<{ overallScore: number; tiers: IntelligenceTier[] }>(`/identity/businesses/${bid}/tiered-completeness`)
+        .then(({ data }) => {
+          if (data) {
+            setIntelligenceTiers(data.tiers || []);
+            setOverallIntelligenceScore(data.overallScore || 0);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to load intelligence tiers:", err);
+        });
     }
   }, []);
 
@@ -220,22 +260,22 @@ export default function ProfileSettingsPage() {
   }, []);
 
   if (loading) return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-3xl mx-auto">
       <SkeletonProfile />
     </div>
   );
 
-  const maxWidth = activeTab === "documents" ? "max-w-4xl" : activeTab === "brand" ? "max-w-3xl" : "max-w-2xl";
+  const maxWidth = activeTab === "intelligence" ? "max-w-4xl" : activeTab === "business" ? "max-w-3xl" : "max-w-3xl";
 
-  const tabBadge = (tabId: TabId) => {
-    if (tabId === "documents" && docCount > 0) {
+  const tabBadge = (tabId: ActiveTab) => {
+    if (tabId === "intelligence" && docCount > 0) {
       return (
         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.15)", color: "hsl(var(--kf-accent1))" }}>
           {docCount}
         </span>
       );
     }
-    if (tabId === "profile" && profileCompleteness > 0 && profileCompleteness < 100) {
+    if (tabId === "overview" && profileCompleteness > 0 && profileCompleteness < 100) {
       return (
         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{
           background: profileCompleteness >= 80 ? "hsl(var(--kf-success) / 0.15)" : "hsl(var(--kf-warning) / 0.15)",
@@ -252,11 +292,11 @@ export default function ProfileSettingsPage() {
     <motion.div variants={stagger} initial="hidden" animate="show" className={`space-y-4 ${maxWidth} mx-auto transition-all`}>
       <motion.div variants={fadeUp} className="flex items-center gap-3">
         <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white shadow-lg">
-          <User className="w-5 h-5" aria-hidden="true" />
+          <Sparkles className="w-5 h-5" aria-hidden="true" />
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight">My Profile</h1>
-          <p className="text-sm text-muted-foreground">Manage your profile, brand, and documents</p>
+          <h1 className="text-2xl font-bold tracking-tight">Profile & Intelligence</h1>
+          <p className="text-sm text-muted-foreground">Manage your identity, business foundation, intelligence, and system-ready documents.</p>
         </div>
       </motion.div>
 
@@ -264,7 +304,34 @@ export default function ProfileSettingsPage() {
         <JourneyIndicator items={completenessItems} onGoTo={handleTabChange} />
       </motion.div>
 
-      <motion.div variants={fadeUp} className="flex gap-1 p-1 rounded-xl" style={{ background: "hsl(var(--kf-muted) / 0.15)", border: "1px solid hsl(var(--kf-border) / 0.2)" }} role="tablist" aria-label="Profile sections">
+      <AnimatePresence>
+        {status && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm"
+            role="status"
+            aria-live="polite"
+            style={{
+              border: `1px solid ${status.type === "success" ? "hsl(var(--kf-success) / 0.4)" : "hsl(var(--kf-error) / 0.4)"}`,
+              background: status.type === "success" ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--kf-error) / 0.08)",
+              color: status.type === "success" ? "hsl(var(--kf-success))" : "hsl(var(--kf-error))",
+            }}
+          >
+            {status.type === "success" ? <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" /> : <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />}
+            {status.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <motion.div
+        variants={fadeUp}
+        className="flex gap-1 p-1 rounded-xl overflow-x-auto"
+        style={{ background: "hsl(var(--kf-muted) / 0.15)", border: "1px solid hsl(var(--kf-border) / 0.2)" }}
+        role="tablist"
+        aria-label="Profile sections"
+      >
         {TAB_CONFIG.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -276,7 +343,7 @@ export default function ProfileSettingsPage() {
               aria-selected={isActive}
               aria-controls={`tabpanel-${tab.id}`}
               onClick={() => handleTabChange(tab.id)}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all min-h-[44px]"
+              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-lg text-xs font-medium transition-all min-h-[44px] whitespace-nowrap"
               style={{
                 background: isActive ? "hsl(var(--kf-card))" : "transparent",
                 color: isActive ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))",
@@ -284,8 +351,9 @@ export default function ProfileSettingsPage() {
                 border: isActive ? "1px solid hsl(var(--kf-border) / 0.3)" : "1px solid transparent",
               }}
             >
-              <Icon className="w-4 h-4" aria-hidden="true" />
-              <span className="hidden sm:inline">{tab.label}</span>
+              <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+              <span className="hidden lg:inline">{tab.label}</span>
+              <span className="lg:hidden">{tab.shortLabel}</span>
               {badge}
             </button>
           );
@@ -293,121 +361,70 @@ export default function ProfileSettingsPage() {
       </motion.div>
 
       <AnimatePresence mode="wait">
-        {activeTab === "documents" && (
-          <motion.div key="documents" id="tabpanel-documents" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <ProfileSectionErrorBoundary sectionName="Documents">
-              <DocumentsTab businessId={businessId} />
-            </ProfileSectionErrorBoundary>
+        {activeTab === "overview" && (
+          <motion.div key="overview" id="tabpanel-overview" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <OverviewTab
+              businessData={businessData}
+              profileCompleteness={profileCompleteness}
+              intelligenceTiers={intelligenceTiers}
+              overallIntelligenceScore={overallIntelligenceScore}
+              completenessItems={completenessItems}
+              onNavigateTab={handleTabChange}
+            />
           </motion.div>
         )}
 
-        {activeTab === "brand" && (
-          <motion.div key="brand" id="tabpanel-brand" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <ProfileSectionErrorBoundary sectionName="Brand & Identity">
-              <BrandIdentityTab onDirtyChange={handleBizInfoDirtyChange} />
-            </ProfileSectionErrorBoundary>
+        {activeTab === "business" && (
+          <motion.div key="business" id="tabpanel-business" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <BusinessTab
+              businessId={businessId}
+              businessData={businessData}
+              businessLoading={businessLoading}
+              onBizDirtyChange={handleBizInfoDirtyChange}
+              onBrandDirtyChange={handleBizInfoDirtyChange}
+              onStatus={setStatus}
+              onBusinessSaved={(saved) => setBusinessData((prev) => prev ? { ...prev, ...saved } : prev)}
+            />
           </motion.div>
         )}
 
-        {activeTab === "profile" && (
-          <motion.div key="profile" id="tabpanel-profile" role="tabpanel" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -8 }} className="space-y-4">
-            <AnimatePresence>
-              {status && (
-                <motion.div
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm"
-                  role="status"
-                  aria-live="polite"
-                  style={{
-                    border: `1px solid ${status.type === "success" ? "hsl(var(--kf-success) / 0.4)" : "hsl(var(--kf-error) / 0.4)"}`,
-                    background: status.type === "success" ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--kf-error) / 0.08)",
-                    color: status.type === "success" ? "hsl(var(--kf-success))" : "hsl(var(--kf-error))",
-                  }}
-                >
-                  {status.type === "success" ? <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" /> : <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />}
-                  {status.message}
-                </motion.div>
-              )}
-            </AnimatePresence>
+        {activeTab === "professional" && (
+          <motion.div key="professional" id="tabpanel-professional" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <ProfessionalTab
+              businessId={businessId}
+              businessData={businessData}
+              businessLoading={businessLoading}
+              savedForm={savedForm}
+              avatarUrl={avatarUrl}
+              onPersonalDirtyChange={handlePersonalDirtyChange}
+              onBizDirtyChange={handleBizDirtyChange}
+              onStatus={setStatus}
+              onPersonalSaved={(newForm, newAvatar) => {
+                setSavedForm({ ...newForm });
+                if (newAvatar !== undefined) setAvatarUrl(newAvatar);
+              }}
+              onBusinessSaved={(saved) => {
+                setBusinessData((prev) => prev ? { ...prev, ...saved } : prev);
+                if (typeof saved.profileCompleteness === "number") setProfileCompleteness(saved.profileCompleteness);
+              }}
+              onCompletenessChange={(pct) => setProfileCompleteness(pct)}
+            />
+          </motion.div>
+        )}
 
-            <motion.div variants={fadeUp}>
-              <BusinessContextCard businessData={businessData} />
-            </motion.div>
+        {activeTab === "intelligence" && (
+          <motion.div key="intelligence" id="tabpanel-intelligence" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <IntelligenceTab businessId={businessId} />
+          </motion.div>
+        )}
 
-            <motion.div variants={fadeUp}>
-              <ProfileSectionErrorBoundary sectionName="Business Intelligence">
-                <ContextDepthCard businessId={businessId} />
-              </ProfileSectionErrorBoundary>
-            </motion.div>
-
-            <motion.div variants={fadeUp}>
-              <ProfileSectionErrorBoundary sectionName="Smart Suggestions">
-                <ProgressivePrompts businessId={businessId} />
-              </ProfileSectionErrorBoundary>
-            </motion.div>
-
-            <motion.div variants={fadeUp}>
-              <ProfileSectionErrorBoundary sectionName="Business Builder">
-                <BusinessBuilderCard />
-              </ProfileSectionErrorBoundary>
-            </motion.div>
-
-            <motion.div variants={fadeUp} className="kf-card p-6">
-              <ProfileSectionErrorBoundary sectionName="Personal Info">
-                <PersonalInfoSection
-                  initialData={savedForm}
-                  avatarUrl={avatarUrl}
-                  onDirtyChange={handlePersonalDirtyChange}
-                  onSaved={(newForm, newAvatar) => {
-                    setSavedForm({ ...newForm });
-                    if (newAvatar !== undefined) setAvatarUrl(newAvatar);
-                  }}
-                  onStatus={setStatus}
-                />
-              </ProfileSectionErrorBoundary>
-            </motion.div>
-
-            <motion.div variants={fadeUp} className="kf-card p-6">
-              <ProfileSectionErrorBoundary sectionName="My Business">
-                <MyBusinessSection
-                  businessId={businessId}
-                  businessData={businessData}
-                  businessLoading={businessLoading}
-                  onDirtyChange={handleBizInfoDirtyChange}
-                  onStatus={setStatus}
-                  onSaved={(saved) => setBusinessData((prev) => prev ? { ...prev, ...saved } : prev)}
-                />
-              </ProfileSectionErrorBoundary>
-            </motion.div>
-
-            <motion.div variants={fadeUp} className="kf-card p-6">
-              <ProfileSectionErrorBoundary sectionName="Professional Profile">
-                <ProfessionalProfileSection
-                  businessId={businessId}
-                  businessData={businessData}
-                  businessLoading={businessLoading}
-                  userName={savedForm.name || `${savedForm.firstName} ${savedForm.lastName}`.trim()}
-                  onCompletenessChange={(pct) => {
-                    setProfileCompleteness(pct);
-                  }}
-                  onDirtyChange={handleBizDirtyChange}
-                  onStatus={setStatus}
-                  onSaved={(saved) => {
-                    setBusinessData((prev) => prev ? { ...prev, ...saved } : prev);
-                    if (saved.profileCompleteness !== undefined) setProfileCompleteness(saved.profileCompleteness);
-                  }}
-                />
-              </ProfileSectionErrorBoundary>
-            </motion.div>
-
-            <motion.div variants={fadeUp} className="kf-card p-6">
-              <ProfileSectionErrorBoundary sectionName="Security">
+        {activeTab === "security" && (
+          <motion.div key="security" id="tabpanel-security" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <div className="kf-card p-6">
+              <ProfileSectionErrorBoundary sectionName="Security & Preferences">
                 <SecuritySection onStatus={setStatus} />
               </ProfileSectionErrorBoundary>
-            </motion.div>
-
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

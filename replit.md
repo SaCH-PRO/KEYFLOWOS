@@ -39,10 +39,12 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Observability:** Request correlation ID, logging interceptor, and health checks.
 - **System Diagnostics & Health Center:** Real-time on-demand diagnostics dashboard at `/admin/system`.
 - **Learn Module:** MasterClass functionality with My Learning, Catalog, and Certificates.
-- **Profile Module (Consolidated Hub):** Three-tab layout (Profile / Brand & Identity / Documents).
-    - **Profile tab**: Personal/business info, security, compliance, integrated Business Intelligence Engine with multi-agent reasoning, intake wizard, and result tabs.
-    - **Brand & Identity tab**: Logo uploader, business info, social media, branding/color customization.
-    - **Documents tab**: Full document catalog, my documents, health dashboard, AI generator modal, and Google Drive browser integration.
+- **Profile & Intelligence Workspace (Overhauled):** Five-mode layout (Overview / Business / Professional / Documents & Intelligence / Security & Preferences). Redesigned as identity and intelligence foundation layer.
+    - **Overview mode**: Strategic landing with Business Foundation progress, Intelligence Readiness summary, "What KEYFLOWOS Sees" context display, Recommended Next Steps engine, and Key Unlocks status.
+    - **Business mode**: Business Identity forms with AI-generated tagline/description, Team & Scale, Operating Hours, Brand & Identity (logo, social, colors). Each section has "What this powers" downstream module annotations.
+    - **Professional mode**: Personal info (name, contact, avatar) and professional profile (headline, bio, industry, stage, skills, location). Each section has "powers" indicators showing downstream impact.
+    - **Documents & Intelligence mode**: Premium surface combining Business Intelligence Engine (5-tier completeness), Intelligence Package generation (8-section business plan), Smart Suggestions, module connection map, and full document catalog with health dashboard and Google Drive integration.
+    - **Security & Preferences mode**: Password change with strength indicator, appearance/theme selector. Isolated from strategic business planning areas.
 - **Universal Export System:** All AI-generated content is exportable.
 - **Business Documentation Engine:** AI-powered document generation, versioning, and health tracking across 18 categories and 96 document types, with risk-tiered editing and a Document Blueprint System.
 - **Navigation & Command System:** Sidebar, breadcrumbs, Command Palette (⌘K), and persistent AI Copilot quick-action chips.

@@ -3,17 +3,18 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
+import type { TabId } from "./profile-types";
 
 export interface CompletenessItem {
   label: string;
   done: boolean;
-  tab: "profile" | "brand" | "documents";
+  tab: TabId;
   icon: React.ElementType;
 }
 
 interface JourneyIndicatorProps {
   items: CompletenessItem[];
-  onGoTo: (tab: "profile" | "brand" | "documents") => void;
+  onGoTo: (tab: TabId) => void;
 }
 
 export function JourneyIndicator({ items, onGoTo }: JourneyIndicatorProps) {

@@ -38,7 +38,7 @@ export interface ProfileCompletenessField {
   description: string;
 }
 
-export type TabId = "profile" | "brand" | "documents";
+export type TabId = "overview" | "business" | "professional" | "intelligence" | "security" | "profile" | "brand" | "documents";
 
 export interface StatusMessage {
   type: "success" | "error";
