@@ -5,6 +5,9 @@ import { X, CalendarDays } from "lucide-react";
 import type { Service, StaffMember, Contact } from "./bookings-types";
 import BookingForm from "./booking-form";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useNavigationContext } from "@/lib/navigation-context";
+import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
+import { useRouter } from "next/navigation";
 
 interface BookingSideSheetProps {
   open: boolean;
@@ -22,6 +25,7 @@ interface BookingSideSheetProps {
   formError: string | null;
   defaultDate?: string;
   defaultTime?: string;
+  defaultContactId?: string;
   saving?: boolean;
 }
 
@@ -35,11 +39,33 @@ export default function BookingSideSheet({
   formError,
   defaultDate,
   defaultTime,
+  defaultContactId,
   saving,
 }: BookingSideSheetProps) {
   const isMobile = useIsMobile();
+  const router = useRouter();
+  const { getOriginContext } = useNavigationContext();
+  const originContext = getOriginContext();
+  const crossModuleOrigin = originContext && originContext.workspace && originContext.workspace !== "Calendar"
+    ? { label: originContext.workspace, route: originContext.route }
+    : null;
+
+  const handleReturnToOrigin = () => {
+    onClose();
+    if (crossModuleOrigin?.route) {
+      router.push(crossModuleOrigin.route);
+    }
+  };
 
   if (!open) return null;
+
+  const prefillContact = defaultContactId
+    ? contacts.find((c) => c.id === defaultContactId)
+    : undefined;
+  const prefillContactName = prefillContact
+    ? `${prefillContact.firstName ?? ""} ${prefillContact.lastName ?? ""}`.trim() || prefillContact.email || ""
+    : undefined;
+  const taskLabel = prefillContactName ? `New Booking · ${prefillContactName}` : "New Booking";
 
   return (
     <motion.div
@@ -80,7 +106,7 @@ export default function BookingSideSheet({
                   style={{ color: "hsl(var(--kf-accent1))" }}
                 />
               </div>
-              <h3 className="text-sm font-semibold">New Booking</h3>
+              <h3 className="text-sm font-semibold">{taskLabel}</h3>
             </div>
             <button
               onClick={onClose}
@@ -90,6 +116,16 @@ export default function BookingSideSheet({
               <X className="w-5 h-5 text-muted-foreground" />
             </button>
           </div>
+          {crossModuleOrigin && (
+            <div className="px-4 pt-3 pb-1">
+              <TaskContinuityHeader
+                taskLabel={taskLabel}
+                returnLabel={`Back to ${crossModuleOrigin.label}`}
+                returnHref={crossModuleOrigin.route}
+                onBack={handleReturnToOrigin}
+              />
+            </div>
+          )}
           <div className="p-1">
             <BookingForm
               services={services}
@@ -100,6 +136,7 @@ export default function BookingSideSheet({
               formError={formError}
               defaultDate={defaultDate}
               defaultTime={defaultTime}
+              defaultContactId={defaultContactId}
               saving={saving}
             />
           </div>
@@ -123,7 +160,7 @@ export default function BookingSideSheet({
                   style={{ color: "hsl(var(--kf-accent1))" }}
                 />
               </div>
-              <h3 className="text-sm font-semibold">New Booking</h3>
+              <h3 className="text-sm font-semibold">{taskLabel}</h3>
             </div>
             <button
               onClick={onClose}
@@ -133,6 +170,16 @@ export default function BookingSideSheet({
               <X className="w-4 h-4 text-muted-foreground" />
             </button>
           </div>
+          {crossModuleOrigin && (
+            <div className="px-4 pt-3 pb-1">
+              <TaskContinuityHeader
+                taskLabel={taskLabel}
+                returnLabel={`Back to ${crossModuleOrigin.label}`}
+                returnHref={crossModuleOrigin.route}
+                onBack={handleReturnToOrigin}
+              />
+            </div>
+          )}
           <div className="p-1">
             <BookingForm
               services={services}
@@ -143,6 +190,7 @@ export default function BookingSideSheet({
               formError={formError}
               defaultDate={defaultDate}
               defaultTime={defaultTime}
+              defaultContactId={defaultContactId}
               saving={saving}
             />
           </div>

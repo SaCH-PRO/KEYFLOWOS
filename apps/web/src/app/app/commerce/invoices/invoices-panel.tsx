@@ -47,6 +47,8 @@ import {
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
 import { useModuleEmit } from "@/hooks/use-module-events";
+import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
+import { useNavigationContext } from "@/lib/navigation-context";
 import { ContactSelect } from "@/components/contacts";
 import {
   INVOICE_STATUS_FILTERS,
@@ -133,6 +135,54 @@ export default function InvoicesPanel({
   } = useInvoiceForm();
   const emitEvent = useModuleEmit();
   const { businessData, saveBranding, savingBranding } = useBusinessPreview();
+  const { getOriginContext } = useNavigationContext();
+  const invoiceTaskIdRef = useRef<string | null>(null);
+  const invoiceSessionIdRef = useRef<string | null>(null);
+
+  const originContext = getOriginContext();
+  const crossModuleOriginLabel = originContext && originContext.workspace && originContext.workspace !== "Revenue"
+    ? originContext.workspace
+    : null;
+  const crossModuleOriginRoute = crossModuleOriginLabel
+    ? originContext?.route ?? null
+    : null;
+
+  useEffect(() => {
+    if (showInvoiceBuilder) {
+      if (!invoiceSessionIdRef.current) {
+        invoiceSessionIdRef.current = editingInvoiceId
+          ? `commerce-invoice-${editingInvoiceId}`
+          : `commerce-invoice-new-${Date.now()}`;
+      }
+      const sessionId = invoiceSessionIdRef.current;
+      const label = editingInvoiceId ? "Edit invoice" : "New invoice";
+      const contact = contacts.find((c) => c.id === invoiceForm.contactId);
+      const contactName = contact ? (`${contact.firstName ?? ""} ${contact.lastName ?? ""}`).trim() || null : null;
+      const taskId = registerInterruptedTask({
+        id: sessionId,
+        module: "commerce",
+        label: contactName ? `${label} · ${contactName}` : label,
+        description: contactName
+          ? `Resume invoice for ${contactName}`
+          : "Resume building this invoice",
+        route: "/app/commerce?tab=invoices",
+        draftId: editingInvoiceId ?? null,
+        originRoute: "/app/commerce",
+        originLabel: "Revenue",
+        taskIntent: editingInvoiceId ? "edit-invoice" : "create-invoice",
+        formData: {
+          contactId: invoiceForm.contactId || null,
+          dueDate: invoiceForm.dueDate || null,
+          itemCount: invoiceForm.items.length,
+          notes: invoiceForm.notes || null,
+        },
+      });
+      invoiceTaskIdRef.current = taskId;
+    } else {
+      invoiceSessionIdRef.current = null;
+      invoiceTaskIdRef.current = null;
+    }
+  }, [showInvoiceBuilder, editingInvoiceId, invoiceForm, contacts]);
 
   const prevTriggerNew = useRef(triggerNew);
   useEffect(() => {
@@ -470,6 +520,7 @@ export default function InvoicesPanel({
       });
       if (error) { setFormError(error); toast.error("Failed to update invoice"); }
       if (data) {
+        if (invoiceTaskIdRef.current) { markTaskCompleted(invoiceTaskIdRef.current); invoiceTaskIdRef.current = null; }
         setInvoices((prev) => prev.map((inv) => inv.id === editingInvoiceId ? data : inv));
         resetInvoiceForm();
         setShowInvoiceBuilder(false);
@@ -479,6 +530,7 @@ export default function InvoicesPanel({
       const { data, error } = await createInvoice(invoicePayload);
       if (error) { setFormError(error); toast.error("Failed to create invoice"); }
       if (data) {
+        if (invoiceTaskIdRef.current) { markTaskCompleted(invoiceTaskIdRef.current); invoiceTaskIdRef.current = null; }
         setInvoices((prev) => [data, ...prev]);
         resetInvoiceForm();
         setShowInvoiceBuilder(false);
@@ -702,6 +754,8 @@ export default function InvoicesPanel({
         notes={invoiceForm.notes}
         onNotesChange={(v) => setInvoiceForm((f: any) => ({ ...f, notes: v }))}
         onPaymentTermsChange={applyPaymentTerms}
+        originLabel={crossModuleOriginLabel}
+        originRoute={crossModuleOriginRoute}
       />
 
       {invoiceError && (

@@ -48,6 +48,10 @@ import { useBookingsAiHub } from "./hooks/use-bookings-ai-hub";
 import { BookingsSkeleton } from "./components/bookings-skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { moduleEvents } from "@/lib/module-events";
+import { ResumePrompt } from "@/components/ui/resume-task-system";
+import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
+import { useNavigationContext } from "@/lib/navigation-context";
 import CalendarView from "./calendar/calendar-view";
 import BookingDetailDrawer from "./components/booking-detail-drawer";
 import BookingSideSheet from "./components/booking-side-sheet";
@@ -82,6 +86,8 @@ export default function BookingsPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("schedule");
   const { checkLimit } = usePlan();
+  const { setCurrentMeta } = useNavigationContext();
+  useReturnNavigation({ restoreScrollOnMount: true });
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -95,7 +101,41 @@ export default function BookingsPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [prefillDate, setPrefillDate] = useState<string | undefined>(undefined);
   const [prefillTime, setPrefillTime] = useState<string | undefined>(undefined);
+  const [prefillContactId, setPrefillContactId] = useState<string | undefined>(undefined);
   const [bookingSaving, setBookingSaving] = useState(false);
+  const bookingTaskIdRef = useRef<string | null>(null);
+  const bookingSessionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (showCreateBooking) {
+      if (!bookingSessionIdRef.current) {
+        bookingSessionIdRef.current = `bookings-new-${Date.now()}`;
+      }
+      const sessionId = bookingSessionIdRef.current;
+      const taskId = registerInterruptedTask({
+        id: sessionId,
+        module: "bookings",
+        label: "New booking",
+        description: prefillDate
+          ? `Resume scheduling appointment for ${prefillDate}${prefillTime ? ` at ${prefillTime}` : ""}`
+          : "Resume scheduling this appointment",
+        route: "/app/bookings",
+        draftId: null,
+        originRoute: "/app/bookings",
+        originLabel: "Calendar",
+        taskIntent: "create-booking",
+        formData: {
+          prefillDate: prefillDate ?? null,
+          prefillTime: prefillTime ?? null,
+          prefillContactId: prefillContactId ?? null,
+        },
+      });
+      bookingTaskIdRef.current = taskId;
+    } else {
+      bookingSessionIdRef.current = null;
+      bookingTaskIdRef.current = null;
+    }
+  }, [showCreateBooking, prefillDate, prefillTime, prefillContactId]);
 
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
@@ -125,8 +165,9 @@ export default function BookingsPage() {
     const oldIndex = tabKeys.indexOf(tab);
     directionRef.current = newIndex > oldIndex ? 1 : -1;
     setTab(key as Tab);
+    setCurrentMeta({ tab: key });
     moduleEvents.emit("module:tab_changed", "bookings", { tab: key });
-  }, [tab, tabKeys]);
+  }, [tab, tabKeys, setCurrentMeta]);
 
   const { swipeHandlers } = useSwipeTabs({
     tabs: tabKeys,
@@ -163,6 +204,12 @@ export default function BookingsPage() {
     const actionParam = searchParams?.get("action");
     if (actionParam === "share" && businessSlug) {
       setShareModalOpen(true);
+      window.history.replaceState({}, "", "/app/bookings");
+    }
+    const contactIdParam = searchParams?.get("contactId");
+    if (contactIdParam) {
+      setPrefillContactId(contactIdParam);
+      setShowCreateBooking(true);
       window.history.replaceState({}, "", "/app/bookings");
     }
   }, [searchParams, businessSlug]);
@@ -296,10 +343,12 @@ export default function BookingsPage() {
       });
       if (error) { setFormError(error); return; }
       if (result) {
+        if (bookingTaskIdRef.current) { markTaskCompleted(bookingTaskIdRef.current); bookingTaskIdRef.current = null; }
         await loadData();
         setShowCreateBooking(false);
         setPrefillDate(undefined);
         setPrefillTime(undefined);
+        setPrefillContactId(undefined);
         setFormError(null);
         moduleEvents.emit("booking:created", "bookings", { booking: result });
         if (calendarConnected && result.id) {
@@ -425,6 +474,14 @@ export default function BookingsPage() {
     }
   }
 
+  const handleResumeBookingTask = useCallback((task: import("@/lib/resume-task-registry").InterruptedTask) => {
+    const fd = task.formData;
+    if (fd?.prefillDate) setPrefillDate(fd.prefillDate as string);
+    if (fd?.prefillTime) setPrefillTime(fd.prefillTime as string);
+    if (fd?.prefillContactId) setPrefillContactId(fd.prefillContactId as string);
+    setShowCreateBooking(true);
+  }, []);
+
   if (!businessId && !loading) {
     return <WorkspaceError />;
   }
@@ -444,6 +501,7 @@ export default function BookingsPage() {
 
   return (
     <div className="space-y-5" {...swipeHandlers}>
+      <ResumePrompt module="bookings" onResume={handleResumeBookingTask} />
       <PageHeader
         icon={Calendar}
         title="Bookings"
@@ -656,10 +714,11 @@ export default function BookingsPage() {
             staff={staff}
             contacts={contacts}
             onSubmit={handleCreateBooking}
-            onClose={() => { setShowCreateBooking(false); setPrefillDate(undefined); setPrefillTime(undefined); setFormError(null); }}
+            onClose={() => { setShowCreateBooking(false); setPrefillDate(undefined); setPrefillTime(undefined); setPrefillContactId(undefined); setFormError(null); }}
             formError={formError}
             defaultDate={prefillDate}
             defaultTime={prefillTime}
+            defaultContactId={prefillContactId}
             saving={bookingSaving}
           />
         )}

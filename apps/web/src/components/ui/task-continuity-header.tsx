@@ -9,6 +9,7 @@ interface TaskContinuityHeaderProps {
   draftStatus?: "saved" | "saving" | "unsaved" | null;
   draftLabel?: string;
   onSave?: () => void;
+  onBack?: () => void;
   className?: string;
   returnHref?: string;
   returnLabel?: string;
@@ -19,6 +20,7 @@ export function TaskContinuityHeader({
   draftStatus,
   draftLabel,
   onSave,
+  onBack,
   className,
   returnHref,
   returnLabel,
@@ -30,7 +32,9 @@ export function TaskContinuityHeader({
   const originWorkspace = getOriginWorkspace();
 
   const handleReturn = () => {
-    if (returnHref) {
+    if (onBack) {
+      onBack();
+    } else if (returnHref) {
       navigateBack(returnHref);
     } else {
       navigateBack();

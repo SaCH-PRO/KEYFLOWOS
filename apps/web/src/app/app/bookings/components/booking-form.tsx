@@ -32,6 +32,7 @@ interface BookingFormProps {
   formError: string | null;
   defaultDate?: string;
   defaultTime?: string;
+  defaultContactId?: string;
   saving?: boolean;
 }
 
@@ -80,13 +81,14 @@ export default function BookingForm({
   formError,
   defaultDate,
   defaultTime,
+  defaultContactId,
   saving = false,
 }: BookingFormProps) {
   const [bookingDate, setBookingDate] = useState(defaultDate ?? "");
   const [bookingTime, setBookingTime] = useState(defaultTime ?? "");
   const [bookingServiceId, setBookingServiceId] = useState("");
   const [bookingStaffId, setBookingStaffId] = useState("");
-  const [bookingContactId, setBookingContactId] = useState("");
+  const [bookingContactId, setBookingContactId] = useState(defaultContactId ?? "");
   const [bookingNotes, setBookingNotes] = useState("");
   const [weekBase, setWeekBase] = useState(() => {
     if (defaultDate) return new Date(defaultDate + "T12:00:00");

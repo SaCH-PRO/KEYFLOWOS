@@ -67,6 +67,8 @@ import { getQuoteSmartCTA } from "../utils/smart-cta";
 import { useQuoteForm } from "../hooks/use-quote-form";
 import { useBusinessPreview } from "../hooks/use-business-preview";
 import { useModuleEmit } from "@/hooks/use-module-events";
+import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
+import { useNavigationContext } from "@/lib/navigation-context";
 import { ArrowRightLeft, Eye, DollarSign, Ban, Bell } from "lucide-react";
 
 interface QuotesPanelProps {
@@ -129,6 +131,54 @@ export default function QuotesPanel({
   } = useQuoteForm();
   const emitEvent = useModuleEmit();
   const { businessData, saveBranding, savingBranding } = useBusinessPreview();
+  const { getOriginContext } = useNavigationContext();
+  const quoteTaskIdRef = useRef<string | null>(null);
+  const quoteSessionIdRef = useRef<string | null>(null);
+
+  const originContext = getOriginContext();
+  const crossModuleOriginLabel = originContext && originContext.workspace && originContext.workspace !== "Revenue"
+    ? originContext.workspace
+    : null;
+  const crossModuleOriginRoute = crossModuleOriginLabel
+    ? originContext?.route ?? null
+    : null;
+
+  useEffect(() => {
+    if (showQuoteBuilder) {
+      if (!quoteSessionIdRef.current) {
+        quoteSessionIdRef.current = editingQuoteId
+          ? `commerce-quote-${editingQuoteId}`
+          : `commerce-quote-new-${Date.now()}`;
+      }
+      const sessionId = quoteSessionIdRef.current;
+      const label = editingQuoteId ? "Edit quote" : "New quote";
+      const contact = contacts.find((c) => c.id === quoteForm.contactId);
+      const contactName = contact ? (`${contact.firstName ?? ""} ${contact.lastName ?? ""}`).trim() || null : null;
+      const taskId = registerInterruptedTask({
+        id: sessionId,
+        module: "commerce",
+        label: contactName ? `${label} · ${contactName}` : label,
+        description: contactName
+          ? `Resume quote for ${contactName}`
+          : "Resume building this quote",
+        route: "/app/commerce?tab=quotes",
+        draftId: editingQuoteId ?? null,
+        originRoute: "/app/commerce",
+        originLabel: "Revenue",
+        taskIntent: editingQuoteId ? "edit-quote" : "create-quote",
+        formData: {
+          contactId: quoteForm.contactId || null,
+          expiryDate: quoteForm.expiryDate || null,
+          itemCount: quoteForm.items.length,
+          notes: quoteForm.notes || null,
+        },
+      });
+      quoteTaskIdRef.current = taskId;
+    } else {
+      quoteSessionIdRef.current = null;
+      quoteTaskIdRef.current = null;
+    }
+  }, [showQuoteBuilder, editingQuoteId, quoteForm, contacts]);
 
   const triggerRef = useRef(triggerNew);
   useEffect(() => {
@@ -458,6 +508,7 @@ export default function QuotesPanel({
         notes: quoteForm.notes || undefined,
       });
       if (res.data) {
+        if (quoteTaskIdRef.current) { markTaskCompleted(quoteTaskIdRef.current); quoteTaskIdRef.current = null; }
         setQuotes((q) => q.map((quote) => (quote.id === editingQuoteId ? res.data! : quote)));
         toast.success("Quote updated");
       } else if (res.error) {
@@ -475,6 +526,7 @@ export default function QuotesPanel({
         notes: quoteForm.notes || undefined,
       });
       if (res.data) {
+        if (quoteTaskIdRef.current) { markTaskCompleted(quoteTaskIdRef.current); quoteTaskIdRef.current = null; }
         setQuotes((q) => [res.data!, ...q]);
         toast.success("Quote created");
         emitEvent("commerce:quote_created", "commerce", { quoteId: res.data.id });
@@ -702,6 +754,8 @@ export default function QuotesPanel({
         onDiscountValueChange={(v) => setQuoteForm((f: any) => ({ ...f, discountValue: v }))}
         notes={quoteForm.notes}
         onNotesChange={(v) => setQuoteForm((f: any) => ({ ...f, notes: v }))}
+        originLabel={crossModuleOriginLabel}
+        originRoute={crossModuleOriginRoute}
       />
 
       <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4">

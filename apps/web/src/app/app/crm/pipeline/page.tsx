@@ -28,6 +28,9 @@ import { useModuleEmit } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { usePlan } from "@/hooks/use-plan";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
+import { ResumePrompt } from "@/components/ui/resume-task-system";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
+import { useNavigationContext } from "@/lib/navigation-context";
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -38,6 +41,8 @@ export default function ContactsPage() {
   const { checkLimit } = usePlan();
   const emitEvent = useModuleEmit();
   const [slideDirection, setSlideDirection] = useState(0);
+  const { setCurrentMeta } = useNavigationContext();
+  useReturnNavigation({ restoreScrollOnMount: true });
 
   const CRM_TABS = ["contacts"];
 
@@ -145,8 +150,9 @@ export default function ContactsPage() {
     const newIndex = CRM_TABS.indexOf(t);
     setSlideDirection(newIndex > oldIndex ? 1 : -1);
     setCrmViewTab(t as "contacts" | "insights" | "studio");
+    setCurrentMeta({ tab: t });
     emitEvent("module:tab_changed", "crm", { tab: t });
-  }, [crmViewTab, setCrmViewTab, emitEvent]);
+  }, [crmViewTab, setCrmViewTab, emitEvent, setCurrentMeta]);
 
   const { swipeHandlers } = useSwipeTabs({
     tabs: CRM_TABS,
@@ -187,6 +193,7 @@ export default function ContactsPage() {
 
   return (
     <div className="space-y-4" aria-label="Clients Workspace">
+      <ResumePrompt module="crm" />
       <PageHeader
         icon={Users}
         title="Clients"
