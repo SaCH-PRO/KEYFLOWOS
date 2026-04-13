@@ -293,10 +293,12 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     const statuses = deliveries.map(d => d.status);
     const allPublished = statuses.every(s => s === 'Published');
     const allFailed = statuses.every(s => s === 'Failed');
+    const allCancelled = statuses.every(s => s === 'Cancelled');
     const anyPending = statuses.some(s => ['Queued', 'Scheduled', 'Sending', 'RetryPending'].includes(s));
 
     let contentStatus: string;
-    if (allPublished) contentStatus = 'Sent';
+    if (allCancelled) contentStatus = 'Cancelled';
+    else if (allPublished) contentStatus = 'Sent';
     else if (allFailed) contentStatus = 'Failed';
     else if (anyPending) contentStatus = 'Sending';
     else contentStatus = 'PartiallyFailed';
