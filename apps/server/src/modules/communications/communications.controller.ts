@@ -166,11 +166,12 @@ export class CommunicationsController {
     @Res() res: import('express').Response,
   ) {
     if (!TRACKING_SECRET || !token || !verifyTrackingToken(deliveryId, token)) {
-      if (redirectUrl) return res.redirect(302, redirectUrl);
-      return res.status(400).json({ error: 'Invalid tracking' });
+      return res.status(400).json({ error: 'Invalid tracking token' });
     }
     await this.delivery.trackClick(deliveryId);
-    if (redirectUrl) return res.redirect(302, redirectUrl);
+    if (redirectUrl && /^https?:\/\//i.test(redirectUrl)) {
+      return res.redirect(302, redirectUrl);
+    }
     return res.json({ ok: true });
   }
 
