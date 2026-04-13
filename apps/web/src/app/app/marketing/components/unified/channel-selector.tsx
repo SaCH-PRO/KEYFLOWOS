@@ -91,12 +91,17 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
     }
   };
 
-  const selectAll = () => {
-    onSelectionChange([...activeDestinations]);
-  };
-
   const selectedIds = new Set(selectedDestinations.map((d) => d.id));
   const activeIds = new Set(activeDestinations.map((d) => d.id));
+
+  const disabledConnectionIds = useMemo(() => {
+    return new Set(connections.filter((c) => !!getDisabledReason(c)).map((c) => c.id));
+  }, [connections]);
+
+  const selectAll = () => {
+    const selectableDests = activeDestinations.filter((d) => !disabledConnectionIds.has(d.connectionId));
+    onSelectionChange([...selectableDests]);
+  };
 
   const groupedByConnection = useMemo(() => {
     return connections.map((conn) => ({
@@ -210,13 +215,14 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                         )}
                         {dests.map((dest) => {
                           const isActive = activeIds.has(dest.id);
+                          const isDisabled = !isActive || isConnectionDisabled;
                           return (
                             <button
                               key={dest.id}
-                              onClick={() => toggleDestination(dest)}
-                              disabled={!isActive}
+                              onClick={() => !isDisabled && toggleDestination(dest)}
+                              disabled={isDisabled}
                               className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all ${
-                                !isActive
+                                isDisabled
                                   ? "opacity-40 cursor-not-allowed"
                                   : selectedIds.has(dest.id)
                                     ? "bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/30"
@@ -224,18 +230,18 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                               }`}
                             >
                               <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
-                                selectedIds.has(dest.id) ? "bg-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]" : "border-border/50"
+                                selectedIds.has(dest.id) && !isDisabled ? "bg-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]" : "border-border/50"
                               }`}>
-                                {selectedIds.has(dest.id) && <Check className="w-2.5 h-2.5 text-white" />}
+                                {selectedIds.has(dest.id) && !isDisabled && <Check className="w-2.5 h-2.5 text-white" />}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-medium truncate">{dest.displayName}</p>
                                 <p className="text-[10px] text-muted-foreground capitalize">{(dest.destinationType || dest.platform || "").replace(/_/g, " ")}</p>
                               </div>
-                              {isActive ? (
-                                <Wifi className="w-3 h-3 text-emerald-400/60" />
-                              ) : (
+                              {isDisabled ? (
                                 <Lock className="w-3 h-3 text-muted-foreground/40" />
+                              ) : (
+                                <Wifi className="w-3 h-3 text-emerald-400/60" />
                               )}
                             </button>
                           );

@@ -23,12 +23,14 @@ import type { ChannelConnection, ChannelDestination, SocialConnection } from "@/
 import {
   useChannelHealth,
   HEALTH_BG_COLORS,
+  type ChannelHealthData,
   type EnrichedConnection,
   type HealthState,
 } from "@/hooks/use-channel-health";
 
 interface ContentStudioTabProps {
   businessId: string;
+  sharedHealth?: ChannelHealthData;
 }
 
 const PROVIDER_META: Record<string, { icon: React.ElementType; color: string; label: string; description: string }> = {
@@ -741,8 +743,9 @@ function SocialConnectionsSection({ socialConnections, businessId, onRefresh }: 
   );
 }
 
-export function ContentStudioTab({ businessId }: ContentStudioTabProps) {
-  const health = useChannelHealth(businessId);
+export function ContentStudioTab({ businessId, sharedHealth }: ContentStudioTabProps) {
+  const localHealth = useChannelHealth(sharedHealth ? "" : businessId);
+  const health = sharedHealth || localHealth;
 
   const handleDisconnect = useCallback(async (connectionId: string) => {
     if (!businessId) return;
