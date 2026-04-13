@@ -252,6 +252,53 @@ export class MarketplaceController {
     return this.marketplaceService.fulfillOrder(businessId, orderId, action, data);
   }
 
+  @Post('businesses/:businessId/orders/:orderId/route')
+  routeOrder(
+    @Param('businessId') businessId: string,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.marketplaceService.routeOrder(businessId, orderId);
+  }
+
+  @Get('businesses/:businessId/orders/:orderId/routes')
+  getFulfillmentRoutes(
+    @Param('businessId') businessId: string,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.marketplaceService.getFulfillmentRoutes(businessId, orderId);
+  }
+
+  @Patch('businesses/:businessId/fulfillment-routes/:routeId')
+  updateFulfillmentRoute(
+    @Param('businessId') businessId: string,
+    @Param('routeId') routeId: string,
+    @Body() body: any,
+  ) {
+    return this.marketplaceService.updateFulfillmentRoute(businessId, routeId, body);
+  }
+
+  @Get('businesses/:businessId/inventory/alerts')
+  getInventoryAlerts(@Param('businessId') businessId: string) {
+    return this.marketplaceService.getInventoryAlerts(businessId);
+  }
+
+  @Post('businesses/:businessId/purchase-orders/:poId/advance')
+  advancePurchaseOrderStatus(
+    @Param('businessId') businessId: string,
+    @Param('poId') poId: string,
+    @Body() body: { status: 'SUBMITTED' | 'ACKNOWLEDGED' | 'SHIPPED' | 'RECEIVED' },
+  ) {
+    return this.marketplaceService.advancePurchaseOrderStatus(businessId, poId, body);
+  }
+
+  @Post('businesses/:businessId/fulfillment-routes/:routeId/activate-preorder')
+  activatePreorderRoute(
+    @Param('businessId') businessId: string,
+    @Param('routeId') routeId: string,
+  ) {
+    return this.marketplaceService.activatePreorderRoute(businessId, routeId);
+  }
+
   @Get('businesses/:businessId/orders/:orderId/token')
   async getOrderToken(
     @Param('businessId') businessId: string,
