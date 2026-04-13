@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Clock, Zap, RefreshCw, AlertTriangle, CheckCircle, Info, Search, SkipForward, ChevronDown, ChevronRight, FileText } from "lucide-react";
+import {
+  Clock, Zap, RefreshCw, AlertTriangle, CheckCircle, Info, Search,
+  SkipForward, ChevronDown, ChevronRight, FileText, ExternalLink,
+  RotateCcw, Workflow,
+} from "lucide-react";
 import { fetchActivityFeed, ActivityItem } from "@/lib/client";
 
 const TONE_STYLES: Record<string, { icon: typeof Zap; color: string; bg: string; label: string }> = {
@@ -18,7 +22,15 @@ const STATUS_FILTERS = [
   { key: "skipped", label: "Skipped", icon: SkipForward },
 ] as const;
 
+const TIME_FILTERS = [
+  { key: "all", label: "All Time" },
+  { key: "today", label: "Today" },
+  { key: "week", label: "This Week" },
+  { key: "month", label: "This Month" },
+] as const;
+
 type StatusFilterKey = (typeof STATUS_FILTERS)[number]["key"];
+type TimeFilterKey = (typeof TIME_FILTERS)[number]["key"];
 
 const AUTOMATION_MODULES = ["automation", "agent"];
 
@@ -32,12 +44,13 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all");
+  const [timeFilter, setTimeFilter] = useState<TimeFilterKey>("all");
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!businessId) return;
     const results = await Promise.all(
-      AUTOMATION_MODULES.map((mod) => fetchActivityFeed(businessId, { module: mod, limit: 30 }))
+      AUTOMATION_MODULES.map((mod) => fetchActivityFeed(businessId, { module: mod, limit: 50 }))
     );
     const executionActions = new Set(["executed", "failed", "skipped"]);
     const allItems: ActivityItem[] = [];
@@ -49,7 +62,7 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
       }
     }
     allItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    setItems(allItems.slice(0, 50));
+    setItems(allItems.slice(0, 100));
     setLoading(false);
   }, [businessId]);
 
@@ -64,8 +77,17 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
     setRefreshing(false);
   }
 
+  const stats = useMemo(() => {
+    const total = items.length;
+    const success = items.filter((i) => i.tone === "success" || i.action === "executed").length;
+    const failed = items.filter((i) => i.tone === "error" || i.action === "failed").length;
+    const skipped = items.filter((i) => i.action === "skipped").length;
+    return { total, success, failed, skipped };
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     let result = items;
+
     if (statusFilter !== "all") {
       if (statusFilter === "skipped") {
         result = result.filter((item) => item.action === "skipped");
@@ -75,6 +97,16 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
         result = result.filter((item) => item.tone === "error" || item.action === "failed");
       }
     }
+
+    if (timeFilter !== "all") {
+      const now = Date.now();
+      let cutoff = 0;
+      if (timeFilter === "today") cutoff = now - 24 * 60 * 60 * 1000;
+      else if (timeFilter === "week") cutoff = now - 7 * 24 * 60 * 60 * 1000;
+      else if (timeFilter === "month") cutoff = now - 30 * 24 * 60 * 60 * 1000;
+      result = result.filter((item) => new Date(item.createdAt).getTime() > cutoff);
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -85,14 +117,15 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
       );
     }
     return result;
-  }, [items, statusFilter, searchQuery]);
+  }, [items, statusFilter, timeFilter, searchQuery]);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Execution history for playbooks and cross-module workflows.
-        </p>
+        <div className="flex items-center gap-2">
+          <Workflow className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <p className="text-sm font-medium">Execution Diagnostics</p>
+        </div>
         <button
           onClick={handleRefresh}
           disabled={refreshing}
@@ -103,15 +136,24 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
         </button>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
+      {!loading && items.length > 0 && (
+        <div className="grid grid-cols-4 gap-2">
+          <MiniStat label="Total Runs" value={stats.total} color="hsl(var(--foreground))" />
+          <MiniStat label="Success" value={stats.success} color="hsl(var(--kf-success))" />
+          <MiniStat label="Failed" value={stats.failed} color="hsl(var(--kf-error))" />
+          <MiniStat label="Skipped" value={stats.skipped} color="hsl(var(--kf-warning))" />
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50" />
           <input
             type="text"
-            placeholder="Search by playbook name..."
+            placeholder="Search executions..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-lg border border-border/60 bg-input pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground/50 min-h-[44px]"
+            className="w-full rounded-lg border border-border/60 bg-input pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground/50 min-h-[36px]"
           />
         </div>
         <div className="flex items-center gap-1.5">
@@ -121,7 +163,7 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
               <button
                 key={sf.key}
                 onClick={() => setStatusFilter(sf.key)}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[44px]"
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-lg transition-colors min-h-[32px]"
                 style={{
                   background: isActive
                     ? sf.key === "error"
@@ -149,6 +191,21 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
             );
           })}
         </div>
+        <div className="flex items-center gap-1">
+          {TIME_FILTERS.map((tf) => (
+            <button
+              key={tf.key}
+              onClick={() => setTimeFilter(tf.key)}
+              className="text-[11px] font-medium px-2 py-1 rounded-lg transition-colors min-h-[32px]"
+              style={{
+                background: timeFilter === tf.key ? "hsl(var(--kf-info) / 0.15)" : "transparent",
+                color: timeFilter === tf.key ? "hsl(var(--kf-info))" : undefined,
+              }}
+            >
+              {tf.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading ? (
@@ -161,10 +218,10 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
           <p className="text-sm font-medium mb-1">
             {items.length === 0 ? "No execution history yet" : "No matching results"}
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground max-w-md mx-auto">
             {items.length === 0
-              ? "When your automations run, their execution details will appear here."
-              : "Try adjusting your search or filters."}
+              ? "Once your flows run, you'll be able to inspect every execution, failure, and skipped condition here."
+              : "Try adjusting your search, status, or time filters."}
           </p>
         </div>
       ) : (
@@ -187,7 +244,7 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                       <ToneIcon className="w-3.5 h-3.5" style={{ color: toneStyle.color }} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium">{item.title}</span>
                         <span
                           className="text-[10px] px-1.5 py-0.5 rounded-md font-medium"
@@ -197,9 +254,9 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                         </span>
                       </div>
                       {item.detail && (
-                        <p className="text-[12px] text-muted-foreground mt-0.5">{item.detail}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{item.detail}</p>
                       )}
-                      <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground/60">
+                      <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground/60">
                         <span className="inline-flex items-center gap-1">
                           <Zap className="w-3 h-3" />
                           {item.entityType}
@@ -239,13 +296,14 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                           <TraceConnector />
                           <TraceStep
                             label="Result"
-                            value={item.detail || (item.tone === "error" ? "Execution failed" : "Completed successfully")}
-                            status={item.tone === "error" ? "failed" : "completed"}
+                            value={item.detail || (item.tone === "error" ? "Execution failed" : item.action === "skipped" ? "Condition not met — flow skipped" : "Completed successfully")}
+                            status={item.tone === "error" ? "failed" : item.action === "skipped" ? "skipped" : "completed"}
                           />
                         </div>
                       </div>
+
                       <div
-                        className="rounded-lg p-3 text-[11px] space-y-1"
+                        className="rounded-lg p-3 text-[11px] space-y-1.5"
                         style={{ background: "hsl(var(--kf-muted) / 0.2)", border: "1px solid hsl(var(--kf-border) / 0.3)" }}
                       >
                         <div className="flex items-center justify-between">
@@ -261,6 +319,10 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                           <span>{item.module || "automation"}</span>
                         </div>
                         <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Entity Type</span>
+                          <span>{item.entityType || "—"}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">Status</span>
                           <span
                             className="px-1.5 py-0.5 rounded text-[10px] font-medium"
@@ -270,6 +332,41 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                           </span>
                         </div>
                       </div>
+
+                      {item.entityId && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[32px]"
+                            style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}
+                            onClick={() => {
+                              const routeMap: Record<string, string> = {
+                                invoice: "/app/invoices",
+                                client: "/app/clients",
+                                booking: "/app/calendar",
+                                quote: "/app/quotes",
+                                project: "/app/projects",
+                              };
+                              const entityType = item.entityType?.toLowerCase() || "";
+                              const base = routeMap[entityType] || "/app";
+                              window.location.href = `${base}/${item.entityId}`;
+                            }}
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Open Related Record
+                          </button>
+                          <button
+                            className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[32px]"
+                            style={{ background: "hsl(var(--muted) / 0.5)", color: "hsl(var(--muted-foreground))" }}
+                            onClick={() => {
+                              console.log("Rerun flow execution:", item.id);
+                            }}
+                            title="Re-execute this flow run"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            Rerun
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -278,6 +375,15 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function MiniStat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="rounded-lg px-3 py-2 text-center" style={{ background: `${color}08`, border: `1px solid ${color}15` }}>
+      <div className="text-lg font-bold" style={{ color }}>{value}</div>
+      <div className="text-[10px] text-muted-foreground">{label}</div>
     </div>
   );
 }

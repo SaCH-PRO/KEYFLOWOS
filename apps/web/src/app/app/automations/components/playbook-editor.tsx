@@ -1,30 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, X, Plus, Eye, EyeOff, Filter } from "lucide-react";
+import { Zap, X, Plus, Filter, ArrowDown, Clock, Workflow, MessageSquare } from "lucide-react";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { Button, Input } from "@keyflow/ui";
 import { createPlaybook, updatePlaybook, Playbook } from "@/lib/client";
 import {
   TRIGGER_GROUPS,
   ACTION_GROUPS,
+  CONDITION_OPTIONS,
   getTriggerLabel,
   getActionLabel,
+  getFlowModules,
+  MODULE_COLORS,
+  buildNaturalLanguageSummary,
   type ActionStep,
   type AutomationTemplate,
 } from "./automation-constants";
-
-const CONDITION_OPTIONS = [
-  { value: "", label: "Select condition..." },
-  { value: "contact.has_email", label: "Contact has email" },
-  { value: "contact.has_phone", label: "Contact has phone number" },
-  { value: "contact.is_active", label: "Contact is active" },
-  { value: "contact.is_new", label: "Contact was created in last 7 days" },
-  { value: "invoice.above_threshold", label: "Invoice total above threshold" },
-  { value: "booking.is_first", label: "First booking for contact" },
-  { value: "time.business_hours", label: "During business hours only" },
-];
 
 type ConditionOperator = "AND" | "OR";
 
@@ -60,117 +53,12 @@ interface PlaybookEditorProps {
   businessId?: string | null;
 }
 
-function VisualFlowPreview({
-  triggerEvent,
-  conditionGroup,
-  actionSteps,
-}: {
-  triggerEvent: string;
-  conditionGroup: ConditionGroup;
-  actionSteps: ActionStep[];
-}) {
-  const filledConditions = conditionGroup.conditions.filter((c) => c);
-  const filledActions = actionSteps.filter((a) => a.type);
-
-  if (!triggerEvent && filledActions.length === 0) {
-    return (
-      <div className="rounded-xl p-4 text-center" style={{ background: "hsl(var(--kf-muted)/0.1)", border: "1px solid hsl(var(--kf-border)/0.3)" }}>
-        <p className="text-xs text-muted-foreground">
-          Select a trigger and actions to see the automation flow.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-xl p-4 space-y-0" style={{ background: "hsl(var(--kf-muted)/0.1)", border: "1px solid hsl(var(--kf-border)/0.3)" }}>
-      {triggerEvent && (
-        <div className="flex items-center gap-3">
-          <div className="flex flex-col items-center">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ background: "hsl(var(--kf-accent1)/0.15)" }}
-            >
-              <Zap className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            </div>
-            {(filledConditions.length > 0 || filledActions.length > 0) && (
-              <div className="w-px h-4" style={{ background: "hsl(var(--kf-border)/0.4)" }} />
-            )}
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Trigger</p>
-            <p className="text-sm font-medium">{getTriggerLabel(triggerEvent)}</p>
-          </div>
-        </div>
-      )}
-
-      {filledConditions.length > 0 && (
-        <div className="flex items-center gap-3">
-          <div className="flex flex-col items-center">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ background: "hsl(var(--kf-info)/0.15)" }}
-            >
-              <Filter className="w-4 h-4" style={{ color: "hsl(var(--kf-info))" }} />
-            </div>
-            {filledActions.length > 0 && (
-              <div className="w-px h-4" style={{ background: "hsl(var(--kf-border)/0.4)" }} />
-            )}
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Condition{filledConditions.length > 1 ? `s (${conditionGroup.operator})` : ""}
-            </p>
-            {filledConditions.map((c, i) => {
-              const label = CONDITION_OPTIONS.find((o) => o.value === c)?.label ?? c;
-              return (
-                <p key={i} className="text-sm font-medium">
-                  {i > 0 && (
-                    <span
-                      className="text-[10px] font-bold mr-1"
-                      style={{ color: conditionGroup.operator === "AND" ? "hsl(var(--kf-info))" : "hsl(var(--kf-accent2))" }}
-                    >
-                      {conditionGroup.operator}
-                    </span>
-                  )}
-                  {label}
-                </p>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {filledActions.map((action, i) => (
-        <div key={i} className="flex items-center gap-3">
-          <div className="flex flex-col items-center">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ background: "hsl(var(--kf-success)/0.15)" }}
-            >
-              <span className="text-xs font-bold" style={{ color: "hsl(var(--kf-success))" }}>{i + 1}</span>
-            </div>
-            {i < filledActions.length - 1 && (
-              <div className="w-px h-4" style={{ background: "hsl(var(--kf-border)/0.4)" }} />
-            )}
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Action {i + 1}</p>
-            <p className="text-sm font-medium">{getActionLabel(action.type)}</p>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybook, businessId }: PlaybookEditorProps) {
   const [form, setForm] = useState({ name: "", triggerEvent: "" });
   const [conditionGroup, setConditionGroup] = useState<ConditionGroup>({ operator: "AND", conditions: [""] });
   const [actionSteps, setActionSteps] = useState<ActionStep[]>([{ type: "" }]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [showFlow, setShowFlow] = useState(false);
 
   const isEditing = !!editingPlaybook;
 
@@ -200,6 +88,8 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
   const removeStep = (i: number) => setActionSteps((s) => s.filter((_, idx) => idx !== i));
   const updateStep = (i: number, type: string) =>
     setActionSteps((s) => s.map((st, idx) => (idx === i ? { ...st, type } : st)));
+  const updateStepConfig = (i: number, key: string, value: string) =>
+    setActionSteps((s) => s.map((st, idx) => (idx === i ? { ...st, config: { ...st.config, [key]: value } } : st)));
 
   const addCondition = () => setConditionGroup((g) => ({ ...g, conditions: [...g.conditions, ""] }));
   const removeCondition = (i: number) =>
@@ -208,6 +98,16 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
     setConditionGroup((g) => ({ ...g, conditions: g.conditions.map((c, idx) => (idx === i ? value : c)) }));
   const toggleOperator = () =>
     setConditionGroup((g) => ({ ...g, operator: g.operator === "AND" ? "OR" : "AND" }));
+
+  const naturalLanguage = useMemo(
+    () => buildNaturalLanguageSummary(form.triggerEvent, conditionGroup.conditions, actionSteps, conditionGroup.operator),
+    [form.triggerEvent, conditionGroup, actionSteps]
+  );
+
+  const touchedModules = useMemo(
+    () => form.triggerEvent ? getFlowModules(form.triggerEvent, actionSteps.filter((a) => a.type)) : [],
+    [form.triggerEvent, actionSteps]
+  );
 
   async function handleSave() {
     setError(null);
@@ -229,12 +129,8 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
         businessId: businessId ?? undefined,
       });
       setSaving(false);
-      if (apiError) {
-        setError(apiError);
-      } else if (data) {
-        onSaved(data);
-        onClose();
-      }
+      if (apiError) setError(apiError);
+      else if (data) { onSaved(data); onClose(); }
     } else {
       const { data, error: apiError } = await createPlaybook({
         name: form.name,
@@ -244,9 +140,8 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
         businessId: businessId ?? undefined,
       });
       setSaving(false);
-      if (apiError) {
-        setError(apiError);
-      } else if (data) {
+      if (apiError) setError(apiError);
+      else if (data) {
         onSaved(data);
         setForm({ name: "", triggerEvent: "" });
         setConditionGroup({ operator: "AND", conditions: [""] });
@@ -265,11 +160,11 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
           exit={{ opacity: 0, height: 0 }}
           className="overflow-hidden"
         >
-          <div className="rounded-2xl border border-primary/40 bg-card p-5 space-y-4">
+          <div className="rounded-2xl border border-primary/40 bg-card p-5 space-y-5">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Zap className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-                {isEditing ? `Edit: ${editingPlaybook!.name}` : template ? `Create from: ${template.name}` : "New Automation"}
+                <Workflow className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                {isEditing ? `Edit: ${editingPlaybook!.name}` : template ? `Create from: ${template.name}` : "New Flow"}
               </h3>
               <button
                 onClick={onClose}
@@ -285,17 +180,24 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Input
-                label="Automation Name"
-                placeholder="e.g. Send receipt on payment"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              />
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 inline-flex items-center gap-1">When this happens... <InfoBadge title="Automation Trigger" body="The event that starts this automation. For example, 'Invoice Paid' fires whenever a client completes payment. Each automation needs exactly one trigger." side="right" iconSize={10} /></label>
+            <Input
+              label="Flow Name"
+              placeholder="e.g. Send receipt on payment"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            />
+
+            <div className="space-y-3">
+              <StepBlock
+                number={1}
+                label="TRIGGER"
+                sublabel="When this happens..."
+                color="hsl(var(--kf-accent1))"
+                icon={<Zap className="w-3.5 h-3.5" />}
+                infoBadge={{ title: "Flow Trigger", body: "The event that starts this flow. For example, 'Invoice Paid' fires whenever a client completes payment." }}
+              >
                 <select
-                  className="w-full rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-border/60 bg-input px-3 py-2.5 text-sm"
                   value={form.triggerEvent}
                   onChange={(e) => setForm((f) => ({ ...f, triggerEvent: e.target.value }))}
                 >
@@ -308,155 +210,273 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
                     </optgroup>
                   ))}
                 </select>
-              </div>
-            </div>
+              </StepBlock>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs text-muted-foreground inline-flex items-center gap-1">Only if... (optional conditions) <InfoBadge title="Automation Conditions" body="Conditions narrow when the automation runs. Without a condition, it fires for every trigger event. Add multiple conditions and choose AND (all must match) or OR (any must match)." side="right" iconSize={10} /></label>
-                <div className="flex items-center gap-2">
-                  {conditionGroup.conditions.filter((c) => c).length > 1 && (
+              {form.triggerEvent && (
+                <div className="flex justify-center">
+                  <ArrowDown className="w-4 h-4 text-muted-foreground/30" />
+                </div>
+              )}
+
+              <StepBlock
+                number={2}
+                label="CONDITIONS"
+                sublabel="Only if... (optional)"
+                color="hsl(var(--kf-info))"
+                icon={<Filter className="w-3.5 h-3.5" />}
+                infoBadge={{ title: "Flow Conditions", body: "Narrow when the flow runs. Without a condition, it fires for every trigger. Use AND/OR logic." }}
+                actions={
+                  <div className="flex items-center gap-2">
+                    {conditionGroup.conditions.filter((c) => c).length > 1 && (
+                      <button
+                        type="button"
+                        onClick={toggleOperator}
+                        className="text-[10px] font-bold px-2 py-1 rounded-md transition-colors"
+                        style={{
+                          color: conditionGroup.operator === "AND" ? "hsl(var(--kf-info))" : "hsl(var(--kf-accent2))",
+                          background: conditionGroup.operator === "AND" ? "hsl(var(--kf-info) / 0.1)" : "hsl(var(--kf-accent2) / 0.1)",
+                        }}
+                      >
+                        {conditionGroup.operator}
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={toggleOperator}
-                      className="text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-colors min-h-[32px]"
-                      style={{
-                        color: conditionGroup.operator === "AND" ? "hsl(var(--kf-info))" : "hsl(var(--kf-accent2))",
-                        background: conditionGroup.operator === "AND" ? "hsl(var(--kf-info) / 0.1)" : "hsl(var(--kf-accent2) / 0.1)",
-                      }}
+                      onClick={addCondition}
+                      className="text-[10px] font-medium px-2 py-1 rounded-md transition-colors"
+                      style={{ color: "hsl(var(--kf-info))", background: "hsl(var(--kf-info) / 0.1)" }}
                     >
-                      {conditionGroup.operator === "AND" ? "AND — all must match" : "OR — any must match"}
+                      <Plus className="w-3 h-3 inline mr-0.5" /> Add
                     </button>
-                  )}
+                  </div>
+                }
+              >
+                <div className="space-y-2">
+                  {conditionGroup.conditions.map((cond, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      {i > 0 && (
+                        <span
+                          className="text-[9px] font-bold w-6 shrink-0 text-center rounded py-0.5"
+                          style={{
+                            color: conditionGroup.operator === "AND" ? "hsl(var(--kf-info))" : "hsl(var(--kf-accent2))",
+                            background: conditionGroup.operator === "AND" ? "hsl(var(--kf-info) / 0.1)" : "hsl(var(--kf-accent2) / 0.1)",
+                          }}
+                        >
+                          {conditionGroup.operator}
+                        </span>
+                      )}
+                      {i === 0 && <span className="w-6 shrink-0" />}
+                      <select
+                        className="flex-1 rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
+                        value={cond}
+                        onChange={(e) => updateCondition(i, e.target.value)}
+                      >
+                        {CONDITION_OPTIONS.map((c) => (
+                          <option key={c.value} value={c.value}>{c.label}</option>
+                        ))}
+                      </select>
+                      {conditionGroup.conditions.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeCondition(i)}
+                          className="text-muted-foreground/50 hover:text-foreground text-xs min-w-[32px] min-h-[32px] flex items-center justify-center"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </StepBlock>
+
+              <div className="flex justify-center">
+                <ArrowDown className="w-4 h-4 text-muted-foreground/30" />
+              </div>
+
+              <StepBlock
+                number={3}
+                label="ACTIONS"
+                sublabel="Then do these (in order)..."
+                color="hsl(var(--kf-success))"
+                icon={<Zap className="w-3.5 h-3.5" />}
+                actions={
                   <button
                     type="button"
-                    onClick={addCondition}
-                    className="text-[11px] font-medium px-2 py-1 rounded-lg transition-colors min-h-[32px]"
-                    style={{ color: "hsl(var(--kf-accent1))", background: "hsl(var(--kf-accent1) / 0.1)" }}
+                    onClick={addStep}
+                    className="text-[10px] font-medium px-2 py-1 rounded-md transition-colors"
+                    style={{ color: "hsl(var(--kf-success))", background: "hsl(var(--kf-success) / 0.1)" }}
                   >
-                    <Plus className="w-3 h-3 inline mr-0.5" />
-                    Add Condition
+                    <Plus className="w-3 h-3 inline mr-0.5" /> Add Step
                   </button>
-                </div>
-              </div>
-              {conditionGroup.conditions.map((cond, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  {i > 0 && (
-                    <span
-                      className="text-[10px] font-bold w-8 shrink-0 text-center rounded-md py-0.5"
-                      style={{
-                        color: conditionGroup.operator === "AND" ? "hsl(var(--kf-info))" : "hsl(var(--kf-accent2))",
-                        background: conditionGroup.operator === "AND" ? "hsl(var(--kf-info) / 0.1)" : "hsl(var(--kf-accent2) / 0.1)",
-                      }}
-                    >
-                      {conditionGroup.operator}
-                    </span>
-                  )}
-                  {i === 0 && <span className="w-8 shrink-0" />}
-                  <select
-                    className="flex-1 rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
-                    value={cond}
-                    onChange={(e) => updateCondition(i, e.target.value)}
-                  >
-                    {CONDITION_OPTIONS.map((c) => (
-                      <option key={c.value} value={c.value}>{c.label}</option>
-                    ))}
-                  </select>
-                  {conditionGroup.conditions.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeCondition(i)}
-                      className="text-muted-foreground/50 hover:text-foreground text-xs min-w-[44px] min-h-[44px] flex items-center justify-center"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs text-muted-foreground">Then do these actions (in order)...</label>
-                <button
-                  type="button"
-                  onClick={addStep}
-                  className="text-[11px] font-medium px-2 py-1 rounded-lg transition-colors"
-                  style={{ color: "hsl(var(--kf-accent1))", background: "hsl(var(--kf-accent1) / 0.1)" }}
-                >
-                  + Add Step
-                </button>
-              </div>
-              {actionSteps.map((step, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-muted-foreground/40 w-5 shrink-0 text-center">{i + 1}</span>
-                  <select
-                    className="flex-1 rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
-                    value={step.type}
-                    onChange={(e) => updateStep(i, e.target.value)}
-                  >
-                    <option value="">Select action...</option>
-                    {ACTION_GROUPS.map((g) => (
-                      <optgroup key={g.group} label={g.group}>
-                        {g.options.map((a) => (
-                          <option key={a.value} value={a.value}>{a.label}</option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  {actionSteps.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeStep(i)}
-                      className="text-muted-foreground/50 hover:text-foreground text-xs min-w-[44px] min-h-[44px] flex items-center justify-center"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-between pt-1">
-              <button
-                type="button"
-                onClick={() => setShowFlow((v) => !v)}
-                className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[44px]"
-                style={{
-                  color: showFlow ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
-                  background: showFlow ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
-                }}
+                }
               >
-                {showFlow ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                {showFlow ? "Hide Flow" : "Preview Flow"}
-              </button>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={onClose}>Cancel</Button>
-                <Button onClick={handleSave} disabled={saving}>
-                  {saving ? "Saving..." : isEditing ? "Save Changes" : "Create Automation"}
-                </Button>
-              </div>
+                <div className="space-y-2">
+                  {actionSteps.map((step, i) => (
+                    <div key={i} className="rounded-lg p-2.5 space-y-2" style={{ background: "hsl(var(--muted) / 0.1)", border: "1px solid hsl(var(--border) / 0.3)" }}>
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-md flex items-center justify-center shrink-0" style={{ background: "hsl(var(--kf-success) / 0.15)" }}>
+                          <span className="text-[10px] font-bold" style={{ color: "hsl(var(--kf-success))" }}>{i + 1}</span>
+                        </div>
+                        <select
+                          className="flex-1 rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
+                          value={step.type}
+                          onChange={(e) => updateStep(i, e.target.value)}
+                        >
+                          <option value="">Select action...</option>
+                          {ACTION_GROUPS.map((g) => (
+                            <optgroup key={g.group} label={g.group}>
+                              {g.options.map((a) => (
+                                <option key={a.value} value={a.value}>{a.label}</option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                        {actionSteps.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeStep(i)}
+                            className="text-muted-foreground/50 hover:text-foreground text-xs min-w-[32px] min-h-[32px] flex items-center justify-center"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                      {step.type === "delay" && (
+                        <div className="flex items-center gap-2 pl-7">
+                          <Clock className="w-3 h-3 text-muted-foreground" />
+                          <span className="text-[11px] text-muted-foreground">Wait</span>
+                          <input
+                            type="number"
+                            className="w-16 rounded-lg border border-border/60 bg-input px-2 py-1 text-xs text-center"
+                            placeholder="hours"
+                            value={step.config?.hours ?? ""}
+                            onChange={(e) => updateStepConfig(i, "hours", e.target.value)}
+                          />
+                          <span className="text-[11px] text-muted-foreground">hours</span>
+                        </div>
+                      )}
+                      {step.type === "create_task" && (
+                        <div className="flex items-center gap-2 pl-7">
+                          <input
+                            type="text"
+                            className="flex-1 rounded-lg border border-border/60 bg-input px-2 py-1 text-xs"
+                            placeholder="Task title..."
+                            value={step.config?.title ?? ""}
+                            onChange={(e) => updateStepConfig(i, "title", e.target.value)}
+                          />
+                        </div>
+                      )}
+                      {step.type === "add_tag" && (
+                        <div className="flex items-center gap-2 pl-7">
+                          <input
+                            type="text"
+                            className="flex-1 rounded-lg border border-border/60 bg-input px-2 py-1 text-xs"
+                            placeholder="Tag name..."
+                            value={step.config?.tag ?? ""}
+                            onChange={(e) => updateStepConfig(i, "tag", e.target.value)}
+                          />
+                        </div>
+                      )}
+                      {i < actionSteps.length - 1 && (
+                        <div className="flex justify-center pt-1">
+                          <ArrowDown className="w-3 h-3 text-muted-foreground/20" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </StepBlock>
             </div>
 
-            <AnimatePresence>
-              {showFlow && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <VisualFlowPreview
-                    triggerEvent={form.triggerEvent}
-                    conditionGroup={conditionGroup}
-                    actionSteps={actionSteps}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {touchedModules.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider mr-1">Modules:</span>
+                {touchedModules.map((mod) => (
+                  <span
+                    key={mod}
+                    className="text-[9px] px-1.5 py-0.5 rounded-md font-medium"
+                    style={{
+                      background: `${MODULE_COLORS[mod] ?? "hsl(var(--muted-foreground))"}15`,
+                      color: MODULE_COLORS[mod] ?? "hsl(var(--muted-foreground))",
+                    }}
+                  >
+                    {mod}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {naturalLanguage && (
+              <div
+                className="rounded-xl px-4 py-3 text-sm leading-relaxed flex items-start gap-2.5"
+                style={{ background: "hsl(var(--kf-accent2) / 0.06)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}
+              >
+                <MessageSquare className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+                <p className="text-muted-foreground italic">{naturalLanguage}</p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button onClick={handleSave} disabled={saving}>
+                {saving ? "Saving..." : isEditing ? "Save Changes" : "Create Flow"}
+              </Button>
+            </div>
           </div>
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+function StepBlock({
+  number,
+  label,
+  sublabel,
+  color,
+  icon,
+  infoBadge,
+  actions,
+  children,
+}: {
+  number: number;
+  label: string;
+  sublabel: string;
+  color: string;
+  icon: React.ReactNode;
+  infoBadge?: { title: string; body: string };
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-xl overflow-hidden"
+      style={{ border: `1px solid ${color}25` }}
+    >
+      <div
+        className="flex items-center justify-between px-3 py-2"
+        style={{ background: `${color}08` }}
+      >
+        <div className="flex items-center gap-2">
+          <div
+            className="w-6 h-6 rounded-md flex items-center justify-center"
+            style={{ background: `${color}20`, color }}
+          >
+            {icon}
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color }}>{label}</span>
+              {infoBadge && <InfoBadge title={infoBadge.title} body={infoBadge.body} side="right" iconSize={10} />}
+            </div>
+            <p className="text-[10px] text-muted-foreground">{sublabel}</p>
+          </div>
+        </div>
+        {actions}
+      </div>
+      <div className="p-3">
+        {children}
+      </div>
+    </div>
   );
 }

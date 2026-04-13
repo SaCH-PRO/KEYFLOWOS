@@ -184,14 +184,14 @@ export const PROJECTS_WALKTHROUGH: WalkthroughStep[] = [
 export const AUTOMATIONS_WALKTHROUGH: WalkthroughStep[] = [
   {
     target: "[data-walkthrough='automations-list']",
-    title: "Automate Your Business",
-    description: "Create playbooks that trigger actions automatically — like sending a reminder when an invoice is overdue.",
+    title: "Your Flows Dashboard",
+    description: "See the health of every automation, coverage across your modules, and intelligent recommendations for what to automate next.",
     icon: Zap,
   },
   {
     target: "[data-walkthrough='automations-templates']",
-    title: "Start with Templates",
-    description: "Browse pre-built automation recipes for Commerce, Bookings, CRM, and Marketing. Activate them with one click.",
+    title: "Strategic Templates",
+    description: "Browse flow recipes by business problem, module, and complexity. Activate instantly or customize before creating.",
     icon: Sparkles,
   },
 ];
@@ -433,14 +433,14 @@ export const PAGE_OVERVIEWS: Record<string, PageOverview> = {
     ],
   },
   automations: {
-    title: "Getting Started with Automations",
-    description: "Automate repetitive tasks and connect your business modules.",
+    title: "Getting Started with Flows",
+    description: "Automate, orchestrate, and monitor how your business reacts across every module.",
     concepts: [
-      { step: "1", title: "Create an Automation", desc: "Click 'New Automation' or use a template to set up trigger-to-action workflows." },
-      { step: "2", title: "Pick a Trigger", desc: "Choose what starts the automation — like a paid invoice, new booking, or form submission." },
-      { step: "3", title: "Add Actions", desc: "Define what happens next — send an email, create a task, tag a contact, or more." },
-      { step: "4", title: "Toggle On/Off", desc: "Enable or disable automations anytime without losing your configuration." },
-      { step: "5", title: "Monitor Activity", desc: "Check the Activity Log tab to see when automations ran and what they did." },
+      { step: "1", title: "Check Flow Health", desc: "See how many flows are active, paused, or need attention at a glance." },
+      { step: "2", title: "Review Coverage", desc: "See which modules are automated and where gaps exist in your business." },
+      { step: "3", title: "Create a Flow", desc: "Click 'New Flow' or use a strategic template to build trigger → condition → action chains." },
+      { step: "4", title: "Pick Triggers & Actions", desc: "Choose from events across Clients, Revenue, Bookings, Content, and more." },
+      { step: "5", title: "Monitor Diagnostics", desc: "Check the Activity Log for execution traces, failures, skipped conditions, and results." },
     ],
   },
   projects: {
