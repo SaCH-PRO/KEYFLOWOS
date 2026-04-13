@@ -323,6 +323,44 @@ export default function ContentPage() {
     return items;
   }, [mk.campaigns, mk.socialPosts]);
 
+  const schedulingInsights = useMemo(() => {
+    const warnings: { text: string; type: "conflict" | "gap" | "cadence" }[] = [];
+
+    const dateCounts: Record<string, number> = {};
+    scheduledItems.forEach((item) => {
+      const day = new Date(item.scheduledFor).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+      dateCounts[day] = (dateCounts[day] || 0) + 1;
+    });
+    Object.entries(dateCounts).forEach(([day, count]) => {
+      if (count >= 3) warnings.push({ text: `${count} items on ${day} — consider spreading content`, type: "conflict" });
+    });
+
+    if (scheduledItems.length > 0) {
+      const dates = scheduledItems.map((i) => new Date(i.scheduledFor).getTime()).sort((a, b) => a - b);
+      for (let i = 1; i < dates.length; i++) {
+        const gap = (dates[i] - dates[i - 1]) / (1000 * 60 * 60 * 24);
+        if (gap > 5) {
+          const gapStart = new Date(dates[i - 1]).toLocaleDateString("en-TT", { month: "short", day: "numeric" });
+          const gapEnd = new Date(dates[i]).toLocaleDateString("en-TT", { month: "short", day: "numeric" });
+          warnings.push({ text: `${Math.round(gap)}-day gap between ${gapStart} and ${gapEnd}`, type: "gap" });
+        }
+      }
+    }
+
+    const now = Date.now();
+    const thisWeekEnd = now + 7 * 24 * 60 * 60 * 1000;
+    const thisWeekCount = scheduledItems.filter((i) => {
+      const t = new Date(i.scheduledFor).getTime();
+      return t >= now && t <= thisWeekEnd;
+    }).length;
+    if (thisWeekCount < 2 && scheduledItems.length > 0) {
+      warnings.push({ text: `Only ${thisWeekCount} item${thisWeekCount === 1 ? "" : "s"} this week — consider increasing cadence`, type: "cadence" });
+    }
+
+    return warnings;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduledItems, mk.dataVersion]);
+
   const shortcuts = useMemo<ShortcutGroup[]>(() => [
     {
       groupName: "Content",
@@ -538,9 +576,19 @@ export default function ContentPage() {
                         ) : null;
                       })()}
                     </div>
+                    {schedulingInsights.length > 0 && (
+                      <div className="rounded-xl border border-border/30 bg-card p-2.5 space-y-1">
+                        {schedulingInsights.map((insight, i) => (
+                          <div key={i} className="flex items-center gap-2 text-[11px]">
+                            <AlertTriangle className={`w-3 h-3 shrink-0 ${insight.type === "conflict" ? "text-red-400" : insight.type === "gap" ? "text-amber-400" : "text-blue-400"}`} />
+                            <span className="text-muted-foreground">{insight.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {scheduledItems.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-16 text-center">
-                        <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
+                        <div className="w-14 h-14 rounded-xl bg-muted/10 border border-border/50 flex items-center justify-center mb-4">
                           <Clock className="w-7 h-7 text-muted-foreground/50" />
                         </div>
                         <h3 className="text-lg font-semibold mb-1">No Scheduled Content</h3>
@@ -565,24 +613,50 @@ export default function ContentPage() {
                     ) : (
                       <div className="space-y-2">
                         {scheduledItems.map((item) => {
-                          const isClose = new Date(item.scheduledFor).getTime() - Date.now() < 24 * 60 * 60 * 1000;
+                          const scheduledDate = new Date(item.scheduledFor);
+                          const isClose = scheduledDate.getTime() - Date.now() < 24 * 60 * 60 * 1000;
+                          const hour = scheduledDate.getHours();
+                          const dayOfWeek = scheduledDate.getDay();
+                          const bestTimeHint = (() => {
+                            if (item.type === "post") {
+                              if (hour < 8 || hour > 20) return "Consider 9am-12pm for higher engagement";
+                              if (dayOfWeek === 0 || dayOfWeek === 6) return "Weekday posts typically get 20% more reach";
+                              if (hour >= 12 && hour <= 14) return "Lunch hours — good engagement window";
+                              return null;
+                            }
+                            if (item.type === "campaign") {
+                              if (hour < 7 || hour > 18) return "Emails sent 9-11am have higher open rates";
+                              if (dayOfWeek === 1) return "Tuesdays have peak email open rates";
+                              if (dayOfWeek === 5) return "Friday sends may see lower engagement";
+                              return null;
+                            }
+                            return null;
+                          })();
                           return (
-                            <div key={item.id} className="rounded-xl border border-border/30 bg-card p-3 flex items-center gap-3 hover:bg-white/[0.03] transition-colors">
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.type === "campaign" ? "bg-blue-500/10" : "bg-[hsl(var(--kf-accent2))]/10"}`}>
-                                {item.type === "campaign" ? <Mail className="w-3.5 h-3.5 text-blue-400" /> : <PenSquare className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{item.title}</p>
-                                <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
-                                  <span className="capitalize">{item.type}</span>
-                                  <span className="text-muted-foreground/30">·</span>
-                                  <span>{new Date(item.scheduledFor).toLocaleDateString("en-TT", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                            <div key={item.id} className="rounded-xl border border-border/30 bg-card p-3 hover:bg-muted/10 transition-colors">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.type === "campaign" ? "bg-blue-500/10" : "bg-[hsl(var(--kf-accent2))]/10"}`}>
+                                  {item.type === "campaign" ? <Mail className="w-3.5 h-3.5 text-blue-400" /> : <PenSquare className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />}
                                 </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{item.title}</p>
+                                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
+                                    <span className="capitalize">{item.type}</span>
+                                    <span className="text-muted-foreground/30">·</span>
+                                    <span>{scheduledDate.toLocaleDateString("en-TT", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                                  </div>
+                                </div>
+                                {isClose && (
+                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                    Soon
+                                  </span>
+                                )}
                               </div>
-                              {isClose && (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                                  Soon
-                                </span>
+                              {bestTimeHint && (
+                                <div className="flex items-center gap-1.5 mt-2 ml-11 text-[10px] text-purple-400/80">
+                                  <Sparkles className="w-3 h-3 shrink-0" />
+                                  <span>{bestTimeHint}</span>
+                                </div>
                               )}
                             </div>
                           );
@@ -631,7 +705,7 @@ export default function ContentPage() {
 
 function CalendarInsightStrip({ campaigns, socialPosts }: { campaigns: EmailCampaign[]; socialPosts: any[] }) {
   const insights = useMemo(() => {
-    const items: string[] = [];
+    const items: { text: string; color?: string }[] = [];
     const now = new Date();
     const thisWeekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
@@ -641,14 +715,19 @@ function CalendarInsightStrip({ campaigns, socialPosts }: { campaigns: EmailCamp
     ];
 
     if (scheduledThisWeek.length === 0) {
-      items.push("No content scheduled this week — consider adding posts or campaigns");
+      items.push({ text: "No content scheduled this week — consider adding posts or campaigns", color: "text-amber-400" });
     } else {
-      items.push(`${scheduledThisWeek.length} item${scheduledThisWeek.length > 1 ? "s" : ""} scheduled this week`);
+      items.push({ text: `${scheduledThisWeek.length} item${scheduledThisWeek.length > 1 ? "s" : ""} scheduled this week` });
     }
 
     const draftCount = campaigns.filter((c) => c.status === "DRAFT").length + socialPosts.filter((p) => p.status === "DRAFT").length;
     if (draftCount > 0) {
-      items.push(`${draftCount} draft${draftCount > 1 ? "s" : ""} awaiting scheduling`);
+      items.push({ text: `${draftCount} draft${draftCount > 1 ? "s" : ""} awaiting scheduling` });
+    }
+
+    const sentCount = campaigns.filter((c) => c.status === "SENT").length + socialPosts.filter((p) => p.status === "POSTED").length;
+    if (sentCount > 0) {
+      items.push({ text: `${sentCount} sent/posted` });
     }
 
     return items;
@@ -659,8 +738,8 @@ function CalendarInsightStrip({ campaigns, socialPosts }: { campaigns: EmailCamp
   return (
     <div className="flex items-center gap-3 flex-wrap text-[10px] px-1">
       <CalendarDays className="w-3 h-3 text-[hsl(var(--kf-accent2))]" />
-      {insights.map((text, i) => (
-        <span key={i} className="text-muted-foreground font-medium">{i > 0 && <span className="text-muted-foreground/30 mr-3">|</span>}{text}</span>
+      {insights.map((item, i) => (
+        <span key={i} className={`font-medium ${item.color || "text-muted-foreground"}`}>{i > 0 && <span className="text-muted-foreground/30 mr-3">|</span>}{item.text}</span>
       ))}
     </div>
   );
