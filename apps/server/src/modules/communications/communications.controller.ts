@@ -139,6 +139,18 @@ export class CommunicationsController {
     return this.connections.getAudienceHealth(businessId);
   }
 
+  @Post('deliveries/:deliveryId/track-open')
+  async trackOpen(@Param('deliveryId') deliveryId: string) {
+    await this.delivery.trackOpen(deliveryId);
+    return { ok: true };
+  }
+
+  @Post('deliveries/:deliveryId/track-click')
+  async trackClick(@Param('deliveryId') deliveryId: string) {
+    await this.delivery.trackClick(deliveryId);
+    return { ok: true };
+  }
+
   // --- Outbound Content ---
 
   @UseGuards(AuthGuard, BusinessGuard)

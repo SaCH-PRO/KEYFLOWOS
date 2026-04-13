@@ -542,6 +542,26 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async trackOpen(deliveryId: string) {
+    const delivery = await this.prisma.client.outboundDelivery.findUnique({
+      where: { id: deliveryId },
+      select: { contentId: true, contactId: true, businessId: true },
+    });
+    if (!delivery || !delivery.contactId) return;
+    await this.updateCampaignContactStatus(delivery.contentId, delivery.contactId, 'OPENED');
+    this.events.emit('delivery.opened', { deliveryId, contentId: delivery.contentId, businessId: delivery.businessId });
+  }
+
+  async trackClick(deliveryId: string) {
+    const delivery = await this.prisma.client.outboundDelivery.findUnique({
+      where: { id: deliveryId },
+      select: { contentId: true, contactId: true, businessId: true },
+    });
+    if (!delivery || !delivery.contactId) return;
+    await this.updateCampaignContactStatus(delivery.contentId, delivery.contactId, 'CLICKED');
+    this.events.emit('delivery.clicked', { deliveryId, contentId: delivery.contentId, businessId: delivery.businessId });
+  }
+
   private async updateCampaignContactStatus(contentId: string, contactId: string, status: string) {
     try {
       const contentMeta = (await this.prisma.client.outboundContent.findUnique({

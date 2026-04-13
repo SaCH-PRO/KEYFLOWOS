@@ -271,6 +271,7 @@ export function UnifiedComposer({
           setMediaUrls(c.mediaUrls || []);
           setSavedContentId(c.id);
           if (c.contentType === "campaign_email") setContentType("email");
+          else if (c.contentType === "whatsapp_message") setContentType("messaging");
           else if (c.contentType === "multi_channel_broadcast") setContentType("multi");
           else setContentType("social");
 

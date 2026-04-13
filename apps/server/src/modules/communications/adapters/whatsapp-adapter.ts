@@ -50,11 +50,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
       if (templateName) {
         const templateComponents: Record<string, unknown>[] = [];
-        if (payload.meta?.templateParameters && Array.isArray(payload.meta.templateParameters)) {
-          const params = Array.isArray(payload.meta.templateParameters) ? payload.meta.templateParameters : [];
+        if (Array.isArray(payload.meta?.templateParameters) && payload.meta.templateParameters.length > 0) {
           templateComponents.push({
             type: 'body',
-            parameters: params.map((p: unknown) => ({
+            parameters: payload.meta.templateParameters.map((p: unknown) => ({
               type: 'text',
               text: String(p),
             })),
@@ -81,8 +80,6 @@ export class WhatsAppAdapter implements ChannelAdapter {
           const mediaUrl = payload.mediaUrls[0];
           const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(mediaUrl);
           const isVideo = /\.(mp4|3gp)$/i.test(mediaUrl);
-          const isDocument = !isImage && !isVideo;
-
           const mediaType = isImage ? 'image' : isVideo ? 'video' : 'document';
 
           messagePayload = {
