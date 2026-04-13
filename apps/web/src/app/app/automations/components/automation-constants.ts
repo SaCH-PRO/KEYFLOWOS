@@ -70,6 +70,7 @@ export const ACTION_GROUPS = [
     group: "Communication",
     options: [
       { value: "send_email", label: "Send Email" },
+      { value: "send_email_campaign", label: "Send Email Campaign" },
       { value: "send_whatsapp", label: "Send WhatsApp" },
       { value: "send_sms", label: "Send SMS" },
       { value: "send_notification", label: "In-App Notification" },
