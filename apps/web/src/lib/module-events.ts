@@ -42,6 +42,7 @@ export type ModuleEventType =
   | "marketing:social_post_published"
   | "marketing:strategy_generated"
   | "marketing:brief_submitted"
+  | "marketing:open_unified_composer"
   | "billing:schedule_created"
   | "billing:schedule_toggled"
   | "store:status_changed"

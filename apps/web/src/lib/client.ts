@@ -5844,4 +5844,161 @@ export async function submitPublicIntake(slug: string, input: {
   }
 }
 
+export type ChannelConnection = {
+  id: string;
+  businessId: string;
+  platform: string;
+  providerType: string;
+  displayName: string;
+  isActive: boolean;
+  healthStatus: string;
+  capabilities: string[];
+  createdAt: string;
+  updatedAt: string;
+  destinations?: ChannelDestination[];
+};
+
+export type ChannelDestination = {
+  id: string;
+  connectionId: string;
+  platform: string;
+  destinationType: string;
+  externalId: string;
+  displayName: string;
+  isActive: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type OutboundContent = {
+  id: string;
+  businessId: string;
+  contentType: string;
+  subject?: string;
+  body: string;
+  mediaUrls?: string[];
+  objective?: string;
+  audience?: string;
+  tone?: string;
+  tags?: string[];
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  variants?: OutboundVariant[];
+  deliveries?: OutboundDelivery[];
+};
+
+export type OutboundVariant = {
+  id: string;
+  contentId: string;
+  destinationId: string;
+  platform: string;
+  body: string;
+  subject?: string;
+  mediaUrls?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type OutboundDelivery = {
+  id: string;
+  contentId: string;
+  variantId?: string;
+  destinationId: string;
+  status: string;
+  scheduledAt?: string;
+  publishedAt?: string;
+  failReason?: string;
+  retryCount: number;
+};
+
+export type DeliverySummary = {
+  contentId: string;
+  total: number;
+  byStatus: Record<string, number>;
+  deliveries: OutboundDelivery[];
+};
+
+export async function listChannelConnections(businessId?: string): Promise<ApiResult<ChannelConnection[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<ChannelConnection[]>(`/communications/businesses/${encodeURIComponent(bid)}/connections`);
+}
+
+export async function createChannelConnection(data: { platform: string; providerType: string; displayName: string; credentials?: Record<string, unknown>; capabilities?: string[] }, businessId?: string): Promise<ApiResult<ChannelConnection>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<ChannelConnection>({ path: `/communications/businesses/${encodeURIComponent(bid)}/connections`, body: data });
+}
+
+export async function listChannelDestinations(businessId?: string, opts?: { platform?: string; activeOnly?: boolean }): Promise<ApiResult<ChannelDestination[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const params = new URLSearchParams();
+  if (opts?.platform) params.set("platform", opts.platform);
+  if (opts?.activeOnly) params.set("activeOnly", "true");
+  const qs = params.toString();
+  return apiGetSimple<ChannelDestination[]>(`/communications/businesses/${encodeURIComponent(bid)}/destinations${qs ? `?${qs}` : ""}`);
+}
+
+export async function createOutboundContent(data: { contentType: string; subject?: string; body: string; mediaUrls?: string[]; objective?: string; audience?: string; tone?: string; tags?: string[] }, businessId?: string): Promise<ApiResult<OutboundContent>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<OutboundContent>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content`, body: data });
+}
+
+export async function updateOutboundContent(contentId: string, data: Partial<{ subject: string; body: string; mediaUrls: string[]; objective: string; audience: string; tone: string; tags: string[] }>, businessId?: string): Promise<ApiResult<OutboundContent>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPatch<OutboundContent>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}`, data);
+}
+
+export async function listOutboundContent(businessId?: string, opts?: { contentType?: string; status?: string; limit?: number }): Promise<ApiResult<OutboundContent[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const params = new URLSearchParams();
+  if (opts?.contentType) params.set("contentType", opts.contentType);
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  return apiGetSimple<OutboundContent[]>(`/communications/businesses/${encodeURIComponent(bid)}/content${qs ? `?${qs}` : ""}`);
+}
+
+export async function getOutboundContent(contentId: string, businessId?: string): Promise<ApiResult<OutboundContent>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<OutboundContent>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}`);
+}
+
+export async function deleteOutboundContent(contentId: string, businessId?: string): Promise<ApiResult<{ deleted: boolean }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiDelete<{ deleted: boolean }>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}`);
+}
+
+export async function upsertOutboundVariant(contentId: string, data: { destinationId: string; platform: string; body: string; subject?: string; mediaUrls?: string[]; metadata?: Record<string, unknown> }, businessId?: string): Promise<ApiResult<OutboundVariant>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<OutboundVariant>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/variants`, body: data });
+}
+
+export async function publishContentNow(contentId: string, destinationIds: string[], businessId?: string): Promise<ApiResult<{ deliveries: OutboundDelivery[] }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ deliveries: OutboundDelivery[] }>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/publish`, body: { destinationIds } });
+}
+
+export async function scheduleContent(contentId: string, data: { destinationIds: string[]; scheduledAt: string; timezone?: string }, businessId?: string): Promise<ApiResult<{ deliveries: OutboundDelivery[] }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ deliveries: OutboundDelivery[] }>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/schedule`, body: data });
+}
+
+export async function rescheduleDelivery(deliveryId: string, data: { scheduledAt: string; timezone?: string }, businessId?: string): Promise<ApiResult<OutboundDelivery>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPatch<OutboundDelivery>(`/communications/businesses/${encodeURIComponent(bid)}/deliveries/${encodeURIComponent(deliveryId)}/reschedule`, data);
+}
+
+export async function cancelDelivery(deliveryId: string, businessId?: string): Promise<ApiResult<OutboundDelivery>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<OutboundDelivery>({ path: `/communications/businesses/${encodeURIComponent(bid)}/deliveries/${encodeURIComponent(deliveryId)}/cancel`, body: {} });
+}
+
+export async function retryDelivery(deliveryId: string, businessId?: string): Promise<ApiResult<OutboundDelivery>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<OutboundDelivery>({ path: `/communications/businesses/${encodeURIComponent(bid)}/deliveries/${encodeURIComponent(deliveryId)}/retry`, body: {} });
+}
+
+export async function getDeliverySummary(contentId: string, businessId?: string): Promise<ApiResult<DeliverySummary>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<DeliverySummary>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/delivery-summary`);
+}
+
 export { DEFAULT_BUSINESS_ID };
