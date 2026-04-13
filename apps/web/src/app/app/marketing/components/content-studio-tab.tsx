@@ -15,6 +15,7 @@ import {
   deleteChannelConnection,
   toggleChannelDestination,
   updateChannelConnection,
+  syncChannelConnectionsFromSocial,
   startSocialOAuth,
   disconnectSocial,
   testSocialConnection,
@@ -431,9 +432,10 @@ function ConnectNewChannel({ businessId, oauthAvailability, onConnected }: {
           setConnecting(null);
           return;
         }
-        const checkInterval = setInterval(() => {
+        const checkInterval = setInterval(async () => {
           if (popup.closed) {
             clearInterval(checkInterval);
+            await syncChannelConnectionsFromSocial(businessId);
             setConnecting(null);
             onConnected();
           }
@@ -802,11 +804,12 @@ export function ContentStudioTab({ businessId, sharedHealth }: ContentStudioTabP
           return;
         }
         toast.info("Complete re-authentication in the popup window...");
-        const checkInterval = setInterval(() => {
+        const checkInterval = setInterval(async () => {
           if (popup.closed) {
             clearInterval(checkInterval);
-            health.refresh();
-            toast.success("Reconnection flow completed");
+            await syncChannelConnectionsFromSocial(businessId);
+            await health.refresh();
+            toast.success("Reconnection flow completed — channels synced");
           }
         }, 1000);
       } else {

@@ -81,6 +81,30 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
   const allDestinations = healthData ? healthData.destinations : localAllDestinations;
   const loading = healthData ? healthData.loading : localLoading;
 
+  const PREF_KEY = `kf_default_destinations_${businessId}`;
+
+  useEffect(() => {
+    if (loading || selectedDestinations.length > 0 || activeDestinations.length === 0) return;
+    try {
+      const saved = localStorage.getItem(PREF_KEY);
+      if (saved) {
+        const savedIds: string[] = JSON.parse(saved);
+        const preselected = activeDestinations.filter((d) => savedIds.includes(d.id));
+        if (preselected.length > 0) {
+          onSelectionChange(preselected);
+        }
+      }
+    } catch {}
+  }, [loading, activeDestinations, selectedDestinations.length, PREF_KEY, onSelectionChange]);
+
+  useEffect(() => {
+    if (selectedDestinations.length > 0) {
+      try {
+        localStorage.setItem(PREF_KEY, JSON.stringify(selectedDestinations.map((d) => d.id)));
+      } catch {}
+    }
+  }, [selectedDestinations, PREF_KEY]);
+
   const toggleDestination = (dest: ChannelDestination) => {
     if (!dest.isActive) return;
     const exists = selectedDestinations.find((d) => d.id === dest.id);

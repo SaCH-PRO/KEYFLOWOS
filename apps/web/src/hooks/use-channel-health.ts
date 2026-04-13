@@ -6,6 +6,7 @@ import {
   listChannelDestinations,
   getChannelHealthSummary,
   runChannelHealthCheck,
+  syncChannelConnectionsFromSocial,
   fetchSocialConnections,
   fetchOAuthAvailability,
 } from "@/lib/client";
@@ -111,6 +112,7 @@ export function useChannelHealth(businessId: string | null): ChannelHealthData {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (businessId) await syncChannelConnectionsFromSocial(businessId).catch(() => {});
       await loadData();
       if (cancelled || !businessId) return;
       const connRes = await listChannelConnections(businessId).catch(() => ({ data: null, error: "failed" }));
