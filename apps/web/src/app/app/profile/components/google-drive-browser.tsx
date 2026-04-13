@@ -153,10 +153,10 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
     const params = new URLSearchParams(window.location.search);
     if (params.get("drive") === "success") {
       checkStatus();
-      window.history.replaceState({}, "", window.location.pathname + "?tab=documents");
+      window.history.replaceState({}, "", window.location.pathname + "?tab=intelligence");
     }
     if (params.get("drive") === "error") {
-      window.history.replaceState({}, "", window.location.pathname + "?tab=documents");
+      window.history.replaceState({}, "", window.location.pathname + "?tab=intelligence");
     }
   }, [checkStatus]);
 

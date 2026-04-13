@@ -7,7 +7,7 @@ export default function DocumentsRedirectPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/app/profile?tab=documents");
+    router.replace("/app/profile?tab=intelligence");
   }, [router]);
 
   return (
