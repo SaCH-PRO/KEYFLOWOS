@@ -8,6 +8,8 @@ type ExpenseCustomData = {
   totalExpenses?: number;
   categories?: unknown[];
   summary?: Record<string, unknown> | null;
+  budgets?: unknown[];
+  vendors?: unknown[];
 };
 
 async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSuggestion[]> {
@@ -18,6 +20,8 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
   const data = (customData ?? {}) as ExpenseCustomData;
   const expenses = (data.expenses ?? []) as Record<string, unknown>[];
   const categories = (data.categories ?? []) as Record<string, unknown>[];
+  const budgets = (data.budgets ?? []) as Record<string, unknown>[];
+  const vendors = (data.vendors ?? []) as Record<string, unknown>[];
   const summary = data.summary as Record<string, unknown> | null;
 
   if (expenses.length === 0) {
@@ -25,11 +29,12 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       id: `no-expenses-${Date.now()}`,
       type: "tip",
       title: "Start Tracking Expenses",
-      description: "Add your first expense to begin tracking spending patterns and get AI-powered insights.",
+      description: "Add your first expense to begin tracking spending patterns, margins, budgets, and tax-ready records.",
       priority: "medium",
       actionLabel: "Add expense",
       actionKey: "add_expense",
     });
+    return suggestions;
   }
 
   if (categories.length === 0) {
@@ -37,10 +42,22 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       id: `no-categories-${Date.now()}`,
       type: "insight",
       title: "Set Up Categories",
-      description: "Categorize expenses for clearer reports and smarter budget recommendations.",
+      description: "Create spending categories to unlock budget tracking, spending breakdowns, and smarter AI insights.",
       priority: "medium",
       actionLabel: "Go to categories",
-      actionKey: "switch_tab:analytics",
+      actionKey: "switch_tab:categories",
+    });
+  }
+
+  if (budgets.length === 0 && expenses.length > 5) {
+    suggestions.push({
+      id: `no-budgets-${Date.now()}`,
+      type: "insight",
+      title: "Set Up Budgets",
+      description: "Configure monthly spending limits to get overspend alerts, cost control, and budget-vs-actual tracking.",
+      priority: "medium",
+      actionLabel: "Set up budgets",
+      actionKey: "switch_tab:budgets",
     });
   }
 
@@ -50,26 +67,25 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       id: `uncategorized-${Date.now()}`,
       type: "warning",
       title: `${uncategorized.length} Uncategorized Expenses`,
-      description: "Categorize these expenses to improve budget tracking and reporting accuracy.",
+      description: "Categorize these expenses to improve budget tracking, reporting accuracy, and financial intelligence.",
       priority: "high",
       actionLabel: "Review expenses",
-      actionKey: "switch_tab:expenses",
+      actionKey: "switch_tab:transactions",
     });
   }
 
   if (summary) {
-    const totalThisMonth = (summary.totalThisMonth as number) ?? 0;
-    const totalLastMonth = (summary.totalLastMonth as number) ?? 0;
-    if (totalLastMonth > 0 && totalThisMonth > totalLastMonth * 1.2) {
-      const pctIncrease = Math.round(((totalThisMonth - totalLastMonth) / totalLastMonth) * 100);
+    const comparison = summary.comparison as Record<string, unknown> | undefined;
+    const changePercent = (comparison?.changePercent as number) ?? 0;
+    if (changePercent > 20) {
       suggestions.push({
         id: `spending-spike-${Date.now()}`,
         type: "warning",
         title: "Spending Increase Detected",
-        description: `This month's expenses are ${pctIncrease}% higher than last month. Review recent entries to identify the cause.`,
+        description: `Spending is up ${changePercent.toFixed(0)}% compared to the previous period. Check Insights for a detailed breakdown.`,
         priority: "high",
-        actionLabel: "View analytics",
-        actionKey: "switch_tab:analytics",
+        actionLabel: "View insights",
+        actionKey: "switch_tab:insights",
       });
     }
   }
@@ -80,9 +96,40 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       id: `missing-receipts-${Date.now()}`,
       type: "tip",
       title: "Attach Receipts",
-      description: "Less than 30% of your expenses have receipts. Attaching receipts helps with tax compliance.",
+      description: "Less than 30% of your expenses have receipts. Attaching receipts improves tax compliance and audit readiness.",
       priority: "low",
     });
+  }
+
+  const overBudget = (budgets as Record<string, unknown>[]).filter(b => b.isOverBudget);
+  if (overBudget.length > 0) {
+    suggestions.push({
+      id: `over-budget-${Date.now()}`,
+      type: "warning",
+      title: `${overBudget.length} Budget${overBudget.length > 1 ? "s" : ""} Exceeded`,
+      description: "Review your budget allocations and recent spending to get costs back under control.",
+      priority: "high",
+      actionLabel: "Review budgets",
+      actionKey: "switch_tab:budgets",
+    });
+  }
+
+  if (vendors.length > 0) {
+    const topVendor = vendors[0] as Record<string, unknown>;
+    const totalSpend = (summary?.total as number) ?? 0;
+    const vendorTotal = (topVendor.total as number) ?? 0;
+    const vendorPct = totalSpend > 0 ? Math.round((vendorTotal / totalSpend) * 100) : 0;
+    if (vendorPct > 40) {
+      suggestions.push({
+        id: `vendor-concentration-${Date.now()}`,
+        type: "insight",
+        title: `High Vendor Concentration: ${vendorPct}%`,
+        description: `${topVendor.name} accounts for ${vendorPct}% of all spending. Consider diversifying or negotiating terms.`,
+        priority: "medium",
+        actionLabel: "View insights",
+        actionKey: "switch_tab:insights",
+      });
+    }
   }
 
   return suggestions;
@@ -102,7 +149,7 @@ const expenseTools: AiTool[] = [
   {
     id: "expense-anomaly",
     name: "Detect Anomalies",
-    description: "Scan for unusual spending patterns or duplicate entries",
+    description: "Scan for unusual spending patterns, duplicates, or cost spikes",
     icon: "🔍",
     category: "detect",
     requiresSelection: false,
@@ -112,7 +159,7 @@ const expenseTools: AiTool[] = [
   {
     id: "expense-forecast",
     name: "Forecast Monthly Spending",
-    description: "Predict next month's expenses based on historical patterns",
+    description: "Predict next month's expenses based on historical patterns and trends",
     icon: "📊",
     category: "analyze",
     requiresSelection: false,
@@ -121,13 +168,33 @@ const expenseTools: AiTool[] = [
   },
   {
     id: "expense-optimize",
-    name: "Spending Optimization Tips",
-    description: "Get AI recommendations to reduce costs and optimize spending",
+    name: "Cost Optimization Tips",
+    description: "Get AI recommendations to reduce costs, optimize vendor mix, and improve margins",
     icon: "💡",
     category: "optimize",
     requiresSelection: false,
     creditCost: 1,
     execute: async () => ({ status: "success", message: "Optimization tips generated" }),
+  },
+  {
+    id: "expense-margin",
+    name: "Margin Impact Analysis",
+    description: "Analyze how expense categories affect your service and project profitability",
+    icon: "📈",
+    category: "analyze",
+    requiresSelection: false,
+    creditCost: 1,
+    execute: async () => ({ status: "success", message: "Margin analysis complete" }),
+  },
+  {
+    id: "expense-vendor-review",
+    name: "Vendor Rationalization",
+    description: "Identify vendor overlaps, concentration risks, and negotiation opportunities",
+    icon: "🏪",
+    category: "optimize",
+    requiresSelection: false,
+    creditCost: 1,
+    execute: async () => ({ status: "success", message: "Vendor review complete" }),
   },
 ];
 
