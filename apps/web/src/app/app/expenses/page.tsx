@@ -1,9 +1,13 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
+import { ResumePrompt } from "@/components/ui/resume-task-system";
+import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
+import { useNavigationContext } from "@/lib/navigation-context";
 import {
   Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus,
   TrendingUp, AlertTriangle, Tag, FileQuestion, BarChart3, Lightbulb,
@@ -53,15 +57,56 @@ export default function ExpensesPage() {
   const router = useRouter();
   const tabParam = searchParams.get("tab") as TabKey | null;
   const activeTab: TabKey = TABS.some(t => t.key === tabParam) ? tabParam! : "transactions";
+  useReturnNavigation({ restoreScrollOnMount: true });
+  const { setCurrentMeta } = useNavigationContext();
 
   const setActiveTab = useCallback((tab: TabKey) => {
+    setCurrentMeta({ tab: tab === "transactions" ? null : tab });
     router.replace(`/app/expenses?tab=${tab}`, { scroll: false });
-  }, [router]);
+  }, [router, setCurrentMeta]);
 
   const d = useExpensesData();
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
+  const expenseTaskIdRef = useRef<string | null>(null);
+  const expenseSessionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (showModal) {
+      if (!expenseSessionIdRef.current) {
+        expenseSessionIdRef.current = editingExpense
+          ? `expenses-edit-${editingExpense.id}`
+          : `expenses-new-${Date.now()}`;
+      }
+      const sessionId = expenseSessionIdRef.current;
+      const label = editingExpense ? "Edit expense" : "New expense";
+      const description = editingExpense
+        ? `Resume editing expense: ${editingExpense.description ?? editingExpense.id}`
+        : "Resume adding this expense";
+      const taskId = registerInterruptedTask({
+        id: sessionId,
+        module: "expenses",
+        label: editingExpense?.description ? `${label} · ${editingExpense.description}` : label,
+        description,
+        route: "/app/expenses",
+        draftId: editingExpense?.id ?? null,
+        originRoute: "/app/expenses",
+        originLabel: "Expenses",
+        taskIntent: editingExpense ? "edit-expense" : "create-expense",
+        formData: {
+          expenseId: editingExpense?.id ?? null,
+          description: editingExpense?.description ?? null,
+          amount: editingExpense?.amount ?? null,
+          categoryId: editingExpense?.categoryId ?? null,
+        },
+      });
+      expenseTaskIdRef.current = taskId;
+    } else {
+      expenseSessionIdRef.current = null;
+      expenseTaskIdRef.current = null;
+    }
+  }, [showModal, editingExpense]);
 
   const aiCustomData = useMemo(() => ({
     expenses: d.expenses,
@@ -75,6 +120,16 @@ export default function ExpensesPage() {
 
   const openEditModal = (exp: Expense) => { setEditingExpense(exp); setShowModal(true); };
   const openAddModal = () => { setEditingExpense(null); setShowModal(true); };
+
+  const handleResumeExpenseTask = useCallback((task: import("@/lib/resume-task-registry").InterruptedTask) => {
+    const fd = task.formData;
+    if (task.id.startsWith("expenses-edit-") && fd?.id) {
+      const match = d.expenses.find((e) => e.id === fd.id);
+      if (match) { openEditModal(match); return; }
+    }
+    openAddModal();
+  }, [d.expenses]);
+
   const handleDelete = async (id: string) => {
     if (!d.businessId) return;
     try { await deleteExpense(d.businessId, id); toast.success("Deleted"); void d.loadData(); } catch { toast.error("Failed"); }
@@ -94,6 +149,7 @@ export default function ExpensesPage() {
 
   return (
     <div className="space-y-6">
+      <ResumePrompt module="expenses" onResume={handleResumeExpenseTask} />
       <PageHeader
         icon={Receipt}
         title="Expenses"
@@ -256,7 +312,7 @@ export default function ExpensesPage() {
         )}
       </div>
 
-      <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} onClose={() => setShowModal(false)} onSaved={d.loadData} />}</AnimatePresence>
+      <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} onClose={() => setShowModal(false)} onSaved={() => { if (expenseTaskIdRef.current) { markTaskCompleted(expenseTaskIdRef.current); expenseTaskIdRef.current = null; } void d.loadData(); }} />}</AnimatePresence>
       <AnimatePresence>{detailExpense && <ExpenseDetailModal expense={detailExpense} onClose={() => setDetailExpense(null)} onEdit={openEditModal} />}</AnimatePresence>
 
       <PageGuide moduleKey="expenses" walkthroughSteps={EXPENSES_WALKTHROUGH} />

@@ -9,6 +9,7 @@ import {
 import { SideSheet } from "./side-sheet";
 import { ContactSelect } from "@/components/contacts";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import type { Contact, Product } from "@/lib/client";
 import {
   InvoiceLineItem,
@@ -50,6 +51,9 @@ interface BillingFormModalProps {
   notes: string;
   onNotesChange: (v: string) => void;
   onPaymentTermsChange?: (termKey: string) => void;
+  originLabel?: string | null;
+  originRoute?: string | null;
+  onReturn?: () => void;
 }
 
 const THEME = {
@@ -120,6 +124,9 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   notes,
   onNotesChange,
   onPaymentTermsChange,
+  originLabel,
+  originRoute,
+  onReturn,
 }: BillingFormModalProps) {
   const theme = THEME[docType];
   const ThemeIcon = theme.icon;
@@ -245,6 +252,15 @@ export const BillingFormModal = React.memo(function BillingFormModal({
         }
       >
         <div className="space-y-1">
+                {originLabel && (onReturn || originRoute) && (
+                  <TaskContinuityHeader
+                    taskLabel={isEditing ? `Edit ${theme.label}` : `New ${theme.label}`}
+                    returnLabel={`Back to ${originLabel}`}
+                    returnHref={originRoute ?? undefined}
+                    onBack={onReturn}
+                    className="mb-3"
+                  />
+                )}
                 {formError && (
                   <motion.div
                     initial={{ opacity: 0, y: -5 }}

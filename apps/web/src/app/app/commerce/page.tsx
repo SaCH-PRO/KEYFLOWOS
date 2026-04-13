@@ -72,8 +72,8 @@ const OPS_SECTIONS: { key: string; label: string; icon: React.ElementType }[] = 
 ];
 
 export default function CommercePage() {
-  const { setCurrentMeta } = useNavigationContext();
-  useReturnNavigation({ restoreScrollOnMount: true });
+  const { setCurrentMeta, getOriginContext } = useNavigationContext();
+  const { getReturnLabel, getReturnHref, navigateBack } = useReturnNavigation({ restoreScrollOnMount: true });
   const shell = useCommerceShell();
   const billing = useBillingWorkspace();
   const { checkLimit } = usePlan();
@@ -319,15 +319,47 @@ export default function CommercePage() {
     overview.handleTabChange(key);
   }, [overview.handleTabChange]);
 
+  const handleResumeCommerceTask = useCallback((task: import("@/lib/resume-task-registry").InterruptedTask) => {
+    const isQuote = task.taskIntent?.includes("quote") || task.route?.includes("tab=quotes");
+    if (isQuote) {
+      setMode("operations");
+      handleTabChange("quotes");
+      billing.setTriggerNewQuote((n: number) => n + 1);
+    } else {
+      setMode("operations");
+      handleTabChange("invoices");
+      billing.setTriggerNewInvoice((n: number) => n + 1);
+    }
+  }, [handleTabChange, billing]);
+
   if (shell.workspaceLoading) return <ListPageSkeleton />;
 
   if (shell.workspaceError) {
     return <WorkspaceError />;
   }
 
+  const originContext = getOriginContext();
+  const showCrossModuleBanner = originContext && originContext.workspace && originContext.workspace !== "Revenue" && billing.pendingPrefill?.contactId;
+
   return (
     <div className="space-y-5" aria-label="Revenue">
-      <ResumePrompt module="commerce" />
+      <ResumePrompt module="commerce" onResume={handleResumeCommerceTask} />
+      {showCrossModuleBanner && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border/60 bg-card/60 backdrop-blur-sm">
+          <button
+            onClick={() => navigateBack()}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 group"
+            title={getReturnLabel()}
+          >
+            <ArrowRight className="w-3.5 h-3.5 rotate-180 group-hover:-translate-x-0.5 transition-transform" />
+            <span className="max-w-[180px] truncate hidden sm:inline">{getReturnLabel()}</span>
+          </button>
+          <div className="w-px h-4 bg-border/60 shrink-0" />
+          <span className="text-sm font-medium text-foreground truncate">
+            {billing.pendingPrefill?.targetSegment === "quotes" ? "Creating quote" : "Creating invoice"} for client from {originContext!.workspace}
+          </span>
+        </div>
+      )}
       <PageHeader
         icon={TrendingUp}
         title="Revenue"

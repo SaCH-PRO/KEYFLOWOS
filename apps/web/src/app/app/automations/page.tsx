@@ -68,11 +68,13 @@ export default function FlowsPage() {
   function handleTemplateSelect(template: AutomationTemplate) {
     setSelectedTemplate(template);
     setActiveTab("flows");
+    setCurrentMeta({ tab: "flows" });
   }
 
   function handleRecommendedSelect(template: AutomationTemplate) {
     setSelectedTemplate(template);
     setActiveTab("flows");
+    setCurrentMeta({ tab: "flows" });
   }
 
   const healthStats = useMemo(() => {
@@ -160,7 +162,7 @@ export default function FlowsPage() {
         <TabNav
           tabs={TABS}
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={(tab) => { setActiveTab(tab); setCurrentMeta({ tab }); }}
           layoutId="flows-tab"
         />
       </div>

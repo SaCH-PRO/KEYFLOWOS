@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft, MoreHorizontal, Trash2, Archive, Edit3, Save, X,
   LayoutDashboard, ListTodo, Flag, Clock, MessageSquare,
@@ -13,6 +14,8 @@ import {
 } from "@/lib/client";
 import { toast } from "sonner";
 import { TabNav } from "@/components/ui/tab-nav";
+import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
+import { useNavigationContext } from "@/lib/navigation-context";
 import {
   PROJECT_STAGES, normalizeStatus, getStageInfo, PROJECT_COLORS,
 } from "./project-constants";
@@ -51,6 +54,21 @@ interface ProjectDetailProps {
 export function ProjectDetail({
   project, businessId, onBack, onProjectUpdate, onProjectDelete,
 }: ProjectDetailProps) {
+  const router = useRouter();
+  const { getOriginContext } = useNavigationContext();
+  const originContext = getOriginContext();
+  const crossModuleOrigin = originContext && originContext.workspace && originContext.workspace !== "Projects"
+    ? { label: originContext.workspace, route: originContext.route }
+    : null;
+
+  const handleBack = useCallback(() => {
+    if (crossModuleOrigin?.route) {
+      router.push(crossModuleOrigin.route);
+    } else {
+      onBack();
+    }
+  }, [crossModuleOrigin, router, onBack]);
+
   const [activeTab, setActiveTab] = useState("overview");
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(project.name);
@@ -154,9 +172,14 @@ export function ProjectDetail({
 
   return (
     <div className="space-y-4">
+      <TaskContinuityHeader
+        taskLabel={project.name || "Project"}
+        returnLabel={crossModuleOrigin ? `Back to ${crossModuleOrigin.label}` : "Back to Projects"}
+        onBack={handleBack}
+      />
       <div className="flex items-center gap-3">
         <button
-          onClick={onBack}
+          onClick={handleBack}
           className="p-2 rounded-xl hover:bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />

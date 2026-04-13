@@ -8,6 +8,9 @@ import {
   Sparkles, ChevronRight, BarChart3,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
+import { ResumePrompt } from "@/components/ui/resume-task-system";
+import { useNavigationContext } from "@/lib/navigation-context";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { WorkspaceError } from "@/components/ui/workspace-error";
@@ -42,6 +45,8 @@ export default function StorePage() {
   const [activeTab, setActiveTab] = useState<TabKey>("setup");
   const dirRef = useRef(0);
   const initRef = useRef(false);
+  const { setCurrentMeta } = useNavigationContext();
+  useReturnNavigation({ restoreScrollOnMount: true });
 
   useEffect(() => {
     if (initRef.current) return;
@@ -67,11 +72,12 @@ export default function StorePage() {
     if (!TAB_KEYS.includes(key as TabKey)) return;
     dirRef.current = TAB_KEYS.indexOf(key as TabKey) > TAB_KEYS.indexOf(activeTab) ? 1 : -1;
     setActiveTab(key as TabKey);
+    setCurrentMeta({ tab: key === "setup" ? null : key });
     s.emitEvent("module:tab_changed", "store", { tab: key });
     const url = new URL(window.location.href);
     key === "setup" ? url.searchParams.delete("tab") : url.searchParams.set("tab", key);
     window.history.replaceState({}, "", url.toString());
-  }, [activeTab, s.emitEvent]);
+  }, [activeTab, s.emitEvent, setCurrentMeta]);
 
   const { swipeHandlers } = useSwipeTabs({ tabs: TAB_KEYS, activeTab, onTabChange: handleTabChange });
 
@@ -105,6 +111,7 @@ export default function StorePage() {
 
   return (
     <div className="space-y-5" aria-label="Store">
+      <ResumePrompt module="store" />
       <div className="relative rounded-2xl overflow-hidden" style={{ border: `1px solid ${pc}20` }}>
         {coverImage ? (
           <div className="absolute inset-0">

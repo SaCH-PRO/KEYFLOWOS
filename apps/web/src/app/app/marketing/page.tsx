@@ -36,7 +36,9 @@ import { useModuleEvent } from "@/hooks/use-module-events";
 import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
 import { useMarketing } from "./hooks/use-marketing";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
+import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
+import { useNavigationContext } from "@/lib/navigation-context";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { AiBadge } from "@/components/ui/ai-badge";
@@ -346,11 +348,12 @@ function BusinessPulseStrip({
 }
 
 export default function ContentPage() {
-  useReturnNavigation({ restoreScrollOnMount: true });
+  const { getReturnLabel, navigateBack, getOriginWorkspace } = useReturnNavigation({ restoreScrollOnMount: true });
   const searchParams = useSearchParams();
   const mk = useMarketing();
   const marketingAi = useMarketingAiHub();
   const channelHealth = useChannelHealth(mk.businessId || "");
+  const { setCurrentMeta } = useNavigationContext();
 
   const [activeTab, setActiveTab] = useState<ContentTab>("create");
   const [createSubmode, setCreateSubmode] = useState<CreateSubmode>("compose");
@@ -361,10 +364,41 @@ export default function ContentPage() {
   const [editingContentId, setEditingContentId] = useState<string | undefined>();
   const initialTabSet = useRef(false);
   const directionRef = useRef<number>(0);
+  const composeTaskIdRef = useRef<string | null>(null);
+  const composeSessionIdRef = useRef<string | null>(null);
+  const [prefillContactId, setPrefillContactId] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (activeTab === "create" && createSubmode === "compose") {
+      if (!composeSessionIdRef.current) {
+        composeSessionIdRef.current = `marketing-compose-${composeType}-${Date.now()}`;
+      }
+      const sessionId = composeSessionIdRef.current;
+      const typeLabel = composeType === "email" ? "Email draft" : "Social post";
+      const taskId = registerInterruptedTask({
+        id: sessionId,
+        module: "marketing",
+        label: typeLabel,
+        description: `Resume composing ${composeType === "email" ? "email" : "social post"}`,
+        route: `/app/marketing?tab=${composeType === "email" ? "create" : "social"}`,
+        draftId: null,
+        originRoute: "/app/marketing",
+        originLabel: "Content",
+        taskIntent: `compose-${composeType}`,
+        formData: { composeType },
+      });
+      composeTaskIdRef.current = taskId;
+    }
+  }, [activeTab, createSubmode, composeType]);
 
   useEffect(() => {
     if (initialTabSet.current) return;
     const tabParam = searchParams.get("tab");
+    const contactIdParam = searchParams.get("contactId");
+    if (contactIdParam) {
+      setPrefillContactId(contactIdParam);
+      window.history.replaceState({}, "", "/app/marketing");
+    }
     if (tabParam) {
       if (tabParam === "social") {
         setActiveTab("create");
@@ -425,11 +459,12 @@ export default function ContentPage() {
     const oldIndex = TAB_KEYS.indexOf(activeTab);
     directionRef.current = newIndex > oldIndex ? 1 : -1;
     setActiveTab(resolved as ContentTab);
+    setCurrentMeta({ tab: resolved === "create" ? null : resolved });
     const url = new URL(window.location.href);
     if (resolved === "create") url.searchParams.delete("tab");
     else url.searchParams.set("tab", resolved);
     window.history.replaceState({}, "", url.toString());
-  }, [activeTab]);
+  }, [activeTab, setCurrentMeta]);
 
   const { swipeHandlers } = useSwipeTabs({ tabs: TAB_KEYS, activeTab, onTabChange: handleTabChange });
 
@@ -474,6 +509,15 @@ export default function ContentPage() {
   const handleSendCampaign = useCallback((id: string) => {
     document.querySelector<HTMLButtonElement>(`[data-campaign-send="${id}"]`)?.click();
   }, []);
+
+  const handleCampaignSentWithCompletion = useCallback((campaign: Parameters<typeof mk.handleCampaignSent>[0]) => {
+    if (composeTaskIdRef.current) {
+      markTaskCompleted(composeTaskIdRef.current);
+      composeTaskIdRef.current = null;
+    }
+    composeSessionIdRef.current = null;
+    mk.handleCampaignSent(campaign);
+  }, [mk]);
 
   const handleEditForm = useCallback((form: LeadForm) => {
     document.querySelector<HTMLButtonElement>(`[data-form-edit="${form.id}"]`)?.click();
@@ -580,9 +624,28 @@ export default function ContentPage() {
         : undefined)
     : activeTab === "audience" ? "New Form" : undefined;
 
+  const originWorkspace = getOriginWorkspace();
+  const showCrossModuleBanner = !!prefillContactId && !!originWorkspace && originWorkspace !== "Content";
+
   return (
     <div className="space-y-5" aria-label="Content">
       <ResumePrompt module="marketing" />
+      {showCrossModuleBanner && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border/60 bg-card/60 backdrop-blur-sm">
+          <button
+            onClick={() => navigateBack()}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 group"
+            title={getReturnLabel()}
+          >
+            <span className="group-hover:-translate-x-0.5 transition-transform inline-flex items-center">&#8592;</span>
+            <span className="max-w-[180px] truncate hidden sm:inline ml-1">{getReturnLabel()}</span>
+          </button>
+          <div className="w-px h-4 bg-border/60 shrink-0" />
+          <span className="text-sm font-medium text-foreground truncate">
+            Creating campaign for contact from {originWorkspace}
+          </span>
+        </div>
+      )}
       <PageHeader
         icon={Megaphone}
         title="Content"
@@ -697,7 +760,7 @@ export default function ContentPage() {
                         })()}
                       </div>
                     )}
-                    <CampaignsPanel businessId={mk.businessId} campaigns={mk.campaigns} setCampaigns={mk.setCampaigns} availableTags={mk.availableTags} onCampaignCreated={mk.handleCampaignCreated} onCampaignSent={mk.handleCampaignSent} onViewContact={mk.handleViewContact} onAiWrite={() => handleAiAction("campaign-content-generator")} />
+                    <CampaignsPanel businessId={mk.businessId} campaigns={mk.campaigns} setCampaigns={mk.setCampaigns} availableTags={mk.availableTags} onCampaignCreated={mk.handleCampaignCreated} onCampaignSent={handleCampaignSentWithCompletion} onViewContact={mk.handleViewContact} onAiWrite={() => handleAiAction("campaign-content-generator")} />
                   </div>
                 )}
 

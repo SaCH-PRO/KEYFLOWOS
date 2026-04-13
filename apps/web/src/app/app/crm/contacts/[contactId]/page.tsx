@@ -589,6 +589,42 @@ export default function ContactDetailPage() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-2">
+        <div className="text-sm font-semibold">Quick Actions</div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/commerce?tab=invoices&contactId=${contactId}`)}
+          >
+            Create Invoice
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/commerce?tab=quotes&contactId=${contactId}`)}
+          >
+            Create Quote
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/bookings?contactId=${contactId}`)}
+          >
+            Book Appointment
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/projects?contactId=${contactId}`)}
+          >
+            Create Project
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/marketing?tab=campaigns&contactId=${contactId}`)}
+          >
+            Create Campaign
+          </Button>
+        </div>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-3">
           <div className="flex gap-2">
