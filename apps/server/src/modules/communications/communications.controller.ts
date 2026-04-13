@@ -9,12 +9,13 @@ import { WhatsAppAdapter } from './adapters/whatsapp-adapter';
 
 const TRACKING_SECRET = process.env.TRACKING_HMAC_SECRET || '';
 
-function signTrackingToken(deliveryId: string): string {
-  return createHmac('sha256', TRACKING_SECRET).update(deliveryId).digest('hex').slice(0, 16);
+function signTrackingToken(deliveryId: string, extra?: string): string {
+  const data = extra ? `${deliveryId}:${extra}` : deliveryId;
+  return createHmac('sha256', TRACKING_SECRET).update(data).digest('hex').slice(0, 16);
 }
 
-function verifyTrackingToken(deliveryId: string, token: string): boolean {
-  return signTrackingToken(deliveryId) === token;
+function verifyTrackingToken(deliveryId: string, token: string, extra?: string): boolean {
+  return signTrackingToken(deliveryId, extra) === token;
 }
 
 @Controller('communications')
@@ -165,11 +166,14 @@ export class CommunicationsController {
     @Query('r') redirectUrl: string | undefined,
     @Res() res: import('express').Response,
   ) {
-    if (!TRACKING_SECRET || !token || !verifyTrackingToken(deliveryId, token)) {
+    if (!TRACKING_SECRET || !token || !redirectUrl) {
+      return res.status(400).json({ error: 'Invalid tracking request' });
+    }
+    if (!verifyTrackingToken(deliveryId, token, redirectUrl)) {
       return res.status(400).json({ error: 'Invalid tracking token' });
     }
     await this.delivery.trackClick(deliveryId);
-    if (redirectUrl && /^https?:\/\//i.test(redirectUrl)) {
+    if (/^https?:\/\//i.test(redirectUrl)) {
       return res.redirect(302, redirectUrl);
     }
     return res.json({ ok: true });
