@@ -15,6 +15,7 @@ interface AudienceSelectorProps {
   selectedTags: string[];
   onTagsChange: (tags: string[]) => void;
   onValidationChange?: (result: EmailValidationResult | null) => void;
+  hasEmailDestination?: boolean;
 }
 
 export function AudienceSelector({
@@ -24,6 +25,7 @@ export function AudienceSelector({
   selectedTags,
   onTagsChange,
   onValidationChange,
+  hasEmailDestination = true,
 }: AudienceSelectorProps) {
   const [audienceData, setAudienceData] = useState<AudienceExpandResult | null>(null);
   const [validation, setValidation] = useState<EmailValidationResult | null>(null);
@@ -43,7 +45,11 @@ export function AudienceSelector({
   }, [businessId, selectedTags]);
 
   const runValidation = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId || !hasEmailDestination) {
+      setValidation(null);
+      onValidationChange?.(null);
+      return;
+    }
     setValidating(true);
     try {
       const res = await validateEmailSend({ subject, destinationIds, segmentTags: selectedTags.length > 0 ? selectedTags : undefined }, businessId);
@@ -53,7 +59,7 @@ export function AudienceSelector({
       }
     } catch {}
     setValidating(false);
-  }, [businessId, subject, destinationIds, selectedTags, onValidationChange]);
+  }, [businessId, subject, destinationIds, selectedTags, onValidationChange, hasEmailDestination]);
 
   useEffect(() => { void loadAudience(); }, [loadAudience]);
 

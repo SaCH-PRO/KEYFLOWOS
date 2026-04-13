@@ -283,14 +283,24 @@ export class AutomationExecutorService {
                 contentType: 'whatsapp_message',
                 body: messageBody,
                 status: 'Queued',
-                contentMeta: { source: 'flow', playbookName, contactId: context.contactId, ...templateMeta },
+                contentMeta: { source: 'flow', playbookName, contactId: context.contactId },
                 tags: ['flow-action'],
+              },
+            });
+
+            const waVariant = await this.prisma.client.outboundVariant.create({
+              data: {
+                contentId: flowContent.id,
+                platform: 'WHATSAPP',
+                textBody: messageBody,
+                variantMeta: templateMeta,
               },
             });
 
             await this.prisma.client.outboundDelivery.create({
               data: {
                 contentId: flowContent.id,
+                variantId: waVariant.id,
                 destinationId: destination.id,
                 businessId,
                 status: 'Queued',
