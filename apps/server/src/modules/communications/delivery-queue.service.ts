@@ -180,6 +180,14 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     if (previewText) mergedMeta.previewText = previewText;
     if (senderName) mergedMeta.senderName = senderName;
 
+    const trackingSecret = process.env.TRACKING_HMAC_SECRET;
+    if (trackingSecret && content?.contentType === 'campaign_email') {
+      const { createHmac } = await import('crypto');
+      const token = createHmac('sha256', trackingSecret).update(delivery.id).digest('hex').slice(0, 16);
+      mergedMeta.deliveryId = delivery.id;
+      mergedMeta.trackingToken = token;
+    }
+
     const payload = {
       textBody: effectiveVariant?.textBody ?? content?.body ?? '',
       htmlBody: effectiveVariant?.htmlBody,

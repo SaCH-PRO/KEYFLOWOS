@@ -33,6 +33,24 @@ export class EmailAdapter implements ChannelAdapter {
         htmlBody = previewHtml + htmlBody;
       }
 
+      const deliveryId = payload.meta?.deliveryId as string | undefined;
+      const trackingToken = payload.meta?.trackingToken as string | undefined;
+      if (deliveryId && trackingToken) {
+        const baseUrl = process.env.API_BASE_URL || '';
+        if (baseUrl) {
+          const openUrl = `${baseUrl}/communications/deliveries/${deliveryId}/track-open?t=${trackingToken}`;
+          htmlBody += `<img src="${openUrl}" width="1" height="1" style="display:none" alt="" />`;
+
+          htmlBody = htmlBody.replace(
+            /href="(https?:\/\/[^"]+)"/g,
+            (_match: string, url: string) => {
+              const clickUrl = `${baseUrl}/communications/deliveries/${deliveryId}/track-click?t=${trackingToken}&r=${encodeURIComponent(url)}`;
+              return `href="${clickUrl}"`;
+            },
+          );
+        }
+      }
+
       const message = [
         `From: ${from}`,
         `To: ${payload.recipientEmail}`,
