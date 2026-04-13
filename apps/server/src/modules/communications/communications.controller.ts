@@ -152,11 +152,18 @@ export class CommunicationsController {
   }
 
   @Get('deliveries/:deliveryId/track-open')
-  async trackOpen(@Param('deliveryId') deliveryId: string, @Query('t') token?: string) {
+  async trackOpen(
+    @Param('deliveryId') deliveryId: string,
+    @Query('t') token: string | undefined,
+    @Res() res: import('express').Response,
+  ) {
     if (TRACKING_SECRET && token && verifyTrackingToken(deliveryId, token)) {
       await this.delivery.trackOpen(deliveryId);
     }
-    return { ok: true };
+    const pixel = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+    res.set('Content-Type', 'image/gif');
+    res.set('Cache-Control', 'no-store, no-cache');
+    return res.send(pixel);
   }
 
   @Get('deliveries/:deliveryId/track-click')
