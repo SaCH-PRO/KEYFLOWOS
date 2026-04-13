@@ -4,6 +4,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { ChannelConnectionService } from './channel-connection.service';
 import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
+import { WhatsAppAdapter } from './adapters/whatsapp-adapter';
 
 @Controller('communications')
 export class CommunicationsController {
@@ -108,6 +109,28 @@ export class CommunicationsController {
   @Post('businesses/:businessId/audience/expand')
   expandAudience(@Param('businessId') businessId: string, @Body() body: { segmentTags?: string[]; limit?: number }) {
     return this.connections.expandAudience(businessId, body);
+  }
+
+  // --- WhatsApp Connect & Verify ---
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/whatsapp/verify-connection')
+  async verifyWhatsAppConnection(@Param('businessId') businessId: string, @Body() body: { accessToken: string }) {
+    const adapter = new WhatsAppAdapter();
+    return adapter.validateConnection({ token: body.accessToken });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/whatsapp/list-phones')
+  async listWhatsAppPhones(@Param('businessId') businessId: string, @Body() body: { accessToken: string; waBusinessAccountId: string }) {
+    const adapter = new WhatsAppAdapter();
+    return adapter.listPhoneNumbers(body.accessToken, body.waBusinessAccountId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/whatsapp/connect')
+  async connectWhatsApp(@Param('businessId') businessId: string, @Body() body: { accessToken: string; waBusinessAccountId: string; label?: string }) {
+    return this.connections.connectWhatsApp(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
