@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards, Inject } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { MarketplaceService } from './marketplace.service';
@@ -6,7 +6,7 @@ import { MarketplaceService } from './marketplace.service';
 @Controller('marketplace')
 @UseGuards(AuthGuard, BusinessGuard)
 export class MarketplaceController {
-  constructor(private readonly marketplaceService: MarketplaceService) {}
+  constructor(@Inject(MarketplaceService) private readonly marketplaceService: MarketplaceService) {}
 
   @Get('businesses/:businessId/dashboard')
   getDashboard(@Param('businessId') businessId: string) {

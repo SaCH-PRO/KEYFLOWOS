@@ -1,11 +1,11 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Inject } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
 @Controller()
 export class ReportsController {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(@Inject(ReportsService) private readonly reports: ReportsService) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/reports/generate')
