@@ -414,16 +414,30 @@ export default function ProfileSettingsPage() {
 
         {activeTab === "intelligence" && (
           <motion.div key="intelligence" id="tabpanel-intelligence" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <IntelligenceTab businessId={businessId} />
+            <IntelligenceTab businessId={businessId} businessData={businessData} />
           </motion.div>
         )}
 
         {activeTab === "security" && (
           <motion.div key="security" id="tabpanel-security" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <div className="kf-card p-6">
-              <ProfileSectionErrorBoundary sectionName="Security & Preferences">
-                <SecuritySection onStatus={setStatus} />
-              </ProfileSectionErrorBoundary>
+            <div className="space-y-4">
+              <div
+                className="rounded-xl p-3 flex items-center gap-2.5"
+                style={{
+                  background: "hsl(var(--kf-muted) / 0.06)",
+                  border: "1px solid hsl(var(--kf-border) / 0.15)",
+                }}
+              >
+                <Shield className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
+                <p className="text-[11px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                  Security and appearance settings are isolated from your business data. Changes here do not affect your profile completeness or intelligence score.
+                </p>
+              </div>
+              <div className="kf-card p-6">
+                <ProfileSectionErrorBoundary sectionName="Security & Preferences">
+                  <SecuritySection onStatus={setStatus} />
+                </ProfileSectionErrorBoundary>
+              </div>
             </div>
           </motion.div>
         )}

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import {
   Building2, Clock, Users, FileText,
   AlertCircle, Sparkles as SparklesIcon, Wand2, RefreshCw,
+  CheckCircle2, ArrowRight,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
 import { apiPatch, apiPost } from "@/lib/api";
@@ -67,6 +68,46 @@ function isBizInfoDirty(current: BizInfo, initial: BizInfo): boolean {
   );
 }
 
+function SectionCompletion({ completed, total, impact }: { completed: number; total: number; impact: string }) {
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const isComplete = completed === total;
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-2 rounded-lg mb-2"
+      style={{
+        background: isComplete ? "hsl(var(--kf-success) / 0.06)" : "hsl(var(--kf-muted) / 0.06)",
+        border: `1px solid ${isComplete ? "hsl(var(--kf-success) / 0.12)" : "hsl(var(--kf-border) / 0.1)"}`,
+      }}
+    >
+      {isComplete ? (
+        <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
+      ) : (
+        <div className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0" style={{ borderColor: "hsl(var(--kf-muted-foreground) / 0.3)" }} />
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold" style={{ color: isComplete ? "hsl(var(--kf-success))" : "hsl(var(--kf-foreground))" }}>
+            {completed}/{total} complete
+          </span>
+          <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted) / 0.2)", maxWidth: "60px" }}>
+            <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: isComplete ? "hsl(var(--kf-success))" : "hsl(var(--kf-accent1))" }} />
+          </div>
+        </div>
+        <p className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{impact}</p>
+      </div>
+    </div>
+  );
+}
+
+function FieldImpact({ text }: { text: string }) {
+  return (
+    <p className="text-[10px] mt-1 flex items-center gap-1" style={{ color: "hsl(var(--kf-accent2) / 0.8)" }}>
+      <ArrowRight className="w-2.5 h-2.5 flex-shrink-0" />
+      {text}
+    </p>
+  );
+}
+
 interface MyBusinessSectionProps {
   businessId: string | null;
   businessData?: {
@@ -99,6 +140,23 @@ export default function MyBusinessSection({
   const [generatingTagline, setGeneratingTagline] = useState(false);
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const initializedRef = useRef(false);
+
+  const identityCompletion = useMemo(() => {
+    const fields = [form.name, form.tagline, form.description];
+    return { completed: fields.filter(Boolean).length, total: fields.length };
+  }, [form.name, form.tagline, form.description]);
+
+  const teamCompletion = useMemo(() => {
+    const fields = [form.teamSize];
+    return { completed: fields.filter(Boolean).length, total: fields.length };
+  }, [form.teamSize]);
+
+  const hoursCompletion = useMemo(() => {
+    const hasCustomHours = Object.values(form.businessHours).some(
+      (d) => d.open !== "09:00" || d.close !== "17:00" || d.closed
+    );
+    return { completed: hasCustomHours ? 1 : 0, total: 1 };
+  }, [form.businessHours]);
 
   useEffect(() => {
     if (!businessId || businessLoading || !businessData) return;
@@ -202,18 +260,24 @@ export default function MyBusinessSection({
       <AccordionGroup title="Business Details">
         <AccordionSection
           title="Business Identity"
-          subtitle="Your business name and how you describe it"
+          subtitle={`${identityCompletion.completed}/${identityCompletion.total} fields complete`}
           icon={Building2}
           accentColor="hsl(var(--kf-accent2))"
           defaultOpen
         >
           <div className="space-y-4 p-1">
+            <SectionCompletion
+              completed={identityCompletion.completed}
+              total={identityCompletion.total}
+              impact="Powers invoices, storefront, AI documents, and public pages"
+            />
+
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                 <Building2 className="h-3 w-3" aria-hidden="true" />
                 Business Name
                 {!form.name && (
-                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Required</span>
                 )}
               </div>
               <Input
@@ -222,7 +286,7 @@ export default function MyBusinessSection({
                 placeholder="Your Business Name"
                 style={!form.name ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
-              <p className="text-[10px] mt-1 opacity-60">Appears on invoices, storefront, and all customer-facing pages</p>
+              <FieldImpact text="Appears on invoices, quotes, storefront, and all customer-facing pages" />
             </label>
 
             <div className="block text-xs text-muted-foreground">
@@ -258,8 +322,8 @@ export default function MyBusinessSection({
                 style={!form.tagline ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
               <div className="flex justify-between mt-1">
-                <p className="text-[10px] opacity-60">Shown on your storefront hero section</p>
-                <p className="text-[10px]" aria-label={`${form.tagline.length} of 100 characters`}>{form.tagline.length}/100</p>
+                <FieldImpact text="Shown on storefront hero and marketing materials" />
+                <p className="text-[10px] flex-shrink-0 ml-2" aria-label={`${form.tagline.length} of 100 characters`}>{form.tagline.length}/100</p>
               </div>
             </div>
 
@@ -299,8 +363,8 @@ export default function MyBusinessSection({
                 style={!form.description ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
               <div className="flex justify-between mt-1">
-                <p className="text-[10px] opacity-60">Used on your storefront and in AI-powered recommendations</p>
-                <p className="text-[10px]" aria-label={`${form.description.length} of 500 characters`}>{form.description.length}/500</p>
+                <FieldImpact text="Improves AI documents, storefront copy, and intelligence package quality" />
+                <p className="text-[10px] flex-shrink-0 ml-2" aria-label={`${form.description.length} of 500 characters`}>{form.description.length}/500</p>
               </div>
             </div>
           </div>
@@ -308,17 +372,22 @@ export default function MyBusinessSection({
 
         <AccordionSection
           title="Team & Scale"
-          subtitle="How big is your operation"
+          subtitle={`${teamCompletion.completed}/${teamCompletion.total} fields complete`}
           icon={Users}
           accentColor="hsl(var(--kf-accent1))"
         >
           <div className="p-1">
+            <SectionCompletion
+              completed={teamCompletion.completed}
+              total={teamCompletion.total}
+              impact="Powers staffing, automation, and operations recommendations"
+            />
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                 <Users className="h-3 w-3" aria-hidden="true" />
                 Team Size
                 {!form.teamSize && (
-                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Required</span>
                 )}
               </div>
               <select
@@ -333,18 +402,23 @@ export default function MyBusinessSection({
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
-              <p className="text-[10px] mt-1 opacity-60">Helps tailor automation recommendations for your scale</p>
+              <FieldImpact text="Tailors automation complexity, staffing guidance in Calendar, and Flows recommendations" />
             </label>
           </div>
         </AccordionSection>
 
         <AccordionSection
           title="Operating Hours"
-          subtitle="When your business is open"
+          subtitle={hoursCompletion.completed > 0 ? "Configured" : "Not configured"}
           icon={Clock}
           accentColor="hsl(var(--kf-accent2))"
         >
           <div className="space-y-2 p-1">
+            <SectionCompletion
+              completed={hoursCompletion.completed}
+              total={hoursCompletion.total}
+              impact="Controls booking availability and storefront display hours"
+            />
             {DAY_LABELS.map(({ key, label }) => {
               const day = form.businessHours[key] || { open: "09:00", close: "17:00", closed: false };
               return (
@@ -383,7 +457,7 @@ export default function MyBusinessSection({
                 </div>
               );
             })}
-            <p className="text-[10px] text-muted-foreground opacity-60 pt-1">Controls booking availability and storefront display</p>
+            <FieldImpact text="Syncs with Calendar bookings, storefront hours display, and scheduling AI" />
           </div>
         </AccordionSection>
       </AccordionGroup>

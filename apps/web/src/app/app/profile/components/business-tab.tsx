@@ -1,9 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  Building2, Users, Clock, Briefcase, TrendingUp,
-  MapPin, FileText, Palette, Globe, Zap,
+  Building2, Users, Clock,
+  FileText, Palette, Globe, Zap,
+  CheckCircle2, BarChart3, Target,
 } from "lucide-react";
 import MyBusinessSection from "./my-business-section";
 import BrandIdentityTab from "./brand-identity-tab";
@@ -21,39 +23,37 @@ interface PowersNote {
   modules: string;
 }
 
-const SECTION_POWERS: Record<string, PowersNote[]> = {
-  identity: [
-    { icon: FileText, label: "Invoices & Quotes", modules: "Revenue" },
-    { icon: Globe, label: "Storefront & Public Pages", modules: "Store" },
-    { icon: Zap, label: "AI Document Generation", modules: "Documents" },
-  ],
-  team: [
-    { icon: Zap, label: "Automation Recommendations", modules: "Flows" },
-    { icon: Users, label: "Staffing Guidance", modules: "Calendar" },
-    { icon: TrendingUp, label: "Operations Intelligence", modules: "Projects" },
-  ],
-  hours: [
-    { icon: Clock, label: "Booking Availability", modules: "Calendar" },
-    { icon: Globe, label: "Storefront Display", modules: "Store" },
-  ],
-  brand: [
-    { icon: Palette, label: "Visual Identity", modules: "Store, Emails" },
-    { icon: Globe, label: "Social Presence", modules: "Content, Store" },
-    { icon: FileText, label: "Document Branding", modules: "Documents" },
-  ],
-};
+const IDENTITY_POWERS: PowersNote[] = [
+  { icon: FileText, label: "Invoices & Quotes", modules: "Revenue" },
+  { icon: Globe, label: "Storefront & Public Pages", modules: "Store" },
+  { icon: Zap, label: "AI Document Generation", modules: "Documents" },
+  { icon: Target, label: "Intelligence Package", modules: "Profile" },
+];
 
-function PowersIndicator({ powers }: { powers: PowersNote[] }) {
+const BRAND_POWERS: PowersNote[] = [
+  { icon: Palette, label: "Visual Identity", modules: "Store, Emails" },
+  { icon: Globe, label: "Social Presence", modules: "Content, Store" },
+  { icon: FileText, label: "Document Branding", modules: "Documents" },
+  { icon: BarChart3, label: "Marketing Materials", modules: "Content" },
+];
+
+function PowersIndicator({ powers, title, description }: { powers: PowersNote[]; title: string; description: string }) {
   return (
     <div
-      className="rounded-lg p-2.5 mt-1 mb-3"
+      className="rounded-xl p-3"
       style={{
-        background: "hsl(var(--kf-muted) / 0.06)",
-        border: "1px solid hsl(var(--kf-border) / 0.1)",
+        background: "linear-gradient(135deg, hsl(var(--kf-accent2) / 0.04), hsl(var(--kf-accent1) / 0.02))",
+        border: "1px solid hsl(var(--kf-accent2) / 0.1)",
       }}
     >
-      <p className="text-[10px] font-semibold mb-1.5" style={{ color: "hsl(var(--kf-accent2))" }}>
-        What this powers
+      <div className="flex items-center gap-2 mb-1.5">
+        <Zap className="w-3 h-3" style={{ color: "hsl(var(--kf-accent2))" }} />
+        <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>
+          {title}
+        </span>
+      </div>
+      <p className="text-[10px] mb-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+        {description}
       </p>
       <div className="flex flex-wrap gap-1.5">
         {powers.map((p, i) => {
@@ -69,7 +69,93 @@ function PowersIndicator({ powers }: { powers: PowersNote[] }) {
             >
               <Icon className="w-3 h-3" />
               {p.label}
+              <span className="opacity-60">({p.modules})</span>
             </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BusinessCompletionStrip({ businessData }: { businessData: ProfileBusinessData | null }) {
+  const sections = useMemo(() => [
+    {
+      label: "Identity",
+      icon: Building2,
+      completed: [businessData?.name, businessData?.tagline, businessData?.description].filter(Boolean).length,
+      total: 3,
+    },
+    {
+      label: "Team",
+      icon: Users,
+      completed: businessData?.teamSize ? 1 : 0,
+      total: 1,
+    },
+    {
+      label: "Hours",
+      icon: Clock,
+      completed: businessData?.businessHours && Object.values(businessData.businessHours).some(
+        (d: { open: string; close: string; closed: boolean }) => d.open !== "09:00" || d.close !== "17:00" || d.closed
+      ) ? 1 : 0,
+      total: 1,
+    },
+    {
+      label: "Brand",
+      icon: Palette,
+      completed: [businessData?.logoUrl, businessData?.primaryColor].filter(Boolean).length,
+      total: 2,
+    },
+  ], [businessData]);
+
+  const totalCompleted = sections.reduce((a, s) => a + s.completed, 0);
+  const totalFields = sections.reduce((a, s) => a + s.total, 0);
+
+  return (
+    <div
+      className="rounded-xl p-3"
+      style={{
+        background: "hsl(var(--kf-card))",
+        border: "1px solid hsl(var(--kf-border) / 0.3)",
+      }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold">Business Profile Completion</span>
+        <span
+          className="text-xs font-bold px-2 py-0.5 rounded-full"
+          style={{
+            background: totalCompleted === totalFields ? "hsl(var(--kf-success) / 0.12)" : "hsl(var(--kf-accent1) / 0.12)",
+            color: totalCompleted === totalFields ? "hsl(var(--kf-success))" : "hsl(var(--kf-accent1))",
+          }}
+        >
+          {totalCompleted}/{totalFields}
+        </span>
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        {sections.map((s) => {
+          const Icon = s.icon;
+          const isComplete = s.completed === s.total;
+          return (
+            <div key={s.label} className="flex flex-col items-center gap-1">
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{
+                  background: isComplete ? "hsl(var(--kf-success) / 0.1)" : "hsl(var(--kf-muted) / 0.1)",
+                }}
+              >
+                {isComplete ? (
+                  <CheckCircle2 className="w-4 h-4" style={{ color: "hsl(var(--kf-success))" }} />
+                ) : (
+                  <Icon className="w-4 h-4" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
+                )}
+              </div>
+              <span className="text-[10px] font-medium" style={{ color: isComplete ? "hsl(var(--kf-success))" : "hsl(var(--kf-muted-foreground))" }}>
+                {s.label}
+              </span>
+              <span className="text-[9px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                {s.completed}/{s.total}
+              </span>
+            </div>
           );
         })}
       </div>
@@ -104,7 +190,15 @@ export function BusinessTab({
       className="space-y-4"
     >
       <motion.div variants={fadeUp}>
-        <PowersIndicator powers={SECTION_POWERS.identity} />
+        <BusinessCompletionStrip businessData={businessData} />
+      </motion.div>
+
+      <motion.div variants={fadeUp}>
+        <PowersIndicator
+          powers={IDENTITY_POWERS}
+          title="Business identity powers these modules"
+          description="Your business name, description, and core details feed into every customer-facing and AI-powered surface in KeyFlow."
+        />
       </motion.div>
 
       <motion.div variants={fadeUp} className="kf-card p-6">
@@ -121,7 +215,11 @@ export function BusinessTab({
       </motion.div>
 
       <motion.div variants={fadeUp}>
-        <PowersIndicator powers={SECTION_POWERS.brand} />
+        <PowersIndicator
+          powers={BRAND_POWERS}
+          title="Brand & identity powers these modules"
+          description="Your visual identity, colors, logo, and social presence shape how your business appears across storefront, emails, and marketing."
+        />
       </motion.div>
 
       <motion.div variants={fadeUp}>
