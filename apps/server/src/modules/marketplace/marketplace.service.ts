@@ -19,10 +19,10 @@ export class MarketplaceService {
   private readonly logger = new Logger(MarketplaceService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(forwardRef(() => TransactionalEmailService))
     private readonly emailService: TransactionalEmailService,
-    private readonly fulfillmentRoutingService: FulfillmentRoutingService,
+    @Inject(FulfillmentRoutingService) private readonly fulfillmentRoutingService: FulfillmentRoutingService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 

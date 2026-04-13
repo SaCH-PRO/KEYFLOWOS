@@ -183,8 +183,8 @@ export class FulfillmentRoutingService {
   private readonly logger = new Logger(FulfillmentRoutingService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly emailService: TransactionalEmailService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
