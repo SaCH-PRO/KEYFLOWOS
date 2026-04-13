@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Paintbrush,
@@ -14,9 +14,22 @@ import {
   Sparkles,
   Palette,
   Check,
+  Image,
+  Zap,
+  ChevronRight,
 } from "lucide-react";
-import type { StorefrontConfig } from "@/lib/client";
-import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
+import type { StorefrontConfig, StorefrontHeroProofChip } from "@/lib/client";
+import {
+  getThemeStyles,
+  type ThemeKey,
+  STOREFRONT_MODELS,
+  LEGACY_MODELS,
+  BRAND_PALETTE_PRESETS,
+  getAIPaletteForPersonality,
+  getContrastRatio,
+  getContrastGrade,
+  type StorefrontModel,
+} from "@/lib/storefront-themes";
 import { FONT_PAIRINGS } from "./store-types";
 
 type Props = {
@@ -32,15 +45,6 @@ type Props = {
     secondaryColor?: string | null;
   } | null;
 };
-
-const TEMPLATES: { key: string; label: string; desc: string; inspiration: string }[] = [
-  { key: "default", label: "Classic", desc: "Clean, versatile, professional", inspiration: "Shopify Dawn" },
-  { key: "minimal", label: "Minimal", desc: "Zen-like, content-first", inspiration: "Aesop" },
-  { key: "bold", label: "Bold", desc: "High-energy, statement-making", inspiration: "Nike" },
-  { key: "elegant", label: "Elegant", desc: "Refined editorial luxury", inspiration: "Net-a-Porter" },
-  { key: "luxe", label: "Luxe", desc: "Cinematic, dark & moody", inspiration: "Aman Resorts" },
-  { key: "fresh", label: "Fresh", desc: "Friendly, modern & playful", inspiration: "Glossier" },
-];
 
 function Toggle({ enabled, onToggle, label }: { enabled: boolean; onToggle: () => void; label: string }) {
   return (
@@ -67,13 +71,17 @@ function Toggle({ enabled, onToggle, label }: { enabled: boolean; onToggle: () =
 function Section({
   icon: Icon,
   title,
+  subtitle,
   children,
   defaultOpen = true,
+  badge,
 }: {
   icon: React.ElementType;
   title: string;
+  subtitle?: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
+  badge?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -97,12 +105,18 @@ function Section({
           >
             <Icon className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
           </div>
-          <span className="text-sm font-semibold">{title}</span>
+          <div className="text-left">
+            <span className="text-sm font-semibold">{title}</span>
+            {subtitle && <p className="text-[10px] text-muted-foreground mt-0.5">{subtitle}</p>}
+          </div>
+          {badge && (
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide"
+              style={{ background: "hsl(var(--kf-accent1)/0.12)", color: "hsl(var(--kf-accent1))" }}>
+              {badge}
+            </span>
+          )}
         </div>
-        <motion.div
-          animate={{ rotate: open ? 180 : 0 }}
-          transition={{ duration: 0.2 }}
-        >
+        <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
           <ChevronDown className="w-4 h-4 text-muted-foreground" />
         </motion.div>
       </button>
@@ -130,172 +144,65 @@ function Section({
 
 type MiniProps = { p: string; s: string; a: string };
 
-function ClassicMiniature({ p, s, a }: MiniProps) {
+function ModelMiniature({ modelKey, p, s, a }: MiniProps & { modelKey: ThemeKey }) {
+  const isLuxury = ["luxury_editorial", "luxe"].includes(modelKey);
+  const isBold = ["bold", "conversion_first"].includes(modelKey);
+  const isMinimal = ["minimal", "luxury_editorial"].includes(modelKey);
+  const radius = isLuxury ? "0px" : isBold ? "10px" : isMinimal ? "4px" : "8px";
+
   return (
     <div className="p-2 space-y-1.5">
-      <div className="h-5 rounded-lg" style={{ background: `radial-gradient(ellipse at 50% 0%, ${p}25, transparent 80%)` }} />
-      <div className="flex items-center gap-1.5">
-        <div className="w-2.5 h-2.5 rounded-md" style={{ background: `${p}40` }} />
-        <div className="h-1 w-10 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }} />
+      <div className="h-6 relative overflow-hidden" style={{
+        borderRadius: radius,
+        background: isBold
+          ? `linear-gradient(135deg, ${p}25, ${s}12)`
+          : `radial-gradient(ellipse at 50% 0%, ${p}18, transparent 80%)`,
+        border: `1px solid ${p}15`,
+      }}>
+        <div className="absolute inset-0 flex items-center px-2 gap-1">
+          <div className="h-1 w-8 rounded-full" style={{ background: isLuxury ? `${p}25` : "rgba(0,0,0,0.1)" }} />
+          {!isMinimal && <div className="h-3 px-1.5 rounded-full ml-auto" style={{ background: isBold ? `${p}` : `${p}20`, border: `1px solid ${p}30` }} />}
+        </div>
       </div>
-      <div className="flex gap-1 px-0.5">
+      <div className="flex gap-1">
         {[p, s, a].map((c, n) => (
-          <div key={n} className="flex-1 space-y-1">
-            <div className="h-1 rounded-full" style={{ background: `${c}12`, width: n === 1 ? "70%" : "100%" }} />
-          </div>
+          <div key={n} className="flex-1 h-1 rounded-full" style={{ background: `${c}${n === 0 ? "30" : "15"}` }} />
         ))}
       </div>
       <div className="grid grid-cols-2 gap-1">
-        <div className="h-8 rounded-lg" style={{ background: `${p}06`, border: `1px solid ${p}15` }} />
-        <div className="h-8 rounded-lg" style={{ background: `${s}06`, border: `1px solid ${s}15` }} />
-      </div>
-      <div className="flex justify-end">
-        <div className="h-1 w-6 rounded-full" style={{ background: `${p}20` }} />
-      </div>
-    </div>
-  );
-}
-
-function MinimalMiniature({ p, s, a }: MiniProps) {
-  return (
-    <div className="p-3 space-y-2.5">
-      <div className="space-y-1.5">
-        <div className="h-0.5 w-6 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
-        <div className="h-0.5 w-14 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
-      </div>
-      <div className="h-px" style={{ background: `${p}08` }} />
-      <div className="flex gap-3 px-0.5 mb-1">
-        <div className="h-px flex-1" style={{ borderBottom: `1px solid ${p}20` }} />
-        <div className="h-px flex-1" style={{ borderBottom: `1px solid ${a}10` }} />
-      </div>
-      <div className="grid grid-cols-2 gap-2.5">
-        <div className="space-y-1.5">
-          <div className="h-10 rounded-sm" style={{ background: `${p}04`, border: `1px solid ${p}08` }} />
-          <div className="h-0.5 w-8" style={{ background: `${p}12` }} />
-          <div className="h-0.5 w-4" style={{ background: `${a}08` }} />
+        <div className="h-8 overflow-hidden" style={{ borderRadius: radius, background: `${p}08`, border: `1px solid ${p}18` }}>
+          <div className="h-4 w-full" style={{ background: `${p}12` }} />
+          <div className="px-1 pt-0.5 space-y-0.5">
+            <div className="h-0.5 w-6 rounded-full" style={{ background: `${p}30` }} />
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <div className="h-10 rounded-sm" style={{ background: `${s}04`, border: `1px solid ${s}08` }} />
-          <div className="h-0.5 w-6" style={{ background: `${s}12` }} />
-          <div className="h-0.5 w-3" style={{ background: `${a}08` }} />
+        <div className="h-8 overflow-hidden" style={{ borderRadius: radius, background: `${s}08`, border: `1px solid ${s}18` }}>
+          <div className="h-4 w-full" style={{ background: `${s}12` }} />
+          <div className="px-1 pt-0.5 space-y-0.5">
+            <div className="h-0.5 w-5 rounded-full" style={{ background: `${s}30` }} />
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function BoldMiniature({ p, s, a }: MiniProps) {
-  return (
-    <div className="space-y-1">
-      <div className="h-6 relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${p}30, ${s}15 60%, ${a}0A)` }}>
-        <div className="absolute bottom-1 left-2">
-          <div className="h-1.5 w-8 rounded-sm" style={{ background: "rgba(255,255,255,0.3)" }} />
-        </div>
-      </div>
-      <div className="px-2 pb-2 space-y-1">
-        <div className="flex gap-1">
-          <div className="h-2.5 px-2 rounded-xl" style={{ background: `${p}30`, border: `1px solid ${p}50` }} />
-          <div className="h-2.5 px-2 rounded-xl" style={{ background: `${a}15` }} />
-        </div>
-        <div className="grid grid-cols-2 gap-1">
-          <div className="h-9 rounded-2xl" style={{ background: `${p}0C`, border: `2px solid ${p}25` }} />
-          <div className="h-9 rounded-2xl" style={{ background: `${a}0C`, border: `2px solid ${a}25` }} />
-        </div>
-        <div className="h-1.5 w-10 rounded-sm" style={{ background: `linear-gradient(to right, ${p}, ${s}, ${a})`, opacity: 0.4 }} />
-      </div>
-    </div>
-  );
-}
-
-function ElegantMiniature({ p, s, a }: MiniProps) {
-  return (
-    <div className="p-2.5 space-y-2">
-      <div className="text-center space-y-1">
-        <div className="h-0.5 w-4 rounded-full mx-auto" style={{ background: `${s}20` }} />
-        <div className="h-0.5 w-10 rounded-full mx-auto" style={{ background: "rgba(255,255,255,0.06)" }} />
-      </div>
-      <div className="flex gap-2 justify-center">
-        {[p, s, a].map((c, n) => (
-          <div key={n} className="h-2 px-1.5 rounded-full" style={{ background: n === 0 ? `${c}18` : `${c}06`, border: `1px solid ${n === 0 ? `${c}30` : `${c}0A`}` }} />
-        ))}
-      </div>
-      <div className="grid grid-cols-2 gap-1.5">
-        <div className="h-10 rounded-3xl" style={{ background: `${p}04`, border: `1px solid ${s}12`, boxShadow: `0 2px 8px ${p}10` }} />
-        <div className="h-10 rounded-3xl" style={{ background: `${s}04`, border: `1px solid ${s}12`, boxShadow: `0 2px 8px ${s}10` }} />
-      </div>
-    </div>
-  );
-}
-
-function LuxeMiniature({ p, s, a }: MiniProps) {
-  return (
-    <div className="space-y-0">
-      <div className="h-10 relative" style={{ background: `linear-gradient(180deg, ${p}08, rgba(0,0,0,0.5))` }}>
-        <div className="absolute bottom-1.5 left-2.5 space-y-0.5">
-          <div className="h-0.5 w-8" style={{ background: "rgba(255,255,255,0.25)" }} />
-          <div className="h-0.5 w-5" style={{ background: `${s}18` }} />
-        </div>
-        <div className="absolute bottom-1 right-2">
-          <div className="w-1.5 h-1.5" style={{ background: `${a}20` }} />
-        </div>
-      </div>
-      <div className="px-2.5 py-2 space-y-1.5">
-        <div className="flex gap-2">
-          <div className="h-0.5 w-4" style={{ borderBottom: `1px solid ${p}30` }} />
-          <div className="h-0.5 w-4" style={{ borderBottom: `1px solid ${a}15` }} />
-        </div>
-        <div className="grid grid-cols-2 gap-1.5">
-          <div className="h-8" style={{ background: `${p}06`, border: `1px solid ${s}12` }} />
-          <div className="h-8" style={{ background: `${a}06`, border: `1px solid ${a}12` }} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FreshMiniature({ p, s, a }: MiniProps) {
-  return (
-    <div className="p-2 space-y-1.5">
-      <div className="flex items-center gap-1.5">
-        <div className="w-3 h-3 rounded-full" style={{ background: `${p}25` }} />
-        <div className="h-1 w-8 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} />
-        <div className="ml-auto flex gap-0.5">
-          <div className="w-1.5 h-1.5 rounded-full" style={{ background: `${s}20` }} />
-          <div className="w-1.5 h-1.5 rounded-full" style={{ background: `${a}20` }} />
-        </div>
-      </div>
-      <div className="h-4 rounded-full" style={{ background: `${p}08`, border: `1px solid ${p}12` }} />
-      <div className="flex gap-1">
-        <div className="h-2 px-1 rounded-full" style={{ background: `${p}18` }} />
-        <div className="h-2 px-1.5 rounded-full" style={{ background: `${s}0A` }} />
-      </div>
-      <div className="grid grid-cols-2 gap-1.5">
-        <div className="h-9 rounded-2xl" style={{ background: `${p}08`, border: `1px solid ${p}12`, boxShadow: `0 2px 8px ${p}10` }} />
-        <div className="h-9 rounded-2xl" style={{ background: `${s}08`, border: `1px solid ${s}12`, boxShadow: `0 2px 8px ${s}10` }} />
-      </div>
-    </div>
-  );
-}
-
-const MINIATURES: Record<string, React.FC<MiniProps>> = {
-  default: ClassicMiniature,
-  minimal: MinimalMiniature,
-  bold: BoldMiniature,
-  elegant: ElegantMiniature,
-  luxe: LuxeMiniature,
-  fresh: FreshMiniature,
-};
-
-function TemplatePreview({ template, selected, onClick, primary, secondary, accent }: {
-  template: typeof TEMPLATES[number];
+function ModelCard({
+  model,
+  selected,
+  onClick,
+  primary,
+  secondary,
+  accent,
+}: {
+  model: StorefrontModel;
   selected: boolean;
   onClick: () => void;
   primary: string;
   secondary: string;
   accent: string;
 }) {
-  const Mini = MINIATURES[template.key] ?? ClassicMiniature;
-  const ts = getThemeStyles(template.key as ThemeKey, primary, secondary, accent);
+  const ts = getThemeStyles(model.key, primary, secondary, accent);
 
   return (
     <button
@@ -324,28 +231,154 @@ function TemplatePreview({ template, selected, onClick, primary, secondary, acce
         style={{
           backgroundColor: ts.pageBg,
           backgroundImage: ts.pageGradient,
-          border: "1px solid rgba(255,255,255,0.06)",
+          border: "1px solid rgba(0,0,0,0.06)",
         }}
       >
-        <Mini p={primary} s={secondary} a={accent} />
+        <ModelMiniature modelKey={model.key} p={primary} s={secondary} a={accent} />
       </div>
 
       <div className="px-1 pb-0.5">
-        <p className="text-[11px] font-semibold mb-0.5">{template.label}</p>
-        <p className="text-[9px] text-muted-foreground leading-snug">{template.desc}</p>
+        <p className="text-[11px] font-semibold mb-0.5">{model.label}</p>
+        <p className="text-[9px] text-muted-foreground leading-snug">{model.tagline}</p>
       </div>
     </button>
   );
 }
+
+function ContrastIndicator({ hex1, hex2, label }: { hex1: string; hex2: string; label: string }) {
+  const ratio = getContrastRatio(hex1, hex2);
+  const { grade, pass } = getContrastGrade(ratio);
+  return (
+    <div className="flex items-center justify-between text-[10px]">
+      <span className="text-muted-foreground">{label}</span>
+      <div className="flex items-center gap-1.5">
+        <span className="font-mono tabular-nums">{ratio.toFixed(1)}:1</span>
+        <span
+          className="px-1.5 py-0.5 rounded font-semibold"
+          style={{
+            background: pass ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)",
+            color: pass ? "#16a34a" : "#dc2626",
+          }}
+        >
+          {grade}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function AIPalettePanel({
+  onApply,
+  currentPrimary,
+}: {
+  onApply: (primary: string, secondary: string, accent: string) => void;
+  currentPrimary: string;
+}) {
+  const [personality, setPersonality] = useState("");
+  const [suggestions, setSuggestions] = useState<typeof BRAND_PALETTE_PRESETS>([]);
+
+  const handleGenerate = useCallback(() => {
+    const results = getAIPaletteForPersonality(personality || currentPrimary);
+    setSuggestions(results);
+  }, [personality, currentPrimary]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={personality}
+          onChange={(e) => setPersonality(e.target.value)}
+          placeholder="Describe your brand (e.g. luxury wellness, tech startup…)"
+          className="kf-input flex-1 text-xs"
+          onKeyDown={(e) => e.key === "Enter" && handleGenerate()}
+        />
+        <button
+          type="button"
+          onClick={handleGenerate}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-white transition-all hover:scale-[1.02]"
+          style={{ background: "hsl(var(--kf-accent1))" }}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          Suggest
+        </button>
+      </div>
+
+      {suggestions.length > 0 ? (
+        <div className="grid grid-cols-1 gap-2">
+          {suggestions.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => onApply(preset.primary, preset.secondary, preset.accent)}
+              className="flex items-center gap-3 p-3 rounded-xl text-left transition-all hover:scale-[1.01]"
+              style={{
+                background: "hsl(var(--kf-muted)/0.15)",
+                border: "1px solid hsl(var(--kf-border)/0.4)",
+              }}
+            >
+              <div className="flex gap-1 flex-shrink-0">
+                {[preset.primary, preset.secondary, preset.accent].map((c, i) => (
+                  <div key={i} className="w-5 h-5 rounded-full" style={{ background: c }} />
+                ))}
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold">{preset.name}</p>
+                <p className="text-[9px] text-muted-foreground truncate">{preset.personality}</p>
+              </div>
+              <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0 ml-auto" />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {BRAND_PALETTE_PRESETS.slice(0, 4).map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => onApply(preset.primary, preset.secondary, preset.accent)}
+              className="flex items-center gap-2 p-2.5 rounded-xl text-left transition-all hover:scale-[1.01]"
+              style={{
+                background: "hsl(var(--kf-muted)/0.15)",
+                border: "1px solid hsl(var(--kf-border)/0.4)",
+              }}
+            >
+              <div className="flex gap-0.5 flex-shrink-0">
+                {[preset.primary, preset.secondary, preset.accent].map((c, i) => (
+                  <div key={i} className="w-3.5 h-3.5 rounded-full" style={{ background: c }} />
+                ))}
+              </div>
+              <p className="text-[10px] font-medium truncate">{preset.name}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type ProofChip = StorefrontHeroProofChip;
 
 export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, businessData }: Props) {
   const hero = config.hero ?? {};
   const appearance = config.appearance ?? {};
   const seo = config.seo ?? {};
 
-  const currentPrimary = appearance.primaryColor || businessData?.primaryColor || "";
-  const currentSecondary = appearance.secondaryColor || businessData?.secondaryColor || "";
-  const currentAccent = appearance.accentColor || "";
+  const currentPrimary = appearance.primaryColor || businessData?.primaryColor || "#F97316";
+  const currentSecondary = appearance.secondaryColor || businessData?.secondaryColor || "#14B8A6";
+  const currentAccent = appearance.accentColor || "#a78bfa";
+
+  const [showAllModels, setShowAllModels] = useState(false);
+  const [showAIPalette, setShowAIPalette] = useState(false);
+
+  const currentTheme = (appearance.theme ?? "conversion_first") as ThemeKey;
+
+  const proofChips: ProofChip[] = hero.proofChips ?? [];
+
+  const handleApplyPalette = useCallback((primary: string, secondary: string, accent: string) => {
+    onConfigChange("appearance", { primaryColor: primary, secondaryColor: secondary, accentColor: accent });
+    setShowAIPalette(false);
+  }, [onConfigChange]);
 
   return (
     <div className="space-y-4">
@@ -358,8 +391,8 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
             <Paintbrush className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
           </div>
           <div>
-            <h2 className="text-base font-bold">Customize</h2>
-            <p className="text-[11px] text-muted-foreground">Design your storefront</p>
+            <h2 className="text-base font-bold">Design Mode</h2>
+            <p className="text-[11px] text-muted-foreground">Build your storefront identity</p>
           </div>
         </div>
         <button
@@ -373,26 +406,112 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
         </button>
       </div>
 
-      <Section icon={Sparkles} title="Template">
-        <div>
-          <p className="text-xs text-muted-foreground mb-3">Choose a design template for your public storefront</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5" role="radiogroup" aria-label="Template selection">
-            {TEMPLATES.map((t) => (
-              <TemplatePreview
-                key={t.key}
-                template={t}
-                selected={(appearance.theme ?? "default") === t.key}
-                onClick={() => onConfigChange("appearance", { theme: t.key })}
+      <Section icon={Zap} title="Storefront Model" subtitle="Choose what this store is optimizing for" badge="New">
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Each model configures layout priorities, hero hierarchy, CTA emphasis, and section sequencing for a specific commercial outcome.
+          </p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5" role="radiogroup" aria-label="Storefront model selection">
+            {STOREFRONT_MODELS.map((model) => (
+              <ModelCard
+                key={model.key}
+                model={model}
+                selected={currentTheme === model.key}
+                onClick={() => onConfigChange("appearance", { theme: model.key })}
                 primary={currentPrimary || "#F97316"}
                 secondary={currentSecondary || "#14B8A6"}
                 accent={currentAccent || "#a78bfa"}
               />
             ))}
           </div>
+
+          {LEGACY_MODELS.some((m) => m.key === currentTheme) && (
+            <div
+              className="rounded-xl px-3 py-2 text-[10px] flex items-start gap-2"
+              style={{ background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.2)", color: "#a16207" }}
+            >
+              <span className="flex-shrink-0 mt-0.5">⚠️</span>
+              <span>You are using a legacy theme. Switch to a storefront model above for full layout control and better conversion outcomes.</span>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowAllModels(!showAllModels)}
+            className="flex items-center gap-1.5 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors w-full justify-center py-1"
+          >
+            <ChevronDown className={`w-3 h-3 transition-transform ${showAllModels ? "rotate-180" : ""}`} />
+            {showAllModels ? "Hide" : "Show"} legacy themes (deprecated)
+          </button>
+
+          <AnimatePresence>
+            {showAllModels && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-2">
+                  <div
+                    className="rounded-lg px-3 py-2 text-[10px]"
+                    style={{ background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)", color: "#991b1b" }}
+                  >
+                    These legacy aesthetic skins are deprecated and do not support hero composer, section sequencing, or model-level conversion controls. Migrate to a storefront model for the full feature set.
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 opacity-60" role="radiogroup">
+                    {LEGACY_MODELS.map((model) => (
+                      <ModelCard
+                        key={model.key}
+                        model={model}
+                        selected={currentTheme === model.key}
+                        onClick={() => onConfigChange("appearance", { theme: model.key })}
+                        primary={currentPrimary || "#F97316"}
+                        secondary={currentSecondary || "#14B8A6"}
+                        accent={currentAccent || "#a78bfa"}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {currentTheme && (
+            <div
+              className="rounded-xl p-3 space-y-2 mt-1"
+              style={{ background: `${currentPrimary}08`, border: `1px solid ${currentPrimary}20` }}
+            >
+              {(() => {
+                const allModels = [...STOREFRONT_MODELS, ...LEGACY_MODELS];
+                const model = allModels.find((m) => m.key === currentTheme);
+                if (!model) return null;
+                return (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-3 h-3" style={{ color: currentPrimary }} />
+                      <p className="text-[11px] font-semibold" style={{ color: currentPrimary }}>{model.label}</p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1">
+                      <div className="text-[10px] text-muted-foreground"><span className="font-medium text-foreground/60">Fit:</span> {model.businessFit}</div>
+                      <div className="text-[10px] text-muted-foreground"><span className="font-medium text-foreground/60">Tone:</span> {model.visualTone}</div>
+                      <div className="text-[10px] text-muted-foreground"><span className="font-medium text-foreground/60">Optimizes for:</span> {model.conversionEmphasis}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {model.bestFor.map((tag) => (
+                        <span key={tag} className="text-[9px] px-2 py-0.5 rounded-full font-medium" style={{ background: `${currentPrimary}15`, color: currentPrimary }}>{tag}</span>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
         </div>
       </Section>
 
-      <Section icon={Palette} title="Branding">
+      <Section icon={Palette} title="Brand Palette" subtitle="Colors, contrast validation, and AI suggestions">
         <div className="space-y-4">
           {businessData?.logoUrl && (
             <div className="flex items-center gap-3">
@@ -410,133 +529,316 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Primary</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={currentPrimary || "#e8863a"}
-                  onChange={(e) => onConfigChange("appearance", { primaryColor: e.target.value })}
-                  className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent flex-shrink-0"
-                />
-                <input
-                  type="text"
-                  value={currentPrimary || ""}
-                  onChange={(e) => onConfigChange("appearance", { primaryColor: e.target.value })}
-                  placeholder="Auto"
-                  className="kf-input flex-1 min-w-0 text-xs"
-                />
+            {[
+              { key: "primaryColor", label: "Primary", value: currentPrimary, default: "#F97316", hint: "Main CTAs & services" },
+              { key: "secondaryColor", label: "Secondary", value: currentSecondary, default: "#14B8A6", hint: "Products & accents" },
+              { key: "accentColor", label: "Accent", value: currentAccent, default: "#a78bfa", hint: "Packages & highlights" },
+            ].map(({ key, label, value, default: def, hint }) => (
+              <div key={key}>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">{label}</label>
+                <p className="text-[9px] text-muted-foreground mb-1.5">{hint}</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={value || def}
+                    onChange={(e) => onConfigChange("appearance", { [key]: e.target.value })}
+                    className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent flex-shrink-0"
+                  />
+                  <input
+                    type="text"
+                    value={value || ""}
+                    onChange={(e) => onConfigChange("appearance", { [key]: e.target.value })}
+                    placeholder={def}
+                    className="kf-input flex-1 min-w-0 text-xs font-mono"
+                  />
+                </div>
               </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Secondary</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={currentSecondary || "#d4a574"}
-                  onChange={(e) => onConfigChange("appearance", { secondaryColor: e.target.value })}
-                  className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent flex-shrink-0"
-                />
-                <input
-                  type="text"
-                  value={currentSecondary || ""}
-                  onChange={(e) => onConfigChange("appearance", { secondaryColor: e.target.value })}
-                  placeholder="Auto"
-                  className="kf-input flex-1 min-w-0 text-xs"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Accent</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={currentAccent || "#a78bfa"}
-                  onChange={(e) => onConfigChange("appearance", { accentColor: e.target.value })}
-                  className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent flex-shrink-0"
-                />
-                <input
-                  type="text"
-                  value={currentAccent || ""}
-                  onChange={(e) => onConfigChange("appearance", { accentColor: e.target.value })}
-                  placeholder="#a78bfa"
-                  className="kf-input flex-1 min-w-0 text-xs"
-                />
-              </div>
-            </div>
+            ))}
           </div>
 
-          <p className="text-[10px] text-muted-foreground">
-            Your brand colors are used throughout the storefront. Primary for services, secondary for products, accent for packages.
-          </p>
+          <div className="space-y-1.5 rounded-xl p-3" style={{ background: "hsl(var(--kf-muted)/0.1)", border: "1px solid hsl(var(--kf-border)/0.3)" }}>
+            <p className="text-[10px] font-semibold text-muted-foreground mb-2">Contrast Check</p>
+            <ContrastIndicator hex1={currentPrimary} hex2="#ffffff" label="Primary on white" />
+            <ContrastIndicator hex1={currentSecondary} hex2="#ffffff" label="Secondary on white" />
+            <ContrastIndicator hex1={currentAccent} hex2="#ffffff" label="Accent on white" />
+          </div>
+
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowAIPalette(!showAIPalette)}
+              className="flex items-center gap-2 text-xs font-medium transition-all py-2 px-3 rounded-xl w-full"
+              style={{
+                background: showAIPalette ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.15)",
+                border: `1px solid ${showAIPalette ? "hsl(var(--kf-accent1)/0.3)" : "hsl(var(--kf-border)/0.4)"}`,
+                color: showAIPalette ? "hsl(var(--kf-accent1))" : undefined,
+              }}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              AI Palette Suggestions
+              <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${showAIPalette ? "rotate-180" : ""}`} />
+            </button>
+            <AnimatePresence>
+              {showAIPalette && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-3">
+                    <AIPalettePanel onApply={handleApplyPalette} currentPrimary={currentPrimary} />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </Section>
 
-      <Section icon={Type} title="Hero Section">
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Headline</label>
-            <input
-              type="text"
-              value={hero.headline ?? ""}
-              onChange={(e) => onConfigChange("hero", { headline: e.target.value })}
-              placeholder={businessData?.name ? `Welcome to ${businessData.name}` : "Welcome to our store"}
-              className="kf-input w-full text-sm"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Subheadline</label>
-            <input
-              type="text"
-              value={hero.subheadline ?? ""}
-              onChange={(e) => onConfigChange("hero", { subheadline: e.target.value })}
-              placeholder={businessData?.tagline || "Book services and shop products"}
-              className="kf-input w-full text-sm"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">CTA Button Label</label>
-            <input
-              type="text"
-              value={hero.ctaLabel ?? ""}
-              onChange={(e) => onConfigChange("hero", { ctaLabel: e.target.value })}
-              placeholder="Browse Services"
-              className="kf-input w-full text-sm"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cover Image</label>
-            <div className="flex gap-3 items-start">
+      <Section icon={Image} title="Hero Composer" subtitle="Headline, CTAs, proof chips, and cover media" badge="Enhanced">
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Headline</label>
               <input
                 type="text"
-                value={hero.coverImageUrl ?? ""}
-                onChange={(e) => onConfigChange("hero", { coverImageUrl: e.target.value })}
-                placeholder="https://example.com/cover.jpg"
+                value={hero.headline ?? ""}
+                onChange={(e) => onConfigChange("hero", { headline: e.target.value })}
+                placeholder={businessData?.name ? `Welcome to ${businessData.name}` : "Welcome to our store"}
+                className="kf-input w-full text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Subheadline</label>
+              <textarea
+                value={hero.subheadline ?? ""}
+                onChange={(e) => onConfigChange("hero", { subheadline: e.target.value })}
+                placeholder={businessData?.tagline || "Book services and shop products"}
+                className="kf-input w-full text-sm resize-none"
+                rows={2}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Primary CTA</label>
+              <input
+                type="text"
+                value={hero.ctaLabel ?? ""}
+                onChange={(e) => onConfigChange("hero", { ctaLabel: e.target.value })}
+                placeholder="Browse Services"
+                className="kf-input w-full text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Secondary CTA</label>
+              <input
+                type="text"
+                value={hero.secondaryCtaLabel ?? ""}
+                onChange={(e) => onConfigChange("hero", { secondaryCtaLabel: e.target.value })}
+                placeholder="Learn More"
+                className="kf-input w-full text-sm"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Promotional Ribbon</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={hero.promotionalRibbon ?? ""}
+                onChange={(e) => onConfigChange("hero", { promotionalRibbon: e.target.value })}
+                placeholder="🔥 Limited time: 20% off all services this week"
                 className="kf-input flex-1 text-sm"
               />
-              {hero.coverImageUrl && (
-                <div
-                  className="h-14 w-20 rounded-lg overflow-hidden flex-shrink-0"
-                  style={{ border: "1px solid hsl(var(--kf-border)/0.5)" }}
-                >
-                  <img
-                    src={hero.coverImageUrl}
-                    alt="Cover preview"
-                    className="h-full w-full object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              <input
+                type="color"
+                value={hero.promotionalRibbonColor ?? "#f59e0b"}
+                onChange={(e) => onConfigChange("hero", { promotionalRibbonColor: e.target.value })}
+                className="w-9 h-9 rounded-lg cursor-pointer border-0 bg-transparent flex-shrink-0"
+                title="Ribbon color"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Proof Chips</label>
+            <p className="text-[10px] text-muted-foreground mb-2">Social proof signals shown below the headline (e.g. "500+ clients", "4.9 stars")</p>
+            <div className="space-y-2">
+              {proofChips.map((chip: ProofChip, idx: number) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    value={chip.icon ?? ""}
+                    onChange={(e) => {
+                      const updated = [...proofChips];
+                      updated[idx] = { ...updated[idx], icon: e.target.value };
+                      onConfigChange("hero", { proofChips: updated });
+                    }}
+                    placeholder="⭐"
+                    className="kf-input w-12 text-center text-sm flex-shrink-0"
                   />
+                  <input
+                    type="text"
+                    value={chip.label}
+                    onChange={(e) => {
+                      const updated = [...proofChips];
+                      updated[idx] = { ...updated[idx], label: e.target.value };
+                      onConfigChange("hero", { proofChips: updated });
+                    }}
+                    placeholder="500+ happy clients"
+                    className="kf-input flex-1 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = proofChips.filter((_: ProofChip, i: number) => i !== idx);
+                      onConfigChange("hero", { proofChips: updated });
+                    }}
+                    className="text-muted-foreground hover:text-red-400 transition-colors p-1"
+                  >
+                    ×
+                  </button>
                 </div>
+              ))}
+              {proofChips.length < 4 && (
+                <button
+                  type="button"
+                  onClick={() => onConfigChange("hero", { proofChips: [...proofChips, { label: "", icon: "" }] })}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 py-1"
+                >
+                  + Add proof chip
+                </button>
               )}
             </div>
           </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cover Image</label>
+              <div className="flex gap-3 items-start">
+                <input
+                  type="text"
+                  value={hero.coverImageUrl ?? ""}
+                  onChange={(e) => onConfigChange("hero", { coverImageUrl: e.target.value })}
+                  placeholder="https://example.com/cover.jpg"
+                  className="kf-input flex-1 text-sm"
+                />
+                {hero.coverImageUrl && (
+                  <div
+                    className="h-14 w-20 rounded-lg overflow-hidden flex-shrink-0"
+                    style={{ border: "1px solid hsl(var(--kf-border)/0.5)" }}
+                  >
+                    <img
+                      src={hero.coverImageUrl}
+                      alt="Cover preview"
+                      className="h-full w-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                Cover Video <span className="text-muted-foreground/60 font-normal">(overrides image when set)</span>
+              </label>
+              <input
+                type="text"
+                value={hero.coverVideoUrl ?? ""}
+                onChange={(e) => onConfigChange("hero", { coverVideoUrl: e.target.value })}
+                placeholder="https://example.com/cover.mp4"
+                className="kf-input w-full text-sm"
+              />
+              {hero.coverVideoUrl && (
+                <p className="text-[10px] text-muted-foreground/60 mt-1">Video will autoplay muted in a loop.</p>
+              )}
+            </div>
+          </div>
+
+          <div
+            className="rounded-xl p-3 space-y-1"
+            style={{ background: "hsl(var(--kf-muted)/0.15)", border: "1px solid hsl(var(--kf-border)/0.3)" }}
+          >
+            <Toggle
+              enabled={hero.showHours ?? true}
+              onToggle={() => onConfigChange("hero", { showHours: !(hero.showHours ?? true) })}
+              label="Show Business Hours"
+            />
+            <Toggle
+              enabled={hero.showWhatsApp ?? true}
+              onToggle={() => onConfigChange("hero", { showWhatsApp: !(hero.showWhatsApp ?? true) })}
+              label="Show WhatsApp Chat"
+            />
+          </div>
         </div>
       </Section>
 
-      <Section icon={LayoutGrid} title="Layout & Display" defaultOpen={false}>
+      <Section icon={Type} title="Typography" subtitle="Font pairing with usage guidance" defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Curated heading + body combinations. Each pairing is designed for a specific tone.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+            {FONT_PAIRINGS.map((pairing) => {
+              const isActive = (appearance.fontPairing ?? "inter-inter") === pairing.id;
+              return (
+                <button
+                  key={pairing.id}
+                  type="button"
+                  onClick={() => onConfigChange("appearance", { fontPairing: pairing.id })}
+                  className="flex flex-col items-start gap-1.5 p-3 rounded-xl text-left transition-all relative"
+                  style={{
+                    background: isActive ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
+                    border: isActive ? "2px solid hsl(var(--kf-accent1)/0.4)" : "1px solid hsl(var(--kf-border)/0.5)",
+                    padding: isActive ? "11px" : "12px",
+                  }}
+                >
+                  {isActive && (
+                    <div
+                      className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center"
+                      style={{ background: "hsl(var(--kf-accent1))" }}
+                    >
+                      <Check className="w-2.5 h-2.5 text-white" />
+                    </div>
+                  )}
+                  <span className="text-lg font-bold leading-tight" style={{ fontFamily: `'${pairing.heading}', sans-serif` }}>Aa</span>
+                  <span className="text-[10px] text-muted-foreground leading-tight" style={{ fontFamily: `'${pairing.body}', sans-serif` }}>Body text</span>
+                  <span className="text-[9px] font-semibold mt-0.5" style={{ color: isActive ? "hsl(var(--kf-accent1))" : undefined }}>{pairing.name}</span>
+                  <span className="text-[8px] text-muted-foreground leading-tight">{pairing.heading}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {(() => {
+            const currentPairing = FONT_PAIRINGS.find((p) => p.id === (appearance.fontPairing ?? "inter-inter")) ?? FONT_PAIRINGS[0];
+            return (
+              <div className="rounded-xl p-4 space-y-2" style={{ background: "hsl(var(--kf-muted)/0.1)", border: "1px solid hsl(var(--kf-border)/0.3)" }}>
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Preview</p>
+                <h3 className="text-xl font-bold" style={{ fontFamily: `'${currentPairing.heading}', sans-serif` }}>
+                  {businessData?.name || "Your Business"}
+                </h3>
+                <p className="text-sm text-muted-foreground" style={{ fontFamily: `'${currentPairing.body}', sans-serif` }}>
+                  {businessData?.tagline || "Premium services and products crafted for you."}
+                </p>
+                <p className="text-[10px] text-muted-foreground/60 mt-1" style={{ fontFamily: `'${currentPairing.body}', sans-serif` }}>
+                  Heading: {currentPairing.heading} · Body: {currentPairing.body}
+                </p>
+              </div>
+            );
+          })()}
+        </div>
+      </Section>
+
+      <Section icon={LayoutGrid} title="Layout & Density" subtitle="Card style, spacing, and display options" defaultOpen={false}>
         <div className="space-y-4">
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-2 block">Card Style</label>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {(["grid", "list"] as const).map((style) => {
                 const isActive = (appearance.cardStyle ?? "grid") === style;
                 return (
@@ -544,15 +846,26 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
                     key={style}
                     type="button"
                     onClick={() => onConfigChange("appearance", { cardStyle: style })}
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all"
+                    className="flex flex-col items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all"
                     style={{
                       background: isActive ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
-                      border: isActive ? "1px solid hsl(var(--kf-accent1)/0.3)" : "1px solid hsl(var(--kf-border)/0.5)",
+                      border: isActive ? "2px solid hsl(var(--kf-accent1)/0.3)" : "1px solid hsl(var(--kf-border)/0.5)",
                       color: isActive ? "hsl(var(--kf-accent1))" : undefined,
                     }}
                   >
-                    {style === "grid" ? <LayoutGrid className="w-4 h-4" /> : <List className="w-4 h-4" />}
-                    {style === "grid" ? "Grid" : "List"}
+                    {style === "grid" ? (
+                      <>
+                        <LayoutGrid className="w-5 h-5" />
+                        <span className="text-xs">Grid</span>
+                        <span className="text-[9px] text-muted-foreground">Visual cards</span>
+                      </>
+                    ) : (
+                      <>
+                        <List className="w-5 h-5" />
+                        <span className="text-xs">List</span>
+                        <span className="text-[9px] text-muted-foreground">Dense rows</span>
+                      </>
+                    )}
                   </button>
                 );
               })}
@@ -563,8 +876,8 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
             <label className="text-xs font-medium text-muted-foreground mb-2 block">Content Density</label>
             <div className="flex gap-2">
               {([
-                { key: "comfortable", label: "Comfortable" },
-                { key: "compact", label: "Compact" },
+                { key: "comfortable", label: "Comfortable", desc: "Spacious, airy" },
+                { key: "compact", label: "Compact", desc: "Dense, efficient" },
               ] as const).map((opt) => {
                 const isActive = (appearance.density ?? "comfortable") === opt.key;
                 return (
@@ -572,42 +885,15 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
                     key={opt.key}
                     type="button"
                     onClick={() => onConfigChange("appearance", { density: opt.key })}
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all"
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
                     style={{
                       background: isActive ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
                       border: isActive ? "1px solid hsl(var(--kf-accent1)/0.3)" : "1px solid hsl(var(--kf-border)/0.5)",
                       color: isActive ? "hsl(var(--kf-accent1))" : undefined,
                     }}
                   >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1.5">Controls card spacing and padding on the public storefront</p>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-2 block">Font Pairing</label>
-            <p className="text-[10px] text-muted-foreground mb-2">Curated heading + body font combinations for your storefront</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {FONT_PAIRINGS.map((pairing) => {
-                const isActive = (appearance.fontPairing ?? "inter-inter") === pairing.id;
-                return (
-                  <button
-                    key={pairing.id}
-                    type="button"
-                    onClick={() => onConfigChange("appearance", { fontPairing: pairing.id })}
-                    className="flex flex-col items-start gap-1 p-3 rounded-xl text-xs font-medium transition-all text-left relative"
-                    style={{
-                      background: isActive ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
-                      border: isActive ? "1px solid hsl(var(--kf-accent1)/0.3)" : "1px solid hsl(var(--kf-border)/0.5)",
-                      color: isActive ? "hsl(var(--kf-accent1))" : undefined,
-                    }}
-                  >
-                    <span className="text-base font-bold leading-tight" style={{ fontFamily: `'${pairing.heading}', sans-serif` }}>Aa</span>
-                    <span className="text-[10px] text-muted-foreground leading-tight" style={{ fontFamily: `'${pairing.body}', sans-serif` }}>Body text</span>
-                    <span className="text-[9px] mt-0.5 font-medium">{pairing.name}</span>
+                    <div>{opt.label}</div>
+                    <div className="text-[9px] text-muted-foreground">{opt.desc}</div>
                   </button>
                 );
               })}
@@ -628,16 +914,109 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
               onToggle={() => onConfigChange("appearance", { showDuration: !(appearance.showDuration ?? true) })}
               label="Show Duration"
             />
-            <Toggle
-              enabled={hero.showHours ?? true}
-              onToggle={() => onConfigChange("hero", { showHours: !(hero.showHours ?? true) })}
-              label="Show Business Hours"
-            />
-            <Toggle
-              enabled={hero.showWhatsApp ?? true}
-              onToggle={() => onConfigChange("hero", { showWhatsApp: !(hero.showWhatsApp ?? true) })}
-              label="Show WhatsApp Chat"
-            />
+          </div>
+        </div>
+      </Section>
+
+      <Section icon={LayoutGrid} title="Section Styles" subtitle="Per-section emphasis and layout" defaultOpen={false}>
+        <div className="space-y-4">
+          <div>
+            <p className="text-[11px] font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Catalog Section</p>
+            <div
+              className="rounded-xl p-3 space-y-1"
+              style={{ background: "hsl(var(--kf-muted)/0.15)", border: "1px solid hsl(var(--kf-border)/0.3)" }}
+            >
+              <Toggle
+                enabled={(config.sectionStyles?.catalog?.showSectionHeader) ?? true}
+                onToggle={() => onConfigChange("sectionStyles", { catalog: { ...(config.sectionStyles?.catalog ?? {}), showSectionHeader: !((config.sectionStyles?.catalog?.showSectionHeader) ?? true) } })}
+                label="Show Section Header"
+              />
+              <Toggle
+                enabled={(config.sectionStyles?.catalog?.sectionHeaderEmphasis) ?? false}
+                onToggle={() => onConfigChange("sectionStyles", { catalog: { ...(config.sectionStyles?.catalog ?? {}), sectionHeaderEmphasis: !((config.sectionStyles?.catalog?.sectionHeaderEmphasis) ?? false) } })}
+                label="Accent Header Color"
+              />
+            </div>
+            {(config.sectionStyles?.catalog?.showSectionHeader ?? true) && (
+              <div className="mt-2">
+                <input
+                  type="text"
+                  value={config.sectionStyles?.catalog?.sectionHeaderLabel ?? ""}
+                  onChange={(e) => onConfigChange("sectionStyles", { catalog: { ...(config.sectionStyles?.catalog ?? {}), sectionHeaderLabel: e.target.value } })}
+                  placeholder="Browse & Book"
+                  className="kf-input w-full text-sm"
+                />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="text-[11px] font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Trust Bar</p>
+            <div
+              className="rounded-xl p-3 space-y-1"
+              style={{ background: "hsl(var(--kf-muted)/0.15)", border: "1px solid hsl(var(--kf-border)/0.3)" }}
+            >
+              <Toggle
+                enabled={(config.sectionStyles?.trust?.showPaymentBadge) ?? true}
+                onToggle={() => onConfigChange("sectionStyles", { trust: { ...(config.sectionStyles?.trust ?? {}), showPaymentBadge: !((config.sectionStyles?.trust?.showPaymentBadge) ?? true) } })}
+                label="Show Payment Badge"
+              />
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-semibold mb-2 text-muted-foreground uppercase tracking-wide">FAQ Section</p>
+            <div
+              className="rounded-xl p-3 space-y-1"
+              style={{ background: "hsl(var(--kf-muted)/0.15)", border: "1px solid hsl(var(--kf-border)/0.3)" }}
+            >
+              <Toggle
+                enabled={(config.sectionStyles?.faq?.showIcon) !== false}
+                onToggle={() => onConfigChange("sectionStyles", { faq: { ...(config.sectionStyles?.faq ?? {}), showIcon: !((config.sectionStyles?.faq?.showIcon) !== false) } })}
+                label="Show Section Icon"
+              />
+            </div>
+            <div className="mt-2">
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">FAQ Layout</label>
+              <div className="flex gap-2">
+                {([
+                  { key: "accordion", label: "Accordion", desc: "Expandable items" },
+                  { key: "grid", label: "Compact", desc: "Dense layout" },
+                ] as const).map((opt) => {
+                  const isActive = (config.sectionStyles?.faq?.style ?? "accordion") === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => onConfigChange("sectionStyles", { faq: { ...(config.sectionStyles?.faq ?? {}), style: opt.key } })}
+                      className="flex-1 py-2 rounded-xl text-xs font-medium transition-all"
+                      style={{
+                        background: isActive ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
+                        border: isActive ? "1px solid hsl(var(--kf-accent1)/0.3)" : "1px solid hsl(var(--kf-border)/0.5)",
+                        color: isActive ? "hsl(var(--kf-accent1))" : undefined,
+                      }}
+                    >
+                      <div>{opt.label}</div>
+                      <div className="text-[9px] text-muted-foreground">{opt.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Hero Section</p>
+            <div
+              className="rounded-xl p-3 space-y-1"
+              style={{ background: "hsl(var(--kf-muted)/0.15)", border: "1px solid hsl(var(--kf-border)/0.3)" }}
+            >
+              <Toggle
+                enabled={(config.sectionStyles?.hero?.showScrollCta) !== false}
+                onToggle={() => onConfigChange("sectionStyles", { hero: { ...(config.sectionStyles?.hero ?? {}), showScrollCta: !((config.sectionStyles?.hero?.showScrollCta) !== false) } })}
+                label="Show 'Browse Services' CTA"
+              />
+            </div>
           </div>
         </div>
       </Section>

@@ -9,6 +9,8 @@ type Props = {
   heading?: string;
   primaryColor: string;
   accentColor: string;
+  showIcon?: boolean;
+  compact?: boolean;
 };
 
 function FaqItem({ entry, primaryColor, index }: { entry: FaqEntry; primaryColor: string; index: number }) {
@@ -50,23 +52,25 @@ function FaqItem({ entry, primaryColor, index }: { entry: FaqEntry; primaryColor
   );
 }
 
-export function FaqSection({ entries, heading, primaryColor, accentColor }: Props) {
+export function FaqSection({ entries, heading, primaryColor, accentColor, showIcon = true, compact = false }: Props) {
   if (!entries || entries.length === 0) return null;
 
   return (
-    <section className="space-y-5">
+    <section className={compact ? "space-y-3" : "space-y-5"}>
       <div className="flex items-center gap-3">
-        <div
-          className="w-8 h-8 rounded-xl flex items-center justify-center"
-          style={{ background: `${accentColor}15` }}
-        >
-          <HelpCircle className="w-4 h-4" style={{ color: accentColor }} />
-        </div>
-        <h3 className="text-lg font-semibold text-gray-700">
+        {showIcon && (
+          <div
+            className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: `${accentColor}15` }}
+          >
+            <HelpCircle className="w-4 h-4" style={{ color: accentColor }} />
+          </div>
+        )}
+        <h3 className={`font-semibold text-gray-700 ${compact ? "text-base" : "text-lg"}`}>
           {heading || "Frequently Asked Questions"}
         </h3>
       </div>
-      <div className="space-y-3">
+      <div className={compact ? "space-y-2" : "space-y-3"}>
         {entries.map((entry, idx) => (
           <FaqItem key={entry.id} entry={entry} primaryColor={primaryColor} index={idx} />
         ))}
