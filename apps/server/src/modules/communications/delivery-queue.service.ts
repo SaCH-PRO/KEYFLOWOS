@@ -791,4 +791,84 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       })),
     };
   }
+
+  async listDeliveries(businessId: string, opts?: { status?: string; channel?: string; contentId?: string; limit?: number; offset?: number }) {
+    const where: Record<string, unknown> = { businessId };
+    if (opts?.status) where.status = opts.status;
+    if (opts?.contentId) where.contentId = opts.contentId;
+
+    const take = Math.min(opts?.limit || 50, 200);
+    const skip = opts?.offset || 0;
+
+    let deliveries: unknown[];
+    if (opts?.channel) {
+      deliveries = await this.prisma.client.outboundDelivery.findMany({
+        where: {
+          ...where,
+          destination: { platform: opts.channel.toUpperCase() },
+        },
+        include: {
+          destination: { select: { platform: true, displayName: true, label: true } },
+          content: { select: { id: true, subject: true, contentType: true, status: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take,
+        skip,
+      });
+    } else {
+      deliveries = await this.prisma.client.outboundDelivery.findMany({
+        where,
+        include: {
+          destination: { select: { platform: true, displayName: true, label: true } },
+          content: { select: { id: true, subject: true, contentType: true, status: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take,
+        skip,
+      });
+    }
+
+    const total = await this.prisma.client.outboundDelivery.count({
+      where: opts?.channel
+        ? { ...where, destination: { platform: opts.channel.toUpperCase() } }
+        : where,
+    });
+
+    return { deliveries, total, limit: take, offset: skip };
+  }
+
+  async getDeliveryEvents(businessId: string, deliveryId: string) {
+    const delivery = await this.prisma.client.outboundDelivery.findFirst({
+      where: { id: deliveryId, businessId },
+      select: { id: true },
+    });
+    if (!delivery) throw new NotFoundException('Delivery not found');
+
+    return this.prisma.client.deliveryEvent.findMany({
+      where: { deliveryId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async retryAllFailed(businessId: string, contentId: string) {
+    const failed = await this.prisma.client.outboundDelivery.findMany({
+      where: { businessId, contentId, status: 'Failed' },
+      select: { id: true },
+    });
+
+    if (failed.length === 0) return { retried: 0 };
+
+    await this.prisma.client.outboundDelivery.updateMany({
+      where: { id: { in: failed.map(f => f.id) }, status: 'Failed' },
+      data: { status: 'Queued', scheduledAt: new Date(), errorCode: null, errorMessage: null, nextRetryAt: null },
+    });
+
+    for (const f of failed) {
+      await this.recordEvent(f.id, 'manual_retry', 'Failed', 'Queued');
+    }
+
+    setTimeout(() => this.tick(), 500);
+
+    return { retried: failed.length };
+  }
 }

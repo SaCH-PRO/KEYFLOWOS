@@ -5930,11 +5930,30 @@ export type OutboundDelivery = {
   retryCount: number;
 };
 
+export type DeliverySummaryDelivery = {
+  id: string;
+  destinationId: string;
+  platform?: string;
+  displayName?: string | null;
+  status: string;
+  sentAt?: string | null;
+  externalPostId?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  retryCount?: number;
+};
+
 export type DeliverySummary = {
   contentId: string;
-  total: number;
-  byStatus: Record<string, number>;
-  deliveries: OutboundDelivery[];
+  contentStatus?: string;
+  timezone?: string | null;
+  totalDestinations: number;
+  published: number;
+  failed: number;
+  pending: number;
+  cancelled: number;
+  lastAttemptAt?: string | null;
+  deliveries: DeliverySummaryDelivery[];
 };
 
 export async function listChannelConnections(businessId?: string): Promise<ApiResult<ChannelConnection[]>> {
@@ -6130,6 +6149,152 @@ export async function getAudienceHealth(businessId?: string): Promise<ApiResult<
   return apiGet<AudienceHealthResult>({
     path: `/communications/businesses/${encodeURIComponent(bid)}/audience/health`,
   });
+}
+
+// --- Content AI ---
+
+export interface AiDraftResult {
+  body: string;
+  subject: string | null;
+  hashtags: string[];
+  cta: string;
+}
+
+export interface AiRewriteResult {
+  body: string;
+  subject: string | null;
+  hashtags: string[];
+}
+
+export interface AiSubjectsResult {
+  subjects: string[];
+}
+
+export interface AiCtaResult {
+  ctas: { text: string; style: string }[];
+}
+
+export interface AiHashtagsResult {
+  hashtags: string[];
+  groups: Record<string, string[]>;
+}
+
+export interface AiShortenExpandResult {
+  body: string;
+}
+
+export interface AiChannelsResult {
+  recommended: { channel: string; reason: string; priority: string }[];
+}
+
+export interface AiSendTimeResult {
+  suggestions: { day: string; time: string; reason: string; score: number }[];
+  bestWindow: string;
+}
+
+export async function aiGenerateDraft(data: { contentType: string; objective?: string; tone?: string; audience?: string; topic?: string; existingBody?: string }, businessId?: string): Promise<ApiResult<AiDraftResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiDraftResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/generate-draft`, body: data });
+}
+
+export async function aiRewriteContent(data: { body: string; targetChannel: string; tone?: string; objective?: string }, businessId?: string): Promise<ApiResult<AiRewriteResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiRewriteResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/rewrite`, body: data });
+}
+
+export async function aiSuggestSubjects(data: { body: string; objective?: string; tone?: string; audience?: string }, businessId?: string): Promise<ApiResult<AiSubjectsResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiSubjectsResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-subjects`, body: data });
+}
+
+export async function aiSuggestCta(data: { body: string; objective?: string; contentType?: string }, businessId?: string): Promise<ApiResult<AiCtaResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiCtaResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-cta`, body: data });
+}
+
+export async function aiSuggestHashtags(data: { body: string; industry?: string }, businessId?: string): Promise<ApiResult<AiHashtagsResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiHashtagsResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-hashtags`, body: data });
+}
+
+export async function aiShortenExpand(data: { body: string; action: "shorten" | "expand"; targetChannel?: string }, businessId?: string): Promise<ApiResult<AiShortenExpandResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiShortenExpandResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/shorten-expand`, body: data });
+}
+
+export async function aiSuggestChannels(data: { body: string; objective?: string; audience?: string; availableChannels: string[] }, businessId?: string): Promise<ApiResult<AiChannelsResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiChannelsResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-channels`, body: data });
+}
+
+export async function aiSuggestSendTime(data: { contentType: string; audience?: string; timezone?: string }, businessId?: string): Promise<ApiResult<AiSendTimeResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiSendTimeResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-time`, body: data });
+}
+
+// --- Delivery Log ---
+
+export interface DeliveryListItem {
+  id: string;
+  contentId: string;
+  destinationId: string;
+  status: string;
+  scheduledAt: string | null;
+  sentAt: string | null;
+  externalPostId: string | null;
+  externalUrl: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  retryCount: number;
+  recipientEmail: string | null;
+  recipientPhone: string | null;
+  contactId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  destination: { platform: string; displayName: string | null; label: string | null } | null;
+  content: { id: string; subject: string | null; contentType: string; status: string } | null;
+}
+
+export interface DeliveryListResult {
+  deliveries: DeliveryListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface DeliveryEventItem {
+  id: string;
+  deliveryId: string;
+  eventType: string;
+  statusBefore: string;
+  statusAfter: string;
+  attemptNumber: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  resultData: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export async function listDeliveries(businessId?: string, opts?: { status?: string; channel?: string; contentId?: string; limit?: number; offset?: number }): Promise<ApiResult<DeliveryListResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const params = new URLSearchParams();
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.channel) params.set("channel", opts.channel);
+  if (opts?.contentId) params.set("contentId", opts.contentId);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.offset) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  return apiGetSimple<DeliveryListResult>(`/communications/businesses/${encodeURIComponent(bid)}/deliveries${qs ? `?${qs}` : ""}`);
+}
+
+export async function getDeliveryEvents(deliveryId: string, businessId?: string): Promise<ApiResult<DeliveryEventItem[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<DeliveryEventItem[]>(`/communications/businesses/${encodeURIComponent(bid)}/deliveries/${encodeURIComponent(deliveryId)}/events`);
+}
+
+export async function retryAllFailedDeliveries(contentId: string, businessId?: string): Promise<ApiResult<{ retried: number }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ retried: number }>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/retry-all`, body: {} });
 }
 
 export { DEFAULT_BUSINESS_ID };

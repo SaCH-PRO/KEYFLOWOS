@@ -54,13 +54,14 @@ import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
 import { AudienceHealthDashboard } from "./components/audience-health-dashboard";
 import { UnifiedComposer } from "./components/unified/unified-composer";
 import { ContentStudioTab } from "./components/content-studio-tab";
+import { OutboundHistory } from "./components/outbound-history";
 import { useChannelHealth } from "@/hooks/use-channel-health";
 import { listOutboundContent } from "@/lib/client";
 import type { EmailCampaign, LeadForm, OutboundContent } from "@/lib/client";
 import type { BusinessPulse } from "./hooks/use-marketing";
 
 type ContentTab = "create" | "calendar" | "audience" | "studio";
-type CreateSubmode = "compose" | "campaigns" | "posts" | "scheduled";
+type CreateSubmode = "compose" | "campaigns" | "posts" | "scheduled" | "history";
 
 const TABS: { key: ContentTab; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "create", label: "Create & Schedule", icon: PenSquare, tooltip: "Compose content, manage campaigns and posts, and schedule delivery." },
@@ -76,6 +77,7 @@ const CREATE_SUBMODES: { key: CreateSubmode; label: string; icon: React.ElementT
   { key: "campaigns", label: "Campaigns", icon: Mail },
   { key: "posts", label: "Posts", icon: LayoutList },
   { key: "scheduled", label: "Scheduled", icon: Clock },
+  { key: "history", label: "History", icon: Send },
 ];
 
 const LEGACY_TAB_MAP: Record<string, ContentTab> = {
@@ -903,6 +905,10 @@ export default function ContentPage() {
                       </div>
                     )}
                   </div>
+                )}
+
+                {createSubmode === "history" && mk.businessId && (
+                  <OutboundHistory businessId={mk.businessId} refreshTrigger={mk.dataVersion} />
                 )}
               </div>
             )}
