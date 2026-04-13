@@ -42,6 +42,7 @@ import { OnboardingConciergeModule } from './modules/onboarding-concierge/onboar
 import { DocumentsModule } from './modules/documents/documents.module';
 import { GoogleDriveModule } from './modules/google-drive/google-drive.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
+import { CommunicationsModule } from './modules/communications/communications.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
     DocumentsModule,
     GoogleDriveModule,
     DiagnosticsModule,
+    CommunicationsModule,
   ],
   controllers: [AppController],
   providers: [

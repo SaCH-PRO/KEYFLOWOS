@@ -54,6 +54,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
 - **Security: PublicRateLimitGuard:** Reusable rate-limiting guard applied to all unauthenticated endpoints.
 - **KeyflowOS Store Quick-Access:** Global sidebar icon with slide-out drawer showing 3-tier Business Progression System (Build, Grow, Scale).
+- **Communications Delivery Engine (Mission 1 — Task #74/#75):** Unified outbound publishing system with 6 Prisma models (ChannelConnection → ChannelDestination → OutboundContent → OutboundVariant → OutboundDelivery → DeliveryEvent). Adapter-based architecture with `AdapterRegistryService` resolving META (Facebook Page + Instagram Business via MetaAdapter) and GOOGLE (Gmail via EmailAdapter) providers. `DeliveryQueueService` polls every 30s for due deliveries, executes through adapters, records `DeliveryEvent` audit trail, and supports exponential backoff retry (60s × 2^retryCount). Full REST API at `/communications/` for connections, destinations, content, variants, publish-now, schedule, reschedule, cancel, retry, and delivery summary. Event bus integration emits `content.published`, `content.failed`, `delivery.completed`, `delivery.failed`. Status lifecycle: Draft → Scheduled → Queued → Sending → Published/Failed → RetryPending.
 
 ## External Dependencies
 - **Database:** PostgreSQL
