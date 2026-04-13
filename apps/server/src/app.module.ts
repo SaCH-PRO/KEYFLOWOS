@@ -36,6 +36,7 @@ import { TemplatesModule } from './modules/templates/templates.module';
 import { EducationModule } from './modules/education/education.module';
 import { CommunityModule } from './modules/community/community.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
+import { SupplierModule } from './modules/supplier/supplier.module';
 import { MomentumModule } from './modules/momentum/momentum.module';
 import { SeedModule } from './core/seed/seed.module';
 import { OnboardingConciergeModule } from './modules/onboarding-concierge/onboarding-concierge.module';
@@ -80,6 +81,7 @@ import { CommunicationsModule } from './modules/communications/communications.mo
     EducationModule,
     CommunityModule,
     MarketplaceModule,
+    SupplierModule,
     MomentumModule,
     SeedModule,
     OnboardingConciergeModule,

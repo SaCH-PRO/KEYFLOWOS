@@ -171,6 +171,9 @@ model Business {
   channelConnections   ChannelConnection[]
   outboundContent      OutboundContent[]
 
+  // Mission 2: Supplier connections
+  supplierConnections  SupplierConnection[]
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -496,6 +499,11 @@ model Product {
   sku         String?  // Stock keeping unit
   isActive    Boolean  @default(true) @map("is_active")
 
+  // Mission 2: Fulfillment & inventory extensions
+  fulfillmentModel  String?  @map("fulfillment_model")   // local_stock, dropship, preorder, manual, hybrid
+  inventoryMode     String?  @map("inventory_mode")      // tracked, untracked, virtual
+  compareAtPrice    Float?   @map("compare_at_price")
+
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -507,6 +515,11 @@ model Product {
   inventoryStocks InventoryStock[]
   preOrders       PreOrder[]
   orderItems      MarketplaceOrderItem[]
+  variants        ProductVariant[]
+  sourceLinks     ProductSourceLink[]
+  costProfile     ProductCostProfile?
+  marginSnapshots MarginSnapshot[]
+  fulfillmentRoutes FulfillmentRoute[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -1745,6 +1758,9 @@ model MarketplaceListing {
   maxOrderQty     Int?     @map("max_order_qty")
   leadTimeDays    Int?     @map("lead_time_days")
 
+  // Mission 2: Fulfillment strategy
+  fulfillmentStrategy String? @default("local_stock") @map("fulfillment_strategy") // local_stock, dropship, preorder, manual, hybrid
+
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -1995,10 +2011,15 @@ model PurchaseOrder {
   poNumber    String   @unique @map("po_number")
   status      String   @default("DRAFT")
 
+  // Legacy string fields kept for backward compat
   supplierName  String  @map("supplier_name")
   supplierEmail String? @map("supplier_email")
   supplierPhone String? @map("supplier_phone")
   supplierCountry String? @map("supplier_country")
+
+  // Mission 2: Link to structured SupplierConnection
+  supplierConnectionId String?           @map("supplier_connection_id")
+  supplierConnection   SupplierConnection? @relation(fields: [supplierConnectionId], references: [id])
 
   items       Json
   subtotal    Float    @default(0)
@@ -2016,6 +2037,7 @@ model PurchaseOrder {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@index([businessId])
+  @@index([supplierConnectionId])
   @@map("purchase_orders")
 }
 
@@ -3135,4 +3157,199 @@ model FlowSession {
   @@index([businessId])
   @@index([businessId, updatedAt])
   @@map("flow_sessions")
+}
+
+// ---
+// MODULE: MISSION 2 — COMMERCE DATA LAYER & SUPPLIER ARCHITECTURE
+// ---
+
+model SupplierConnection {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  providerType  String  @map("provider_type")  // e.g. aliexpress, shopify, custom_api, manual
+  displayName   String  @map("display_name")
+  credentials   Json?                           // encrypted JSON — API keys, tokens, etc.
+  accountMeta   Json?   @map("account_meta")    // metadata: account id, region, etc.
+
+  connectionHealth  String   @default("unknown") @map("connection_health") // healthy, degraded, error, unknown
+  syncCapabilities  String[] @map("sync_capabilities")                      // catalog, orders, inventory, tracking
+  lastSyncAt        DateTime? @map("last_sync_at")
+  isActive          Boolean   @default(true) @map("is_active")
+
+  supplierProducts SupplierProduct[]
+  purchaseOrders   PurchaseOrder[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, providerType])
+  @@map("supplier_connections")
+}
+
+model SupplierProduct {
+  id                   String             @id @default(cuid())
+  supplierConnectionId String             @map("supplier_connection_id")
+  supplierConnection   SupplierConnection @relation(fields: [supplierConnectionId], references: [id], onDelete: Cascade)
+
+  externalId    String  @map("external_id")   // supplier's own product ID
+  rawData       Json    @map("raw_data")       // full raw response from supplier API
+
+  normalizedTitle       String?  @map("normalized_title")
+  normalizedDescription String?  @map("normalized_description")
+  normalizedPrice       Float?   @map("normalized_price")
+  normalizedImages      String[] @map("normalized_images")
+
+  availability  String  @default("unknown")  // in_stock, out_of_stock, limited, unknown
+  leadTimeDays  Int?    @map("lead_time_days")
+  currency      String  @default("TTD")
+
+  variants     SupplierVariant[]
+  sourceLinks  ProductSourceLink[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@unique([supplierConnectionId, externalId])
+  @@index([supplierConnectionId])
+  @@map("supplier_products")
+}
+
+model SupplierVariant {
+  id                String          @id @default(cuid())
+  supplierProductId String          @map("supplier_product_id")
+  supplierProduct   SupplierProduct @relation(fields: [supplierProductId], references: [id], onDelete: Cascade)
+
+  externalVariantId String?  @map("external_variant_id")
+  attributes        Json     // e.g. { color: "red", size: "M" }
+  sku               String?
+  price             Float?
+  availability      String   @default("unknown") // in_stock, out_of_stock, limited, unknown
+  stockQty          Int?     @map("stock_qty")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([supplierProductId])
+  @@map("supplier_variants")
+}
+
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  attributes  Json            // e.g. { color: "red", size: "M" }
+  sku         String?
+  priceOverride Float?        @map("price_override")
+  imageUrl    String?         @map("image_url")
+
+  trackStock  Boolean @default(false) @map("track_stock")
+  stockQty    Int     @default(0)     @map("stock_qty")
+  reservedQty Int     @default(0)     @map("reserved_qty")
+
+  isActive  Boolean  @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model ProductSourceLink {
+  id                String          @id @default(cuid())
+  productId         String          @map("product_id")
+  product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplierProductId String          @map("supplier_product_id")
+  supplierProduct   SupplierProduct @relation(fields: [supplierProductId], references: [id], onDelete: Cascade)
+
+  sourceCost         Float?   @map("source_cost")
+  leadTimeDays       Int?     @map("lead_time_days")
+  moq                Int      @default(1)           // minimum order quantity
+  shippingAssumptions Json?   @map("shipping_assumptions")
+  availabilityState  String   @default("available") @map("availability_state") // available, unavailable, limited
+  priority           Int      @default(1)            // lower = higher priority
+
+  isActive  Boolean  @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([productId])
+  @@index([supplierProductId])
+  @@map("product_source_links")
+}
+
+model ProductCostProfile {
+  id        String  @id @default(cuid())
+  productId String  @unique @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  sourceCost          Float   @default(0) @map("source_cost")
+  shippingEstimate    Float   @default(0) @map("shipping_estimate")
+  dutiesEstimate      Float   @default(0) @map("duties_estimate")
+  packagingCost       Float   @default(0) @map("packaging_cost")
+  transactionCost     Float   @default(0) @map("transaction_cost")
+  landedCostEstimate  Float   @default(0) @map("landed_cost_estimate")
+  grossMargin         Float?  @map("gross_margin")   // as percentage
+  marginBand          String? @map("margin_band")    // low, medium, high, premium
+
+  currency    String @default("TTD")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@map("product_cost_profiles")
+}
+
+model MarginSnapshot {
+  id        String  @id @default(cuid())
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  sourceCost         Float  @map("source_cost")
+  sellingPrice       Float  @map("selling_price")
+  landedCostEstimate Float  @map("landed_cost_estimate")
+  grossMargin        Float  @map("gross_margin")
+  marginBand         String @map("margin_band")
+  currency           String @default("TTD")
+  snapshotReason     String? @map("snapshot_reason") // e.g. price_change, cost_update, manual
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([productId])
+  @@index([productId, createdAt])
+  @@map("margin_snapshots")
+}
+
+model FulfillmentRoute {
+  id        String  @id @default(cuid())
+  productId String? @map("product_id")
+  product   Product? @relation(fields: [productId], references: [id])
+
+  orderId        String? @map("order_id")
+  orderLineId    String? @map("order_line_id")
+
+  fulfillmentModel String  @map("fulfillment_model") // local_stock, dropship, preorder, manual, hybrid
+  sourceSupplier   String? @map("source_supplier")
+  warehouse        String?
+
+  leadTimeDays  Int?    @map("lead_time_days")
+  shippingMethod String? @map("shipping_method")
+  trackingState  String? @map("tracking_state")  // pending, shipped, in_transit, delivered, failed
+  status         String  @default("pending")      // pending, processing, shipped, delivered, cancelled
+
+  fallbackLogic  Json?  @map("fallback_logic")   // JSON describing fallback rules
+  costSnapshot   Json?  @map("cost_snapshot")    // snapshot of costs at fulfillment time
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([status])
+  @@map("fulfillment_routes")
 }
