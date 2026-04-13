@@ -169,14 +169,14 @@ export const REPORTS_WALKTHROUGH: WalkthroughStep[] = [
 export const PROJECTS_WALKTHROUGH: WalkthroughStep[] = [
   {
     target: "[data-walkthrough='projects-board']",
-    title: "Kanban Project Board",
-    description: "Organize projects in columns: Active, In Progress, Completed, and On Hold. Drag cards between columns to update status.",
+    title: "Getting Started with Projects",
+    description: "Your delivery execution workspace. Projects flow through six stages — Not Started, In Progress, Waiting on Client, Review, Blocked, and Completed — giving you full visibility into every engagement.",
     icon: FolderKanban,
   },
   {
     target: "[data-walkthrough='projects-tasks']",
-    title: "Task Management",
-    description: "Each project contains a task list. Check off tasks as you complete them and track progress with the progress bar.",
+    title: "Task & Milestone Tracking",
+    description: "Each project has tasks, milestones, notes, and deliverables. Click a project card to open its 10-tab detail workspace with risk detection and recommended actions.",
     icon: Target,
   },
 ];
