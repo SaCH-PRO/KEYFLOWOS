@@ -9,9 +9,20 @@ type StoreCustomData = {
   testimonials?: unknown[];
   storeEnabled?: boolean;
   hasHeroImage?: boolean;
+  hasHeroHeadline?: boolean;
+  hasHeroCta?: boolean;
   hasLogo?: boolean;
   hoursConfigured?: boolean;
   storeName?: string;
+  businessDescription?: string;
+  businessTagline?: string;
+  industryHint?: string;
+  primaryColor?: string;
+  hasMetaTitle?: boolean;
+  hasMetaDescription?: boolean;
+  hasPolicies?: boolean;
+  hasFaq?: boolean;
+  activeDeliveryCount?: number;
 };
 
 async function generateStoreSuggestions(context: ModuleContext): Promise<AiSuggestion[]> {
@@ -26,18 +37,25 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   const testimonials = (data.testimonials ?? []) as unknown[];
   const storeEnabled = data.storeEnabled ?? false;
   const hasHeroImage = data.hasHeroImage ?? false;
+  const hasHeroHeadline = data.hasHeroHeadline ?? false;
+  const hasHeroCta = data.hasHeroCta ?? false;
   const hasLogo = data.hasLogo ?? false;
   const hoursConfigured = data.hoursConfigured ?? false;
+  const hasMetaTitle = data.hasMetaTitle ?? false;
+  const hasMetaDescription = data.hasMetaDescription ?? false;
+  const hasPolicies = data.hasPolicies ?? false;
+  const hasFaq = data.hasFaq ?? false;
+  const activeDeliveryCount = data.activeDeliveryCount ?? 0;
 
   if (!storeEnabled) {
     suggestions.push({
       id: `store-offline-${Date.now()}`,
       type: "warning",
       title: "Store is Offline",
-      description: "Your storefront is currently in draft mode. Toggle it live so customers can find you.",
+      description: "Your storefront is in draft mode. Customers cannot find or access it. Go to Launch to publish.",
       priority: "high",
-      actionLabel: "Go to Storefront",
-      actionKey: "switch_tab:storefront",
+      actionLabel: "Go to Launch",
+      actionKey: "switch_tab:launch",
     });
   }
 
@@ -46,10 +64,22 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       id: `no-catalog-${Date.now()}`,
       type: "warning",
       title: "Empty Catalog",
-      description: "Your store has no products or services listed. Add items so visitors have something to browse.",
+      description: "Your store has no products or services. Add items so visitors have something to browse and purchase.",
       priority: "high",
-      actionLabel: "Add products",
-      actionKey: "switch_tab:products",
+      actionLabel: "Add items",
+      actionKey: "switch_tab:catalog",
+    });
+  }
+
+  if (!hasHeroHeadline || !hasHeroCta) {
+    suggestions.push({
+      id: `weak-hero-${Date.now()}`,
+      type: "warning",
+      title: "Weak Hero Section",
+      description: "Missing headline or CTA in your hero. AI can generate compelling copy for you in the Design tab.",
+      priority: "high",
+      actionLabel: "Generate hero copy",
+      actionKey: "tool:hero-copy-generator",
     });
   }
 
@@ -58,10 +88,10 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       id: `no-hero-${Date.now()}`,
       type: "insight",
       title: "Missing Hero Image",
-      description: "Stores with a hero banner image see up to 40% higher engagement. Upload one in Customize.",
+      description: "Stores with a hero banner see up to 40% higher engagement. Upload one in the Design tab.",
       priority: "medium",
-      actionLabel: "Customize store",
-      actionKey: "switch_tab:storefront",
+      actionLabel: "Customize design",
+      actionKey: "switch_tab:design",
     });
   }
 
@@ -70,10 +100,10 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       id: `no-logo-${Date.now()}`,
       type: "insight",
       title: "No Logo Uploaded",
-      description: "A branded logo builds trust and recognition. Add one in your store settings.",
+      description: "A branded logo builds trust and recognition. Add one in the Design tab.",
       priority: "medium",
-      actionLabel: "Go to storefront",
-      actionKey: "switch_tab:storefront",
+      actionLabel: "Go to design",
+      actionKey: "switch_tab:design",
     });
   }
 
@@ -82,10 +112,10 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       id: `low-testimonials-${Date.now()}`,
       type: "insight",
       title: "Low Social Proof",
-      description: `You only have ${testimonials.length} testimonial${testimonials.length !== 1 ? "s" : ""}. Adding more social proof can boost conversions by up to 30%.`,
+      description: `Only ${testimonials.length} testimonial${testimonials.length !== 1 ? "s" : ""}. Aim for 3+ to boost conversions by up to 30%.`,
       priority: "medium",
-      actionLabel: "Manage testimonials",
-      actionKey: "switch_tab:storefront",
+      actionLabel: "Add testimonials",
+      actionKey: "switch_tab:merchandising",
     });
   }
 
@@ -97,43 +127,106 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       description: "Setting your hours helps customers know when you're available and improves local SEO.",
       priority: "medium",
       actionLabel: "Set hours",
-      actionKey: "switch_tab:products",
+      actionKey: "switch_tab:operations",
     });
   }
 
-  if (activeView === "performance") {
+  if (!hasPolicies) {
     suggestions.push({
-      id: `optimizer-tip-${Date.now()}`,
-      type: "tip",
-      title: "Store Optimizer",
-      description: "Run the AI Store Optimizer to get a comprehensive audit of your storefront with actionable improvement steps.",
-      priority: "low",
-      actionLabel: "Run optimizer",
-      actionKey: "tool:store-optimizer",
+      id: `no-policies-${Date.now()}`,
+      type: "insight",
+      title: "No Store Policies",
+      description: "Refund and privacy policies are top trust signals. AI can draft them for you.",
+      priority: "medium",
+      actionLabel: "Generate policies",
+      actionKey: "tool:policy-generator",
     });
   }
 
-  if (activeView === "storefront") {
+  if (!hasMetaTitle || !hasMetaDescription) {
     suggestions.push({
-      id: `seo-tip-${Date.now()}`,
-      type: "tip",
-      title: "SEO Advisor",
-      description: "Get AI-powered SEO recommendations to improve your storefront's discoverability.",
+      id: `no-seo-${Date.now()}`,
+      type: "insight",
+      title: "SEO Not Configured",
+      description: "Missing meta title or description hurts search visibility. AI can generate optimized copy.",
       priority: "low",
-      actionLabel: "Get SEO advice",
-      actionKey: "tool:seo-advisor",
+      actionLabel: "Generate SEO",
+      actionKey: "tool:seo-generator",
     });
   }
 
-  if (activeView === "products") {
+  if (activeDeliveryCount === 0 && (products.length + services.length) > 0) {
     suggestions.push({
-      id: `pricing-tip-${Date.now()}`,
+      id: `no-delivery-${Date.now()}`,
+      type: "warning",
+      title: "No Delivery Method Configured",
+      description: "Customers can't complete purchases without knowing how orders are fulfilled.",
+      priority: "high",
+      actionLabel: "Configure delivery",
+      actionKey: "switch_tab:operations",
+    });
+  }
+
+  if (activeView === "design") {
+    suggestions.push({
+      id: `ai-hero-${Date.now()}`,
       type: "tip",
-      title: "Pricing Advisor",
-      description: "AI can analyze your product pricing and suggest competitive adjustments.",
+      title: "AI Hero Copy",
+      description: "Let AI write your headline, subheadline, offer ribbon, and CTA based on your business.",
       priority: "low",
-      actionLabel: "Analyze pricing",
-      actionKey: "tool:pricing-advisor",
+      actionLabel: "Generate hero copy",
+      actionKey: "tool:hero-copy-generator",
+    });
+    suggestions.push({
+      id: `storefront-model-${Date.now()}`,
+      type: "tip",
+      title: "Storefront Model Advisor",
+      description: "Get a personalized recommendation for the best storefront theme and layout for your business type.",
+      priority: "low",
+      actionLabel: "Get recommendation",
+      actionKey: "tool:storefront-model-advisor",
+    });
+  }
+
+  if (activeView === "merchandising") {
+    suggestions.push({
+      id: `faq-gen-${Date.now()}`,
+      type: "tip",
+      title: "Generate FAQ Content",
+      description: "AI can generate relevant FAQ entries based on your products, services, and business type.",
+      priority: "low",
+      actionLabel: "Generate FAQ",
+      actionKey: "tool:faq-generator",
+    });
+    suggestions.push({
+      id: `seo-gen-${Date.now()}`,
+      type: "tip",
+      title: "Generate SEO Metadata",
+      description: "AI will craft an optimized meta title, description, and keyword strategy for your store.",
+      priority: "low",
+      actionLabel: "Generate SEO",
+      actionKey: "tool:seo-generator",
+    });
+    suggestions.push({
+      id: `featured-gen-${Date.now()}`,
+      type: "tip",
+      title: "Featured Products Advisor",
+      description: "AI will recommend which products to feature based on demand signals and launch goals.",
+      priority: "low",
+      actionLabel: "Get recommendations",
+      actionKey: "tool:featured-products-advisor",
+    });
+  }
+
+  if (activeView === "launch") {
+    suggestions.push({
+      id: `launch-campaign-${Date.now()}`,
+      type: "tip",
+      title: "Launch Campaign Generator",
+      description: "Generate social posts, WhatsApp messages, and email copy to announce your store launch.",
+      priority: "low",
+      actionLabel: "Generate campaign",
+      actionKey: "tool:launch-campaign-generator",
     });
   }
 
@@ -153,6 +246,491 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
 function buildStoreTools(): AiTool[] {
   return [
     {
+      id: "hero-copy-generator",
+      name: "Hero Copy Generator",
+      description: "Generate a compelling hero headline, subheadline, offer ribbon text, and CTA for your storefront.",
+      icon: "analysis",
+      category: "generate",
+      requiresSelection: false,
+      creditCost: 2,
+      execute: async (ctx) => {
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const storeName = d.storeName || "Your Store";
+        const products = (d.products ?? []) as Record<string, unknown>[];
+        const services = (d.services ?? []) as Record<string, unknown>[];
+        const tagline = d.businessTagline || "";
+        const description = d.businessDescription || "";
+        const totalItems = products.length + services.length;
+
+        const categories = [...new Set([
+          ...products.map((p) => p.category as string).filter(Boolean),
+          ...services.map((s) => (s.category as string) || "Service").filter(Boolean),
+        ])].slice(0, 3);
+
+        const categoryStr = categories.length > 0 ? categories.join(", ") : "products and services";
+
+        const headlines = [
+          `${storeName} — ${tagline || "Where Quality Meets Convenience"}`,
+          `Discover ${categoryStr} from ${storeName}`,
+          `Your go-to for ${categoryStr}`,
+        ];
+        const subheadlines = [
+          description || `Browse ${totalItems} curated ${categoryStr}. Book or buy online in seconds.`,
+          `${totalItems > 0 ? `${totalItems} items` : "Everything you need"} — available online, anytime.`,
+          `Premium ${categoryStr} delivered to you. No fuss, just results.`,
+        ];
+        const offerRibbons = [
+          "🎉 Now Open Online — Shop Today",
+          "✨ New Arrivals Just Added",
+          "🔥 Limited Time: Free Consultation on First Order",
+        ];
+        const ctas = [
+          "Shop Now",
+          "Book Today",
+          "Explore Collection",
+          "Get Started",
+        ];
+
+        return {
+          summary: `Generated ${headlines.length} headline options, ${subheadlines.length} subheadlines, ${offerRibbons.length} ribbon options, and ${ctas.length} CTAs for ${storeName}.`,
+          headlines,
+          subheadlines,
+          offerRibbons,
+          ctas,
+          recommendation: {
+            headline: headlines[0],
+            subheadline: subheadlines[0],
+            offerRibbon: offerRibbons[0],
+            cta: ctas[0],
+          },
+          tip: "Use the recommended combination for maximum impact, or mix and match from the options above. Update these in Design → Appearance → Hero section.",
+        };
+      },
+    },
+    {
+      id: "storefront-model-advisor",
+      name: "Storefront Model Advisor",
+      description: "Get a personalized theme, layout, and storefront model recommendation based on your business type and catalog.",
+      icon: "detect",
+      category: "analyze",
+      requiresSelection: false,
+      creditCost: 1,
+      execute: async (ctx) => {
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d.products ?? []) as Record<string, unknown>[];
+        const services = (d.services ?? []) as Record<string, unknown>[];
+        const storeName = d.storeName || "Your Store";
+
+        const serviceCount = services.length;
+        const productCount = products.length;
+        const totalItems = serviceCount + productCount;
+
+        const isServiceHeavy = serviceCount > productCount;
+        const hasMultipleCategories = new Set([
+          ...products.map((p) => p.category as string).filter(Boolean),
+          ...services.map((s) => (s.category as string)).filter(Boolean),
+        ]).size > 2;
+
+        let modelType = "hybrid";
+        let modelDescription = "";
+        let themeRecommendation = "default";
+        let themeReason = "";
+        let layoutTips: string[] = [];
+
+        if (totalItems === 0) {
+          modelType = "not-configured";
+          modelDescription = "Add products or services first to get a storefront model recommendation.";
+        } else if (isServiceHeavy && serviceCount >= 3) {
+          modelType = "service-booking";
+          modelDescription = `With ${serviceCount} services, your store is best positioned as a service booking platform. Customers browse services and book directly.`;
+          themeRecommendation = "elegant";
+          themeReason = "The Elegant theme conveys professionalism and trust — ideal for service businesses.";
+          layoutTips = [
+            "Place your top 3 services in the Featured section",
+            "Add testimonials prominently — service buyers rely heavily on social proof",
+            "Ensure your business hours are visible — customers want to know availability",
+            "Include a clear CTA like 'Book a Consultation' or 'Schedule Now'",
+          ];
+        } else if (productCount >= 5 && hasMultipleCategories) {
+          modelType = "retail-catalog";
+          modelDescription = `With ${productCount} products across multiple categories, your store is a full retail catalog. Category navigation is critical.`;
+          themeRecommendation = "bold";
+          themeReason = "The Bold theme uses strong visual hierarchy perfect for product-first retail stores.";
+          layoutTips = [
+            "Enable the Categories section for easy navigation",
+            "Feature your bestsellers or new arrivals prominently",
+            "Add a promotional banner to highlight limited-time offers",
+            "Ensure product images are high quality — visual products need great imagery",
+          ];
+        } else if (productCount > 0 && serviceCount > 0) {
+          modelType = "hybrid";
+          modelDescription = "Your store mixes products and services — a hybrid model that requires clear section organization.";
+          themeRecommendation = "fresh";
+          themeReason = "The Fresh theme's clean, modern aesthetic works well for hybrid service/product stores.";
+          layoutTips = [
+            "Separate services and products clearly in your catalog",
+            "Consider featuring one of each type in your hero section",
+            "Use a ribbon to announce what's new or what's popular",
+            "FAQ section can address common questions about both product orders and service bookings",
+          ];
+        } else {
+          modelType = "boutique";
+          modelDescription = "A small, curated catalog suggests a boutique approach — focus on quality over quantity.";
+          themeRecommendation = "minimal";
+          themeReason = "The Minimal theme's clean aesthetic positions small catalogs as premium and curated.";
+          layoutTips = [
+            "Focus on storytelling in your hero section — quality items need context",
+            "Add detailed descriptions to each item",
+            "Gather and display testimonials — social proof matters more for boutique stores",
+          ];
+        }
+
+        return {
+          summary: `Storefront model recommendation for "${storeName}": ${modelType.replace("-", " ").replace(/\b\w/g, (c) => c.toUpperCase())}.`,
+          modelType,
+          modelDescription,
+          themeRecommendation,
+          themeReason,
+          layoutTips,
+          catalogStats: { serviceCount, productCount, totalItems },
+        };
+      },
+    },
+    {
+      id: "featured-products-advisor",
+      name: "Featured Products Advisor",
+      description: "Recommend which products or services to feature based on demand, variety, and launch goals.",
+      icon: "score",
+      category: "analyze",
+      requiresSelection: false,
+      creditCost: 1,
+      execute: async (ctx) => {
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d.products ?? []) as Record<string, unknown>[];
+        const services = (d.services ?? []) as Record<string, unknown>[];
+
+        type CatalogItem = Record<string, unknown> & { _type: string };
+        const allItems: CatalogItem[] = [
+          ...products.map((p) => ({ ...p, _type: "product" } as CatalogItem)),
+          ...services.map((s) => ({ ...s, _type: "service" } as CatalogItem)),
+        ];
+
+        if (allItems.length === 0) {
+          return {
+            summary: "No items found. Add products or services first to get featured item recommendations.",
+            recommendations: [],
+          };
+        }
+
+        const pricedItems = allItems.filter((i) => i["price"] && (i["price"] as number) > 0);
+        const prices = pricedItems.map((i) => i["price"] as number);
+        const avgPrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : 0;
+
+        const recommendations: { id: string; name: string; reason: string; priority: string; badge?: string }[] = [];
+
+        const highValue = pricedItems.filter((i) => (i["price"] as number) >= avgPrice * 1.2).slice(0, 2);
+        for (const item of highValue) {
+          recommendations.push({
+            id: item["id"] as string,
+            name: item["name"] as string,
+            reason: `Premium pricing ($${(item["price"] as number).toFixed(2)}) — feature it as your anchor product to anchor the price perception of cheaper items.`,
+            priority: "high",
+            badge: "Premium",
+          });
+        }
+
+        const withImages = allItems.filter((i) => i["imageUrl"]).slice(0, 2);
+        for (const item of withImages) {
+          if (!recommendations.find((r) => r.id === (item["id"] as string))) {
+            recommendations.push({
+              id: item["id"] as string,
+              name: item["name"] as string,
+              reason: "Has a product image — visual items perform significantly better in Featured sections.",
+              priority: "medium",
+              badge: "Visual",
+            });
+          }
+        }
+
+        const withDesc = allItems.filter((i) => i["description"] && (i["description"] as string).length > 50).slice(0, 2);
+        for (const item of withDesc) {
+          if (!recommendations.find((r) => r.id === (item["id"] as string))) {
+            recommendations.push({
+              id: item["id"] as string,
+              name: item["name"] as string,
+              reason: "Has a detailed description — well-described items convert better when featured.",
+              priority: "low",
+              badge: "Well Described",
+            });
+          }
+        }
+
+        if (recommendations.length === 0 && allItems.length > 0) {
+          const first = allItems.slice(0, 3);
+          for (const item of first) {
+            recommendations.push({
+              id: item["id"] as string,
+              name: item["name"] as string,
+              reason: "Consider adding images and descriptions to maximize featured item impact.",
+              priority: "low",
+            });
+          }
+        }
+
+        return {
+          summary: `Analyzed ${allItems.length} catalog items. ${recommendations.length} featured item recommendation${recommendations.length !== 1 ? "s" : ""} generated.`,
+          recommendations: recommendations.slice(0, 4),
+          tip: "Featured items appear prominently at the top of your storefront. Choose items that represent your brand best and have the strongest visual appeal.",
+          totalItems: allItems.length,
+        };
+      },
+    },
+    {
+      id: "faq-generator",
+      name: "FAQ Generator",
+      description: "Generate relevant FAQ entries based on your products, services, policies, and business type.",
+      icon: "analysis",
+      category: "generate",
+      requiresSelection: false,
+      creditCost: 2,
+      execute: async (ctx) => {
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d.products ?? []) as Record<string, unknown>[];
+        const services = (d.services ?? []) as Record<string, unknown>[];
+        const storeName = d.storeName || "Your Store";
+        const activeDelivery = d.activeDeliveryCount ?? 0;
+
+        const faqs: { question: string; answer: string; category: string }[] = [];
+
+        if (services.length > 0) {
+          faqs.push({
+            question: "How do I book a service?",
+            answer: `Booking is easy — browse our services on the storefront, select the one you want, and click "Book Now". You'll be guided through selecting your preferred time and completing the booking.`,
+            category: "Bookings",
+          });
+          faqs.push({
+            question: "Can I reschedule or cancel my booking?",
+            answer: "Yes, you can reschedule or cancel your booking up to 24 hours before your appointment. Please contact us directly for last-minute changes.",
+            category: "Bookings",
+          });
+        }
+
+        if (products.length > 0) {
+          faqs.push({
+            question: "What payment methods do you accept?",
+            answer: "We accept all major credit and debit cards, as well as online payment methods. Payment is processed securely at checkout.",
+            category: "Payments",
+          });
+        }
+
+        if (activeDelivery > 0) {
+          faqs.push({
+            question: "How long does delivery take?",
+            answer: "Delivery times vary by location and method. Standard delivery typically takes 3-5 business days. Express options may be available at checkout.",
+            category: "Delivery",
+          });
+          faqs.push({
+            question: "Do you offer local pickup?",
+            answer: "Yes, local pickup is available. Select this option at checkout and we'll let you know when your order is ready.",
+            category: "Delivery",
+          });
+        }
+
+        faqs.push({
+          question: `What makes ${storeName} different?`,
+          answer: `We pride ourselves on quality and customer satisfaction. Every item in our catalog is carefully selected and we're committed to providing an excellent experience from browsing to delivery.`,
+          category: "About",
+        });
+
+        faqs.push({
+          question: "How can I contact you?",
+          answer: "You can reach us through the contact section on our storefront, or message us directly via the contact details listed on our page. We typically respond within 1 business day.",
+          category: "Support",
+        });
+
+        faqs.push({
+          question: "What is your refund policy?",
+          answer: "We offer refunds within 7 days of purchase for items in their original condition. Services can be cancelled up to 24 hours before the scheduled time. Please contact us to initiate a refund.",
+          category: "Refunds",
+        });
+
+        return {
+          summary: `Generated ${faqs.length} FAQ entries for "${storeName}" covering bookings, payments, delivery, and support.`,
+          faqs,
+          instruction: "Copy these FAQs into your FAQ Manager in the Merchandising tab. You can edit and customize each answer to match your specific policies.",
+        };
+      },
+    },
+    {
+      id: "seo-generator",
+      name: "SEO Metadata Generator",
+      description: "Generate an optimized meta title, meta description, and keyword strategy for your storefront.",
+      icon: "detect",
+      category: "generate",
+      requiresSelection: false,
+      creditCost: 1,
+      execute: async (ctx) => {
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d.products ?? []) as Record<string, unknown>[];
+        const services = (d.services ?? []) as Record<string, unknown>[];
+        const storeName = d.storeName || "Your Store";
+        const tagline = d.businessTagline || "";
+
+        const categories = [...new Set([
+          ...products.map((p) => p.category as string).filter(Boolean),
+          ...services.map((s) => (s.category as string)).filter(Boolean),
+        ])].slice(0, 3);
+
+        const primaryCategory = categories[0] || "Products & Services";
+        const totalItems = products.length + services.length;
+
+        const metaTitleOptions = [
+          `${storeName} — ${primaryCategory} Online`,
+          `${storeName} | Shop ${primaryCategory}`,
+          tagline ? `${storeName} — ${tagline}` : `${storeName} | ${totalItems > 0 ? `${totalItems} Items` : primaryCategory}`,
+        ].map((t) => t.slice(0, 60));
+
+        const metaDescOptions = [
+          `Browse ${totalItems > 0 ? totalItems : ""} ${primaryCategory} at ${storeName}. Book online, buy instantly, delivered to you.`.slice(0, 160),
+          `${storeName} offers ${categories.join(", ") || primaryCategory}. Discover our catalog and order online today.`.slice(0, 160),
+          `Shop ${primaryCategory} from ${storeName}. ${tagline || "Quality products and services available online."}`.slice(0, 160),
+        ];
+
+        const keywords = [
+          storeName.toLowerCase(),
+          ...categories.map((c) => c.toLowerCase()),
+          "buy online",
+          "book online",
+          "local business",
+        ];
+
+        const issues: { field: string; issue: string; suggestion: string }[] = [];
+        if (products.some((p) => !p.description)) {
+          issues.push({ field: "Product Descriptions", issue: "Some products lack descriptions", suggestion: "Add at least 2 sentences per product for better indexing." });
+        }
+        if (!d.hasHeroImage) {
+          issues.push({ field: "Hero Image", issue: "No OG image set for social sharing", suggestion: "Upload a 1200×630px image to improve social share previews." });
+        }
+
+        return {
+          summary: `Generated SEO metadata for "${storeName}" targeting "${primaryCategory}".`,
+          metaTitleOptions,
+          metaDescOptions,
+          recommendation: {
+            metaTitle: metaTitleOptions[0],
+            metaDescription: metaDescOptions[0],
+          },
+          keywords,
+          issues,
+          instruction: "Apply the recommended meta title and description in Merchandising → SEO section. Choose options that best describe your business.",
+        };
+      },
+    },
+    {
+      id: "trust-copy-generator",
+      name: "Trust Copy Generator",
+      description: "Generate trust badges, guarantee copy, and social proof language to add to your storefront.",
+      icon: "analysis",
+      category: "generate",
+      requiresSelection: false,
+      creditCost: 1,
+      execute: async (ctx) => {
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const storeName = d.storeName || "Your Store";
+        const testimonials = (d.testimonials ?? []) as unknown[];
+
+        const guarantees = [
+          "✅ 100% Satisfaction Guarantee",
+          "🔒 Secure, Encrypted Checkout",
+          "⚡ Fast, Reliable Service",
+          "💬 Real Human Support",
+        ];
+
+        const trustBadges = [
+          "Verified Business",
+          "5-Star Rated",
+          `${testimonials.length > 0 ? `${testimonials.length}+ Happy Customers` : "Trusted by Customers"}`,
+          "Secure Payments",
+        ];
+
+        const socialProofCopy = [
+          testimonials.length > 0
+            ? `Join ${testimonials.length}+ satisfied customers who trust ${storeName}.`
+            : `Join our growing community of satisfied customers.`,
+          `Trusted by customers across the region. See what they're saying below.`,
+          `Real results, real reviews — see why customers keep coming back.`,
+        ];
+
+        const aboutCopy = `${storeName} is committed to delivering quality ${d.businessDescription ? "— " + d.businessDescription : "products and services"}. Every order is backed by our satisfaction guarantee.`;
+
+        return {
+          summary: `Generated trust copy, guarantee statements, and social proof language for "${storeName}".`,
+          guarantees,
+          trustBadges,
+          socialProofCopy,
+          aboutCopy,
+          instruction: "Add guarantee copy to your hero ribbon, trust badges in your description, and social proof copy near your testimonials section.",
+        };
+      },
+    },
+    {
+      id: "launch-campaign-generator",
+      name: "Launch Campaign Generator",
+      description: "Generate social media posts, WhatsApp messages, and email copy to announce your store launch.",
+      icon: "analysis",
+      category: "generate",
+      requiresSelection: false,
+      creditCost: 2,
+      execute: async (ctx) => {
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const storeName = d.storeName || "Your Store";
+        const products = (d.products ?? []) as Record<string, unknown>[];
+        const services = (d.services ?? []) as Record<string, unknown>[];
+        const totalItems = products.length + services.length;
+
+        const socialPosts = [
+          `🚀 We're officially live! ${storeName} is now open online. Browse our ${totalItems > 0 ? `${totalItems}+ items` : "products and services"} and place your first order today. Link in bio! ✨`,
+          `Big news! 🎉 ${storeName} just launched online. Shop, book, and explore — all in one place. Drop a comment if you want the link! 👇`,
+          `We've been working hard behind the scenes, and it's finally here. ${storeName} is now live online. Come shop with us! 🛍️`,
+        ];
+
+        const whatsappMessages = [
+          `Hi! Just wanted to let you know that ${storeName} is now live online! 🎉 You can browse and shop directly at ${d.storeName ? "[your store link]" : "our store"}. Would love to see you there! 😊`,
+          `Big news — ${storeName} is now online! 🚀 Easy ordering, fast response. Check it out and let me know what you think!`,
+        ];
+
+        const emailSubjectLines = [
+          `We're Live! ${storeName} Is Now Online`,
+          `Big News from ${storeName} — Shop Us Online`,
+          `${storeName} Just Launched — Come Check It Out`,
+        ];
+
+        const emailBody = `Hi [First Name],
+
+We're thrilled to announce that ${storeName} is now live online!
+
+You can now browse our full catalog, book services, and place orders directly from our store — anytime, anywhere.
+
+${totalItems > 0 ? `We have ${totalItems} items available, with more coming soon.` : "We're just getting started and have exciting things coming."}
+
+[Your Store Link]
+
+As always, thank you for your support. We couldn't do this without amazing customers like you.
+
+Warmly,
+${storeName}`;
+
+        return {
+          summary: `Generated launch campaign materials for "${storeName}": ${socialPosts.length} social posts, ${whatsappMessages.length} WhatsApp messages, and a launch email.`,
+          socialPosts,
+          whatsappMessages,
+          emailSubjectLines,
+          emailBody,
+          tip: "Use these across your channels in the 24-48 hours around your launch for maximum impact. Personalize with your actual store link before sending.",
+        };
+      },
+    },
+    {
       id: "store-optimizer",
       name: "Store Optimizer",
       description: "Analyze your catalog, configuration, and appearance for improvement suggestions to maximize conversions.",
@@ -167,16 +745,32 @@ function buildStoreTools(): AiTool[] {
         const testimonials = (d.testimonials ?? []) as unknown[];
         const storeEnabled = d.storeEnabled ?? false;
         const hasHeroImage = d.hasHeroImage ?? false;
+        const hasHeroHeadline = d.hasHeroHeadline ?? false;
+        const hasHeroCta = d.hasHeroCta ?? false;
+        const hasPolicies = d.hasPolicies ?? false;
+        const hasMetaTitle = d.hasMetaTitle ?? false;
 
         const totalItems = products.length + services.length;
-        const score = Math.min(100, (storeEnabled ? 20 : 0) + Math.min(30, totalItems * 5) + (hasHeroImage ? 15 : 0) + Math.min(20, testimonials.length * 7) + 15);
+        const score = Math.min(100,
+          (storeEnabled ? 15 : 0) +
+          Math.min(20, totalItems * 4) +
+          (hasHeroImage ? 12 : 0) +
+          (hasHeroHeadline ? 8 : 0) +
+          (hasHeroCta ? 5 : 0) +
+          Math.min(18, testimonials.length * 6) +
+          (hasPolicies ? 8 : 0) +
+          (hasMetaTitle ? 7 : 0) +
+          7
+        );
 
         const recommendations: { title: string; description: string; priority: string; expectedImpact?: string }[] = [];
         if (!storeEnabled) recommendations.push({ title: "Enable Your Store", description: "Your store is offline. Toggle it live to start receiving visitors.", priority: "high", expectedImpact: "Critical — no traffic while offline" });
         if (totalItems === 0) recommendations.push({ title: "Add Catalog Items", description: "Add at least 3-5 products or services to give visitors a reason to stay.", priority: "high", expectedImpact: "High — empty stores have near-zero conversions" });
-        if (totalItems > 0 && totalItems < 3) recommendations.push({ title: "Expand Your Catalog", description: `You have ${totalItems} item${totalItems > 1 ? "s" : ""}. Aim for at least 5 to look established.`, priority: "medium", expectedImpact: "Medium — more options increase average order value" });
-        if (!hasHeroImage) recommendations.push({ title: "Add a Hero Image", description: "A visually appealing banner image grabs attention and communicates your brand instantly.", priority: "medium", expectedImpact: "Up to 40% more engagement" });
+        if (!hasHeroHeadline || !hasHeroCta) recommendations.push({ title: "Complete Hero Section", description: "Add a headline and CTA to your hero. Use the AI Hero Copy Generator for instant results.", priority: "high", expectedImpact: "Up to 90% higher CTA click-through" });
+        if (!hasHeroImage) recommendations.push({ title: "Add a Hero Image", description: "A visually appealing banner grabs attention and communicates your brand instantly.", priority: "medium", expectedImpact: "Up to 40% more engagement" });
         if (testimonials.length < 3) recommendations.push({ title: "Gather More Reviews", description: "Social proof is the #1 trust signal. Ask your best customers for testimonials.", priority: "medium", expectedImpact: "Up to 30% conversion lift" });
+        if (!hasPolicies) recommendations.push({ title: "Add Store Policies", description: "Refund and privacy policies reduce purchase anxiety for first-time buyers.", priority: "medium", expectedImpact: "Lower cart abandonment" });
+        if (!hasMetaTitle) recommendations.push({ title: "Configure SEO", description: "Set your meta title and description to improve search visibility.", priority: "low", expectedImpact: "Better search ranking and click-through" });
 
         return {
           summary: `Your store health score is ${score}/100. ${recommendations.length} improvement${recommendations.length !== 1 ? "s" : ""} recommended.`,
@@ -196,9 +790,9 @@ function buildStoreTools(): AiTool[] {
       requiresSelection: false,
       creditCost: 1,
       execute: async (ctx) => {
-        const d2 = (ctx.customData ?? {}) as StoreCustomData;
-        const products = (d2.products ?? []) as Record<string, unknown>[];
-        const storeName = d2.storeName || "Your Store";
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d.products ?? []) as Record<string, unknown>[];
+        const storeName = d.storeName || "Your Store";
 
         const tips: string[] = [
           "Include your primary service keyword in the store title and description.",
@@ -214,6 +808,12 @@ function buildStoreTools(): AiTool[] {
         }
         if (products.some((p) => !p.imageUrl)) {
           issues.push({ field: "Product Images", issue: "Some products are missing images.", suggestion: "Add high-quality images to every product for better engagement and SEO.", impact: "high" });
+        }
+        if (!d.hasMetaTitle) {
+          issues.push({ field: "Meta Title", issue: "No meta title configured.", suggestion: "Use the SEO Generator tool to create an optimized title.", impact: "high" });
+        }
+        if (!d.hasMetaDescription) {
+          issues.push({ field: "Meta Description", issue: "No meta description set.", suggestion: "A compelling description improves click-through from search results.", impact: "medium" });
         }
         issues.push({ field: "Store Title", issue: `Ensure "${storeName}" includes a relevant keyword.`, suggestion: "Example: 'KeyFlow Studio — Premium Design Services'", impact: "medium" });
 
@@ -233,8 +833,8 @@ function buildStoreTools(): AiTool[] {
       requiresSelection: false,
       creditCost: 2,
       execute: async (ctx) => {
-        const d3 = (ctx.customData ?? {}) as StoreCustomData;
-        const products = (d3.products ?? []) as Record<string, unknown>[];
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d.products ?? []) as Record<string, unknown>[];
         const pricedProducts = products.filter((p) => p.price && (p.price as number) > 0);
 
         if (pricedProducts.length === 0) {
@@ -279,20 +879,25 @@ function buildStoreTools(): AiTool[] {
       requiresSelection: false,
       creditCost: 2,
       execute: async (ctx) => {
-        const d4 = (ctx.customData ?? {}) as StoreCustomData;
-        const products = (d4.products ?? []) as Record<string, unknown>[];
-        const services = (d4.services ?? []) as Record<string, unknown>[];
-        const testimonials = (d4.testimonials ?? []) as unknown[];
-        const storeEnabled = d4.storeEnabled ?? false;
-        const hasHeroImage = d4.hasHeroImage ?? false;
-        const hoursConfigured = d4.hoursConfigured ?? false;
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d.products ?? []) as Record<string, unknown>[];
+        const services = (d.services ?? []) as Record<string, unknown>[];
+        const testimonials = (d.testimonials ?? []) as unknown[];
+        const storeEnabled = d.storeEnabled ?? false;
+        const hasHeroImage = d.hasHeroImage ?? false;
+        const hasHeroHeadline = d.hasHeroHeadline ?? false;
+        const hasHeroCta = d.hasHeroCta ?? false;
+        const hoursConfigured = d.hoursConfigured ?? false;
+        const hasPolicies = d.hasPolicies ?? false;
 
         const checks = [
           { label: "Store is live", passed: storeEnabled },
           { label: "Hero image set", passed: hasHeroImage },
+          { label: "Hero copy complete", passed: hasHeroHeadline && hasHeroCta },
           { label: "Has catalog items", passed: products.length + services.length > 0 },
           { label: "Social proof (3+ testimonials)", passed: testimonials.length >= 3 },
           { label: "Business hours configured", passed: hoursConfigured },
+          { label: "Store policies published", passed: hasPolicies },
           { label: "Multiple product categories", passed: new Set(products.map((p) => p.category as string).filter(Boolean)).size > 1 },
         ];
 
@@ -301,7 +906,7 @@ function buildStoreTools(): AiTool[] {
 
         const frictionPoints: { area: string; issue: string; suggestion: string; impact: string }[] = [];
         checks.filter((c) => !c.passed).forEach((c) => {
-          frictionPoints.push({ area: c.label, issue: `Not configured: ${c.label}`, suggestion: `Complete this step to improve your conversion score.`, impact: "medium" });
+          frictionPoints.push({ area: c.label, issue: `Not configured: ${c.label}`, suggestion: "Complete this step to improve your conversion score.", impact: "medium" });
         });
 
         return {
@@ -345,9 +950,18 @@ export function useStoreAiHub() {
     testimonials?: unknown[];
     storeEnabled?: boolean;
     hasHeroImage?: boolean;
+    hasHeroHeadline?: boolean;
+    hasHeroCta?: boolean;
     hasLogo?: boolean;
     hoursConfigured?: boolean;
     storeName?: string;
+    businessDescription?: string;
+    businessTagline?: string;
+    hasMetaTitle?: boolean;
+    hasMetaDescription?: boolean;
+    hasPolicies?: boolean;
+    hasFaq?: boolean;
+    activeDeliveryCount?: number;
   }) => {
     ai.updateContext({
       businessId: params.businessId,
@@ -360,9 +974,18 @@ export function useStoreAiHub() {
         testimonials: params.testimonials,
         storeEnabled: params.storeEnabled,
         hasHeroImage: params.hasHeroImage,
+        hasHeroHeadline: params.hasHeroHeadline,
+        hasHeroCta: params.hasHeroCta,
         hasLogo: params.hasLogo,
         hoursConfigured: params.hoursConfigured,
         storeName: params.storeName,
+        businessDescription: params.businessDescription,
+        businessTagline: params.businessTagline,
+        hasMetaTitle: params.hasMetaTitle,
+        hasMetaDescription: params.hasMetaDescription,
+        hasPolicies: params.hasPolicies,
+        hasFaq: params.hasFaq,
+        activeDeliveryCount: params.activeDeliveryCount,
       },
     });
   }, [ai.updateContext]);

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Palette, Type, LayoutGrid, Monitor, Smartphone, Columns } from "lucide-react";
+import { Palette, Type, LayoutGrid, Monitor, Smartphone, Columns, Wand2 } from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { AppearanceCustomizer } from "./appearance-customizer";
 import { StorefrontPreview } from "./storefront-preview";
 import { FontBrandingPanel } from "./font-branding-panel";
 import { SectionLayoutManager } from "./section-layout-manager";
+import { AiHeroCopyPanel } from "./ai-hero-copy-panel";
 import type { Service, Product, StorefrontConfig } from "@/lib/client";
 
 type Props = {
@@ -15,6 +16,7 @@ type Props = {
     slug?: string | null;
     logoUrl?: string | null;
     tagline?: string | null;
+    description?: string | null;
     primaryColor?: string | null;
     secondaryColor?: string | null;
   } | null;
@@ -46,6 +48,15 @@ export function DesignMode({
     { key: "desktop", icon: Monitor, label: "Desktop" },
     { key: "both", icon: Columns, label: "Side by side" },
   ];
+
+  function handleApplyHeroCopy(fields: { headline?: string; subheadline?: string; ctaText?: string; ribbonText?: string }) {
+    const updates: Record<string, string> = {};
+    if (fields.headline) updates.headline = fields.headline;
+    if (fields.subheadline) updates.subheadline = fields.subheadline;
+    if (fields.ctaText) updates.ctaLabel = fields.ctaText;
+    if (fields.ribbonText) updates.ribbonText = fields.ribbonText;
+    onConfigChange("hero", updates);
+  }
 
   return (
     <div className="space-y-5">
@@ -96,6 +107,24 @@ export function DesignMode({
               previewMode={previewMode}
             />
           </div>
+        </AccordionSection>
+        <AccordionSection
+          title="AI Hero Copy"
+          subtitle="Generate headline, subheadline, ribbon & CTA with AI"
+          icon={Wand2}
+          accentColor="hsl(var(--kf-accent1))"
+        >
+          <AiHeroCopyPanel
+            storeName={businessData?.name}
+            businessDescription={businessData?.description ?? undefined}
+            businessTagline={businessData?.tagline ?? undefined}
+            currentHeadline={(storefrontConfig.hero as any)?.headline}
+            currentSubheadline={(storefrontConfig.hero as any)?.subheadline}
+            currentCta={(storefrontConfig.hero as any)?.ctaLabel}
+            productsCount={commerceProducts.length}
+            servicesCount={services.length}
+            onApply={handleApplyHeroCopy}
+          />
         </AccordionSection>
         <AccordionSection
           title="Typography"
