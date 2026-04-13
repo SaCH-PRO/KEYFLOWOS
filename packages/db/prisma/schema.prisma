@@ -167,6 +167,10 @@ model Business {
   // Flow AI Bot Sessions
   flowSessions         FlowSession[]
 
+  // Unified Communications Engine
+  channelConnections   ChannelConnection[]
+  outboundContent      OutboundContent[]
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -792,6 +796,163 @@ model SocialPost {
 
   @@index([businessId, status, scheduledAt])
   @@map("social_posts")
+}
+
+// ---
+// MODULE 5B: UNIFIED COMMUNICATIONS ENGINE
+// ---
+model ChannelConnection {
+  id            String   @id @default(cuid())
+  provider      String   // META, GOOGLE, WHATSAPP, MANUAL
+  label         String?
+  accountEmail  String?  @map("account_email")
+  token         String?
+  refreshToken  String?  @map("refresh_token")
+  expiresAt     DateTime? @map("expires_at")
+  scopes        String?
+  providerMeta  Json?    @map("provider_meta")
+  healthState   String   @default("Connected") // Connected, NeedsRefresh, Expired, MissingPermission, DestinationMissing, Disabled, Error
+  healthMessage String?  @map("health_message")
+  lastCheckedAt DateTime? @map("last_checked_at")
+
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  destinations  ChannelDestination[]
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, provider])
+  @@map("channel_connections")
+}
+
+model ChannelDestination {
+  id             String   @id @default(cuid())
+  connectionId   String   @map("connection_id")
+  connection     ChannelConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  platform       String   // FACEBOOK_PAGE, INSTAGRAM_BUSINESS, EMAIL, WHATSAPP
+  platformId     String?  @map("platform_id")
+  displayName    String?  @map("display_name")
+  avatarUrl      String?  @map("avatar_url")
+  capabilities   String[] @default([]) // supports_text_post, supports_image_post, supports_video_post, supports_campaign_email, etc.
+  isActive       Boolean  @default(true) @map("is_active")
+  destinationMeta Json?   @map("destination_meta")
+
+  businessId     String   @map("business_id")
+
+  deliveries     OutboundDelivery[]
+
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt      @map("updated_at")
+
+  @@index([connectionId])
+  @@index([businessId])
+  @@index([businessId, platform])
+  @@map("channel_destinations")
+}
+
+model OutboundContent {
+  id            String   @id @default(cuid())
+  contentType   String   @default("social_post") @map("content_type") // social_post, campaign_email, direct_message
+  subject       String?
+  body          String?
+  status        String   @default("Draft") // Draft, Scheduled, Queued, Sending, Sent, PartiallyFailed, Failed, Cancelled
+  scheduledAt   DateTime? @map("scheduled_at")
+  timezone      String   @default("America/Port_of_Spain")
+  publishedAt   DateTime? @map("published_at")
+  contentMeta   Json?    @map("content_meta")
+
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  variants      OutboundVariant[]
+  deliveries    OutboundDelivery[]
+
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt      @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  @@index([businessId, status])
+  @@index([businessId, contentType])
+  @@index([businessId, scheduledAt])
+  @@map("outbound_content")
+}
+
+model OutboundVariant {
+  id            String   @id @default(cuid())
+  contentId     String   @map("content_id")
+  content       OutboundContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  platform      String   // FACEBOOK_PAGE, INSTAGRAM_BUSINESS, EMAIL, WHATSAPP, DEFAULT
+  textBody      String?  @map("text_body")
+  htmlBody      String?  @map("html_body")
+  mediaUrls     String[] @default([]) @map("media_urls")
+  variantMeta   Json?    @map("variant_meta")
+
+  deliveries    OutboundDelivery[]
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  @@index([contentId])
+  @@index([contentId, platform])
+  @@map("outbound_variants")
+}
+
+model OutboundDelivery {
+  id              String   @id @default(cuid())
+  contentId       String   @map("content_id")
+  content         OutboundContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  variantId       String?  @map("variant_id")
+  variant         OutboundVariant? @relation(fields: [variantId], references: [id])
+  destinationId   String   @map("destination_id")
+  destination     ChannelDestination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+  status          String   @default("Queued") // Queued, Scheduled, Sending, Sent, Published, Failed, RetryPending, Cancelled
+  scheduledAt     DateTime? @map("scheduled_at")
+  sentAt          DateTime? @map("sent_at")
+  externalPostId  String?  @map("external_post_id")
+  externalUrl     String?  @map("external_url")
+  errorCode       String?  @map("error_code")
+  errorMessage    String?  @map("error_message")
+  retryCount      Int      @default(0) @map("retry_count")
+  maxRetries      Int      @default(3) @map("max_retries")
+  nextRetryAt     DateTime? @map("next_retry_at")
+  resultSnapshot  Json?    @map("result_snapshot")
+
+  businessId      String   @map("business_id")
+
+  events          DeliveryEvent[]
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([contentId])
+  @@index([destinationId])
+  @@index([status, scheduledAt])
+  @@index([status, nextRetryAt])
+  @@map("outbound_deliveries")
+}
+
+model DeliveryEvent {
+  id          String   @id @default(cuid())
+  deliveryId  String   @map("delivery_id")
+  delivery    OutboundDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  eventType   String   @map("event_type") // attempt, success, failure, retry_scheduled, cancelled
+  statusBefore String? @map("status_before")
+  statusAfter  String? @map("status_after")
+  errorCode    String? @map("error_code")
+  errorMessage String? @map("error_message")
+  resultData   Json?   @map("result_data")
+  attemptNumber Int?   @map("attempt_number")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([deliveryId])
+  @@index([deliveryId, eventType])
+  @@map("delivery_events")
 }
 
 // ---

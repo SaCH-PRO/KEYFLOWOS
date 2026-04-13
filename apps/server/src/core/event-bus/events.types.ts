@@ -195,6 +195,32 @@ export class StoreOrderCancelledPayload {
   businessId!: string;
 }
 
+export class ContentPublishedPayload {
+  deliveryId!: string;
+  contentId!: string;
+  businessId!: string;
+  destinationId!: string;
+}
+
+export class ContentFailedPayload {
+  deliveryId!: string;
+  contentId!: string;
+  businessId!: string;
+  errorCode?: string;
+}
+
+export class DeliveryCompletedPayload {
+  deliveryId!: string;
+  contentId!: string;
+  businessId!: string;
+}
+
+export class DeliveryFailedPayload {
+  deliveryId!: string;
+  contentId!: string;
+  businessId!: string;
+}
+
 // Master event map for reference and typing
 export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
@@ -230,4 +256,8 @@ export interface KeyFlowEventMap {
   'store_order.shipped': StoreOrderShippedPayload;
   'store_order.delivered': StoreOrderDeliveredPayload;
   'store_order.cancelled': StoreOrderCancelledPayload;
+  'content.published': ContentPublishedPayload;
+  'content.failed': ContentFailedPayload;
+  'delivery.completed': DeliveryCompletedPayload;
+  'delivery.failed': DeliveryFailedPayload;
 }
