@@ -445,11 +445,8 @@ export default function ContentPage() {
   const handleNewItem = useCallback(() => {
     if (activeTab === "create") {
       if (createSubmode === "compose") {
-        if (composeType === "social") {
-          document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click();
-        } else {
-          document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
-        }
+        setEditingContentId(undefined);
+        setCreateSubmode("compose");
       } else if (createSubmode === "campaigns") {
         document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
       } else if (createSubmode === "posts") {
@@ -458,7 +455,7 @@ export default function ContentPage() {
     } else if (activeTab === "audience") {
       document.querySelector<HTMLButtonElement>("[data-marketing-new-form]")?.click();
     }
-  }, [activeTab, createSubmode, composeType]);
+  }, [activeTab, createSubmode]);
 
   const handleEditCampaign = useCallback((campaign: EmailCampaign) => {
     document.querySelector<HTMLButtonElement>(`[data-campaign-edit="${campaign.id}"]`)?.click();
