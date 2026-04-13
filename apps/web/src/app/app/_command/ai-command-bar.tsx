@@ -29,7 +29,7 @@ const MODULE_PROMPTS: Record<string, ModuleQuickPrompts> = {
   "/app/crm": { module: "CRM", prompts: ["Score my leads", "Find inactive contacts", "Suggest follow-ups"] },
   "/app/commerce": { module: "Revenue", prompts: ["Summarize overdue", "Revenue this month", "Draft reminder"] },
   "/app/bookings": { module: "Bookings", prompts: ["Today's schedule", "Empty slots this week", "Rebooking suggestions"] },
-  "/app/marketing": { module: "Marketing", prompts: ["Campaign performance", "Best send time", "Audience health"] },
+  "/app/marketing": { module: "Content", prompts: ["What should I post next?", "Campaign performance", "Audience health"] },
   "/app/store": { module: "Store", prompts: ["Store optimizer", "SEO advice", "Pricing analysis"] },
   "/app/expenses": { module: "Expenses", prompts: ["Spending summary", "Over budget alerts", "Tax estimate"] },
   "/app/projects": { module: "Projects", prompts: ["Task priorities", "Automation ideas", "Project status"] },

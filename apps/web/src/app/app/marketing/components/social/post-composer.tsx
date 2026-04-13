@@ -12,6 +12,23 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001"
 
 const MAX_CHARS = 2200;
 
+const OBJECTIVES = [
+  { key: "awareness", label: "Awareness", emoji: "👁️" },
+  { key: "engagement", label: "Engagement", emoji: "💬" },
+  { key: "promotion", label: "Promotion", emoji: "🔥" },
+  { key: "lead_capture", label: "Lead Capture", emoji: "🎯" },
+  { key: "nurture", label: "Nurture", emoji: "💛" },
+  { key: "reminder", label: "Reminder", emoji: "🔔" },
+] as const;
+
+const TONES = [
+  { key: "informative", label: "Informative" },
+  { key: "promotional", label: "Promotional" },
+  { key: "warm", label: "Warm" },
+  { key: "authority", label: "Authority" },
+  { key: "concise", label: "Concise" },
+] as const;
+
 const HASHTAG_SUGGESTIONS = [
   "#business", "#caribbean", "#trinidad", "#entrepreneur",
   "#smallbusiness", "#servicebusiness", "#growyourbusiness", "#ttbusiness",
@@ -90,6 +107,8 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
   const [showPreview, setShowPreview] = useState(false);
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [urlInput, setUrlInput] = useState("");
+  const [objective, setObjective] = useState<string>("");
+  const [tone, setTone] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -262,6 +281,45 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
       </div>
 
       <div className="p-5 space-y-4">
+        <div className="flex flex-wrap gap-3">
+          <div className="space-y-1">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Objective</span>
+            <div className="flex flex-wrap gap-1">
+              {OBJECTIVES.map((o) => (
+                <button
+                  key={o.key}
+                  onClick={() => setObjective(objective === o.key ? "" : o.key)}
+                  className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all border ${
+                    objective === o.key
+                      ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]/30"
+                      : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
+                  }`}
+                >
+                  {o.emoji} {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Tone</span>
+            <div className="flex flex-wrap gap-1">
+              {TONES.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setTone(tone === t.key ? "" : t.key)}
+                  className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all border ${
+                    tone === t.key
+                      ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] border-[hsl(var(--kf-accent2))]/30"
+                      : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
         <div className="relative">
           <div className="relative">
             <button

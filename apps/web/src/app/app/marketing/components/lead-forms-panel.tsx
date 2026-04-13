@@ -383,6 +383,14 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
     else toast.info("No active forms to deactivate");
   }, [businessId, selectedIds, forms, setForms]);
 
+  const captureMetrics = useMemo(() => {
+    const active = forms.filter(f => f.isActive).length;
+    const total = forms.length;
+    const totalSubs = forms.reduce((sum, f) => sum + (f._count?.submissions ?? 0), 0);
+    const avgRate = total > 0 ? Math.round(totalSubs / total) : 0;
+    return { active, total, totalSubs, avgRate };
+  }, [forms]);
+
   return (
     <>
       <div className="space-y-4">
@@ -390,6 +398,24 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
         {forms.map(f => (
           <button key={`trigger-${f.id}`} data-form-edit={f.id} onClick={() => openEditForm(f)} className="hidden" aria-hidden="true" tabIndex={-1} />
         ))}
+
+        {forms.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg bg-muted/10 border border-border/20 p-2.5 text-center">
+              <div className="text-sm font-bold text-foreground">{captureMetrics.totalSubs}</div>
+              <div className="text-[10px] text-muted-foreground">Total Leads</div>
+            </div>
+            <div className="rounded-lg bg-muted/10 border border-border/20 p-2.5 text-center">
+              <div className="text-sm font-bold" style={{ color: "hsl(var(--kf-accent2))" }}>{captureMetrics.active}</div>
+              <div className="text-[10px] text-muted-foreground">Active Forms</div>
+            </div>
+            <div className="rounded-lg bg-muted/10 border border-border/20 p-2.5 text-center">
+              <div className="text-sm font-bold text-muted-foreground">{captureMetrics.avgRate}</div>
+              <div className="text-[10px] text-muted-foreground">Avg / Form</div>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
           <input
             type="text"

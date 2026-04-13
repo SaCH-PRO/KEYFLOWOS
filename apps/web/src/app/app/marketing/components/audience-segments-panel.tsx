@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Users, Tag, ArrowRight, Search, RefreshCw } from "lucide-react";
+import { Users, Tag, ArrowRight, Search, RefreshCw, Mail, PenSquare, TrendingUp } from "lucide-react";
 import { fetchContacts } from "@/lib/client";
 import { useRouter } from "next/navigation";
 
@@ -12,14 +12,17 @@ interface ContactSegment {
 
 interface AudienceSegmentsPanelProps {
   businessId: string | null;
+  onCreateCampaign?: () => void;
+  onCreatePost?: () => void;
 }
 
-export function AudienceSegmentsPanel({ businessId }: AudienceSegmentsPanelProps) {
+export function AudienceSegmentsPanel({ businessId, onCreateCampaign, onCreatePost }: AudienceSegmentsPanelProps) {
   const router = useRouter();
   const [segments, setSegments] = useState<ContactSegment[]>([]);
   const [totalContacts, setTotalContacts] = useState(0);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [hoveredTag, setHoveredTag] = useState<string | null>(null);
 
   const loadSegments = useCallback(async () => {
     if (!businessId) return;
@@ -105,18 +108,54 @@ export function AudienceSegmentsPanel({ businessId }: AudienceSegmentsPanelProps
         </div>
       ) : (
         <div className="space-y-1 max-h-[280px] overflow-y-auto">
-          {filtered.map((seg) => (
-            <button
-              key={seg.tag}
-              onClick={() => handleViewSegment(seg.tag)}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-left hover:bg-muted/30 transition-colors group"
-            >
-              <Tag className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-              <span className="text-xs font-medium flex-1 truncate">{seg.tag}</span>
-              <span className="text-xs text-muted-foreground tabular-nums">{seg.count}</span>
-              <ArrowRight className="w-3 h-3 text-muted-foreground/0 group-hover:text-muted-foreground/60 transition-colors" />
-            </button>
-          ))}
+          {filtered.map((seg) => {
+            const pct = totalContacts > 0 ? Math.round((seg.count / totalContacts) * 100) : 0;
+            return (
+              <div
+                key={seg.tag}
+                className="relative group"
+                onMouseEnter={() => setHoveredTag(seg.tag)}
+                onMouseLeave={() => setHoveredTag(null)}
+              >
+                <button
+                  onClick={() => handleViewSegment(seg.tag)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-left hover:bg-muted/30 transition-colors"
+                >
+                  <Tag className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                  <span className="text-xs font-medium flex-1 truncate">{seg.tag}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-12 h-1 rounded-full bg-border/20 overflow-hidden">
+                      <div className="h-full rounded-full bg-[hsl(var(--kf-accent2))]" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-xs text-muted-foreground tabular-nums w-8 text-right">{seg.count}</span>
+                  </div>
+                  <ArrowRight className="w-3 h-3 text-muted-foreground/0 group-hover:text-muted-foreground/60 transition-colors" />
+                </button>
+                {hoveredTag === seg.tag && (onCreateCampaign || onCreatePost) && (
+                  <div className="absolute right-10 top-1/2 -translate-y-1/2 flex items-center gap-1 z-10">
+                    {onCreateCampaign && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onCreateCampaign(); }}
+                        className="p-1 rounded bg-blue-500/10 hover:bg-blue-500/20 transition-colors"
+                        title={`Campaign for ${seg.tag}`}
+                      >
+                        <Mail className="w-3 h-3 text-blue-400" />
+                      </button>
+                    )}
+                    {onCreatePost && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onCreatePost(); }}
+                        className="p-1 rounded bg-[hsl(var(--kf-accent2))]/10 hover:bg-[hsl(var(--kf-accent2))]/20 transition-colors"
+                        title={`Post for ${seg.tag}`}
+                      >
+                        <PenSquare className="w-3 h-3 text-[hsl(var(--kf-accent2))]" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           {untaggedCount > 0 && (
             <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground/60">
               <Users className="w-3.5 h-3.5 flex-shrink-0" />
@@ -124,6 +163,13 @@ export function AudienceSegmentsPanel({ businessId }: AudienceSegmentsPanelProps
               <span className="text-xs tabular-nums">{untaggedCount}</span>
             </div>
           )}
+        </div>
+      )}
+
+      {segments.length > 0 && (
+        <div className="flex items-center gap-1.5 pt-1 border-t border-border/20">
+          <TrendingUp className="w-3 h-3 text-muted-foreground/40" />
+          <span className="text-[10px] text-muted-foreground/40">{segments.length} segment{segments.length > 1 ? "s" : ""} across {totalContacts} contacts</span>
         </div>
       )}
     </div>
