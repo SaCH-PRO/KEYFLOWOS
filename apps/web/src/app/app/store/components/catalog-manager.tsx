@@ -3,21 +3,14 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
-  Store,
-  Briefcase,
-  ShoppingBag,
-  Package,
-  Search,
-  Filter,
-  ChevronDown,
-  X,
-  CheckCircle2,
-  AlertTriangle,
-  ExternalLink,
-  GripVertical,
+  Store, Briefcase, ShoppingBag, Package, Search, Filter,
+  ChevronDown, X, CheckCircle2, AlertTriangle, ExternalLink,
+  GripVertical, Eye, EyeOff, Edit3, Tag, ChevronRight, Clock,
+  TrendingUp, Layers, Star, DollarSign, BadgeCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { Product } from "@/lib/client";
+import type { BadgeType, CatalogVisibilityRule, CatalogItemOverride } from "@/lib/client";
 import { formatPrice } from "@/lib/format";
 
 function formatRelativeTime(dateStr: string | undefined | null): string {
@@ -49,7 +42,36 @@ type Props = {
   onDeleteFromStore: (serviceId: string, productName?: string) => void;
   services: { id: string; name: string }[];
   onReorder?: (orderedIds: string[]) => void;
+  itemOverrides?: Record<string, CatalogItemOverride>;
+  onItemOverrideChange?: (productId: string, override: Partial<CatalogItemOverride>) => void;
+  categoryEmphasis?: Record<string, "high" | "medium" | "low" | "default">;
+  onCategoryEmphasisChange?: (category: string, emphasis: "high" | "medium" | "low" | "default") => void;
 };
+
+const BADGE_OPTIONS: { value: BadgeType | "none"; label: string; color: string }[] = [
+  { value: "none", label: "None", color: "hsl(var(--kf-muted-foreground))" },
+  { value: "popular", label: "Popular", color: "hsl(45 93% 55%)" },
+  { value: "new", label: "New", color: "hsl(160 84% 39%)" },
+  { value: "best_seller", label: "Best Seller", color: "hsl(263 70% 58%)" },
+  { value: "limited", label: "Limited", color: "hsl(0 72% 51%)" },
+  { value: "sale", label: "Sale", color: "hsl(340 82% 52%)" },
+  { value: "best_value", label: "Best Value", color: "hsl(199 89% 48%)" },
+  { value: "fast_delivery", label: "Fast Delivery", color: "hsl(142 70% 45%)" },
+  { value: "book_today", label: "Book Today", color: "hsl(28 90% 55%)" },
+  { value: "verified", label: "Verified", color: "hsl(211 90% 55%)" },
+  { value: "digital_delivery", label: "Digital Delivery", color: "hsl(271 81% 65%)" },
+  { value: "staff_pick", label: "Staff Pick", color: "hsl(335 80% 60%)" },
+];
+
+const VISIBILITY_RULES: { value: CatalogVisibilityRule; label: string; icon: React.ElementType; color: string }[] = [
+  { value: "visible", label: "Visible", icon: Eye, color: "hsl(142 70% 45%)" },
+  { value: "hidden", label: "Hidden", icon: EyeOff, color: "hsl(var(--kf-muted-foreground))" },
+  { value: "preorder", label: "Pre-order", icon: Clock, color: "hsl(45 93% 55%)" },
+  { value: "low_stock", label: "Low Stock", icon: AlertTriangle, color: "hsl(28 90% 55%)" },
+  { value: "consultation_first", label: "Consultation First", icon: Briefcase, color: "hsl(263 70% 58%)" },
+  { value: "service_only", label: "Service Only", icon: Tag, color: "hsl(217 91% 60%)" },
+  { value: "digital_only", label: "Digital Only", icon: Layers, color: "hsl(271 81% 65%)" },
+];
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
   SERVICE: Briefcase,
@@ -58,6 +80,13 @@ const CATEGORY_ICONS: Record<string, React.ElementType> = {
 };
 
 const CATEGORY_FILTERS = ["ALL", "SERVICE", "PRODUCT", "PACKAGE"] as const;
+
+const EMPHASIS_OPTIONS = [
+  { value: "high", label: "High", color: "hsl(142 70% 45%)" },
+  { value: "medium", label: "Medium", color: "hsl(45 93% 55%)" },
+  { value: "low", label: "Low", color: "hsl(var(--kf-muted-foreground))" },
+  { value: "default", label: "Default", color: "hsl(var(--kf-muted-foreground) / 0.5)" },
+] as const;
 
 export function CatalogManager({
   products,
@@ -72,12 +101,20 @@ export function CatalogManager({
   onDeleteFromStore,
   services,
   onReorder,
+  itemOverrides = {},
+  onItemOverrideChange,
+  categoryEmphasis = {},
+  onCategoryEmphasisChange,
 }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [showFilters, setShowFilters] = useState(false);
   const [bulkConfirm, setBulkConfirm] = useState<"add" | "remove" | null>(null);
   const [orderedProducts, setOrderedProducts] = useState<Product[]>(products);
+  const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [showCategoryEmphasis, setShowCategoryEmphasis] = useState(false);
+  const [bulkAction, setBulkAction] = useState<string | null>(null);
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const orderDirty = useRef(false);
 
   useEffect(() => {
@@ -119,6 +156,8 @@ export function CatalogManager({
     return true;
   });
 
+  const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean)));
+
   function handleBulkAdd() {
     if (bulkConfirm === "add") {
       onSelectAll();
@@ -135,6 +174,35 @@ export function CatalogManager({
     } else {
       setBulkConfirm("remove");
     }
+  }
+
+  function toggleSelectItem(id: string) {
+    setSelectedItems((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  function applyBulkAction(action: string) {
+    if (selectedItems.size === 0) return;
+    const ids = Array.from(selectedItems);
+    if (action === "feature") {
+      ids.forEach((id) => onItemOverrideChange?.(id, { featured: true }));
+    } else if (action === "unfeature") {
+      ids.forEach((id) => onItemOverrideChange?.(id, { featured: false }));
+    } else if (action === "hide_price") {
+      ids.forEach((id) => onItemOverrideChange?.(id, { hidePrice: true }));
+    } else if (action === "show_price") {
+      ids.forEach((id) => onItemOverrideChange?.(id, { hidePrice: false }));
+    } else if (action === "hide") {
+      ids.forEach((id) => onItemOverrideChange?.(id, { visibilityRule: "hidden" }));
+    } else if (action === "show") {
+      ids.forEach((id) => onItemOverrideChange?.(id, { visibilityRule: "visible" }));
+    }
+    setSelectedItems(new Set());
+    setBulkAction(null);
   }
 
   return (
@@ -166,7 +234,7 @@ export function CatalogManager({
           </div>
           <div>
             <h3 className="text-sm font-semibold">Store Catalog</h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Toggle items from Commerce to display in your store</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Visibility, ordering, and per-item storefront overrides</p>
             <Link
               href="/app/commerce"
               className="inline-flex items-center gap-1 text-[10px] mt-0.5 hover:underline"
@@ -180,26 +248,75 @@ export function CatalogManager({
         <div className="flex items-center gap-2">
           <span
             className="px-2.5 py-1 rounded-full text-[10px] font-semibold"
-            style={{
-              background: "hsl(142 70% 45% / 0.15)",
-              color: "hsl(142 70% 60%)",
-              border: "1px solid hsl(142 70% 45% / 0.2)",
-            }}
+            style={{ background: "hsl(142 70% 45% / 0.15)", color: "hsl(142 70% 60%)", border: "1px solid hsl(142 70% 45% / 0.2)" }}
           >
             {inStoreCount} In Store
           </span>
           <span
             className="px-2.5 py-1 rounded-full text-[10px] font-semibold"
-            style={{
-              background: "hsl(var(--kf-muted) / 0.5)",
-              color: "hsl(var(--kf-muted-foreground))",
-              border: "1px solid hsl(var(--kf-border))",
-            }}
+            style={{ background: "hsl(var(--kf-muted) / 0.5)", color: "hsl(var(--kf-muted-foreground))", border: "1px solid hsl(var(--kf-border))" }}
           >
             {notAddedCount} Not Added
           </span>
         </div>
       </div>
+
+      {categories.length > 0 && onCategoryEmphasisChange && (
+        <div
+          className="px-4 pt-3"
+          style={{ borderBottom: showCategoryEmphasis ? "1px solid hsl(var(--kf-border) / 0.3)" : "none" }}
+        >
+          <button
+            type="button"
+            onClick={() => setShowCategoryEmphasis(!showCategoryEmphasis)}
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2 pb-2"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            Category Emphasis
+            <ChevronDown className={`w-3 h-3 transition-transform ${showCategoryEmphasis ? "rotate-180" : ""}`} />
+          </button>
+          <AnimatePresence>
+            {showCategoryEmphasis && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="pb-3 space-y-2"
+              >
+                <p className="text-[10px] text-muted-foreground">Elevate certain categories above others in the storefront display.</p>
+                {categories.map((cat) => {
+                  const current = (categoryEmphasis[cat] ?? "default") as "high" | "medium" | "low" | "default";
+                  const Icon = CATEGORY_ICONS[cat] ?? ShoppingBag;
+                  return (
+                    <div key={cat} className="flex items-center gap-3">
+                      <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                      <span className="text-xs flex-1">{cat}</span>
+                      <div className="flex gap-1">
+                        {EMPHASIS_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => onCategoryEmphasisChange(cat, opt.value)}
+                            className="text-[9px] px-2 py-0.5 rounded-md transition-all"
+                            style={{
+                              background: current === opt.value ? `${opt.color}20` : "hsl(var(--kf-muted) / 0.3)",
+                              color: current === opt.value ? opt.color : "hsl(var(--kf-muted-foreground))",
+                              border: current === opt.value ? `1px solid ${opt.color}30` : "1px solid transparent",
+                              fontWeight: current === opt.value ? 600 : 400,
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
 
       {products.length > 0 && (
         <div className="px-4 pt-3 pb-2 space-y-3">
@@ -236,9 +353,7 @@ export function CatalogManager({
                   <button
                     key={cat}
                     onClick={() => setCategoryFilter(cat)}
-                    className={`px-3 py-1.5 text-xs rounded-lg transition-all ${
-                      categoryFilter === cat ? "kf-btn-primary" : "kf-btn-secondary"
-                    }`}
+                    className={`px-3 py-1.5 text-xs rounded-lg transition-all ${categoryFilter === cat ? "kf-btn-primary" : "kf-btn-secondary"}`}
                   >
                     {cat}
                   </button>
@@ -283,12 +398,39 @@ export function CatalogManager({
               </button>
             )}
             {bulkConfirm && (
-              <button
-                onClick={() => setBulkConfirm(null)}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
+              <button onClick={() => setBulkConfirm(null)} className="text-xs text-muted-foreground hover:text-foreground">
                 Cancel
               </button>
+            )}
+
+            {selectedItems.size > 0 && (
+              <div className="flex items-center gap-1.5 ml-auto">
+                <span className="text-[10px] text-muted-foreground">{selectedItems.size} selected</span>
+                <select
+                  value={bulkAction ?? ""}
+                  onChange={(e) => setBulkAction(e.target.value || null)}
+                  className="kf-input text-[10px] py-1 pr-6"
+                >
+                  <option value="">Bulk action...</option>
+                  <option value="feature">Feature</option>
+                  <option value="unfeature">Unfeature</option>
+                  <option value="hide_price">Hide Price</option>
+                  <option value="show_price">Show Price</option>
+                  <option value="hide">Hide from store</option>
+                  <option value="show">Show on store</option>
+                </select>
+                {bulkAction && (
+                  <button
+                    onClick={() => applyBulkAction(bulkAction)}
+                    className="kf-btn-primary text-[10px] px-2 py-1"
+                  >
+                    Apply
+                  </button>
+                )}
+                <button onClick={() => setSelectedItems(new Set())} className="text-[10px] text-muted-foreground hover:text-foreground">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -298,7 +440,7 @@ export function CatalogManager({
         <div className="p-3 space-y-2">
           {!isFiltering && (
             <p className="text-[10px] text-muted-foreground/50 px-1 flex items-center gap-1">
-              <GripVertical className="w-3 h-3" /> Drag to reorder display order on your storefront
+              <GripVertical className="w-3 h-3" /> Drag to reorder · Click row for per-item overrides
             </p>
           )}
           <Reorder.Group
@@ -315,12 +457,17 @@ export function CatalogManager({
                 isProcessing={processingItems.has(p.id)}
                 isConfirming={confirmRemove === p.id}
                 isDraggable={!isFiltering}
+                isSelected={selectedItems.has(p.id)}
+                override={itemOverrides[p.id]}
                 onToggle={() => onToggleItem(p)}
                 onConfirmRemoveChange={onConfirmRemoveChange}
                 onDeleteFromStore={onDeleteFromStore}
                 services={services}
-                onDragStart={() => {}}
                 onDragEnd={handleReorderComplete}
+                onSelect={() => toggleSelectItem(p.id)}
+                onOverrideChange={onItemOverrideChange ? (upd) => onItemOverrideChange(p.id, upd) : undefined}
+                expanded={expandedItem === p.id}
+                onExpandToggle={() => setExpandedItem(expandedItem === p.id ? null : p.id)}
               />
             ))}
           </Reorder.Group>
@@ -359,164 +506,358 @@ function CatalogItem({
   isProcessing,
   isConfirming,
   isDraggable,
+  isSelected,
+  override,
   onToggle,
   onConfirmRemoveChange,
   onDeleteFromStore,
   services,
-  onDragStart,
   onDragEnd,
+  onSelect,
+  onOverrideChange,
+  expanded,
+  onExpandToggle,
 }: {
   product: Product;
   isOnStore: boolean;
   isProcessing: boolean;
   isConfirming: boolean;
   isDraggable: boolean;
+  isSelected: boolean;
+  override?: CatalogItemOverride;
   onToggle: () => void;
   onConfirmRemoveChange: (id: string | null) => void;
   onDeleteFromStore: (serviceId: string, productName?: string) => void;
   services: { id: string; name: string }[];
-  onDragStart: () => void;
   onDragEnd: () => void;
+  onSelect: () => void;
+  onOverrideChange?: (upd: Partial<CatalogItemOverride>) => void;
+  expanded: boolean;
+  onExpandToggle: () => void;
 }) {
+  const visibilityRule = override?.visibilityRule ?? "visible";
+  const isHidden = visibilityRule === "hidden";
+  const currentBadge = override?.badge;
+  const badgeOpt = BADGE_OPTIONS.find((b) => b.value === currentBadge);
+  const visOpt = VISIBILITY_RULES.find((v) => v.value === visibilityRule);
+  const [badgeOpen, setBadgeOpen] = useState(false);
+  const [visOpen, setVisOpen] = useState(false);
+
   return (
     <Reorder.Item
       value={p}
       dragListener={isDraggable}
-      onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className={`relative w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm transition-all ${
-        isProcessing ? "opacity-60 pointer-events-none" : ""
-      }`}
+      className={`w-full rounded-xl overflow-hidden transition-all ${isProcessing ? "opacity-60 pointer-events-none" : ""}`}
       style={{
-        backgroundColor: isOnStore ? "hsl(var(--kf-accent1) / 0.08)" : "hsl(var(--kf-muted) / 0.3)",
-        border: isOnStore
+        border: isSelected
+          ? "1px solid hsl(var(--kf-accent2) / 0.4)"
+          : isOnStore
           ? "1px solid hsl(var(--kf-accent1) / 0.25)"
           : "1px solid hsl(var(--kf-border) / 0.5)",
-        cursor: isDraggable ? "grab" : "pointer",
       }}
     >
-      {isConfirming && (
-        <div
-          className="absolute inset-0 rounded-xl flex items-center justify-center gap-3 z-10"
-          style={{
-            background: "hsl(var(--kf-background) / 0.95)",
-            backdropFilter: "blur(8px)",
-            border: "1px solid hsl(0 70% 50% / 0.3)",
-          }}
-        >
-          <span className="text-sm font-medium" style={{ color: "hsl(var(--kf-error))" }}>Remove from store?</span>
-          <button
-            onClick={(e) => { e.stopPropagation(); onConfirmRemoveChange(null); }}
-            className="kf-btn-secondary text-xs min-h-[44px]"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const matched = services.find((s) => s.name === p.name);
-              if (matched) onDeleteFromStore(matched.id, p.name);
-            }}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium min-h-[44px] transition-colors"
-            style={{ background: "hsl(var(--kf-error) / 0.2)", border: "1px solid hsl(var(--kf-error) / 0.3)", color: "hsl(var(--kf-error))" }}
-          >
-            Confirm
-          </button>
-        </div>
-      )}
-
-      {isDraggable && (
-        <GripVertical
-          className="w-4 h-4 flex-shrink-0 cursor-grab"
-          style={{ color: "hsl(var(--kf-muted-foreground) / 0.4)" }}
-        />
-      )}
-
-      <button
-        onClick={(e) => { e.stopPropagation(); if (!isProcessing) onToggle(); }}
-        className="min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
-        aria-label={isOnStore ? "Remove from store" : "Add to store"}
+      <div
+        className="relative flex items-center gap-3 px-4 py-3.5 text-left text-sm"
+        style={{
+          backgroundColor: isSelected
+            ? "hsl(var(--kf-accent2) / 0.06)"
+            : isOnStore
+            ? "hsl(var(--kf-accent1) / 0.08)"
+            : "hsl(var(--kf-muted) / 0.3)",
+          cursor: isDraggable ? "grab" : "pointer",
+        }}
       >
-        <div
-          className={`h-5 w-5 rounded-md border-2 flex items-center justify-center transition-all ${
-            isOnStore ? "" : "border-[hsl(var(--kf-muted-foreground)/0.3)]"
-          }`}
-          style={
-            isOnStore
-              ? { backgroundColor: "hsl(var(--kf-accent1))", borderColor: "hsl(var(--kf-accent1))" }
-              : {}
-          }
-        >
-          {isProcessing ? (
-            <div className="w-3 h-3 border-2 border-[hsl(var(--kf-accent1)/0.4)] border-t-[hsl(var(--kf-accent1))] rounded-full animate-spin" />
-          ) : isOnStore ? (
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ color: "hsl(var(--kf-accent1-foreground, 0 0% 100%))" }}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          ) : null}
-        </div>
-      </button>
-
-      {p.imageUrl ? (
-        <div
-          className="h-10 w-10 rounded-xl overflow-hidden flex-shrink-0"
-          style={{
-            border: isOnStore
-              ? "1px solid hsl(var(--kf-accent1) / 0.3)"
-              : "1px solid hsl(var(--kf-border))",
-          }}
-        >
-          <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-        </div>
-      ) : (
-        <div
-          className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold"
-          style={{
-            background: isOnStore
-              ? "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.2), hsl(var(--kf-accent2) / 0.1))"
-              : "hsl(var(--kf-muted))",
-            border: isOnStore
-              ? "1px solid hsl(var(--kf-accent1) / 0.3)"
-              : "1px solid hsl(var(--kf-border))",
-            color: isOnStore ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
-          }}
-        >
-          {p.name.charAt(0).toUpperCase()}
-        </div>
-      )}
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className={`font-medium truncate ${isOnStore ? "" : "text-muted-foreground"}`}>{p.name}</span>
-          <span
-            className="text-[10px] px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 border"
-            style={{ borderColor: "hsl(var(--kf-accent1) / 0.2)", color: "hsl(var(--kf-accent1) / 0.7)" }}
+        {isConfirming && (
+          <div
+            className="absolute inset-0 rounded-xl flex items-center justify-center gap-3 z-10"
+            style={{ background: "hsl(var(--kf-background) / 0.95)", backdropFilter: "blur(8px)", border: "1px solid hsl(0 70% 50% / 0.3)" }}
           >
-            {p.category}
-          </span>
-          {p.sku && (
-            <span className="text-[10px] text-muted-foreground/50 flex-shrink-0">
-              SKU: {p.sku}
+            <span className="text-sm font-medium" style={{ color: "hsl(var(--kf-error))" }}>Remove from store?</span>
+            <button onClick={(e) => { e.stopPropagation(); onConfirmRemoveChange(null); }} className="kf-btn-secondary text-xs min-h-[44px]">Cancel</button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const matched = services.find((s) => s.name === p.name);
+                if (matched) onDeleteFromStore(matched.id, p.name);
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium min-h-[44px] transition-colors"
+              style={{ background: "hsl(var(--kf-error) / 0.2)", border: "1px solid hsl(var(--kf-error) / 0.3)", color: "hsl(var(--kf-error))" }}
+            >
+              Confirm
+            </button>
+          </div>
+        )}
+
+        <button
+          onClick={(e) => { e.stopPropagation(); onSelect(); }}
+          className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border transition-all"
+          style={{
+            borderColor: isSelected ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-border))",
+            background: isSelected ? "hsl(var(--kf-accent2))" : "transparent",
+          }}
+        >
+          {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
+        </button>
+
+        {isDraggable && (
+          <GripVertical className="w-4 h-4 flex-shrink-0 cursor-grab" style={{ color: "hsl(var(--kf-muted-foreground) / 0.4)" }} />
+        )}
+
+        <button
+          onClick={(e) => { e.stopPropagation(); if (!isProcessing) onToggle(); }}
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
+          aria-label={isOnStore ? "Remove from store" : "Add to store"}
+        >
+          <div
+            className="h-5 w-5 rounded-md border-2 flex items-center justify-center transition-all"
+            style={isOnStore ? { backgroundColor: "hsl(var(--kf-accent1))", borderColor: "hsl(var(--kf-accent1))" } : { borderColor: "hsl(var(--kf-muted-foreground)/0.3)" }}
+          >
+            {isProcessing ? (
+              <div className="w-3 h-3 border-2 border-[hsl(var(--kf-accent1)/0.4)] border-t-[hsl(var(--kf-accent1))] rounded-full animate-spin" />
+            ) : isOnStore ? (
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ color: "white" }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            ) : null}
+          </div>
+        </button>
+
+        {p.imageUrl ? (
+          <div className="h-10 w-10 rounded-xl overflow-hidden flex-shrink-0" style={{ border: isOnStore ? "1px solid hsl(var(--kf-accent1) / 0.3)" : "1px solid hsl(var(--kf-border))" }}>
+            <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          </div>
+        ) : (
+          <div
+            className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold"
+            style={{
+              background: isOnStore ? "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.2), hsl(var(--kf-accent2) / 0.1))" : "hsl(var(--kf-muted))",
+              border: isOnStore ? "1px solid hsl(var(--kf-accent1) / 0.3)" : "1px solid hsl(var(--kf-border))",
+              color: isOnStore ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
+            }}
+          >
+            {p.name.charAt(0).toUpperCase()}
+          </div>
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`font-medium truncate ${isOnStore ? "" : "text-muted-foreground"}`}>
+              {override?.label || p.name}
             </span>
-          )}
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 border"
+              style={{ borderColor: "hsl(var(--kf-accent1) / 0.2)", color: "hsl(var(--kf-accent1) / 0.7)" }}
+            >
+              {p.category}
+            </span>
+            {isHidden && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "hsl(var(--kf-muted) / 0.4)", color: "hsl(var(--kf-muted-foreground))" }}>
+                <EyeOff className="w-2.5 h-2.5 inline mr-0.5" /> Hidden
+              </span>
+            )}
+            {visibilityRule !== "visible" && visibilityRule !== "hidden" && visOpt && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: `${visOpt.color}15`, color: visOpt.color }}>
+                {visOpt.label}
+              </span>
+            )}
+            {badgeOpt && badgeOpt.value !== "none" && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: `${badgeOpt.color}15`, color: badgeOpt.color }}>
+                {badgeOpt.label}
+              </span>
+            )}
+            {override?.hidePrice && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "hsl(var(--kf-muted) / 0.4)", color: "hsl(var(--kf-muted-foreground))" }}>
+                Price hidden
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[11px] font-medium" style={{ color: isOnStore ? "hsl(var(--kf-success))" : "hsl(var(--kf-muted-foreground) / 0.6)" }}>
+              {isProcessing ? "Processing..." : isOnStore ? "✓ On store" : "Not on store"}
+            </span>
+            {(() => {
+              const updated = formatRelativeTime((p as Record<string, unknown>).updatedAt as string | undefined);
+              return updated ? <span className="text-[10px] text-muted-foreground/40">· {updated}</span> : null;
+            })()}
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className={`text-[11px] font-medium`} style={{ color: isOnStore ? "hsl(var(--kf-success))" : "hsl(var(--kf-muted-foreground) / 0.6)" }}>
-            {isProcessing ? "Processing..." : isOnStore ? "\u2713 On store" : "Not on store"}
+
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <span className="text-xs font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+            {formatPrice(p.price, p.currency)}
           </span>
-          {(() => {
-            const updated = formatRelativeTime((p as Record<string, unknown>).updatedAt as string | undefined);
-            return updated ? <span className="text-[10px] text-muted-foreground/40">&middot; {updated}</span> : null;
-          })()}
-          {p.description && (
-            <span className="text-[10px] text-muted-foreground/40 truncate max-w-[200px]">&middot; {p.description}</span>
+          {onOverrideChange && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onExpandToggle(); }}
+              className="p-1.5 rounded-lg hover:bg-[hsl(var(--kf-muted)/0.5)] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+              title="Per-item overrides"
+            >
+              <Edit3 className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
           )}
         </div>
       </div>
 
-      <span className="text-xs font-semibold flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }}>
-        {formatPrice(p.price, p.currency)}
-      </span>
+      <AnimatePresence>
+        {expanded && onOverrideChange && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div
+              className="px-5 py-4 space-y-3"
+              style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.3)", background: "hsl(var(--kf-muted) / 0.1)" }}
+            >
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Storefront Overrides</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] text-muted-foreground mb-1 block">Display Label (override)</label>
+                  <input
+                    type="text"
+                    value={override?.label ?? ""}
+                    onChange={(e) => onOverrideChange({ label: e.target.value || undefined })}
+                    placeholder={p.name}
+                    className="kf-input w-full text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground mb-1 block">Short Description</label>
+                  <input
+                    type="text"
+                    value={override?.shortDescription ?? ""}
+                    onChange={(e) => onOverrideChange({ shortDescription: e.target.value || undefined })}
+                    placeholder="Short tagline for storefront"
+                    className="kf-input w-full text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] text-muted-foreground mb-1 block">Badge Override</label>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setBadgeOpen(!badgeOpen)}
+                      className="kf-btn-secondary text-[10px] w-full px-2 py-1.5 flex items-center justify-between"
+                    >
+                      <span style={{ color: badgeOpt && badgeOpt.value !== "none" ? badgeOpt.color : undefined }}>
+                        {badgeOpt ? badgeOpt.label : "None"}
+                      </span>
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                    <AnimatePresence>
+                      {badgeOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.1 }}
+                          className="absolute left-0 right-0 top-full mt-1 rounded-xl overflow-hidden z-50 max-h-48 overflow-y-auto"
+                          style={{ background: "hsl(var(--kf-background) / 0.97)", border: "1px solid hsl(var(--kf-border))", boxShadow: "0 8px 24px hsl(0 0% 0% / 0.3)" }}
+                        >
+                          {BADGE_OPTIONS.map((opt) => (
+                            <button
+                              key={opt.value}
+                              onClick={() => { onOverrideChange({ badge: opt.value }); setBadgeOpen(false); }}
+                              className="w-full text-left text-[10px] px-3 py-1.5 hover:bg-[hsl(var(--kf-muted)/0.5)] transition-colors"
+                              style={{ color: opt.value !== "none" ? opt.color : undefined }}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-muted-foreground mb-1 block">Visibility Rule</label>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setVisOpen(!visOpen)}
+                      className="kf-btn-secondary text-[10px] w-full px-2 py-1.5 flex items-center justify-between"
+                    >
+                      <span style={{ color: visOpt?.color }}>
+                        {visOpt?.label ?? "Visible"}
+                      </span>
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                    <AnimatePresence>
+                      {visOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.1 }}
+                          className="absolute left-0 right-0 top-full mt-1 rounded-xl overflow-hidden z-50"
+                          style={{ background: "hsl(var(--kf-background) / 0.97)", border: "1px solid hsl(var(--kf-border))", boxShadow: "0 8px 24px hsl(0 0% 0% / 0.3)" }}
+                        >
+                          {VISIBILITY_RULES.map((opt) => {
+                            const VIcon = opt.icon;
+                            return (
+                              <button
+                                key={opt.value}
+                                onClick={() => { onOverrideChange({ visibilityRule: opt.value }); setVisOpen(false); }}
+                                className="w-full text-left text-[10px] px-3 py-1.5 hover:bg-[hsl(var(--kf-muted)/0.5)] transition-colors flex items-center gap-1.5"
+                                style={{ color: opt.color }}
+                              >
+                                <VIcon className="w-3 h-3" /> {opt.label}
+                              </button>
+                            );
+                          })}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-muted-foreground mb-1 block">Options</label>
+                  <div className="space-y-1">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={override?.hidePrice ?? false}
+                        onChange={(e) => onOverrideChange({ hidePrice: e.target.checked })}
+                        className="rounded"
+                      />
+                      <span className="text-[10px]">Hide price</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={override?.featured ?? false}
+                        onChange={(e) => onOverrideChange({ featured: e.target.checked })}
+                        className="rounded"
+                      />
+                      <span className="text-[10px]">Featured</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-muted-foreground mb-1 block">Section / Rail (optional)</label>
+                <input
+                  type="text"
+                  value={override?.section ?? ""}
+                  onChange={(e) => onOverrideChange({ section: e.target.value || undefined })}
+                  placeholder="e.g. Summer Picks, New Arrivals"
+                  className="kf-input w-full text-xs"
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Reorder.Item>
   );
 }

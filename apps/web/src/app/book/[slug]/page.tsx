@@ -502,9 +502,25 @@ export default function PublicBookingPage() {
   })();
 
   const filteredCatalogItems = useMemo(() => {
-    if (!activeCategory) return catalogItems;
-    return catalogItems.filter((i) => i.itemType === activeCategory);
-  }, [catalogItems, activeCategory]);
+    const itemOverrides = storefrontConfig?.catalog?.itemOverrides ?? {};
+    const baseItems = catalogItems
+      .filter((i) => {
+        const override = itemOverrides[i.id];
+        if (override?.visibilityRule === "hidden") return false;
+        return true;
+      })
+      .map((i) => {
+        const override = itemOverrides[i.id];
+        if (!override) return i;
+        return {
+          ...i,
+          name: override.label || i.name,
+          description: override.shortDescription || i.description,
+        };
+      });
+    if (!activeCategory) return baseItems;
+    return baseItems.filter((i) => i.itemType === activeCategory);
+  }, [catalogItems, activeCategory, storefrontConfig]);
 
   const featuredItems = useMemo(() => {
     const ids = storefrontConfig?.merchandising?.featuredItemIds;
@@ -972,6 +988,7 @@ export default function PublicBookingPage() {
               secondaryColor={secondaryColor}
               businessName={business?.name}
               completedOrdersCount={completedOrdersCount}
+              configuredRails={storefrontConfig?.merchandising?.trustRails}
               businessHoursToday={(() => {
                 if (!business?.businessHours) return null;
                 const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -1137,7 +1154,9 @@ export default function PublicBookingPage() {
       )}
 
       <div className={`max-w-4xl mx-auto ${densityPadding} pb-32 ${appearance?.density === "compact" ? "space-y-5" : "space-y-8"}`}>
-        {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && !bannerDismissed && (!storefrontConfig.promotions.bannerExpiry || new Date(storefrontConfig.promotions.bannerExpiry) > new Date()) && (
+        {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && !bannerDismissed &&
+          (!storefrontConfig.promotions.bannerExpiry || new Date(storefrontConfig.promotions.bannerExpiry) > new Date()) &&
+          (!storefrontConfig.promotions.bannerStartDate || new Date(storefrontConfig.promotions.bannerStartDate) <= new Date()) && (
           <div
             className="rounded-2xl px-5 py-3.5 text-center text-sm font-medium flex items-center justify-center gap-2 backdrop-blur-sm relative"
             style={{
@@ -1147,7 +1166,18 @@ export default function PublicBookingPage() {
             }}
           >
             <Flame className="w-4 h-4 animate-pulse" />
-            {storefrontConfig.promotions.bannerText}
+            {storefrontConfig.promotions.bannerLink
+              ? <a href={storefrontConfig.promotions.bannerLink} target="_blank" rel="noopener noreferrer" className="hover:underline">{storefrontConfig.promotions.bannerText}</a>
+              : <span>{storefrontConfig.promotions.bannerText}</span>
+            }
+            {storefrontConfig.promotions.bannerCta && (
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full font-semibold ml-1"
+                style={{ background: `${storefrontConfig.promotions.bannerColor || '#f59e0b'}30` }}
+              >
+                {storefrontConfig.promotions.bannerCta} →
+              </span>
+            )}
             <button
               onClick={() => setBannerDismissed(true)}
               className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-gray-100 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
@@ -1159,6 +1189,94 @@ export default function PublicBookingPage() {
         )}
 
         {sectionOrder.map((key) => renderSection(key))}
+
+        {(storefrontConfig?.merchandising?.collections ?? []).filter((col) => col.itemIds?.length > 0).map((col) => {
+          const colItems = catalogItems.filter((i) => col.itemIds.includes(i.id));
+          if (colItems.length === 0) return null;
+          const railLabel: Record<string, string> = { featured: "⭐ Featured", seasonal: "🌿 Seasonal", landing: "✨ Spotlight" };
+          const tag = col.railType ? railLabel[col.railType] : null;
+          return (
+            <div key={col.id} className="space-y-3">
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold" style={{ color: primaryColor }}>{col.name}</h3>
+                {tag && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: `${primaryColor}18`, color: primaryColor }}>
+                    {tag}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {colItems.slice(0, 6).map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => handleItemClick(item)}
+                    className="rounded-xl p-3 text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    style={{ background: `${primaryColor}08`, border: `1px solid ${primaryColor}18` }}
+                  >
+                    {item.imageUrl && (
+                      <div className="w-full h-24 rounded-lg overflow-hidden mb-2">
+                        <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                    <p className="text-xs font-semibold text-gray-900 truncate">{item.name}</p>
+                    {item.price != null && storefrontConfig?.appearance?.showPrices !== false && (
+                      <p className="text-xs mt-0.5" style={{ color: primaryColor }}>
+                        {item.currency || "USD"} {(item.price / 100).toFixed(2)}
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+
+        {(storefrontConfig?.merchandising?.spotlights ?? []).length > 0 && (
+          <div className="space-y-3">
+            {(storefrontConfig!.merchandising!.spotlights!).map((spotlight) => {
+              const spotItem = catalogItems.find((i) => i.id === spotlight.itemId);
+              if (!spotItem) return null;
+              return (
+                <div
+                  key={spotlight.id}
+                  className="rounded-2xl overflow-hidden"
+                  style={{ background: `linear-gradient(135deg, ${primaryColor}10, ${secondaryColor}08)`, border: `1px solid ${primaryColor}20` }}
+                >
+                  <div className="flex items-start gap-4 p-4">
+                    {spotItem.imageUrl && (
+                      <div className="w-20 h-20 rounded-xl overflow-hidden flex-shrink-0">
+                        <img src={spotItem.imageUrl} alt={spotItem.name} className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      {spotlight.headline && (
+                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: secondaryColor }}>
+                          {spotlight.headline}
+                        </p>
+                      )}
+                      <h3 className="text-sm font-bold text-gray-900 truncate">{spotItem.name}</h3>
+                      {spotlight.subheadline && (
+                        <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{spotlight.subheadline}</p>
+                      )}
+                      {spotItem.price != null && storefrontConfig?.appearance?.showPrices !== false && (
+                        <p className="text-sm font-bold mt-1.5" style={{ color: primaryColor }}>
+                          {spotItem.currency || "USD"} {(spotItem.price / 100).toFixed(2)}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleItemClick(spotItem)}
+                      className="flex-shrink-0 px-3 py-2 rounded-xl text-xs font-semibold text-white transition-all hover:opacity-90"
+                      style={{ background: primaryColor }}
+                    >
+                      View
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {storefrontConfig?.socialProof?.guaranteeText && (
           <div className="rounded-2xl p-4 flex items-center gap-3 text-sm backdrop-blur-sm" style={{ border: `1px solid ${accentColor}18`, background: `${accentColor}06` }}>
