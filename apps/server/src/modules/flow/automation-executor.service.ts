@@ -355,6 +355,18 @@ export class AutomationExecutorService {
             break;
           }
 
+          const campaign = await this.prisma.client.emailCampaign.create({
+            data: {
+              businessId,
+              name: campaignSubject,
+              subject: campaignSubject,
+              body: campaignBody,
+              status: 'SENDING',
+              totalRecipients: recipients.filter(r => r.email).length,
+              segmentFilter: segmentTags.length > 0 ? { tags: segmentTags } : undefined,
+            },
+          });
+
           const campaignContent = await this.prisma.client.outboundContent.create({
             data: {
               businessId,
@@ -362,7 +374,7 @@ export class AutomationExecutorService {
               subject: campaignSubject,
               body: campaignBody,
               status: 'Queued',
-              contentMeta: { segmentTags, source: 'flow', playbookName },
+              contentMeta: { segmentTags, source: 'flow', playbookName, campaignId: campaign.id },
               tags: ['flow-action', 'campaign'],
             },
           });
@@ -383,6 +395,23 @@ export class AutomationExecutorService {
             }));
 
           await this.prisma.client.outboundDelivery.createMany({ data: deliveryData });
+
+          const campaignContactData = deliveryData
+            .filter(d => d.contactId && d.recipientEmail)
+            .map(d => ({
+              campaignId: campaign.id,
+              contactId: d.contactId as string,
+              email: d.recipientEmail as string,
+              businessId,
+              status: 'PENDING',
+            }));
+
+          if (campaignContactData.length > 0) {
+            await this.prisma.client.emailCampaignContact.createMany({
+              data: campaignContactData,
+              skipDuplicates: true,
+            });
+          }
 
           this.logger.log(`Email campaign queued: ${deliveryData.length} recipients for playbook "${playbookName}"`);
         } catch (e) {
