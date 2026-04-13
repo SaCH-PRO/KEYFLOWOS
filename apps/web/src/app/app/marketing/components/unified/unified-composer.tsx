@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Clock, Save, Loader2, ImagePlus, X, Sparkles, Wand2,
-  Target, Hash, MessageSquare, ChevronDown, Eye, EyeOff,
-  Mail, PenSquare, Globe, Calendar, Trash2, AlertCircle,
-  CheckCircle, ArrowRight, Layers, FileText, Plus,
+  Target, Hash, MessageSquare, Eye, EyeOff,
+  Mail, PenSquare, Globe, Calendar, AlertCircle,
+  CheckCircle, ArrowRight, Layers, FileText, Image as ImageIcon,
+  Upload, AlertTriangle, Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -20,6 +21,8 @@ import { ChannelPreviewPanel } from "./channel-preview-panel";
 
 type ContentTypeOption = "social" | "email" | "multi";
 type ComposerStep = "compose" | "distribute" | "review";
+
+const DRAFT_STORAGE_KEY = "kf_composer_draft";
 
 interface UnifiedComposerProps {
   businessId: string;
@@ -38,6 +41,8 @@ const OBJECTIVES = [
   { key: "lead_capture", label: "Lead Capture", emoji: "🎯" },
   { key: "nurture", label: "Nurture", emoji: "💛" },
   { key: "reminder", label: "Reminder", emoji: "🔔" },
+  { key: "announcement", label: "Announcement", emoji: "📢" },
+  { key: "re_engagement", label: "Re-engagement", emoji: "🔄" },
 ] as const;
 
 const TONES = [
@@ -76,6 +81,99 @@ const STEPS: { key: ComposerStep; label: string; num: number }[] = [
   { key: "review", label: "Review & Send", num: 3 },
 ];
 
+const TIMEZONES = [
+  { value: "America/Port_of_Spain", label: "Trinidad (AST)" },
+  { value: "America/New_York", label: "Eastern (ET)" },
+  { value: "America/Chicago", label: "Central (CT)" },
+  { value: "America/Los_Angeles", label: "Pacific (PT)" },
+  { value: "Europe/London", label: "London (GMT/BST)" },
+  { value: "America/Jamaica", label: "Jamaica (EST)" },
+  { value: "America/Barbados", label: "Barbados (AST)" },
+];
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const token = window.localStorage?.getItem("kf_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function inferContentType(destinations: ChannelDestination[]): ContentTypeOption {
+  if (destinations.length === 0) return "social";
+  const platforms = new Set(destinations.map((d) => d.platform.toUpperCase()));
+  const hasEmail = platforms.has("GOOGLE") || platforms.has("EMAIL");
+  const hasSocial = platforms.has("FACEBOOK") || platforms.has("INSTAGRAM") || platforms.has("WHATSAPP") || platforms.has("META");
+  if (hasEmail && hasSocial) return "multi";
+  if (hasEmail) return "email";
+  return "social";
+}
+
+interface ChannelWarning {
+  platform: string;
+  message: string;
+  severity: "error" | "warning";
+}
+
+function getChannelWarnings(
+  destinations: ChannelDestination[],
+  body: string,
+  subject: string,
+  mediaUrls: string[],
+): ChannelWarning[] {
+  const warnings: ChannelWarning[] = [];
+  const platforms = new Set(destinations.map((d) => d.platform.toUpperCase()));
+
+  if (platforms.has("INSTAGRAM") && mediaUrls.length === 0) {
+    warnings.push({ platform: "Instagram", message: "Instagram posts require at least one image or video", severity: "error" });
+  }
+  if ((platforms.has("GOOGLE") || platforms.has("EMAIL")) && !subject.trim()) {
+    warnings.push({ platform: "Email", message: "Email requires a subject line", severity: "error" });
+  }
+  if (platforms.has("WHATSAPP") && body.length > 4096) {
+    warnings.push({ platform: "WhatsApp", message: `Content exceeds WhatsApp limit (${body.length}/4096 chars)`, severity: "error" });
+  }
+  if (platforms.has("INSTAGRAM") && body.length > 2200) {
+    warnings.push({ platform: "Instagram", message: `Caption exceeds limit (${body.length}/2200 chars)`, severity: "warning" });
+  }
+  if (platforms.has("FACEBOOK") && body.length > 63206) {
+    warnings.push({ platform: "Facebook", message: `Post exceeds Facebook limit`, severity: "warning" });
+  }
+  return warnings;
+}
+
+function saveDraftToStorage(data: { body: string; subject: string; objective: string; tone: string; audience: string; contentType: string; mediaUrls: string[] }) {
+  try { sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ ...data, savedAt: Date.now() })); } catch {}
+}
+
+function loadDraftFromStorage(): { body: string; subject: string; objective: string; tone: string; audience: string; contentType: string; mediaUrls: string[] } | null {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Date.now() - (parsed.savedAt ?? 0) > 24 * 60 * 60 * 1000) {
+      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch { return null; }
+}
+
+function clearDraftFromStorage() {
+  try { sessionStorage.removeItem(DRAFT_STORAGE_KEY); } catch {}
+}
+
+function loadCrossModulePrefill(): { body?: string; subject?: string } {
+  const result: { body?: string; subject?: string } = {};
+  try {
+    const b = sessionStorage.getItem("kf_composer_body");
+    const s = sessionStorage.getItem("kf_composer_subject");
+    if (b) { result.body = b; sessionStorage.removeItem("kf_composer_body"); }
+    if (s) { result.subject = s; sessionStorage.removeItem("kf_composer_subject"); }
+  } catch {}
+  return result;
+}
+
 export function UnifiedComposer({
   businessId,
   businessName,
@@ -99,10 +197,46 @@ export function UnifiedComposer({
   const [showAiPanel, setShowAiPanel] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<"now" | "later">("now");
   const [scheduledAt, setScheduledAt] = useState("");
+  const [timezone, setTimezone] = useState("America/Port_of_Spain");
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [savedContentId, setSavedContentId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const prefill = loadCrossModulePrefill();
+    if (prefill.body) setBody(prefill.body);
+    if (prefill.subject) setSubject(prefill.subject);
+
+    if (!prefill.body) {
+      const draft = loadDraftFromStorage();
+      if (draft && draft.body) {
+        setBody(draft.body);
+        setSubject(draft.subject || "");
+        setObjective(draft.objective || "");
+        setTone(draft.tone || "");
+        setAudience(draft.audience || "all");
+        setContentType((draft.contentType as ContentTypeOption) || "social");
+        setMediaUrls(draft.mediaUrls || []);
+        setDraftRestored(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (body.trim()) {
+      saveDraftToStorage({ body, subject, objective, tone, audience, contentType, mediaUrls });
+    }
+  }, [body, subject, objective, tone, audience, contentType, mediaUrls]);
+
+  const handleDestinationChange = useCallback((dests: ChannelDestination[]) => {
+    setSelectedDestinations(dests);
+    const inferred = inferContentType(dests);
+    setContentType(inferred);
+  }, []);
 
   const charCount = body.length;
   const maxChars = contentType === "social" ? 2200 : 0;
@@ -118,20 +252,64 @@ export function UnifiedComposer({
     return [...new Set(platforms)] as ("FACEBOOK" | "INSTAGRAM" | "EMAIL" | "WHATSAPP" | "GENERIC")[];
   }, [selectedDestinations]);
 
+  const channelWarnings = useMemo(
+    () => getChannelWarnings(selectedDestinations, body, subject, mediaUrls),
+    [selectedDestinations, body, subject, mediaUrls],
+  );
+
+  const hasBlockingWarnings = channelWarnings.some((w) => w.severity === "error");
+
   const canAdvanceToDistribute = body.trim().length > 0;
   const canAdvanceToReview = selectedDestinations.length > 0;
+  const canPublish = canAdvanceToReview && !hasBlockingWarnings;
   const readinessScore = useMemo(() => {
     let score = 0;
-    if (body.trim()) score += 30;
-    if (objective) score += 15;
+    if (body.trim()) score += 25;
+    if (objective) score += 10;
     if (tone) score += 10;
-    if (selectedDestinations.length > 0) score += 25;
+    if (selectedDestinations.length > 0) score += 20;
     if (contentType === "email" && subject.trim()) score += 10;
     if (contentType !== "email") score += 10;
+    if (mediaUrls.length > 0) score += 10;
     if (scheduleMode === "later" && scheduledAt) score += 10;
     if (scheduleMode === "now") score += 10;
+    if (!hasBlockingWarnings && selectedDestinations.length > 0) score += 5;
     return Math.min(score, 100);
-  }, [body, objective, tone, selectedDestinations, contentType, subject, scheduleMode, scheduledAt]);
+  }, [body, objective, tone, selectedDestinations, contentType, subject, scheduleMode, scheduledAt, mediaUrls, hasBlockingWarnings]);
+
+  const handleMediaUpload = useCallback(async (files: FileList) => {
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch(`${API_BASE}/upload/businesses/${encodeURIComponent(businessId)}/media`, {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: formData,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.url) {
+            setMediaUrls((prev) => [...prev, data.url]);
+          }
+        } else {
+          toast.error(`Failed to upload ${file.name}`);
+        }
+      }
+    } catch {
+      toast.error("Media upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }, [businessId]);
+
+  const removeMedia = useCallback((index: number) => {
+    setMediaUrls((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   const handleSaveDraft = useCallback(async () => {
     if (!body.trim()) return;
@@ -164,7 +342,7 @@ export function UnifiedComposer({
   }, [body, subject, objective, audience, tone, mediaUrls, savedContentId, businessId, contentTypeForApi, onContentCreated]);
 
   const handlePublish = useCallback(async () => {
-    if (!body.trim() || selectedDestinations.length === 0) return;
+    if (!body.trim() || selectedDestinations.length === 0 || hasBlockingWarnings) return;
     setPublishing(true);
     try {
       let contentId = savedContentId;
@@ -204,7 +382,7 @@ export function UnifiedComposer({
         const res = await scheduleContent(contentId, {
           destinationIds: destIds,
           scheduledAt,
-          timezone: "America/Port_of_Spain",
+          timezone,
         }, businessId);
         if (res.error) { toast.error(res.error); return; }
         toast.success(`Scheduled for ${new Date(scheduledAt).toLocaleString("en-TT")}`);
@@ -213,15 +391,26 @@ export function UnifiedComposer({
         if (res.error) { toast.error(res.error); return; }
         toast.success("Publishing to all channels...");
       }
+      clearDraftFromStorage();
       onClose?.();
     } finally {
       setPublishing(false);
     }
-  }, [body, subject, objective, audience, tone, mediaUrls, selectedDestinations, variants, savedContentId, businessId, contentTypeForApi, scheduleMode, scheduledAt, onContentCreated, onClose]);
+  }, [body, subject, objective, audience, tone, mediaUrls, selectedDestinations, variants, savedContentId, businessId, contentTypeForApi, scheduleMode, scheduledAt, timezone, onContentCreated, onClose, hasBlockingWarnings]);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 px-1">
+      {draftRestored && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--kf-accent2))]/10 border border-[hsl(var(--kf-accent2))]/20 text-xs">
+          <Info className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
+          <span className="text-[hsl(var(--kf-accent2))]">Previous draft restored</span>
+          <button onClick={() => { setBody(""); setSubject(""); setObjective(""); setTone(""); setAudience("all"); setMediaUrls([]); clearDraftFromStorage(); setDraftRestored(false); }} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">
+            Discard
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 px-1 flex-wrap">
         {STEPS.map((s, i) => (
           <button
             key={s.key}
@@ -340,7 +529,7 @@ export function UnifiedComposer({
                             <button
                               key={action.key}
                               className="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-purple-500/10 transition-colors text-center"
-                              onClick={() => toast.info(`AI ${action.label} coming soon`)}
+                              onClick={() => toast.info(`AI ${action.label} — connect your AI provider in Settings`)}
                             >
                               <AIcon className="w-4 h-4 text-purple-400" />
                               <span className="text-[10px] font-medium text-purple-300">{action.label}</span>
@@ -380,13 +569,44 @@ export function UnifiedComposer({
                   </div>
                 </div>
 
+                {mediaUrls.length > 0 && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {mediaUrls.map((url, i) => (
+                      <div key={i} className="relative group w-16 h-16 rounded-lg overflow-hidden border border-border/30">
+                        <img src={url} alt={`Media ${i + 1}`} className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => removeMedia(i)}
+                          className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => { if (e.target.files) { void handleMediaUpload(e.target.files); } e.target.value = ""; }}
+                  />
                   <button
-                    onClick={() => toast.info("Media upload coming soon")}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/30 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/15 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/30 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/15 transition-colors disabled:opacity-40"
                   >
-                    <ImagePlus className="w-3.5 h-3.5" /> Add Media
+                    {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImagePlus className="w-3.5 h-3.5" />}
+                    {uploading ? "Uploading..." : "Add Media"}
                   </button>
+                  {contentType === "social" && mediaUrls.length === 0 && (
+                    <span className="text-[10px] text-muted-foreground/60 flex items-center gap-1">
+                      <ImageIcon className="w-3 h-3" /> Posts with images get 2.3x more engagement
+                    </span>
+                  )}
                   <div className="flex-1" />
                   <button
                     onClick={handleSaveDraft}
@@ -412,9 +632,30 @@ export function UnifiedComposer({
                 <ChannelSelector
                   businessId={businessId}
                   selectedDestinations={selectedDestinations}
-                  onSelectionChange={setSelectedDestinations}
+                  onSelectionChange={handleDestinationChange}
                   contentType={contentTypeForApi}
                 />
+
+                {channelWarnings.length > 0 && (
+                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">Channel Compatibility</span>
+                    </div>
+                    {channelWarnings.map((w, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[11px]">
+                        {w.severity === "error" ? (
+                          <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                        )}
+                        <span className={w.severity === "error" ? "text-red-400" : "text-amber-400/80"}>
+                          <span className="font-medium">{w.platform}:</span> {w.message}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {selectedDestinations.length > 0 && (
                   <ChannelVariantsPanel
@@ -447,6 +688,18 @@ export function UnifiedComposer({
 
             {step === "review" && (
               <motion.div key="review" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+                {hasBlockingWarnings && (
+                  <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-red-400">Cannot Publish</span>
+                    </div>
+                    {channelWarnings.filter((w) => w.severity === "error").map((w, i) => (
+                      <p key={i} className="text-[11px] text-red-400/80 ml-5">{w.platform}: {w.message}</p>
+                    ))}
+                  </div>
+                )}
+
                 <div className="rounded-xl border border-border/30 bg-card p-4 space-y-3">
                   <h4 className="text-sm font-semibold flex items-center gap-2">
                     <FileText className="w-4 h-4 text-muted-foreground" /> Content Summary
@@ -483,6 +736,16 @@ export function UnifiedComposer({
                     <span className="text-muted-foreground block text-[10px] mb-0.5">Content</span>
                     <p className="text-foreground/80 line-clamp-3">{body}</p>
                   </div>
+                  {mediaUrls.length > 0 && (
+                    <div className="text-xs">
+                      <span className="text-muted-foreground block text-[10px] mb-0.5">Media</span>
+                      <div className="flex gap-1.5 mt-1">
+                        {mediaUrls.map((url, i) => (
+                          <img key={i} src={url} alt="" className="w-10 h-10 rounded object-cover border border-border/20" />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-xl border border-border/30 bg-card p-4 space-y-3">
@@ -512,12 +775,23 @@ export function UnifiedComposer({
                     </button>
                   </div>
                   {scheduleMode === "later" && (
-                    <input
-                      type="datetime-local"
-                      value={scheduledAt}
-                      onChange={(e) => setScheduledAt(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-muted/10 border border-border/30 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent2))]/50"
-                    />
+                    <div className="space-y-2">
+                      <input
+                        type="datetime-local"
+                        value={scheduledAt}
+                        onChange={(e) => setScheduledAt(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg bg-muted/10 border border-border/30 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent2))]/50"
+                      />
+                      <select
+                        value={timezone}
+                        onChange={(e) => setTimezone(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg bg-transparent border border-border/30 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent2))]/50"
+                      >
+                        {TIMEZONES.map((tz) => (
+                          <option key={tz.value} value={tz.value}>{tz.label}</option>
+                        ))}
+                      </select>
+                    </div>
                   )}
                 </div>
 
@@ -548,7 +822,7 @@ export function UnifiedComposer({
                   <div className="flex-1" />
                   <button
                     onClick={handlePublish}
-                    disabled={publishing || (scheduleMode === "later" && !scheduledAt)}
+                    disabled={publishing || !canPublish || (scheduleMode === "later" && !scheduledAt)}
                     className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-semibold bg-[hsl(var(--kf-accent1))] text-white hover:bg-[hsl(var(--kf-accent1))]/90 transition-colors disabled:opacity-40 shadow-lg shadow-[hsl(var(--kf-accent1))]/20"
                   >
                     {publishing ? (
