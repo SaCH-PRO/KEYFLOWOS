@@ -6188,9 +6188,7 @@ export async function expandAudience(data: { segmentTags?: string[]; limit?: num
 
 export async function getAudienceHealth(businessId?: string): Promise<ApiResult<AudienceHealthResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiGet<AudienceHealthResult>({
-    path: `/communications/businesses/${encodeURIComponent(bid)}/audience/health`,
-  });
+  return apiGet<AudienceHealthResult>(`/communications/businesses/${encodeURIComponent(bid)}/audience/health`);
 }
 
 // --- Content AI ---

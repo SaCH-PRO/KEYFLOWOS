@@ -254,7 +254,7 @@ export function ProjectDetail({
                   style={{
                     background: s.bg,
                     color: s.color,
-                    ringColor: normalizeStatus(project.status) === s.key ? s.color : undefined,
+                    ...(normalizeStatus(project.status) === s.key ? { boxShadow: `0 0 0 1px ${s.color}` } : {}),
                   }}
                 >
                   {s.label}
