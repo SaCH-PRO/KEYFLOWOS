@@ -686,11 +686,7 @@ export function ChannelsPanel() {
           <li>Once connected, select platforms when composing posts to auto-publish</li>
         </ol>
         <p className="text-[11px] text-muted-foreground mt-2">
-          Configure OAuth credentials in{" "}
-          <a href="/app/settings/connections" className="font-medium hover:underline" style={{ color: "hsl(var(--kf-accent1))" }}>
-            Settings &gt; Connections
-          </a>{" "}
-          for one-click connect
+          Configure OAuth credentials in Settings &gt; Connections for one-click connect.
         </p>
       </motion.div>
       <ConfirmDialog

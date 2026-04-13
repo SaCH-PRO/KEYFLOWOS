@@ -1001,7 +1001,11 @@ export default function CatalogCapacityTab({
               <h3 className="text-sm font-semibold">Calendar Integration</h3>
             </div>
 
-            <a href="/app/settings/connections" className="kf-card p-3 flex items-center justify-between group hover:border-[hsl(var(--kf-accent1))]/40 transition-colors block">
+            <button
+              onClick={calendarConnected ? onDisconnectCalendar : onConnectCalendar}
+              disabled={calendarLoading}
+              className="kf-card p-3 flex items-center justify-between group hover:border-[hsl(var(--kf-accent1))]/40 transition-colors w-full text-left"
+            >
               <div className="flex items-center gap-2.5">
                 <div
                   className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
@@ -1019,24 +1023,30 @@ export default function CatalogCapacityTab({
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {calendarConnected && (
-                  <div
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg"
-                    style={{
-                      background: "hsl(var(--kf-success) / 0.1)",
-                      borderWidth: 1,
-                      borderColor: "hsl(var(--kf-success) / 0.3)",
-                    }}
-                  >
-                    <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />
-                    <span className="text-[10px] font-medium" style={{ color: "hsl(var(--kf-success))" }}>Connected</span>
-                  </div>
+                {calendarConnected ? (
+                  <>
+                    <div
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-lg"
+                      style={{
+                        background: "hsl(var(--kf-success) / 0.1)",
+                        borderWidth: 1,
+                        borderColor: "hsl(var(--kf-success) / 0.3)",
+                      }}
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />
+                      <span className="text-[10px] font-medium" style={{ color: "hsl(var(--kf-success))" }}>Connected</span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground group-hover:text-[hsl(var(--kf-error))] transition-colors">
+                      Disconnect
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground group-hover:text-[hsl(var(--kf-accent1))] transition-colors">
+                    Connect →
+                  </span>
                 )}
-                <span className="text-[10px] text-muted-foreground group-hover:text-[hsl(var(--kf-accent1))] transition-colors">
-                  Settings →
-                </span>
               </div>
-            </a>
+            </button>
           </div>
         </div>
       )}

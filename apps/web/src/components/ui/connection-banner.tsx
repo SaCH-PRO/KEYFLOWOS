@@ -18,6 +18,7 @@ interface ConnectionBannerProps {
   compact?: boolean;
   manageHref?: string;
   taskIntent?: string;
+  onManage?: () => void;
 }
 
 export function ConnectionBanner({
@@ -31,10 +32,12 @@ export function ConnectionBanner({
   onDisconnect,
   loading = false,
   compact = false,
-  manageHref = "/app/settings/connections",
+  manageHref,
   taskIntent,
+  onManage,
 }: ConnectionBannerProps) {
   const { pushContext, setTaskOrigin, current } = useNavigationContext();
+  const resolvedManageHref = manageHref ?? "/app/settings/connections";
 
   function handleManageClick() {
     if (current) setTaskOrigin(current);
@@ -72,9 +75,17 @@ export function ConnectionBanner({
             {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
             Connect
           </button>
+        ) : onManage ? (
+          <button
+            onClick={onManage}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+          >
+            <Settings className="w-3 h-3" />
+            Manage
+          </button>
         ) : (
           <Link
-            href={manageHref}
+            href={resolvedManageHref}
             onClick={handleManageClick}
             className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
           >
@@ -141,14 +152,24 @@ export function ConnectionBanner({
                   Disconnect
                 </button>
               )}
-              <Link
-                href={manageHref}
-                onClick={handleManageClick}
-                className="kf-btn-secondary !py-1.5 !px-3 text-xs flex items-center gap-1.5"
-              >
-                <Settings className="w-3 h-3" />
-                Manage
-              </Link>
+              {onManage ? (
+                <button
+                  onClick={onManage}
+                  className="kf-btn-secondary !py-1.5 !px-3 text-xs flex items-center gap-1.5"
+                >
+                  <Settings className="w-3 h-3" />
+                  Manage
+                </button>
+              ) : (
+                <Link
+                  href={resolvedManageHref}
+                  onClick={handleManageClick}
+                  className="kf-btn-secondary !py-1.5 !px-3 text-xs flex items-center gap-1.5"
+                >
+                  <Settings className="w-3 h-3" />
+                  Manage
+                </Link>
+              )}
             </div>
           )}
         </div>

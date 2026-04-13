@@ -18,7 +18,6 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
-import Link from "next/link";
 import type { Invoice, Contact } from "@/lib/client";
 import { markInvoicePaid, updateInvoiceStatus } from "@/lib/client";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
@@ -710,9 +709,9 @@ export default function PaymentsTab({
         entityLabel="payments"
       />
 
-      <Link
-        href="/app/settings/business?tab=payments"
-        className="flex items-center justify-between p-3 rounded-xl border border-border/40 bg-muted/5 hover:bg-muted/10 transition-colors group"
+      <button
+        onClick={() => { window.location.href = "/app/settings/business?tab=payments"; }}
+        className="flex items-center justify-between p-3 rounded-xl border border-border/40 bg-muted/5 hover:bg-muted/10 transition-colors group w-full text-left"
       >
         <div className="flex items-center gap-2.5">
           <div className="p-1.5 rounded-lg bg-muted/20">
@@ -724,7 +723,7 @@ export default function PaymentsTab({
           </div>
         </div>
         <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
-      </Link>
+      </button>
     </motion.div>
   );
 }
