@@ -1,9 +1,19 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
-function stripSecrets<T extends Record<string, unknown>>(conn: T): Omit<T, 'token' | 'refreshToken'> {
+type ConnectionRecord = Awaited<ReturnType<PrismaService['client']['channelConnection']['findFirst']>>;
+
+function stripSecrets(conn: NonNullable<ConnectionRecord>) {
   const { token, refreshToken, ...safe } = conn;
-  return safe as Omit<T, 'token' | 'refreshToken'>;
+  return safe;
+}
+
+function stripSecretsFromDestination(dest: Record<string, unknown>) {
+  if (dest.connection && typeof dest.connection === 'object' && dest.connection !== null) {
+    const { token, refreshToken, ...safeConn } = dest.connection as Record<string, unknown>;
+    return { ...dest, connection: safeConn };
+  }
+  return dest;
 }
 
 @Injectable()
@@ -18,7 +28,7 @@ export class ChannelConnectionService {
       include: { destinations: true },
       orderBy: { createdAt: 'desc' },
     });
-    return connections.map((c: any) => stripSecrets(c));
+    return connections.map((c) => stripSecrets(c));
   }
 
   async get(businessId: string, id: string) {
@@ -26,7 +36,7 @@ export class ChannelConnectionService {
       where: { id, businessId },
       include: { destinations: true },
     });
-    return conn ? stripSecrets(conn as any) : null;
+    return conn ? stripSecrets(conn) : null;
   }
 
   async create(businessId: string, data: {
@@ -53,7 +63,7 @@ export class ChannelConnectionService {
       });
     }
 
-    return stripSecrets(conn as any);
+    return stripSecrets(conn);
   }
 
   async update(businessId: string, id: string, data: {
@@ -69,10 +79,11 @@ export class ChannelConnectionService {
   }) {
     const existing = await this.prisma.client.channelConnection.findFirst({ where: { id, businessId } });
     if (!existing) return null;
-    return this.prisma.client.channelConnection.update({
+    const updated = await this.prisma.client.channelConnection.update({
       where: { id },
       data,
     });
+    return stripSecrets(updated);
   }
 
   async delete(businessId: string, id: string) {
@@ -117,21 +128,24 @@ export class ChannelConnectionService {
   }
 
   async listDestinations(businessId: string, opts?: { platform?: string; activeOnly?: boolean }) {
-    const where: any = { businessId };
+    const where: { businessId: string; platform?: string; isActive?: boolean } = { businessId };
     if (opts?.platform) where.platform = opts.platform;
     if (opts?.activeOnly) where.isActive = true;
-    return this.prisma.client.channelDestination.findMany({
+    const destinations = await this.prisma.client.channelDestination.findMany({
       where,
       include: { connection: true },
       orderBy: { createdAt: 'desc' },
     });
+    return destinations.map((d) => stripSecretsFromDestination(d as unknown as Record<string, unknown>));
   }
 
   async getDestination(id: string) {
-    return this.prisma.client.channelDestination.findUnique({
+    const dest = await this.prisma.client.channelDestination.findUnique({
       where: { id },
       include: { connection: true },
     });
+    if (!dest) return null;
+    return stripSecretsFromDestination(dest as unknown as Record<string, unknown>);
   }
 
   async updateHealthState(id: string, healthState: string, healthMessage?: string) {
@@ -235,7 +249,7 @@ export class ChannelConnectionService {
         where: { businessId, provider },
       });
 
-      let conn: any;
+      let conn: { id: string };
       if (existing) {
         conn = await this.prisma.client.channelConnection.update({
           where: { id: existing.id },
@@ -270,12 +284,15 @@ export class ChannelConnectionService {
       let destCount = 0;
 
       if (sc.pages && Array.isArray(sc.pages)) {
-        for (const page of sc.pages as any[]) {
+        const pages = sc.pages as Array<Record<string, unknown>>;
+        for (const page of pages) {
+          const pictureData = page.picture as Record<string, unknown> | undefined;
+          const pictureInner = pictureData?.data as Record<string, unknown> | undefined;
           await this.upsertDestination(conn.id, businessId, {
             platform: 'FACEBOOK',
-            platformId: page.id || page.pageId,
-            displayName: page.name || page.pageName || 'Facebook Page',
-            avatarUrl: page.picture?.data?.url || page.avatarUrl,
+            platformId: (page.id || page.pageId) as string | undefined,
+            displayName: (page.name || page.pageName || 'Facebook Page') as string,
+            avatarUrl: (pictureInner?.url || page.avatarUrl) as string | undefined,
             capabilities: ['text', 'image', 'video', 'link'],
           });
           destCount++;
@@ -283,12 +300,13 @@ export class ChannelConnectionService {
       }
 
       if (sc.instagramAccounts && Array.isArray(sc.instagramAccounts)) {
-        for (const ig of sc.instagramAccounts as any[]) {
+        const igAccounts = sc.instagramAccounts as Array<Record<string, unknown>>;
+        for (const ig of igAccounts) {
           await this.upsertDestination(conn.id, businessId, {
             platform: 'INSTAGRAM',
-            platformId: ig.id || ig.igId,
-            displayName: ig.username || ig.name || 'Instagram',
-            avatarUrl: ig.profilePictureUrl || ig.avatarUrl,
+            platformId: (ig.id || ig.igId) as string | undefined,
+            displayName: (ig.username || ig.name || 'Instagram') as string,
+            avatarUrl: (ig.profilePictureUrl || ig.avatarUrl) as string | undefined,
             capabilities: ['image', 'video', 'carousel'],
           });
           destCount++;
