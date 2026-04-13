@@ -942,9 +942,12 @@ export default function QuotesPanel({
                 currency={quote.currency}
                 items={(quote.items ?? []) as Array<{ description?: string | null }>}
                 date={quote.issueDate}
+                dueDate={quote.expiryDate}
                 badges={cardBadges}
                 selected={selectedQuote?.id === quote.id}
                 onClick={() => setSelectedQuote(quote)}
+                linkedService={(quote.items ?? []).find((item: any) => item.description)?.description?.slice(0, 30) || null}
+                onViewContact={onViewContact && quote.contactId ? () => onViewContact(quote.contactId!) : undefined}
                 smartCTA={
                   <button
                     onClick={handleSmartAction}

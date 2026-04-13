@@ -371,6 +371,9 @@ export default function PaymentsTab({
         totalPending={stats.totalPending}
         totalOverdue={stats.totalOverdue}
         currency={currency}
+        draftCount={invoices.filter((i) => i.status === "DRAFT").length}
+        pendingCount={stats.pendingCount}
+        overdueCount={stats.overdueCount}
       />
 
       {overdueQueue.length > 0 && (

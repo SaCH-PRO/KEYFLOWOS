@@ -519,8 +519,8 @@ export default function CommercePage() {
             />
           )}
 
-          {opsSection === "quotes" && (
-            <div className="flex items-center gap-3 flex-wrap text-[10px] px-1 mb-1">
+          {opsSection === "quotes" && quotes.length > 0 && (
+            <div className="rounded-xl border border-border/30 bg-card p-2.5">
               {(() => {
                 const draft = quotes.filter((q) => q.status === "DRAFT").length;
                 const sent = quotes.filter((q) => q.status === "SENT").length;
@@ -529,18 +529,53 @@ export default function CommercePage() {
                 const total = quotes.length;
                 const convRate = total > 0 ? Math.round((accepted / total) * 100) : 0;
                 const pendingVal = quotes.filter((q) => q.status === "SENT").reduce((s, q) => s + Number(q.total ?? 0), 0);
+                const acceptedVal = quotes.filter((q) => q.status === "ACCEPTED").reduce((s, q) => s + Number(q.total ?? 0), 0);
+                const stages = [
+                  { label: "Draft", count: draft, color: "hsl(var(--muted-foreground))" },
+                  { label: "Sent", count: sent, color: "hsl(210, 80%, 60%)" },
+                  { label: "Accepted", count: accepted, color: "hsl(var(--kf-success))" },
+                  { label: "Rejected", count: rejected, color: "hsl(var(--kf-error))" },
+                ];
+                const totalBar = Math.max(total, 1);
                 return (
-                  <>
-                    <span className="text-muted-foreground font-medium">{draft} Draft</span>
-                    <span className="text-blue-400 font-medium">{sent} Pending</span>
-                    <span className="text-emerald-400 font-medium">{accepted} Accepted</span>
-                    <span className={`${rejected > 0 ? "text-red-400" : "text-muted-foreground/50"} font-medium`}>{rejected} Rejected</span>
-                    <span className="text-muted-foreground/30">|</span>
-                    <span className="text-muted-foreground font-medium">{convRate}% conversion</span>
-                    {pendingVal > 0 && (
-                      <span className="text-amber-400 font-medium">{formatCurrencyCompact(pendingVal, businessCurrency)} pending</span>
-                    )}
-                  </>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Quote Pipeline</span>
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="font-bold" style={{ color: convRate >= 50 ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))" }}>
+                          {convRate}% conversion
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex h-1.5 rounded-full overflow-hidden bg-muted/20">
+                      {stages.map((s) => s.count > 0 && (
+                        <div
+                          key={s.label}
+                          style={{ width: `${(s.count / totalBar) * 100}%`, background: s.color }}
+                          className="transition-all duration-300"
+                        />
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-3 text-[10px]">
+                      {stages.map((s) => (
+                        <span key={s.label} className="font-medium" style={{ color: s.color }}>
+                          {s.count} {s.label}
+                        </span>
+                      ))}
+                      {pendingVal > 0 && (
+                        <>
+                          <span className="text-muted-foreground/30">|</span>
+                          <span className="text-amber-400 font-medium">{formatCurrencyCompact(pendingVal, businessCurrency)} pending</span>
+                        </>
+                      )}
+                      {acceptedVal > 0 && (
+                        <>
+                          <span className="text-muted-foreground/30">|</span>
+                          <span className="text-emerald-400 font-medium">{formatCurrencyCompact(acceptedVal, businessCurrency)} won</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 );
               })()}
             </div>

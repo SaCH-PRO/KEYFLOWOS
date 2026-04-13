@@ -936,9 +936,12 @@ export default function InvoicesPanel({
                   currency={inv.currency}
                   items={inv.items ?? []}
                   date={inv.issueDate ?? ""}
+                  dueDate={inv.dueDate}
                   badges={cardBadges}
                   selected={selectedInvoice?.id === inv.id}
                   onClick={() => setSelectedInvoice(inv)}
+                  linkedService={(inv.items ?? []).find((item: any) => item.description)?.description?.slice(0, 30) || null}
+                  onViewContact={onViewContact && inv.contactId ? () => onViewContact(inv.contactId!) : undefined}
                   smartCTA={
                     <button
                       onClick={handleSmartAction}

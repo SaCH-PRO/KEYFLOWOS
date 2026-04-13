@@ -43,6 +43,12 @@ export class PublicCreateBookingDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  @Transform(stripHtml)
+  company?: string | null;
+
+  @IsString()
+  @IsOptional()
   @MaxLength(1000)
   @Transform(stripHtml)
   notes?: string | null;

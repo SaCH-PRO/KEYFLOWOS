@@ -528,7 +528,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     serviceId: string;
     staffId?: string | null;
     startTime: Date;
-    contact: { firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null };
+    contact: { firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null; companyName?: string | null };
   }) {
     const business = await this.prisma.client.business.findFirstOrThrow({
       where: { id: input.businessId, deletedAt: null },

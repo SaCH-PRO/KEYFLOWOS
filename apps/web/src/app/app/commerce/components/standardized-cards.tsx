@@ -107,7 +107,7 @@ export function ActionCard({
       <div className="flex items-start gap-3">
         <div
           className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-          style={{ backgroundColor: `${accentColor}15` }}
+          style={{ backgroundColor: "hsl(var(--kf-accent1) / 0.08)" }}
         >
           <Icon className="w-4 h-4" style={{ color: accentColor }} />
         </div>
@@ -120,7 +120,7 @@ export function ActionCard({
           disabled={loading}
           className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors shrink-0 disabled:opacity-50"
           style={{
-            backgroundColor: `${accentColor}15`,
+            backgroundColor: "hsl(var(--kf-accent1) / 0.08)",
             color: accentColor,
           }}
         >
@@ -171,11 +171,14 @@ interface RecordRowCardProps {
   currency: string;
   items: Array<{ description?: string | null }>;
   date: string;
+  dueDate?: string | null;
   badges?: ReactNode;
   smartCTA: ReactNode;
   overflowMenu: ReactNode;
   onClick: () => void;
   selected?: boolean;
+  linkedService?: string | null;
+  onViewContact?: () => void;
 }
 
 export function RecordRowCard({
@@ -187,15 +190,37 @@ export function RecordRowCard({
   currency,
   items,
   date,
+  dueDate,
   badges,
   smartCTA,
   overflowMenu,
   onClick,
   selected,
+  linkedService,
+  onViewContact,
 }: RecordRowCardProps) {
   const contactName = contact
     ? `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || contact.email || "\u2014"
     : "\u2014";
+
+  const urgency = (() => {
+    if (status === "OVERDUE") return "overdue";
+    if (status === "SENT" && dueDate) {
+      const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      if (daysLeft < 0) return "overdue";
+      if (daysLeft <= 3) return "due-soon";
+    }
+    return null;
+  })();
+
+  const dueLabel = (() => {
+    if (!dueDate) return null;
+    const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    if (daysLeft < 0) return `${Math.abs(daysLeft)}d overdue`;
+    if (daysLeft === 0) return "Due today";
+    if (daysLeft <= 7) return `Due in ${daysLeft}d`;
+    return null;
+  })();
 
   return (
     <div
@@ -226,20 +251,51 @@ export function RecordRowCard({
               <span className="font-mono text-[13px] font-semibold text-foreground leading-tight">
                 {number}
               </span>
-              <span className="text-[13px] text-foreground/70 truncate">
-                {contactName}
-              </span>
+              {onViewContact && contact ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onViewContact(); }}
+                  className="text-[13px] text-foreground/70 truncate hover:text-[hsl(var(--kf-accent1))] hover:underline transition-colors"
+                >
+                  {contactName}
+                </button>
+              ) : (
+                <span className="text-[13px] text-foreground/70 truncate">{contactName}</span>
+              )}
               <span
                 className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border leading-none ${getStatusBadge(status)}`}
               >
                 {status}
               </span>
+              {urgency === "overdue" && (
+                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none" style={{ background: "hsl(var(--kf-error) / 0.12)", color: "hsl(var(--kf-error))" }}>
+                  OVERDUE
+                </span>
+              )}
+              {urgency === "due-soon" && (
+                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none" style={{ background: "hsl(var(--kf-warning) / 0.12)", color: "hsl(var(--kf-warning))" }}>
+                  DUE SOON
+                </span>
+              )}
               {badges}
             </div>
             <div className="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground/50">
               <span className="truncate">{getItemsSummary(items)}</span>
               <span className="text-muted-foreground/25">&middot;</span>
               <span className="shrink-0">{date ? formatRelativeDate(date) : ""}</span>
+              {dueLabel && (
+                <>
+                  <span className="text-muted-foreground/25">&middot;</span>
+                  <span className={`shrink-0 font-medium ${urgency === "overdue" ? "text-red-400" : urgency === "due-soon" ? "text-amber-400" : "text-muted-foreground/50"}`}>
+                    {dueLabel}
+                  </span>
+                </>
+              )}
+              {linkedService && (
+                <>
+                  <span className="text-muted-foreground/25">&middot;</span>
+                  <span className="truncate" style={{ color: "hsl(var(--kf-accent2))" }}>{linkedService}</span>
+                </>
+              )}
             </div>
           </div>
 
@@ -288,7 +344,7 @@ export function InsightCard({
             onClick={action.onClick}
             className="px-2.5 py-1 text-[11px] font-medium rounded-lg transition-colors shrink-0"
             style={{
-              backgroundColor: `${accentColor}15`,
+              backgroundColor: "hsl(var(--kf-accent1) / 0.08)",
               color: accentColor,
             }}
           >
