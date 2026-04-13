@@ -187,7 +187,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   const handleOpenBroadcast = useCallback(() => setShowBroadcast(true), [setShowBroadcast]);
   const openComposer = useOpenComposer();
   const handleOpenComposer = useCallback(() => {
-    const names = contacts.filter(c => selectedIds.has(c.id)).map(c => c.name || c.email).filter(Boolean);
+    const names = contacts.filter(c => selectedIds.has(c.id)).map(c => c.displayName || c.firstName || c.email).filter(Boolean);
     openComposer({ contentType: "email", subject: names.length ? `Message for ${names.slice(0, 3).join(", ")}${names.length > 3 ? ` +${names.length - 3}` : ""}` : undefined });
   }, [openComposer, contacts, selectedIds]);
   const handleScanSuccess = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);

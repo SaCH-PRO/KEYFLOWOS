@@ -168,7 +168,7 @@ function getChannelWarnings(
       warnings.push({ platform: "Instagram", message: "Instagram posts require at least one image or video", severity: "error" });
     }
     if (plat === "EMAIL" && !effSubject.trim()) {
-      warnings.push({ platform: "Email", message: `Email requires a subject line${dest.label ? ` (${dest.label})` : ""}`, severity: "error" });
+      warnings.push({ platform: "Email", message: `Email requires a subject line${dest.displayName ? ` (${dest.displayName})` : ""}`, severity: "error" });
     }
     if (plat === "WHATSAPP" && effBody.length > 4096) {
       warnings.push({ platform: "WhatsApp", message: `Content exceeds WhatsApp limit (${effBody.length}/4096 chars)`, severity: "error" });
@@ -503,7 +503,7 @@ export function UnifiedComposer({
         }
         case "channels": {
           const channelNames = selectedDestinations.length > 0
-            ? selectedDestinations.map(d => d.platform || d.label || "unknown")
+            ? selectedDestinations.map(d => d.platform || d.displayName || "unknown")
             : ["email", "social", "whatsapp"];
           const res = await aiSuggestChannels({ body, objective, audience, availableChannels: channelNames }, businessId);
           if (res.error) { toast.error(res.error); break; }

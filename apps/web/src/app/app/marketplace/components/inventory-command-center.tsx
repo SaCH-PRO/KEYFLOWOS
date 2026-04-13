@@ -389,7 +389,8 @@ export function InventoryCommandCenter({
     setSheetLoading(true);
     try {
       const res = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/create`, body: { title: "Inventory Sync" } });
-      if (res.data) setSheetStatus({ ...sheetStatus, linkedSheetId: res.data.fileId, linkedSheetName: res.data.name });
+      const sheetData = res.data as { fileId?: string; name?: string } | undefined;
+      if (sheetData) setSheetStatus({ ...sheetStatus, linkedSheetId: sheetData.fileId ?? null, linkedSheetName: sheetData.name ?? null });
     } catch {}
     setSheetLoading(false);
   };
@@ -481,7 +482,7 @@ export function InventoryCommandCenter({
               setStockStatusFilter={setStockStatusFilter}
               expandedRows={expandedRows}
               setExpandedRows={setExpandedRows}
-              onAdjust={(inv) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
+              onAdjust={(inv: Record<string, unknown>) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
               onAddInventory={onAddInventory}
             />
           )}
@@ -495,7 +496,7 @@ export function InventoryCommandCenter({
               productsById={productsById}
               warehousesById={warehousesById}
               basePath={basePath}
-              onAdjust={(inv) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
+              onAdjust={(inv: Record<string, unknown>) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
               onShowTransfer={() => setShowTransferModal(true)}
             />
           )}
