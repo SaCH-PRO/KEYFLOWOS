@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ProductNormalizationService } from './product-normalization.service';
@@ -7,8 +7,8 @@ import { encryptCredentials, decryptCredentials } from './credentials.util';
 @Injectable()
 export class SupplierService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly normalizationService: ProductNormalizationService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ProductNormalizationService) private readonly normalizationService: ProductNormalizationService,
   ) {}
 
   // ---- SupplierConnection CRUD ----
