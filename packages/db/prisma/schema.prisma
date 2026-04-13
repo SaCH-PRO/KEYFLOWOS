@@ -921,6 +921,9 @@ model OutboundDelivery {
   variant         OutboundVariant? @relation(fields: [variantId], references: [id])
   destinationId   String   @map("destination_id")
   destination     ChannelDestination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+  contactId       String?  @map("contact_id")
+  recipientEmail  String?  @map("recipient_email")
+  recipientPhone  String?  @map("recipient_phone")
   status          String   @default("Queued") // Queued, Scheduled, Sending, Sent, Published, Failed, RetryPending, Cancelled
   scheduledAt     DateTime? @map("scheduled_at")
   sentAt          DateTime? @map("sent_at")
@@ -944,6 +947,7 @@ model OutboundDelivery {
   @@index([businessId, status])
   @@index([contentId])
   @@index([destinationId])
+  @@index([contactId])
   @@index([status, scheduledAt])
   @@index([status, nextRetryAt])
   @@map("outbound_deliveries")

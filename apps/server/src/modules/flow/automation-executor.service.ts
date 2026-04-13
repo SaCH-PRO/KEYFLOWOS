@@ -317,6 +317,79 @@ export class AutomationExecutorService {
         }
         break;
       }
+      case 'send_email_campaign':
+      case 'SEND_EMAIL_CAMPAIGN': {
+        try {
+          const segmentTags: string[] = Array.isArray(action.segmentTags) ? action.segmentTags.map(String) : [];
+          const campaignSubject = action.subject || `Campaign from ${playbookName}`;
+          const campaignBody = action.body || action.message || '';
+
+          const emailConnection = await this.prisma.client.channelConnection.findFirst({
+            where: { businessId, provider: { in: ['EMAIL', 'GOOGLE'] } },
+            include: { destinations: { where: { isActive: true }, take: 1 } },
+          });
+
+          if (!emailConnection || emailConnection.destinations.length === 0) {
+            this.logger.warn(`No email connection for business ${businessId}, skipping campaign`);
+            break;
+          }
+
+          const contactWhere: Record<string, unknown> = {
+            businessId, deletedAt: null,
+            email: { not: null },
+            doNotContact: { not: true },
+            marketingOptIn: { not: false },
+          };
+          if (segmentTags.length > 0) {
+            contactWhere.tags = { hasSome: segmentTags };
+          }
+
+          const recipients = await this.prisma.client.contact.findMany({
+            where: contactWhere,
+            select: { id: true, email: true },
+            take: 10000,
+          });
+
+          if (recipients.length === 0) {
+            this.logger.warn(`No eligible recipients for campaign in playbook "${playbookName}"`);
+            break;
+          }
+
+          const campaignContent = await this.prisma.client.outboundContent.create({
+            data: {
+              businessId,
+              contentType: 'campaign_email',
+              subject: campaignSubject,
+              body: campaignBody,
+              status: 'Queued',
+              contentMeta: { segmentTags, source: 'flow', playbookName },
+              tags: ['flow-action', 'campaign'],
+            },
+          });
+
+          const destination = emailConnection.destinations[0];
+          const deliveryData = recipients
+            .filter((r): r is typeof r & { email: string } => !!r.email)
+            .map(r => ({
+              contentId: campaignContent.id,
+              variantId: null as string | null,
+              destinationId: destination.id,
+              businessId,
+              status: 'Queued',
+              scheduledAt: new Date(),
+              contactId: r.id,
+              recipientEmail: r.email,
+              recipientPhone: null as string | null,
+            }));
+
+          await this.prisma.client.outboundDelivery.createMany({ data: deliveryData });
+
+          this.logger.log(`Email campaign queued: ${deliveryData.length} recipients for playbook "${playbookName}"`);
+        } catch (e) {
+          this.logger.warn(`Failed to send email campaign for playbook "${playbookName}": ${(e as Error).message}`);
+        }
+        break;
+      }
       case 'LOG_EVENT': {
         if (context.contactId) {
           await this.crm.logContactEvent({

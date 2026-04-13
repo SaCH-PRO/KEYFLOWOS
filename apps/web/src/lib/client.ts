@@ -5956,9 +5956,13 @@ export async function listChannelDestinations(businessId?: string, opts?: { plat
   return apiGetSimple<ChannelDestination[]>(`/communications/businesses/${encodeURIComponent(bid)}/destinations${qs ? `?${qs}` : ""}`);
 }
 
-export async function createOutboundContent(data: { contentType: string; subject?: string; body: string; mediaUrls?: string[]; objective?: string; audience?: string; tone?: string; tags?: string[] }, businessId?: string): Promise<ApiResult<OutboundContent>> {
+export async function createOutboundContent(data: { contentType: string; subject?: string; body: string; mediaUrls?: string[]; objective?: string; audience?: string; tone?: string; tags?: string[]; segmentTags?: string[]; contentMeta?: Record<string, unknown> }, businessId?: string): Promise<ApiResult<OutboundContent>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiPost<OutboundContent>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content`, body: data });
+  const payload: Record<string, unknown> = { ...data };
+  if (data.segmentTags && data.segmentTags.length > 0) {
+    payload.contentMeta = { ...(data.contentMeta ?? {}), segmentTags: data.segmentTags };
+  }
+  return apiPost<OutboundContent>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content`, body: payload });
 }
 
 export async function updateOutboundContent(contentId: string, data: Partial<{ subject: string; body: string; mediaUrls: string[]; objective: string; audience: string; tone: string; tags: string[] }>, businessId?: string): Promise<ApiResult<OutboundContent>> {

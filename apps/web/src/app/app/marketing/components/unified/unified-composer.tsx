@@ -470,6 +470,7 @@ export function UnifiedComposer({
           subject: subject || undefined, objective: objective || undefined,
           audience: audience || undefined, tone: tone || undefined,
           mediaUrls, tags: [],
+          segmentTags: segmentTags.length > 0 ? segmentTags : undefined,
         }, businessId);
         if (res.error) { toast.error(res.error); return; }
         if (res.data) {
@@ -482,7 +483,7 @@ export function UnifiedComposer({
     } finally {
       setSaving(false);
     }
-  }, [body, subject, objective, audience, tone, mediaUrls, savedContentId, businessId, contentTypeForApi, onContentCreated, persistVariants]);
+  }, [body, subject, objective, audience, tone, mediaUrls, savedContentId, businessId, contentTypeForApi, onContentCreated, persistVariants, segmentTags]);
 
   const handlePublish = useCallback(async () => {
     if (!body.trim() || selectedDestinations.length === 0 || hasBlockingWarnings) return;
@@ -495,6 +496,7 @@ export function UnifiedComposer({
           subject: subject || undefined, objective: objective || undefined,
           audience: audience || undefined, tone: tone || undefined,
           mediaUrls, tags: [],
+          segmentTags: segmentTags.length > 0 ? segmentTags : undefined,
         }, businessId);
         if (createRes.error || !createRes.data) {
           toast.error(createRes.error || "Failed to create content");
