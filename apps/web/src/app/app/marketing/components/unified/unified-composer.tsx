@@ -449,6 +449,8 @@ export function UnifiedComposer({
           if (res.data?.body) {
             setBody(res.data.body);
             if (res.data.subject && (contentType === "email" || contentType === "multi")) setSubject(res.data.subject);
+            const rewriteData = res.data as { body: string; previewText?: string };
+            if (rewriteData.previewText && (contentType === "email" || contentType === "multi")) setPreviewText(rewriteData.previewText);
             toast.success("Content rewritten");
           }
           break;
@@ -922,11 +924,11 @@ export function UnifiedComposer({
                             )}
                             {aiSuggestions.type === "ideas" && (
                               <div className="space-y-1">
-                                {(aiSuggestions.data as { title: string; brief: string; contentType: string; category: string; effort: string }[]).map((idea, i) => (
+                                {(aiSuggestions.data as { title: string; brief: string; contentType: string; category: string; effort: string; dataSource?: string }[]).map((idea, i) => (
                                   <button key={i} onClick={() => { setBody(idea.brief); setSubject(idea.title); setAiSuggestions(null); toast.success("Idea loaded as draft"); }} className="block w-full text-left text-[11px] text-purple-200 px-2 py-1.5 rounded-md hover:bg-purple-500/15 transition-colors space-y-0.5">
                                     <div className="flex items-center justify-between">
                                       <span className="font-medium">{idea.title}</span>
-                                      <span className="text-[9px] text-purple-400/50">{idea.category} · {idea.effort}</span>
+                                      <span className="text-[9px] text-purple-400/50">{idea.dataSource ? `${idea.dataSource} · ` : ''}{idea.category} · {idea.effort}</span>
                                     </div>
                                     <p className="text-[9px] text-purple-400/60">{idea.brief}</p>
                                   </button>
