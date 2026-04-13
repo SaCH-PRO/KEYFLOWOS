@@ -23,10 +23,11 @@ import { CatalogMode } from "./components/catalog-mode";
 import { OperationsMode } from "./components/operations-mode";
 import { LaunchMode } from "./components/launch-mode";
 
-type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string; subheadline?: string };
+type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string; subheadline?: string; ctaText?: string };
 type SocialProofSection = { testimonials?: unknown[] };
 type BusinessHourEntry = { enabled?: boolean };
 type AppearanceSection = { primaryColor?: string; secondaryColor?: string; accentColor?: string };
+type SeoSection = { metaTitle?: string; metaDescription?: string };
 
 const TAB_KEYS = VIEW_TABS.map((t) => t.key);
 
@@ -57,6 +58,10 @@ export default function StorePage() {
 
   useEffect(() => {
     if (!s.businessId) return;
+    const _hero = s.storefrontConfig.hero as HeroSection | undefined;
+    const _seo = s.storefrontConfig.seo as SeoSection | undefined;
+    const _policies = s.storefrontConfig.policies ?? {};
+    const _faqEntries = s.storefrontConfig.faqEntries ?? [];
     ai.updateStoreContext({
       businessId: s.businessId,
       activeView: activeTab,
@@ -65,12 +70,21 @@ export default function StorePage() {
       services: s.services,
       testimonials: (s.storefrontConfig.socialProof as SocialProofSection | undefined)?.testimonials ?? [],
       storeEnabled: s.storeEnabled,
-      hasHeroImage: !!(s.storefrontConfig.hero as HeroSection | undefined)?.imageUrl,
+      hasHeroImage: !!(_hero?.imageUrl || _hero?.coverImageUrl),
+      hasHeroHeadline: !!(_hero?.headline && _hero.headline.trim().length > 0),
+      hasHeroCta: !!((_hero as any)?.ctaLabel && (_hero as any).ctaLabel.trim().length > 0),
       hasLogo: !!s.businessData?.logoUrl,
       hoursConfigured: Object.values(s.businessHours).some((h) => (h as BusinessHourEntry)?.enabled),
       storeName: s.businessData?.name,
+      businessDescription: s.businessData?.description ?? undefined,
+      businessTagline: s.businessData?.tagline ?? undefined,
+      hasMetaTitle: !!(_seo?.metaTitle && _seo.metaTitle.trim().length > 0),
+      hasMetaDescription: !!(_seo?.metaDescription && _seo.metaDescription.trim().length > 0),
+      hasPolicies: Object.values(_policies).some((p: any) => p?.enabled),
+      hasFaq: Array.isArray(_faqEntries) && _faqEntries.length > 0,
+      activeDeliveryCount: s.activeDeliveryMethodsCount,
     });
-  }, [s.businessId, activeTab, s.commerceProducts.length, s.services.length, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours]);
+  }, [s.businessId, activeTab, s.commerceProducts.length, s.services.length, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, s.activeDeliveryMethodsCount]);
 
   const handleTabChange = useCallback((key: string) => {
     if (!TAB_KEYS.includes(key as TabKey)) return;
@@ -254,6 +268,7 @@ export default function StorePage() {
                 configSaving={s.configSaving}
                 publicUrl={s.getPublicBookingUrl()}
                 hasTestimonials={hasTestimonials}
+                activeDeliveryMethodsCount={s.activeDeliveryMethodsCount}
               />
             )}
             {activeTab === "catalog" && (
@@ -308,9 +323,11 @@ export default function StorePage() {
                 businessData={s.businessData}
                 services={s.services}
                 commerceProducts={s.commerceProducts}
+                storefrontConfig={cfg}
                 hasHeroImage={hasHeroImage}
                 hoursConfigured={hoursConfigured}
                 hasTestimonials={hasTestimonials}
+                activeDeliveryMethodsCount={s.activeDeliveryMethodsCount}
                 onModeChange={handleTabChange}
               />
             )}

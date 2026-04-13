@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { ShoppingBag, Star, HelpCircle, Search, Globe } from "lucide-react";
+import { ShoppingBag, Star, HelpCircle, Search, Globe, Wand2 } from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { MerchandisingPanel } from "./merchandising-panel";
 import { SocialProofPanel } from "./social-proof-panel";
 import { FaqManager } from "./faq-manager";
 import { PolicyEditor } from "./policy-editor";
-import type { Service, Product, StorefrontConfig } from "@/lib/client";
+import { AiContentPanel } from "./ai-content-panel";
+import type { Service, Product, StorefrontConfig, FaqEntry } from "@/lib/client";
 
 type SeoProps = {
   storefrontConfig: StorefrontConfig;
@@ -118,7 +119,13 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
 }
 
 type Props = {
-  businessData: { name?: string; primaryColor?: string | null; secondaryColor?: string | null } | null;
+  businessData: {
+    name?: string;
+    tagline?: string | null;
+    description?: string | null;
+    primaryColor?: string | null;
+    secondaryColor?: string | null;
+  } | null;
   services: Service[];
   commerceProducts: Product[];
   storefrontConfig: StorefrontConfig;
@@ -127,6 +134,7 @@ type Props = {
   configSaving: boolean;
   publicUrl: string;
   hasTestimonials: boolean;
+  activeDeliveryMethodsCount?: number;
 };
 
 export function MerchandisingMode({
@@ -139,10 +147,29 @@ export function MerchandisingMode({
   configSaving,
   publicUrl,
   hasTestimonials,
+  activeDeliveryMethodsCount = 0,
 }: Props) {
   const appearance = storefrontConfig.appearance as { primaryColor?: string; secondaryColor?: string } | undefined;
   const pc = appearance?.primaryColor || businessData?.primaryColor || "#F97316";
   const ac = "#a78bfa";
+
+  const testimonials = (storefrontConfig.socialProof as any)?.testimonials ?? [];
+
+  function handleApplyFaq(faqs: { question: string; answer: string; category: string }[]) {
+    const existing: FaqEntry[] = storefrontConfig.faqEntries ?? [];
+    const newEntries: FaqEntry[] = faqs.map((f, i) => ({
+      id: `faq_ai_${Date.now()}_${i}`,
+      question: f.question,
+      answer: f.answer,
+      order: existing.length + i,
+    }));
+    const merged = [...existing, ...newEntries];
+    onConfigChange("faqEntries", merged as any);
+  }
+
+  function handleApplySeo(data: { metaTitle: string; metaDescription: string }) {
+    onConfigChange("seo", data);
+  }
 
   const merchandisingBadge = (
     <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md" style={{ background: "hsl(var(--kf-muted)/0.2)", color: "hsl(var(--kf-muted-foreground))" }}>
@@ -172,6 +199,19 @@ export function MerchandisingMode({
             configSaving={configSaving}
             onConfigChange={onConfigChange}
             onSaveConfig={onSaveConfig}
+          />
+        </AccordionSection>
+        <AccordionSection title="AI Content Intelligence" subtitle="Generate FAQ, SEO, trust copy & launch posts" icon={Wand2} accentColor="hsl(var(--kf-accent1))">
+          <AiContentPanel
+            storeName={businessData?.name}
+            businessDescription={businessData?.description ?? undefined}
+            businessTagline={businessData?.tagline ?? undefined}
+            productsCount={commerceProducts.length}
+            servicesCount={services.length}
+            hasDelivery={activeDeliveryMethodsCount > 0}
+            testimonialCount={testimonials.length}
+            onApplyFaq={handleApplyFaq}
+            onApplySeo={handleApplySeo}
           />
         </AccordionSection>
         <AccordionSection title="FAQ & Policies" subtitle="Questions, refund policy & terms" icon={HelpCircle} accentColor={pc}>
