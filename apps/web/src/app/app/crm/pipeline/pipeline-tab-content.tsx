@@ -18,6 +18,7 @@ import { NextActionQueue } from "@/components/contacts";
 import { AutopilotActions } from "@/components/contacts";
 import type { NextAction } from "@/components/contacts/next-action-queue";
 import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
+import { useOpenComposer } from "@/hooks/use-open-composer";
 import { BulkActionBar } from "./bulk-action-bar";
 import { PipelineToolbar } from "./pipeline-toolbar";
 import type { ViewMode } from "./pipeline-toolbar";
@@ -184,6 +185,11 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   const handleRetry = useCallback(() => { void loadContacts(); }, [loadContacts]);
   const handleOpenAddForm = useCallback(() => setShowAddForm(true), [setShowAddForm]);
   const handleOpenBroadcast = useCallback(() => setShowBroadcast(true), [setShowBroadcast]);
+  const openComposer = useOpenComposer();
+  const handleOpenComposer = useCallback(() => {
+    const names = contacts.filter(c => selectedIds.has(c.id)).map(c => c.name || c.email).filter(Boolean);
+    openComposer({ contentType: "email", subject: names.length ? `Message for ${names.slice(0, 3).join(", ")}${names.length > 3 ? ` +${names.length - 3}` : ""}` : undefined });
+  }, [openComposer, contacts, selectedIds]);
   const handleScanSuccess = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
   const handleCancelForm = useCallback(() => { setShowAddForm(false); setEditingContact(null); }, [setShowAddForm, setEditingContact]);
   const handleClearListFilter = useCallback(() => { setActiveListId(null); setActiveListContactIds(null); }, [setActiveListId, setActiveListContactIds]);
@@ -379,6 +385,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
           onAddTag={handleBulkTag}
           onBulkDelete={handleBulkDelete}
           onBroadcast={handleOpenBroadcast}
+          onCompose={handleOpenComposer}
           onCancel={handleToggleSelectMode}
           onAddToList={handleBulkAddToList}
           lists={pipelineLists}

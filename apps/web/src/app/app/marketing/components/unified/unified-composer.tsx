@@ -12,7 +12,7 @@ import {
 import { toast } from "sonner";
 import {
   createOutboundContent, updateOutboundContent, upsertOutboundVariant,
-  publishContentNow, scheduleContent,
+  publishContentNow, scheduleContent, getOutboundContent,
 } from "@/lib/client";
 import type { ChannelDestination, OutboundContent } from "@/lib/client";
 import { ChannelSelector } from "./channel-selector";
@@ -27,6 +27,7 @@ const DRAFT_STORAGE_KEY = "kf_composer_draft";
 interface UnifiedComposerProps {
   businessId: string;
   businessName?: string;
+  editContentId?: string;
   initialContentType?: ContentTypeOption;
   initialBody?: string;
   initialSubject?: string;
@@ -177,6 +178,7 @@ function loadCrossModulePrefill(): { body?: string; subject?: string } {
 export function UnifiedComposer({
   businessId,
   businessName,
+  editContentId,
   initialContentType = "social",
   initialBody = "",
   initialSubject = "",
@@ -207,6 +209,27 @@ export function UnifiedComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (editContentId) {
+      void (async () => {
+        const res = await getOutboundContent(editContentId, businessId);
+        if (res.data) {
+          const c = res.data;
+          setBody(c.body || "");
+          setSubject(c.subject || "");
+          setObjective(c.objective || "");
+          setTone(c.tone || "");
+          setAudience(c.audience || "all");
+          setMediaUrls(c.mediaUrls || []);
+          setSavedContentId(c.id);
+          if (c.contentType === "email_campaign") setContentType("email");
+          else if (c.contentType === "multi_channel_broadcast") setContentType("multi");
+          else setContentType("social");
+          setDraftRestored(true);
+        }
+      })();
+      return;
+    }
+
     const prefill = loadCrossModulePrefill();
     if (prefill.body) setBody(prefill.body);
     if (prefill.subject) setSubject(prefill.subject);
@@ -224,7 +247,7 @@ export function UnifiedComposer({
         setDraftRestored(true);
       }
     }
-  }, []);
+  }, [editContentId, businessId]);
 
   useEffect(() => {
     if (body.trim()) {
@@ -311,6 +334,25 @@ export function UnifiedComposer({
     setMediaUrls((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const persistVariants = useCallback(async (contentId: string) => {
+    const customVariants = variants.filter((v) => v.customized);
+    let failed = 0;
+    for (const v of customVariants) {
+      const variantMeta: Record<string, unknown> = {};
+      if (v.subject) variantMeta.subject = v.subject;
+      if (v.previewText) variantMeta.previewText = v.previewText;
+      if (v.hashtags) variantMeta.hashtags = v.hashtags;
+
+      const res = await upsertOutboundVariant(contentId, {
+        platform: v.platform,
+        textBody: v.textBody,
+        variantMeta: Object.keys(variantMeta).length > 0 ? variantMeta : undefined,
+      }, businessId);
+      if (res.error) { failed++; }
+    }
+    if (failed > 0) toast.error(`${failed} variant(s) failed to save`);
+  }, [variants, businessId]);
+
   const handleSaveDraft = useCallback(async () => {
     if (!body.trim()) return;
     setSaving(true);
@@ -321,6 +363,7 @@ export function UnifiedComposer({
           audience: audience || undefined, tone: tone || undefined, mediaUrls,
         }, businessId);
         if (res.error) { toast.error(res.error); return; }
+        await persistVariants(savedContentId);
         toast.success("Draft updated");
       } else {
         const res = await createOutboundContent({
@@ -333,13 +376,14 @@ export function UnifiedComposer({
         if (res.data) {
           setSavedContentId(res.data.id);
           onContentCreated?.(res.data);
+          await persistVariants(res.data.id);
           toast.success("Draft saved");
         }
       }
     } finally {
       setSaving(false);
     }
-  }, [body, subject, objective, audience, tone, mediaUrls, savedContentId, businessId, contentTypeForApi, onContentCreated]);
+  }, [body, subject, objective, audience, tone, mediaUrls, savedContentId, businessId, contentTypeForApi, onContentCreated, persistVariants]);
 
   const handlePublish = useCallback(async () => {
     if (!body.trim() || selectedDestinations.length === 0 || hasBlockingWarnings) return;
@@ -362,23 +406,7 @@ export function UnifiedComposer({
         onContentCreated?.(createRes.data);
       }
 
-      const customVariants = variants.filter((v) => v.customized);
-      for (const v of customVariants) {
-        const variantMeta: Record<string, unknown> = {};
-        if (v.subject) variantMeta.subject = v.subject;
-        if (v.previewText) variantMeta.previewText = v.previewText;
-        if (v.hashtags) variantMeta.hashtags = v.hashtags;
-
-        const varRes = await upsertOutboundVariant(contentId, {
-          platform: v.platform,
-          textBody: v.textBody,
-          variantMeta: Object.keys(variantMeta).length > 0 ? variantMeta : undefined,
-        }, businessId);
-        if (varRes.error) {
-          toast.error(`Failed to save variant for ${v.platform}: ${varRes.error}`);
-          return;
-        }
-      }
+      await persistVariants(contentId);
 
       const destIds = selectedDestinations.map((d) => d.id);
 
