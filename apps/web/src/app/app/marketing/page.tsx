@@ -10,6 +10,14 @@ import {
   CalendarDays,
   Search,
   X,
+  Send,
+  FileText,
+  Clock,
+  Sparkles,
+  AlertTriangle,
+  TrendingUp,
+  Zap,
+  LayoutList,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
@@ -35,19 +43,25 @@ import { AudienceHealthSection } from "./components/campaign-intelligence-cards"
 import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
 import type { EmailCampaign, LeadForm } from "@/lib/client";
 
-type CreateMode = "email" | "social";
+type ContentTab = "create" | "calendar" | "audience";
+type CreateSubmode = "compose" | "campaigns" | "posts" | "scheduled";
 
-type MarketingTab = "create" | "calendar" | "audience";
-
-const TABS: { key: MarketingTab; label: string; icon: React.ElementType; tooltip?: string }[] = [
-  { key: "create", label: "Create & Schedule", icon: PenSquare, tooltip: "Create email, SMS, or social campaigns and schedule them for delivery." },
-  { key: "calendar", label: "Calendar", icon: CalendarDays, tooltip: "Visual calendar of all scheduled and sent campaigns." },
+const TABS: { key: ContentTab; label: string; icon: React.ElementType; tooltip?: string }[] = [
+  { key: "create", label: "Create & Schedule", icon: PenSquare, tooltip: "Compose content, manage campaigns and posts, and schedule delivery." },
+  { key: "calendar", label: "Calendar", icon: CalendarDays, tooltip: "Visual calendar of all scheduled and sent content." },
   { key: "audience", label: "Audiences & Forms", icon: Users, tooltip: "Build audience segments and lead capture forms for targeting." },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
 
-const LEGACY_TAB_MAP: Record<string, MarketingTab> = {
+const CREATE_SUBMODES: { key: CreateSubmode; label: string; icon: React.ElementType }[] = [
+  { key: "compose", label: "Compose", icon: PenSquare },
+  { key: "campaigns", label: "Campaigns", icon: Mail },
+  { key: "posts", label: "Posts", icon: LayoutList },
+  { key: "scheduled", label: "Scheduled", icon: Clock },
+];
+
+const LEGACY_TAB_MAP: Record<string, ContentTab> = {
   audiences: "audience",
   social: "create",
   campaigns: "create",
@@ -62,13 +76,129 @@ const slideVariants = {
   exit: (dir: number) => ({ x: dir > 0 ? -60 : 60, opacity: 0 }),
 };
 
-export default function MarketingPage() {
+function ContentIntelligenceStrip({
+  campaigns,
+  socialPosts,
+  onCreateCampaign,
+  onCreatePost,
+  onScheduleDraft,
+}: {
+  campaigns: EmailCampaign[];
+  socialPosts: any[];
+  onCreateCampaign: () => void;
+  onCreatePost: () => void;
+  onScheduleDraft: () => void;
+}) {
+  const insights = useMemo(() => {
+    const items: { icon: React.ElementType; text: string; color: string; action?: () => void; actionLabel?: string }[] = [];
+
+    const drafts = campaigns.filter((c) => c.status === "DRAFT");
+    const readyDrafts = drafts.filter((c) => c.name?.trim() && c.subject?.trim() && c.body?.trim());
+    const socialDrafts = socialPosts.filter((p) => p.status === "DRAFT");
+
+    const now = new Date();
+    const fiveDaysFromNow = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
+
+    const scheduledCampaigns = campaigns.filter((c) => c.status === "SCHEDULED" && c.scheduledAt);
+    const scheduledPosts = socialPosts.filter((p) => p.status === "SCHEDULED" && p.scheduledFor);
+    const upcomingCount = [...scheduledCampaigns, ...scheduledPosts].filter((item) => {
+      const d = new Date((item as any).scheduledAt || (item as any).scheduledFor);
+      return d >= now && d <= fiveDaysFromNow;
+    }).length;
+
+    if (upcomingCount === 0) {
+      items.push({
+        icon: AlertTriangle,
+        text: "No content scheduled for the next 5 days",
+        color: "text-amber-400",
+        action: onScheduleDraft,
+        actionLabel: readyDrafts.length > 0 ? "Schedule draft" : "Create content",
+      });
+    }
+
+    if (readyDrafts.length > 0) {
+      items.push({
+        icon: Send,
+        text: `${readyDrafts.length} campaign${readyDrafts.length > 1 ? "s" : ""} ready to send`,
+        color: "text-emerald-400",
+        action: onScheduleDraft,
+        actionLabel: "Review",
+      });
+    }
+
+    if (socialDrafts.length > 0) {
+      items.push({
+        icon: FileText,
+        text: `${socialDrafts.length} social draft${socialDrafts.length > 1 ? "s" : ""} ready to schedule`,
+        color: "text-blue-400",
+        action: onCreatePost,
+        actionLabel: "Schedule",
+      });
+    }
+
+    const sentCampaigns = campaigns.filter((c) => c.status === "SENT" && c.totalRecipients > 0);
+    const avgOpenRate = sentCampaigns.length > 0
+      ? sentCampaigns.reduce((sum, c) => sum + (c.openCount / c.totalRecipients), 0) / sentCampaigns.length
+      : 0;
+    if (sentCampaigns.length >= 2 && avgOpenRate > 0.2) {
+      items.push({
+        icon: TrendingUp,
+        text: `${Math.round(avgOpenRate * 100)}% avg open rate across ${sentCampaigns.length} campaigns`,
+        color: "text-emerald-400",
+      });
+    }
+
+    if (items.length === 0) {
+      items.push({
+        icon: Sparkles,
+        text: "Start creating content to see planning insights",
+        color: "text-muted-foreground",
+        action: onCreateCampaign,
+        actionLabel: "Get started",
+      });
+    }
+
+    return items;
+  }, [campaigns, socialPosts, onCreateCampaign, onCreatePost, onScheduleDraft]);
+
+  if (insights.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-border/30 bg-card p-2.5 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <Zap className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Content Intelligence</span>
+      </div>
+      <div className="space-y-1">
+        {insights.slice(0, 4).map((insight, i) => (
+          <div key={i} className="flex items-center justify-between gap-2 group">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <insight.icon className={`w-3 h-3 shrink-0 ${insight.color}`} />
+              <span className="text-[11px] text-muted-foreground truncate">{insight.text}</span>
+            </div>
+            {insight.action && insight.actionLabel && (
+              <button
+                onClick={insight.action}
+                className="text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:underline shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                {insight.actionLabel}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function ContentPage() {
   const searchParams = useSearchParams();
   const mk = useMarketing();
   const marketingAi = useMarketingAiHub();
 
-  const [activeTab, setActiveTab] = useState<MarketingTab>("create");
-  const [createMode, setCreateMode] = useState<CreateMode>("email");
+  const [activeTab, setActiveTab] = useState<ContentTab>("create");
+  const [createSubmode, setCreateSubmode] = useState<CreateSubmode>("compose");
+  const [composeType, setComposeType] = useState<"email" | "social">("email");
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const initialTabSet = useRef(false);
@@ -80,12 +210,25 @@ export default function MarketingPage() {
     if (tabParam) {
       if (tabParam === "social") {
         setActiveTab("create");
-        setCreateMode("social");
+        setCreateSubmode("compose");
+        setComposeType("social");
+        initialTabSet.current = true;
+      } else if (tabParam === "campaigns") {
+        setActiveTab("create");
+        setCreateSubmode("campaigns");
+        initialTabSet.current = true;
+      } else if (tabParam === "posts") {
+        setActiveTab("create");
+        setCreateSubmode("posts");
+        initialTabSet.current = true;
+      } else if (tabParam === "scheduled") {
+        setActiveTab("create");
+        setCreateSubmode("scheduled");
         initialTabSet.current = true;
       } else {
         const mapped = LEGACY_TAB_MAP[tabParam] || tabParam;
-        if (TAB_KEYS.includes(mapped as MarketingTab)) {
-          setActiveTab(mapped as MarketingTab);
+        if (TAB_KEYS.includes(mapped as ContentTab)) {
+          setActiveTab(mapped as ContentTab);
           initialTabSet.current = true;
         }
       }
@@ -108,10 +251,10 @@ export default function MarketingPage() {
 
   const handleTabChange = useCallback((key: string) => {
     const resolved = LEGACY_TAB_MAP[key] || key;
-    const newIndex = TAB_KEYS.indexOf(resolved as MarketingTab);
+    const newIndex = TAB_KEYS.indexOf(resolved as ContentTab);
     const oldIndex = TAB_KEYS.indexOf(activeTab);
     directionRef.current = newIndex > oldIndex ? 1 : -1;
-    setActiveTab(resolved as MarketingTab);
+    setActiveTab(resolved as ContentTab);
     const url = new URL(window.location.href);
     if (resolved === "create") url.searchParams.delete("tab");
     else url.searchParams.set("tab", resolved);
@@ -122,20 +265,28 @@ export default function MarketingPage() {
 
   useModuleEvent("marketing:create_campaign_for_segment", useCallback(() => {
     handleTabChange("create");
+    setCreateSubmode("compose");
+    setComposeType("email");
     document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
   }, [handleTabChange]));
 
   const handleNewItem = useCallback(() => {
     if (activeTab === "create") {
-      if (createMode === "social") {
-        document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click();
-      } else {
+      if (createSubmode === "compose") {
+        if (composeType === "social") {
+          document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click();
+        } else {
+          document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
+        }
+      } else if (createSubmode === "campaigns") {
         document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
+      } else if (createSubmode === "posts") {
+        document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click();
       }
     } else if (activeTab === "audience") {
       document.querySelector<HTMLButtonElement>("[data-marketing-new-form]")?.click();
     }
-  }, [activeTab, createMode]);
+  }, [activeTab, createSubmode, composeType]);
 
   const handleEditCampaign = useCallback((campaign: EmailCampaign) => {
     document.querySelector<HTMLButtonElement>(`[data-campaign-edit="${campaign.id}"]`)?.click();
@@ -160,9 +311,21 @@ export default function MarketingPage() {
     }
   }, [marketingAi]);
 
+  const scheduledItems = useMemo(() => {
+    const items: { id: string; type: "campaign" | "post"; title: string; scheduledFor: string; status: string }[] = [];
+    mk.campaigns
+      .filter((c) => c.status === "SCHEDULED" && c.scheduledAt)
+      .forEach((c) => items.push({ id: c.id, type: "campaign", title: c.name || "Untitled Campaign", scheduledFor: c.scheduledAt!, status: c.status }));
+    mk.socialPosts
+      .filter((p) => p.status === "SCHEDULED" && p.scheduledFor)
+      .forEach((p) => items.push({ id: p.id, type: "post", title: (p.content ?? "").slice(0, 50) || "Untitled Post", scheduledFor: p.scheduledFor!, status: p.status }));
+    items.sort((a, b) => new Date(a.scheduledFor).getTime() - new Date(b.scheduledFor).getTime());
+    return items;
+  }, [mk.campaigns, mk.socialPosts]);
+
   const shortcuts = useMemo<ShortcutGroup[]>(() => [
     {
-      groupName: "Marketing",
+      groupName: "Content",
       shortcuts: [
         { key: "1", description: "Create & Schedule", action: () => handleTabChange("create") },
         { key: "2", description: "Calendar", action: () => handleTabChange("calendar") },
@@ -182,22 +345,26 @@ export default function MarketingPage() {
   if (mk.loading) {
     return (
       <div className="space-y-6">
-        <PageHeader icon={Megaphone} title="Marketing" subtitle="Create, engage & measure" />
+        <PageHeader icon={Megaphone} title="Content" subtitle="Create, schedule, target, and grow" />
         <MarketingSkeleton activeTab="social" />
       </div>
     );
   }
 
   const actionLabel = activeTab === "create"
-    ? (createMode === "email" ? "New Campaign" : "New Post")
+    ? (createSubmode === "compose"
+        ? (composeType === "email" ? "New Campaign" : "New Post")
+        : createSubmode === "campaigns" ? "New Campaign"
+        : createSubmode === "posts" ? "New Post"
+        : undefined)
     : activeTab === "audience" ? "New Form" : undefined;
 
   return (
-    <div className="space-y-6" aria-label="Marketing">
+    <div className="space-y-5" aria-label="Content">
       <PageHeader
         icon={Megaphone}
-        title="Marketing"
-        subtitle="Create, engage & measure"
+        title="Content"
+        subtitle="Create, schedule, target, and grow"
         actionLabel={actionLabel}
         onAction={actionLabel ? handleNewItem : undefined}
         titleExtra={<PageGuideTrigger moduleKey="marketing" />}
@@ -211,7 +378,7 @@ export default function MarketingPage() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search marketing..."
+                  placeholder="Search content..."
                   className="bg-transparent text-xs w-36 focus:outline-none placeholder:text-muted-foreground/50"
                 />
                 <button onClick={() => { setShowSearch(false); setSearchQuery(""); }} className="p-0.5 hover:text-foreground text-muted-foreground">
@@ -219,7 +386,7 @@ export default function MarketingPage() {
                 </button>
               </div>
             ) : (
-              <button onClick={() => setShowSearch(true)} className="p-2 rounded-lg hover:bg-muted/50 transition-colors" aria-label="Search marketing">
+              <button onClick={() => setShowSearch(true)} className="p-2 rounded-lg hover:bg-muted/50 transition-colors" aria-label="Search content">
                 <Search className="w-4 h-4 text-muted-foreground" />
               </button>
             )}
@@ -227,61 +394,220 @@ export default function MarketingPage() {
         }
       />
 
-
       <div data-walkthrough="marketing-tabs">
-        <TabNav tabs={TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="marketing-tab-pill" />
+        <TabNav tabs={TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="content-tab-pill" />
       </div>
 
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={directionRef.current}>
           <motion.div key={activeTab} custom={directionRef.current} variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}>
             {activeTab === "create" && (
-              <div className="space-y-6">
-                <div className="flex items-center gap-2 mb-1"><AiBadge label="AI Content" explanation="AI can generate email subject lines, body copy, and social posts based on your business context and audience." /></div>
-                <CampaignActionQueue campaigns={mk.campaigns} onEdit={handleEditCampaign} onSend={handleSendCampaign} onAiWrite={() => handleAiAction("campaign-content-generator")} />
-                <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/20 border border-border/30 w-fit" data-walkthrough="marketing-create">
-                  <button
-                    onClick={() => setCreateMode("email")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                      createMode === "email"
-                        ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <Mail className="w-3.5 h-3.5" /> Email Campaign
-                  </button>
-                  <button
-                    onClick={() => setCreateMode("social")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                      createMode === "social"
-                        ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <PenSquare className="w-3.5 h-3.5" /> Social Post
-                  </button>
+              <div className="space-y-4">
+                <ContentIntelligenceStrip
+                  campaigns={mk.campaigns}
+                  socialPosts={mk.socialPosts}
+                  onCreateCampaign={() => { setCreateSubmode("compose"); setComposeType("email"); setTimeout(() => document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click(), 100); }}
+                  onCreatePost={() => { setCreateSubmode("compose"); setComposeType("social"); setTimeout(() => document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click(), 100); }}
+                  onScheduleDraft={() => setCreateSubmode("scheduled")}
+                />
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-muted/20 border border-border/30" data-walkthrough="marketing-create">
+                    {CREATE_SUBMODES.map((mode) => (
+                      <button
+                        key={mode.key}
+                        onClick={() => setCreateSubmode(mode.key)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all ${
+                          createSubmode === mode.key
+                            ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        <mode.icon className="w-3 h-3" /> {mode.label}
+                      </button>
+                    ))}
+                  </div>
+                  <AiBadge label="AI Content" explanation="AI can generate email subject lines, body copy, and social posts based on your business context and audience." />
                 </div>
-                <AnimatePresence mode="wait">
-                  {createMode === "email" ? (
-                    <motion.div key="email" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                      <CampaignsPanel businessId={mk.businessId} campaigns={mk.campaigns} setCampaigns={mk.setCampaigns} availableTags={mk.availableTags} onCampaignCreated={mk.handleCampaignCreated} onCampaignSent={mk.handleCampaignSent} onViewContact={mk.handleViewContact} onAiWrite={() => handleAiAction("campaign-content-generator")} />
-                    </motion.div>
-                  ) : (
-                    <motion.div key="social" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                      <SocialTabContent businessId={mk.businessId} onPostsLoaded={mk.handleSocialPostsLoaded} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+
+                {createSubmode === "compose" && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/20 border border-border/30 w-fit">
+                      <button
+                        onClick={() => setComposeType("email")}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                          composeType === "email"
+                            ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        <Mail className="w-3.5 h-3.5" /> Email Campaign
+                      </button>
+                      <button
+                        onClick={() => setComposeType("social")}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                          composeType === "social"
+                            ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        <PenSquare className="w-3.5 h-3.5" /> Social Post
+                      </button>
+                    </div>
+                    <AnimatePresence mode="wait">
+                      {composeType === "email" ? (
+                        <motion.div key="email" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                          <CampaignsPanel businessId={mk.businessId} campaigns={mk.campaigns} setCampaigns={mk.setCampaigns} availableTags={mk.availableTags} onCampaignCreated={mk.handleCampaignCreated} onCampaignSent={mk.handleCampaignSent} onViewContact={mk.handleViewContact} onAiWrite={() => handleAiAction("campaign-content-generator")} />
+                        </motion.div>
+                      ) : (
+                        <motion.div key="social" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                          <SocialTabContent businessId={mk.businessId} onPostsLoaded={mk.handleSocialPostsLoaded} />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
+
+                {createSubmode === "campaigns" && (
+                  <div className="space-y-4">
+                    <CampaignActionQueue campaigns={mk.campaigns} onEdit={handleEditCampaign} onSend={handleSendCampaign} onAiWrite={() => handleAiAction("campaign-content-generator")} />
+                    {mk.campaigns.length > 0 && (
+                      <div className="flex items-center gap-3 flex-wrap text-[10px] px-1">
+                        {(() => {
+                          const draft = mk.campaigns.filter((c) => c.status === "DRAFT").length;
+                          const scheduled = mk.campaigns.filter((c) => c.status === "SCHEDULED").length;
+                          const sent = mk.campaigns.filter((c) => c.status === "SENT").length;
+                          const totalRecipients = mk.campaigns.filter((c) => c.status === "SENT").reduce((s, c) => s + (c.totalRecipients ?? 0), 0);
+                          return (
+                            <>
+                              <span className="text-muted-foreground font-medium">{draft} Draft</span>
+                              <span className="text-blue-400 font-medium">{scheduled} Scheduled</span>
+                              <span className="text-emerald-400 font-medium">{sent} Sent</span>
+                              {totalRecipients > 0 && (
+                                <>
+                                  <span className="text-muted-foreground/30">|</span>
+                                  <span className="text-amber-400 font-medium">{totalRecipients.toLocaleString()} total recipients</span>
+                                </>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+                    <CampaignsPanel businessId={mk.businessId} campaigns={mk.campaigns} setCampaigns={mk.setCampaigns} availableTags={mk.availableTags} onCampaignCreated={mk.handleCampaignCreated} onCampaignSent={mk.handleCampaignSent} onViewContact={mk.handleViewContact} onAiWrite={() => handleAiAction("campaign-content-generator")} />
+                  </div>
+                )}
+
+                {createSubmode === "posts" && (
+                  <div className="space-y-4">
+                    {mk.socialPosts.length > 0 && (
+                      <div className="flex items-center gap-3 flex-wrap text-[10px] px-1">
+                        {(() => {
+                          const draft = mk.socialPosts.filter((p) => p.status === "DRAFT").length;
+                          const scheduled = mk.socialPosts.filter((p) => p.status === "SCHEDULED").length;
+                          const posted = mk.socialPosts.filter((p) => p.status === "POSTED").length;
+                          const failed = mk.socialPosts.filter((p) => p.status === "FAILED").length;
+                          return (
+                            <>
+                              <span className="text-muted-foreground font-medium">{draft} Draft</span>
+                              <span className="text-blue-400 font-medium">{scheduled} Scheduled</span>
+                              <span className="text-emerald-400 font-medium">{posted} Posted</span>
+                              {failed > 0 && <span className="text-red-400 font-medium">{failed} Failed</span>}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+                    <SocialTabContent businessId={mk.businessId} onPostsLoaded={mk.handleSocialPostsLoaded} />
+                  </div>
+                )}
+
+                {createSubmode === "scheduled" && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 flex-wrap text-[10px] px-1">
+                      <span className="text-blue-400 font-medium">{scheduledItems.length} upcoming</span>
+                      {(() => {
+                        const draftCampaigns = mk.campaigns.filter((c) => c.status === "DRAFT" && c.name?.trim() && c.subject?.trim() && c.body?.trim()).length;
+                        const draftPosts = mk.socialPosts.filter((p) => p.status === "DRAFT").length;
+                        const total = draftCampaigns + draftPosts;
+                        return total > 0 ? (
+                          <>
+                            <span className="text-muted-foreground/30">|</span>
+                            <span className="text-amber-400 font-medium">{total} draft{total > 1 ? "s" : ""} ready to schedule</span>
+                          </>
+                        ) : null;
+                      })()}
+                    </div>
+                    {scheduledItems.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-16 text-center">
+                        <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
+                          <Clock className="w-7 h-7 text-muted-foreground/50" />
+                        </div>
+                        <h3 className="text-lg font-semibold mb-1">No Scheduled Content</h3>
+                        <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-4">
+                          Schedule campaigns and social posts to maintain a consistent content cadence and keep your audience engaged.
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => { setCreateSubmode("compose"); setComposeType("email"); }}
+                            className="px-3 py-2 text-xs font-medium rounded-lg bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/25 transition-colors"
+                          >
+                            <Mail className="w-3.5 h-3.5 inline mr-1.5" />Create Campaign
+                          </button>
+                          <button
+                            onClick={() => { setCreateSubmode("compose"); setComposeType("social"); }}
+                            className="px-3 py-2 text-xs font-medium rounded-lg bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] hover:bg-[hsl(var(--kf-accent2))]/25 transition-colors"
+                          >
+                            <PenSquare className="w-3.5 h-3.5 inline mr-1.5" />Create Post
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {scheduledItems.map((item) => {
+                          const isClose = new Date(item.scheduledFor).getTime() - Date.now() < 24 * 60 * 60 * 1000;
+                          return (
+                            <div key={item.id} className="rounded-xl border border-border/30 bg-card p-3 flex items-center gap-3 hover:bg-white/[0.03] transition-colors">
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.type === "campaign" ? "bg-blue-500/10" : "bg-[hsl(var(--kf-accent2))]/10"}`}>
+                                {item.type === "campaign" ? <Mail className="w-3.5 h-3.5 text-blue-400" /> : <PenSquare className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{item.title}</p>
+                                <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
+                                  <span className="capitalize">{item.type}</span>
+                                  <span className="text-muted-foreground/30">·</span>
+                                  <span>{new Date(item.scheduledFor).toLocaleDateString("en-TT", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                                </div>
+                              </div>
+                              {isClose && (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                  Soon
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {activeTab === "calendar" && (
-              <MarketingCalendarTab campaigns={mk.campaigns} socialPosts={mk.socialPosts} onTabChange={handleTabChange} />
+              <div className="space-y-4">
+                <CalendarInsightStrip campaigns={mk.campaigns} socialPosts={mk.socialPosts} />
+                <MarketingCalendarTab campaigns={mk.campaigns} socialPosts={mk.socialPosts} onTabChange={handleTabChange} />
+              </div>
             )}
             {activeTab === "audience" && (
               <div className="space-y-6">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <AudienceHealthSection businessId={mk.businessId} />
-                  <AudienceSegmentsPanel businessId={mk.businessId} />
+                  <AudienceSegmentsPanel
+                    businessId={mk.businessId}
+                    onCreateCampaign={() => { handleTabChange("create"); setCreateSubmode("compose"); setComposeType("email"); }}
+                    onCreatePost={() => { handleTabChange("create"); setCreateSubmode("compose"); setComposeType("social"); }}
+                  />
                 </div>
                 <div className="space-y-4" data-walkthrough="marketing-forms">
                   <FormOptimizationQueue forms={mk.forms} onAiOptimize={() => handleAiAction("lead-form-optimizer")} onEdit={handleEditForm} onToggle={mk.handleToggleForm} />
@@ -299,6 +625,43 @@ export default function MarketingPage() {
         moduleKey="marketing"
         walkthroughSteps={MARKETING_WALKTHROUGH}
       />
+    </div>
+  );
+}
+
+function CalendarInsightStrip({ campaigns, socialPosts }: { campaigns: EmailCampaign[]; socialPosts: any[] }) {
+  const insights = useMemo(() => {
+    const items: string[] = [];
+    const now = new Date();
+    const thisWeekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    const scheduledThisWeek = [
+      ...campaigns.filter((c) => c.status === "SCHEDULED" && c.scheduledAt && new Date(c.scheduledAt) <= thisWeekEnd),
+      ...socialPosts.filter((p) => p.status === "SCHEDULED" && p.scheduledFor && new Date(p.scheduledFor) <= thisWeekEnd),
+    ];
+
+    if (scheduledThisWeek.length === 0) {
+      items.push("No content scheduled this week — consider adding posts or campaigns");
+    } else {
+      items.push(`${scheduledThisWeek.length} item${scheduledThisWeek.length > 1 ? "s" : ""} scheduled this week`);
+    }
+
+    const draftCount = campaigns.filter((c) => c.status === "DRAFT").length + socialPosts.filter((p) => p.status === "DRAFT").length;
+    if (draftCount > 0) {
+      items.push(`${draftCount} draft${draftCount > 1 ? "s" : ""} awaiting scheduling`);
+    }
+
+    return items;
+  }, [campaigns, socialPosts]);
+
+  if (insights.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-3 flex-wrap text-[10px] px-1">
+      <CalendarDays className="w-3 h-3 text-[hsl(var(--kf-accent2))]" />
+      {insights.map((text, i) => (
+        <span key={i} className="text-muted-foreground font-medium">{i > 0 && <span className="text-muted-foreground/30 mr-3">|</span>}{text}</span>
+      ))}
     </div>
   );
 }

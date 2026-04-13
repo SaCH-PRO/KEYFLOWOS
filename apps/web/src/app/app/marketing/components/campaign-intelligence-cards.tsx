@@ -231,47 +231,73 @@ export function AudienceHealthSection({ businessId }: { businessId: string | nul
     );
   }
 
+  const healthLabel = health.healthPercentage >= 80 ? "Thriving" : health.healthPercentage >= 60 ? "Healthy" : health.healthPercentage >= 40 ? "Needs Attention" : "Critical";
+  const healthColor = health.healthPercentage >= 80 ? "#22c55e" : health.healthPercentage >= 60 ? "#14b8a6" : health.healthPercentage >= 40 ? "#f59e0b" : "#ef4444";
+
   const segments = [
-    { label: "Healthy", count: health.healthy, color: "#22c55e", pct: Math.round((health.healthy / health.totalContacts) * 100) },
-    { label: "At Risk", count: health.atRisk, color: "#f59e0b", pct: Math.round((health.atRisk / health.totalContacts) * 100) },
-    { label: "Disengaged", count: health.disengaged, color: "#ef4444", pct: Math.round((health.disengaged / health.totalContacts) * 100) },
+    { label: "Engaged", desc: "Opens & clicks regularly", count: health.healthy, color: "#22c55e", pct: Math.round((health.healthy / health.totalContacts) * 100) },
+    { label: "At Risk", desc: "Engagement dropping", count: health.atRisk, color: "#f59e0b", pct: Math.round((health.atRisk / health.totalContacts) * 100) },
+    { label: "Disengaged", desc: "No recent activity", count: health.disengaged, color: "#ef4444", pct: Math.round((health.disengaged / health.totalContacts) * 100) },
   ];
+
+  const actionInsights: { icon: React.ElementType; text: string; color: string }[] = [];
+  if (health.atRisk > 0 && health.atRisk > health.healthy * 0.3) {
+    actionInsights.push({ icon: AlertTriangle, text: `${health.atRisk} contacts cooling — consider a re-engagement campaign`, color: "text-amber-400" });
+  }
+  if (health.disengaged > 0 && health.disengaged > health.totalContacts * 0.2) {
+    actionInsights.push({ icon: XCircle, text: `${health.disengaged} disengaged contacts — review or clean your list`, color: "text-red-400" });
+  }
+  if (health.healthy > 0 && health.healthy > health.totalContacts * 0.7) {
+    actionInsights.push({ icon: CheckCircle2, text: "Strong engagement — great time to grow your list", color: "text-emerald-400" });
+  }
 
   return (
     <motion.div variants={stagger.item} className="kf-card p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <HeartPulse className="w-4 h-4 text-emerald-400" />
+          <HeartPulse className="w-4 h-4" style={{ color: healthColor }} />
           <h3 className="text-sm font-semibold">Audience Health</h3>
-          <InfoBadge title="Audience Health Score" body="Measures overall engagement quality of your subscriber list. Based on open rates, click rates, bounce rates, and unsubscribe rates. Above 70% is healthy." iconSize={12} />
+          <InfoBadge title="Audience Health Score" body="Measures engagement quality based on open rates, click rates, bounce rates, and activity recency. Engaged: regular openers. At Risk: declining engagement. Disengaged: no recent activity." iconSize={12} />
         </div>
-        <span className="text-lg font-bold text-emerald-400">{health.healthPercentage}%</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-medium" style={{ color: healthColor }}>{healthLabel}</span>
+          <span className="text-lg font-bold" style={{ color: healthColor }}>{health.healthPercentage}%</span>
+        </div>
       </div>
 
-      <div className="space-y-2">
+      <div className="flex h-2 rounded-full overflow-hidden bg-border/20">
+        {segments.map((s) => s.pct > 0 && (
+          <motion.div
+            key={s.label}
+            initial={{ width: 0 }}
+            animate={{ width: `${s.pct}%` }}
+            transition={{ duration: 0.7 }}
+            className="h-full"
+            style={{ backgroundColor: s.color }}
+          />
+        ))}
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
         {segments.map((s) => (
-          <div key={s.label} className="space-y-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">{s.label}</span>
-              <span className="font-medium">{s.count} ({s.pct}%)</span>
-            </div>
-            <div className="h-2 rounded-full bg-border/20 overflow-hidden">
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: `${s.pct}%` }}
-                transition={{ duration: 0.7 }}
-                className="h-full rounded-full"
-                style={{ backgroundColor: s.color }}
-              />
-            </div>
+          <div key={s.label} className="rounded-lg bg-muted/10 border border-border/20 p-2 text-center">
+            <div className="text-sm font-bold" style={{ color: s.color }}>{s.count}</div>
+            <div className="text-[10px] font-medium text-muted-foreground">{s.label}</div>
+            <div className="text-[9px] text-muted-foreground/40">{s.desc}</div>
           </div>
         ))}
       </div>
 
-      {health.recommendations.length > 0 && (
-        <div className="space-y-1 pt-1">
+      {(actionInsights.length > 0 || health.recommendations.length > 0) && (
+        <div className="space-y-1 pt-1 border-t border-border/20">
+          {actionInsights.map((insight, i) => (
+            <div key={`ai-${i}`} className="flex items-start gap-1.5 text-xs">
+              <insight.icon className={`w-3 h-3 mt-0.5 shrink-0 ${insight.color}`} />
+              <span className={insight.color}>{insight.text}</span>
+            </div>
+          ))}
           {health.recommendations.map((rec, i) => (
-            <div key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+            <div key={`rec-${i}`} className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <Info className="w-3 h-3 text-blue-400 mt-0.5 shrink-0" />
               <span>{rec}</span>
             </div>
