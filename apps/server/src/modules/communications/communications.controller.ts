@@ -7,7 +7,7 @@ import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
 import { WhatsAppAdapter } from './adapters/whatsapp-adapter';
 
-const TRACKING_SECRET = process.env.TRACKING_HMAC_SECRET || 'keyflowos-tracking-default-secret';
+const TRACKING_SECRET = process.env.TRACKING_HMAC_SECRET || '';
 
 function signTrackingToken(deliveryId: string): string {
   return createHmac('sha256', TRACKING_SECRET).update(deliveryId).digest('hex').slice(0, 16);
@@ -152,6 +152,7 @@ export class CommunicationsController {
 
   @Post('deliveries/:deliveryId/track-open')
   async trackOpen(@Param('deliveryId') deliveryId: string, @Query('t') token?: string) {
+    if (!TRACKING_SECRET) throw new BadRequestException('Tracking not configured');
     if (!token || !verifyTrackingToken(deliveryId, token)) {
       throw new BadRequestException('Invalid tracking token');
     }
@@ -161,6 +162,7 @@ export class CommunicationsController {
 
   @Post('deliveries/:deliveryId/track-click')
   async trackClick(@Param('deliveryId') deliveryId: string, @Query('t') token?: string) {
+    if (!TRACKING_SECRET) throw new BadRequestException('Tracking not configured');
     if (!token || !verifyTrackingToken(deliveryId, token)) {
       throw new BadRequestException('Invalid tracking token');
     }

@@ -826,6 +826,7 @@ export function UnifiedComposer({
                     selectedTags={segmentTags}
                     onTagsChange={setSegmentTags}
                     onValidationChange={setEmailValidation}
+                    hasEmailDestination={hasEmailDestination}
                   />
                 )}
 
