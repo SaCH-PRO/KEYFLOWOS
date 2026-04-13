@@ -67,15 +67,17 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
     return () => clearTimeout(timeout);
   }, [searchInput]);
 
+  useEffect(() => {
+    onPostsLoaded?.(posts);
+  }, [posts, onPostsLoaded]);
+
   const loadPosts = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
     const { data } = await fetchPosts(businessId);
-    const loadedPosts = data ?? [];
-    setPosts(loadedPosts);
-    onPostsLoaded?.(loadedPosts);
+    setPosts(data ?? []);
     setLoading(false);
-  }, [businessId, onPostsLoaded]);
+  }, [businessId]);
 
   const loadConnections = useCallback(async () => {
     if (!businessId) return;
@@ -136,18 +138,10 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
           toast.success("Post published");
         }
         const published = pubData ? ((pubData as any).post || pubData) : post;
-        setPosts((prev) => {
-          const updated = [published, ...prev];
-          onPostsLoaded?.(updated);
-          return updated;
-        });
+        setPosts((prev) => [published, ...prev]);
       } else {
         moduleEvents.emit("marketing:social_post_created", "marketing", { postId: post.id });
-        setPosts((prev) => {
-          const updated = [post, ...prev];
-          onPostsLoaded?.(updated);
-          return updated;
-        });
+        setPosts((prev) => [post, ...prev]);
         toast.success("Post created");
       }
       setShowComposer(false);
@@ -188,17 +182,9 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
           toast.success("Post published");
         }
         const published = pubData ? ((pubData as any).post || pubData) : updated;
-        setPosts((prev) => {
-          const newPosts = prev.map((p) => (p.id === editingPost.id ? published : p));
-          onPostsLoaded?.(newPosts);
-          return newPosts;
-        });
+        setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? published : p)));
       } else {
-        setPosts((prev) => {
-          const newPosts = prev.map((p) => (p.id === editingPost.id ? updated : p));
-          onPostsLoaded?.(newPosts);
-          return newPosts;
-        });
+        setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? updated : p)));
         toast.success("Post updated");
       }
       setEditingPost(null);
@@ -214,11 +200,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
     if (error) toast.error(error);
     if (data) {
       const updated = (data as any).post || data;
-      setPosts((prev) => {
-        const newPosts = prev.map((p) => (p.id === postId ? updated : p));
-        onPostsLoaded?.(newPosts);
-        return newPosts;
-      });
+      setPosts((prev) => prev.map((p) => (p.id === postId ? updated : p)));
       moduleEvents.emit("marketing:social_post_published", "marketing", { postId });
       toast.success("Post published");
     }
@@ -232,11 +214,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
         if (error) {
           toast.error(error);
         } else {
-          setPosts((prev) => {
-            const newPosts = prev.filter((p) => p.id !== postId);
-            onPostsLoaded?.(newPosts);
-            return newPosts;
-          });
+          setPosts((prev) => prev.filter((p) => p.id !== postId));
           toast.success("Post deleted");
         }
       },
