@@ -485,12 +485,6 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       errors.push('No sender email configured. Set up your sender identity in Content Studio.');
     }
 
-    const contentMeta = content.contentMeta as Record<string, unknown> | null;
-    const segmentTags = (contentMeta?.segmentTags as string[] | undefined) ?? [];
-    if (segmentTags.length === 0) {
-      errors.push('At least one audience segment must be selected');
-    }
-
     if (errors.length > 0) {
       throw new BadRequestException(`Email campaign validation failed: ${errors.join('; ')}`);
     }
