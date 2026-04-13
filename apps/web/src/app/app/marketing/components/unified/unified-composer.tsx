@@ -387,7 +387,11 @@ export function UnifiedComposer({
 
   const canAdvanceToDistribute = body.trim().length > 0;
   const canAdvanceToReview = selectedDestinations.length > 0;
-  const hasEmailValidationErrors = (contentType === "email" || contentType === "multi") && emailValidation && !emailValidation.valid;
+  const hasEmailDestination = selectedDestinations.some(d => {
+    const p = d.platform.toUpperCase();
+    return p === "EMAIL" || p === "GOOGLE";
+  });
+  const hasEmailValidationErrors = hasEmailDestination && emailValidation && !emailValidation.valid;
   const canPublish = canAdvanceToReview && !hasBlockingWarnings && !hasEmailValidationErrors;
   const readinessScore = useMemo(() => {
     let score = 0;
@@ -870,7 +874,7 @@ export function UnifiedComposer({
                       <span className="text-muted-foreground block text-[10px] mb-0.5">Channels</span>
                       <span className="font-medium">{selectedDestinations.length} destination{selectedDestinations.length !== 1 ? "s" : ""}</span>
                     </div>
-                    {(contentType === "email" || contentType === "multi") && emailValidation && (
+                    {hasEmailDestination && emailValidation && (
                       <div>
                         <span className="text-muted-foreground block text-[10px] mb-0.5">Email Recipients</span>
                         <span className="font-medium">{emailValidation.audienceSummary.eligible} eligible{segmentTags.length > 0 ? ` (${segmentTags.join(", ")})` : ""}</span>
