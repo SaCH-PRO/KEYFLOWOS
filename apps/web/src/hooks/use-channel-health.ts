@@ -102,21 +102,32 @@ export function useChannelHealth(businessId: string | null): ChannelHealthData {
     setLoading(false);
   }, [businessId]);
 
+  const runHealthCheckForConnection = useCallback(async (connectionId: string) => {
+    if (!businessId) return;
+    await runChannelHealthCheck(connectionId, businessId);
+    await loadData();
+  }, [businessId, loadData]);
+
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    let cancelled = false;
+    (async () => {
+      await loadData();
+      if (cancelled || !businessId) return;
+      const connRes = await listChannelConnections(businessId).catch(() => ({ data: null, error: "failed" }));
+      const connList = Array.isArray(connRes.data) ? connRes.data : [];
+      if (connList.length > 0 && !cancelled) {
+        await Promise.allSettled(connList.map((c) => runChannelHealthCheck(c.id, businessId).catch(() => {})));
+        if (!cancelled) await loadData();
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loadData, businessId]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
   }, [loadData]);
-
-  const runHealthCheckForConnection = useCallback(async (connectionId: string) => {
-    if (!businessId) return;
-    await runChannelHealthCheck(connectionId, businessId);
-    await loadData();
-  }, [businessId, loadData]);
 
   const enrichedConnections = useMemo<EnrichedConnection[]>(() => {
     return connections.map((conn) => {
