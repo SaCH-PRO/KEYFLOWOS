@@ -63,6 +63,10 @@ export class ChannelConnectionService {
       });
     }
 
+    if (data.provider?.toUpperCase() === 'WHATSAPP') {
+      await this.discoverWhatsAppDestinations(conn.id, businessId, data.token, data.providerMeta);
+    }
+
     return stripSecrets(conn);
   }
 
@@ -518,5 +522,71 @@ export class ChannelConnectionService {
       where: { id: destId },
       data: { isActive },
     });
+  }
+
+  private async discoverWhatsAppDestinations(
+    connectionId: string,
+    businessId: string,
+    token?: string,
+    providerMeta?: Record<string, unknown>,
+  ) {
+    const wabaId = providerMeta?.wabaId as string | undefined;
+
+    if (!token || !wabaId) {
+      const phoneNumber = providerMeta?.phoneNumber as string | undefined;
+      const phoneNumberId = providerMeta?.phoneNumberId as string | undefined;
+      if (phoneNumber && phoneNumberId) {
+        await this.upsertDestination(connectionId, businessId, {
+          platform: 'WHATSAPP',
+          platformId: phoneNumberId,
+          displayName: phoneNumber,
+          capabilities: ['text', 'template', 'media'],
+          destinationMeta: { phoneNumber, phoneNumberId },
+        });
+      }
+      return;
+    }
+
+    try {
+      const url = `https://graph.facebook.com/v19.0/${wabaId}/phone_numbers`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        this.logger.warn(`WhatsApp phone number discovery failed: ${res.status} ${res.statusText}`);
+        return;
+      }
+
+      const body = (await res.json()) as {
+        data: Array<{
+          id: string;
+          display_phone_number: string;
+          verified_name: string;
+          quality_rating: string;
+          code_verification_status: string;
+        }>;
+      };
+      const phoneNumbers = body.data ?? [];
+
+      for (const pn of phoneNumbers) {
+        await this.upsertDestination(connectionId, businessId, {
+          platform: 'WHATSAPP',
+          platformId: pn.id,
+          displayName: `${pn.verified_name} (${pn.display_phone_number})`,
+          capabilities: ['text', 'template', 'media'],
+          destinationMeta: {
+            phoneNumber: pn.display_phone_number,
+            phoneNumberId: pn.id,
+            verifiedName: pn.verified_name,
+            qualityRating: pn.quality_rating,
+          },
+        });
+      }
+
+      this.logger.log(`Discovered ${phoneNumbers.length} WhatsApp phone number(s) for connection ${connectionId}`);
+    } catch (err) {
+      this.logger.warn(`WhatsApp destination discovery error: ${(err as Error).message}`);
+    }
   }
 }
