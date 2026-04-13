@@ -296,17 +296,21 @@ export class AutomationExecutorService {
                   tags: ['flow-action'],
                 },
               });
-              await this.prisma.client.outboundDelivery.create({
-                data: {
-                  contentId: flowContent.id,
-                  destinationId: destination.id,
-                  businessId,
-                  status: 'Sent',
-                  sentAt: new Date(),
-                  externalPostId: result.externalPostId,
-                  resultSnapshot: { source: 'flow', playbookName, contactId: context.contactId },
-                },
-              }).catch(() => {});
+              try {
+                await this.prisma.client.outboundDelivery.create({
+                  data: {
+                    contentId: flowContent.id,
+                    destinationId: destination.id,
+                    businessId,
+                    status: 'Sent',
+                    sentAt: new Date(),
+                    externalPostId: result.externalPostId,
+                    resultSnapshot: { source: 'flow', playbookName, contactId: context.contactId },
+                  },
+                });
+              } catch (deliveryErr) {
+                this.logger.warn(`Failed to record WhatsApp delivery for playbook "${playbookName}": ${(deliveryErr as Error).message}`);
+              }
               this.logger.log(`WhatsApp sent to ${phone} for playbook "${playbookName}"`);
             } else {
               this.logger.warn(`WhatsApp send failed for playbook "${playbookName}": ${result.errorMessage}`);

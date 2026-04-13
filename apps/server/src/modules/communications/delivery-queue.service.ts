@@ -346,6 +346,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     const segmentTags = (contentMeta?.segmentTags as string[] | undefined) ?? [];
     const isAudienceSend = content.contentType === 'campaign_email' || segmentTags.length > 0;
 
+    if (content.contentType === 'campaign_email') {
+      this.validateEmailCampaignPreSend(content, destinations);
+    }
+
     const deliveryData: Array<{
       contentId: string; variantId: string | null; destinationId: string;
       businessId: string; status: string; scheduledAt: Date;
@@ -354,6 +358,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     if (isAudienceSend) {
       const recipients = await this.expandRecipientsForDelivery(businessId, segmentTags);
+
+      if (recipients.length === 0) {
+        throw new BadRequestException('No eligible recipients found. Check your audience segments and ensure contacts are not suppressed.');
+      }
 
       for (const dest of destinations) {
         const variant = content.variants.find(v => v.platform === dest.platform) || content.variants.find(v => v.platform === 'DEFAULT');
@@ -428,6 +436,38 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     });
 
     return contacts.map(c => ({ id: c.id, email: c.email, phone: c.phone }));
+  }
+
+  private validateEmailCampaignPreSend(
+    content: { subject?: string | null; body?: string | null; contentMeta?: unknown },
+    destinations: Array<{ connection: { provider: string } }>,
+  ) {
+    const errors: string[] = [];
+
+    if (!content.subject || content.subject.trim().length === 0) {
+      errors.push('Email subject is required');
+    }
+
+    if (!content.body || content.body.trim().length === 0) {
+      errors.push('Email body is required');
+    }
+
+    const hasEmailDestination = destinations.some(
+      d => d.connection.provider === 'EMAIL' || d.connection.provider === 'GOOGLE',
+    );
+    if (!hasEmailDestination) {
+      errors.push('At least one email-capable destination is required for email campaigns');
+    }
+
+    const contentMeta = content.contentMeta as Record<string, unknown> | null;
+    const segmentTags = (contentMeta?.segmentTags as string[] | undefined) ?? [];
+    if (segmentTags.length === 0) {
+      errors.push('At least one audience segment must be selected');
+    }
+
+    if (errors.length > 0) {
+      throw new BadRequestException(`Email campaign validation failed: ${errors.join('; ')}`);
+    }
   }
 
   private async ensureCampaignAndContacts(
@@ -526,6 +566,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     const segmentTags = (contentMeta?.segmentTags as string[] | undefined) ?? [];
     const isAudienceSend = content.contentType === 'campaign_email' || segmentTags.length > 0;
 
+    if (content.contentType === 'campaign_email') {
+      this.validateEmailCampaignPreSend(content, destinations);
+    }
+
     const deliveryData: Array<{
       contentId: string; variantId: string | null; destinationId: string;
       businessId: string; status: string; scheduledAt: Date;
@@ -534,6 +578,11 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     if (isAudienceSend) {
       const recipients = await this.expandRecipientsForDelivery(businessId, segmentTags);
+
+      if (recipients.length === 0) {
+        throw new BadRequestException('No eligible recipients found. Check your audience segments and ensure contacts are not suppressed.');
+      }
+
       for (const dest of destinations) {
         const variant = content.variants.find(v => v.platform === dest.platform) || content.variants.find(v => v.platform === 'DEFAULT');
         const isWhatsApp = dest.connection.provider === 'WHATSAPP';
@@ -576,6 +625,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       where: { id: contentId },
       data: { status: 'Scheduled', scheduledAt: scheduleDate, timezone: tz },
     });
+
+    if (content.contentType === 'campaign_email') {
+      await this.ensureCampaignAndContacts(businessId, contentId, content, deliveryData);
+    }
 
     return { scheduled: deliveries.length, scheduledAt: scheduleDate.toISOString(), timezone: tz, deliveryIds: deliveries.map(d => d.id) };
   }
