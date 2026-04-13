@@ -535,7 +535,7 @@ export function UnifiedComposer({
     } finally {
       setPublishing(false);
     }
-  }, [body, subject, objective, audience, tone, mediaUrls, selectedDestinations, variants, savedContentId, businessId, contentTypeForApi, scheduleMode, scheduledAt, timezone, onContentCreated, onClose, hasBlockingWarnings]);
+  }, [body, subject, objective, audience, tone, mediaUrls, selectedDestinations, variants, savedContentId, businessId, contentTypeForApi, scheduleMode, scheduledAt, timezone, onContentCreated, onClose, hasBlockingWarnings, segmentTags]);
 
   return (
     <div className="space-y-4">
@@ -807,7 +807,10 @@ export function UnifiedComposer({
                   />
                 )}
 
-                {(contentType === "email" || contentType === "multi") && selectedDestinations.length > 0 && (
+                {selectedDestinations.length > 0 && selectedDestinations.some(d => {
+                  const p = d.platform.toUpperCase();
+                  return p === "EMAIL" || p === "GOOGLE" || p === "WHATSAPP";
+                }) && (
                   <AudienceSelector
                     businessId={businessId}
                     subject={subject}
