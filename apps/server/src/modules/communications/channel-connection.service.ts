@@ -535,6 +535,37 @@ export class ChannelConnectionService {
     });
   }
 
+  async connectWhatsApp(businessId: string, input: {
+    accessToken: string;
+    waBusinessAccountId: string;
+    label?: string;
+  }) {
+    const { WhatsAppAdapter } = await import('./adapters/whatsapp-adapter');
+    const adapter = new WhatsAppAdapter();
+
+    const validation = await adapter.validateConnection({ token: input.accessToken });
+    if (!validation.valid) {
+      throw new BadRequestException(`WhatsApp connection validation failed: ${validation.error}`);
+    }
+
+    const phones = await adapter.listPhoneNumbers(input.accessToken, input.waBusinessAccountId);
+    if (phones.length === 0) {
+      throw new BadRequestException('No phone numbers found for this WhatsApp Business Account');
+    }
+
+    const conn = await this.create(businessId, {
+      provider: 'WHATSAPP',
+      label: input.label || `WhatsApp (${phones[0].verifiedName})`,
+      token: input.accessToken,
+      providerMeta: { wabaId: input.waBusinessAccountId },
+    });
+
+    return {
+      connection: conn,
+      phoneNumbers: phones,
+    };
+  }
+
   private async discoverWhatsAppDestinations(
     connectionId: string,
     businessId: string,

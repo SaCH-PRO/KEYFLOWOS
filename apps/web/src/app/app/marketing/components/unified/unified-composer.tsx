@@ -20,7 +20,7 @@ import { ChannelVariantsPanel, type VariantData } from "./channel-variants-panel
 import { ChannelPreviewPanel } from "./channel-preview-panel";
 import { AudienceSelector } from "./audience-selector";
 
-type ContentTypeOption = "social" | "email" | "multi";
+type ContentTypeOption = "social" | "email" | "messaging" | "multi";
 type ComposerStep = "compose" | "distribute" | "review";
 
 const DRAFT_STORAGE_KEY = "kf_composer_draft";
@@ -67,6 +67,7 @@ const AUDIENCES = [
 const CONTENT_TYPE_OPTIONS: { key: ContentTypeOption; label: string; icon: React.ElementType; desc: string }[] = [
   { key: "social", label: "Social Post", icon: PenSquare, desc: "Facebook, Instagram, etc." },
   { key: "email", label: "Email", icon: Mail, desc: "Newsletter, campaign" },
+  { key: "messaging", label: "Messaging", icon: MessageSquare, desc: "WhatsApp, direct messages" },
   { key: "multi", label: "Multi-Channel", icon: Layers, desc: "Distribute everywhere" },
 ];
 
@@ -108,8 +109,10 @@ function inferContentType(destinations: ChannelDestination[]): ContentTypeOption
   const hasEmail = platforms.has("GOOGLE") || platforms.has("EMAIL");
   const hasWhatsApp = platforms.has("WHATSAPP");
   const hasSocial = platforms.has("FACEBOOK") || platforms.has("INSTAGRAM") || platforms.has("META");
-  if ((hasEmail && hasSocial) || (hasWhatsApp && hasSocial) || (hasEmail && hasWhatsApp)) return "multi";
+  const hasMultipleChannelTypes = [hasEmail, hasWhatsApp, hasSocial].filter(Boolean).length > 1;
+  if (hasMultipleChannelTypes) return "multi";
   if (hasEmail) return "email";
+  if (hasWhatsApp) return "messaging";
   return "social";
 }
 
@@ -357,18 +360,14 @@ export function UnifiedComposer({
   }, []);
 
   const charCount = body.length;
-  const maxChars = contentType === "social" ? 2200 : 0;
+  const maxChars = contentType === "social" ? 2200 : contentType === "messaging" ? 4096 : 0;
 
   const contentTypeForApi = useMemo(() => {
     if (contentType === "email") return "campaign_email";
-    if (contentType === "social") {
-      const allWhatsApp = selectedDestinations.length > 0 &&
-        selectedDestinations.every(d => d.platform.toUpperCase() === "WHATSAPP");
-      if (allWhatsApp) return "whatsapp_message";
-      return "social_post";
-    }
+    if (contentType === "messaging") return "whatsapp_message";
+    if (contentType === "social") return "social_post";
     return "multi_channel_broadcast";
-  }, [contentType, selectedDestinations]);
+  }, [contentType]);
 
   const selectedPlatforms = useMemo(() => {
     const platforms = selectedDestinations.map((d) => {

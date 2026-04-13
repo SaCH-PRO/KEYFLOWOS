@@ -350,7 +350,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const destinations = await this.prisma.client.channelDestination.findMany({
       where: { id: { in: destinationIds }, businessId, isActive: true },
-      include: { connection: { select: { provider: true } } },
+      include: { connection: { select: { provider: true, healthState: true, accountEmail: true } } },
     });
 
     if (destinations.length === 0) throw new BadRequestException('No valid active destinations found');
@@ -363,7 +363,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     const isAudienceSend = hasMessagingDest && (content.contentType === 'campaign_email' || content.contentType === 'whatsapp_message' || segmentTags.length > 0);
 
     if (content.contentType === 'campaign_email') {
-      this.validateEmailCampaignPreSend(content, destinations);
+      await this.validateEmailCampaignPreSend(content, destinations);
     }
 
     const deliveryData: Array<{
@@ -454,9 +454,9 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     return contacts.map(c => ({ id: c.id, email: c.email, phone: c.phone }));
   }
 
-  private validateEmailCampaignPreSend(
+  private async validateEmailCampaignPreSend(
     content: { subject?: string | null; body?: string | null; contentMeta?: unknown },
-    destinations: Array<{ connection: { provider: string } }>,
+    destinations: Array<{ id: string; connection: { provider: string; healthState?: string; accountEmail?: string | null } }>,
   ) {
     const errors: string[] = [];
 
@@ -468,11 +468,21 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       errors.push('Email body is required');
     }
 
-    const hasEmailDestination = destinations.some(
+    const emailDestinations = destinations.filter(
       d => d.connection.provider === 'EMAIL' || d.connection.provider === 'GOOGLE',
     );
-    if (!hasEmailDestination) {
+    if (emailDestinations.length === 0) {
       errors.push('At least one email-capable destination is required for email campaigns');
+    }
+
+    const unhealthySenders = emailDestinations.filter(d => d.connection.healthState && d.connection.healthState !== 'Connected');
+    if (unhealthySenders.length > 0) {
+      errors.push(`Sender connection is unhealthy (${unhealthySenders[0].connection.healthState}). Please reconnect in Studio.`);
+    }
+
+    const sendersWithoutEmail = emailDestinations.filter(d => !d.connection.accountEmail);
+    if (sendersWithoutEmail.length > 0 && emailDestinations.length === sendersWithoutEmail.length) {
+      errors.push('No sender email configured. Set up your sender identity in Content Studio.');
     }
 
     const contentMeta = content.contentMeta as Record<string, unknown> | null;
@@ -576,7 +586,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const destinations = await this.prisma.client.channelDestination.findMany({
       where: { id: { in: destinationIds }, businessId, isActive: true },
-      include: { connection: { select: { provider: true } } },
+      include: { connection: { select: { provider: true, healthState: true, accountEmail: true } } },
     });
     if (destinations.length === 0) throw new BadRequestException('No valid active destinations found');
 
@@ -588,7 +598,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     const isAudienceSend = hasMessagingDest && (content.contentType === 'campaign_email' || content.contentType === 'whatsapp_message' || segmentTags.length > 0);
 
     if (content.contentType === 'campaign_email') {
-      this.validateEmailCampaignPreSend(content, destinations);
+      await this.validateEmailCampaignPreSend(content, destinations);
     }
 
     const deliveryData: Array<{
