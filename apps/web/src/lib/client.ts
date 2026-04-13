@@ -5881,6 +5881,9 @@ export type OutboundContent = {
   tone?: string;
   tags?: string[];
   status: string;
+  scheduledAt?: string;
+  timezone?: string;
+  publishedAt?: string;
   createdAt: string;
   updatedAt: string;
   variants?: OutboundVariant[];

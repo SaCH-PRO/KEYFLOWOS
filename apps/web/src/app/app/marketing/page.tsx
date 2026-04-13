@@ -22,6 +22,7 @@ import {
   Activity,
   Target,
   UserPlus,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
@@ -48,7 +49,8 @@ import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
 import { AudienceHealthSection } from "./components/campaign-intelligence-cards";
 import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
 import { UnifiedComposer } from "./components/unified/unified-composer";
-import type { EmailCampaign, LeadForm } from "@/lib/client";
+import { listOutboundContent } from "@/lib/client";
+import type { EmailCampaign, LeadForm, OutboundContent } from "@/lib/client";
 import type { BusinessPulse } from "./hooks/use-marketing";
 
 type ContentTab = "create" | "calendar" | "audience";
@@ -348,6 +350,8 @@ export default function ContentPage() {
   const [composeType, setComposeType] = useState<"email" | "social">("email");
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
+  const [outboundContent, setOutboundContent] = useState<OutboundContent[]>([]);
+  const [editingContentId, setEditingContentId] = useState<string | undefined>();
   const initialTabSet = useRef(false);
   const directionRef = useRef<number>(0);
 
@@ -396,6 +400,14 @@ export default function ContentPage() {
       });
     }
   }, [mk.businessId, activeTab, mk.dataVersion, mk.campaigns, mk.forms, mk.socialPosts, mk.crossModuleSignals, mk.businessPulse, marketingAi.updateMarketingContext]);
+
+  useEffect(() => {
+    if (!mk.businessId) return;
+    void (async () => {
+      const res = await listOutboundContent(mk.businessId ?? undefined);
+      if (res.data) setOutboundContent(res.data);
+    })();
+  }, [mk.businessId, mk.dataVersion]);
 
   const handleTabChange = useCallback((key: string) => {
     const resolved = LEGACY_TAB_MAP[key] || key;
@@ -471,16 +483,19 @@ export default function ContentPage() {
   }, [marketingAi]);
 
   const scheduledItems = useMemo(() => {
-    const items: { id: string; type: "campaign" | "post"; title: string; scheduledFor: string; status: string }[] = [];
+    const items: { id: string; type: "campaign" | "post" | "outbound"; title: string; scheduledFor: string; status: string; contentType?: string }[] = [];
     mk.campaigns
       .filter((c) => c.status === "SCHEDULED" && c.scheduledAt)
       .forEach((c) => items.push({ id: c.id, type: "campaign", title: c.name || "Untitled Campaign", scheduledFor: c.scheduledAt!, status: c.status }));
     mk.socialPosts
       .filter((p) => p.status === "SCHEDULED" && p.scheduledFor)
       .forEach((p) => items.push({ id: p.id, type: "post", title: (p.content ?? "").slice(0, 50) || "Untitled Post", scheduledFor: p.scheduledFor!, status: p.status }));
+    outboundContent
+      .filter((c) => (c.status === "SCHEDULED" || c.status === "Scheduled") && c.scheduledAt)
+      .forEach((c) => items.push({ id: c.id, type: "outbound", title: c.subject || c.body?.slice(0, 50) || "Outbound Content", scheduledFor: c.scheduledAt!, status: c.status, contentType: c.contentType }));
     items.sort((a, b) => new Date(a.scheduledFor).getTime() - new Date(b.scheduledFor).getTime());
     return items;
-  }, [mk.campaigns, mk.socialPosts]);
+  }, [mk.campaigns, mk.socialPosts, outboundContent]);
 
   const schedulingInsights = useMemo(() => {
     const warnings: { text: string; type: "conflict" | "gap" | "cadence" }[] = [];
@@ -638,9 +653,10 @@ export default function ContentPage() {
                   <div className="space-y-4">
                     <UnifiedComposer
                       businessId={mk.businessId}
+                      editContentId={editingContentId}
                       initialContentType={composeType === "email" ? "email" : "social"}
-                      onContentCreated={() => { void mk.loadData(); }}
-                      onClose={() => { setCreateSubmode("posts"); void mk.loadData(); }}
+                      onContentCreated={() => { setEditingContentId(undefined); void mk.loadData(); }}
+                      onClose={() => { setEditingContentId(undefined); setCreateSubmode("posts"); void mk.loadData(); }}
                     />
                   </div>
                 )}
@@ -757,7 +773,7 @@ export default function ContentPage() {
                           const hour = scheduledDate.getHours();
                           const dayOfWeek = scheduledDate.getDay();
                           const bestTimeHint = (() => {
-                            if (item.type === "post") {
+                            if (item.type === "post" || item.type === "outbound") {
                               if (hour < 8 || hour > 20) return "Consider 9am-12pm for higher engagement";
                               if (dayOfWeek === 0 || dayOfWeek === 6) return "Weekday posts typically get 20% more reach";
                               if (hour >= 12 && hour <= 14) return "Lunch hours — good engagement window";
@@ -771,11 +787,13 @@ export default function ContentPage() {
                             }
                             return null;
                           })();
+                          const iconMap = { campaign: { bg: "bg-blue-500/10", icon: <Mail className="w-3.5 h-3.5 text-blue-400" /> }, post: { bg: "bg-[hsl(var(--kf-accent2))]/10", icon: <PenSquare className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" /> }, outbound: { bg: "bg-[hsl(var(--kf-accent1))]/10", icon: <Layers className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" /> } };
+                          const itemStyle = iconMap[item.type] || iconMap.post;
                           return (
-                            <div key={item.id} className="rounded-xl border border-border/30 bg-card p-3 hover:bg-muted/10 transition-colors">
+                            <div key={item.id} className="rounded-xl border border-border/30 bg-card p-3 hover:bg-muted/10 transition-colors group">
                               <div className="flex items-center gap-3">
-                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.type === "campaign" ? "bg-blue-500/10" : "bg-[hsl(var(--kf-accent2))]/10"}`}>
-                                  {item.type === "campaign" ? <Mail className="w-3.5 h-3.5 text-blue-400" /> : <PenSquare className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />}
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${itemStyle.bg}`}>
+                                  {itemStyle.icon}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium truncate">{item.title}</p>
@@ -789,6 +807,14 @@ export default function ContentPage() {
                                   <span className="px-2 py-0.5 rounded-full text-[9px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                     Soon
                                   </span>
+                                )}
+                                {item.type === "outbound" && (
+                                  <button
+                                    onClick={() => { setEditingContentId(item.id); setCreateSubmode("compose"); }}
+                                    className="text-[10px] text-[hsl(var(--kf-accent1))] opacity-0 group-hover:opacity-100 transition-opacity hover:underline"
+                                  >
+                                    Edit
+                                  </button>
                                 )}
                               </div>
                               {bestTimeHint && (

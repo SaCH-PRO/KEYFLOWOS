@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { UserCheck, Tag, Send, X, ChevronDown, Trash2, ListPlus, Loader2 } from "lucide-react";
+import { UserCheck, Tag, Send, X, ChevronDown, Trash2, ListPlus, Loader2, PenSquare } from "lucide-react";
 import { Button } from "@keyflow/ui";
 
 export interface BulkActionBarProps {
@@ -12,6 +12,7 @@ export interface BulkActionBarProps {
   onAddTag: (tag: string) => void;
   onBulkDelete: () => void;
   onBroadcast: () => void;
+  onCompose?: () => void;
   onCancel: () => void;
   onAddToList?: (listId: string) => void;
   lists?: { id: string; name: string }[];
@@ -28,6 +29,7 @@ function BulkActionBarInner({
   onAddTag,
   onBulkDelete,
   onBroadcast,
+  onCompose,
   onCancel,
   onAddToList,
   lists,
@@ -209,6 +211,18 @@ function BulkActionBarInner({
         <Trash2 className="w-4 h-4" />
         Delete
       </button>
+
+      {onCompose && (
+        <button
+          onClick={onCompose}
+          disabled={isDisabled}
+          className="kf-btn-secondary inline-flex items-center gap-2 text-sm min-h-[44px] disabled:opacity-50"
+          aria-label={`Compose content for ${selectedCount} selected contacts`}
+        >
+          <PenSquare className="w-4 h-4" />
+          Compose
+        </button>
+      )}
 
       <button
         onClick={onBroadcast}
