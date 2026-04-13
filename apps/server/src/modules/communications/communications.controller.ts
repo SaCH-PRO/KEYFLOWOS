@@ -290,11 +290,14 @@ export class CommunicationsController {
     @Query('status') status?: string,
     @Query('channel') channel?: string,
     @Query('contentId') contentId?: string,
+    @Query('contentType') contentType?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
     return this.delivery.listDeliveries(businessId, {
-      status, channel, contentId,
+      status, channel, contentId, contentType, dateFrom, dateTo,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
     });

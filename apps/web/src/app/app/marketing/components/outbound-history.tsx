@@ -76,6 +76,8 @@ function OutboundContentRow({ item, businessId }: { item: OutboundContent; busin
   };
 
   const handleRetryAll = async () => {
+    const confirmed = window.confirm(`Retry all ${summary?.failed ?? 0} failed deliveries for this content?`);
+    if (!confirmed) return;
     setRetrying(true);
     const res = await retryAllFailedDeliveries(item.id, businessId);
     if (res.error) toast.error(res.error);

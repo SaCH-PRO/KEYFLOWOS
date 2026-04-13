@@ -61,6 +61,8 @@ function DeliveryRow({ item, businessId }: { item: DeliveryListItem; businessId:
   };
 
   const handleRetry = async () => {
+    const confirmed = window.confirm(`Retry delivery to ${item.destination?.displayName || item.destination?.platform || "this destination"}?`);
+    if (!confirmed) return;
     setRetrying(true);
     const res = await retryDelivery(item.id, businessId);
     if (res.error) toast.error(res.error);
@@ -178,6 +180,9 @@ export function DeliveryLog({ businessId, contentId }: DeliveryLogProps) {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
+  const [contentTypeFilter, setContentTypeFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [offset, setOffset] = useState(0);
   const limit = 30;
 
@@ -187,6 +192,9 @@ export function DeliveryLog({ businessId, contentId }: DeliveryLogProps) {
       status: statusFilter || undefined,
       channel: channelFilter || undefined,
       contentId,
+      contentType: contentTypeFilter || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
       limit,
       offset,
     });
@@ -195,7 +203,7 @@ export function DeliveryLog({ businessId, contentId }: DeliveryLogProps) {
       setTotal(res.data.total);
     }
     setLoading(false);
-  }, [businessId, contentId, statusFilter, channelFilter, offset]);
+  }, [businessId, contentId, statusFilter, channelFilter, contentTypeFilter, dateFrom, dateTo, offset]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -233,6 +241,39 @@ export function DeliveryLog({ businessId, contentId }: DeliveryLogProps) {
           <option value="">All channels</option>
           {channels.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
+        <select
+          value={contentTypeFilter}
+          onChange={e => { setContentTypeFilter(e.target.value); setOffset(0); }}
+          className="text-[10px] bg-transparent border border-border/30 rounded-md px-2 py-1 text-foreground focus:outline-none"
+        >
+          <option value="">All types</option>
+          <option value="campaign_email">Email</option>
+          <option value="social_post">Social</option>
+          <option value="whatsapp_message">WhatsApp</option>
+          <option value="multi_channel_broadcast">Multi-Channel</option>
+        </select>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={e => { setDateFrom(e.target.value); setOffset(0); }}
+          className="text-[10px] bg-transparent border border-border/30 rounded-md px-2 py-1 text-foreground focus:outline-none"
+          placeholder="From"
+        />
+        <input
+          type="date"
+          value={dateTo}
+          onChange={e => { setDateTo(e.target.value); setOffset(0); }}
+          className="text-[10px] bg-transparent border border-border/30 rounded-md px-2 py-1 text-foreground focus:outline-none"
+          placeholder="To"
+        />
+        {(statusFilter || channelFilter || contentTypeFilter || dateFrom || dateTo) && (
+          <button
+            onClick={() => { setStatusFilter(""); setChannelFilter(""); setContentTypeFilter(""); setDateFrom(""); setDateTo(""); setOffset(0); }}
+            className="text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {loading ? (

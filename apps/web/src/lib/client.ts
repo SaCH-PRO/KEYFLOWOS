@@ -6275,12 +6275,15 @@ export interface DeliveryEventItem {
   createdAt: string;
 }
 
-export async function listDeliveries(businessId?: string, opts?: { status?: string; channel?: string; contentId?: string; limit?: number; offset?: number }): Promise<ApiResult<DeliveryListResult>> {
+export async function listDeliveries(businessId?: string, opts?: { status?: string; channel?: string; contentId?: string; contentType?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<ApiResult<DeliveryListResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   const params = new URLSearchParams();
   if (opts?.status) params.set("status", opts.status);
   if (opts?.channel) params.set("channel", opts.channel);
   if (opts?.contentId) params.set("contentId", opts.contentId);
+  if (opts?.contentType) params.set("contentType", opts.contentType);
+  if (opts?.dateFrom) params.set("dateFrom", opts.dateFrom);
+  if (opts?.dateTo) params.set("dateTo", opts.dateTo);
   if (opts?.limit) params.set("limit", String(opts.limit));
   if (opts?.offset) params.set("offset", String(opts.offset));
   const qs = params.toString();
