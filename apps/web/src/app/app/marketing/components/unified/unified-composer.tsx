@@ -266,7 +266,7 @@ export function UnifiedComposer({
           setAudience(c.audience || "all");
           setMediaUrls(c.mediaUrls || []);
           setSavedContentId(c.id);
-          if (c.contentType === "email_campaign") setContentType("email");
+          if (c.contentType === "campaign_email") setContentType("email");
           else if (c.contentType === "multi_channel_broadcast") setContentType("multi");
           else setContentType("social");
 
@@ -359,7 +359,7 @@ export function UnifiedComposer({
   const maxChars = contentType === "social" ? 2200 : 0;
 
   const contentTypeForApi = useMemo(() => {
-    if (contentType === "email") return "email_campaign";
+    if (contentType === "email") return "campaign_email";
     if (contentType === "social") return "social_post";
     return "multi_channel_broadcast";
   }, [contentType]);

@@ -403,7 +403,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (content.contentType === 'campaign_email') {
-      await this.createCampaignContactRecords(businessId, contentId, deliveryData);
+      await this.ensureCampaignAndContacts(businessId, contentId, content, deliveryData);
     }
 
     setTimeout(() => this.tick(), 500);
@@ -430,34 +430,55 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     return contacts.map(c => ({ id: c.id, email: c.email, phone: c.phone }));
   }
 
-  private async createCampaignContactRecords(
+  private async ensureCampaignAndContacts(
     businessId: string,
     contentId: string,
+    content: { subject?: string | null; body?: string | null; contentMeta?: unknown },
     deliveryData: Array<{ contactId: string | null; recipientEmail: string | null }>,
   ) {
-    const contentMeta = (await this.prisma.client.outboundContent.findUnique({
-      where: { id: contentId },
-      select: { contentMeta: true },
-    }))?.contentMeta as Record<string, unknown> | null;
+    try {
+      const existingMeta = content.contentMeta as Record<string, unknown> | null;
+      let campaignId = existingMeta?.campaignId as string | undefined;
 
-    const campaignId = contentMeta?.campaignId as string | undefined;
-    if (!campaignId) return;
+      if (!campaignId) {
+        const segmentTags = (existingMeta?.segmentTags as string[] | undefined) ?? [];
+        const campaign = await this.prisma.client.emailCampaign.create({
+          data: {
+            businessId,
+            name: content.subject || 'Email Campaign',
+            subject: content.subject || '',
+            body: content.body || '',
+            status: 'SENDING',
+            totalRecipients: deliveryData.filter(d => d.recipientEmail).length,
+            segmentFilter: segmentTags.length > 0 ? { tags: segmentTags } : undefined,
+          },
+        });
+        campaignId = campaign.id;
 
-    const campaignContactData = deliveryData
-      .filter(d => d.contactId && d.recipientEmail)
-      .map(d => ({
-        campaignId,
-        contactId: d.contactId as string,
-        email: d.recipientEmail as string,
-        businessId,
-        status: 'PENDING',
-      }));
+        await this.prisma.client.outboundContent.update({
+          where: { id: contentId },
+          data: { contentMeta: { ...(existingMeta ?? {}), campaignId } },
+        });
+      }
 
-    if (campaignContactData.length > 0) {
-      await this.prisma.client.emailCampaignContact.createMany({
-        data: campaignContactData,
-        skipDuplicates: true,
-      });
+      const campaignContactData = deliveryData
+        .filter(d => d.contactId && d.recipientEmail)
+        .map(d => ({
+          campaignId: campaignId as string,
+          contactId: d.contactId as string,
+          email: d.recipientEmail as string,
+          businessId,
+          status: 'PENDING',
+        }));
+
+      if (campaignContactData.length > 0) {
+        await this.prisma.client.emailCampaignContact.createMany({
+          data: campaignContactData,
+          skipDuplicates: true,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to create campaign tracking: ${(err as Error).message}`);
     }
   }
 
