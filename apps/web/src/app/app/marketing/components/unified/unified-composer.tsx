@@ -470,6 +470,7 @@ export function UnifiedComposer({
         const res = await updateOutboundContent(savedContentId, {
           body, subject: subject || undefined, objective: objective || undefined,
           audience: audience || undefined, tone: tone || undefined, mediaUrls,
+          segmentTags: segmentTags.length > 0 ? segmentTags : undefined,
         }, businessId);
         if (res.error) { toast.error(res.error); return; }
         await persistVariants(savedContentId);

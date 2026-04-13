@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
       return publicRedirect(`/app/crm/pipeline?google_success=true${imported ? `&imported=${imported}` : ""}`, request);
     }
 
-    return publicRedirect("/app/crm/pipeline?google_success=true", request);
+    return publicRedirect("/app/crm/pipeline?google_error=import_failed", request);
   } catch (err) {
     console.error("Google Contacts callback proxy error:", err);
     return publicRedirect("/app/crm/pipeline?google_error=proxy_error", request);

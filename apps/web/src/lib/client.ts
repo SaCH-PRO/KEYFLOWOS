@@ -5965,7 +5965,7 @@ export async function createOutboundContent(data: { contentType: string; subject
   return apiPost<OutboundContent>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content`, body: payload });
 }
 
-export async function updateOutboundContent(contentId: string, data: Partial<{ subject: string; body: string; mediaUrls: string[]; objective: string; audience: string; tone: string; tags: string[] }>, businessId?: string): Promise<ApiResult<OutboundContent>> {
+export async function updateOutboundContent(contentId: string, data: Partial<{ subject: string; body: string; mediaUrls: string[]; objective: string; audience: string; tone: string; tags: string[]; segmentTags: string[] }>, businessId?: string): Promise<ApiResult<OutboundContent>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPatch<OutboundContent>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}`, data);
 }
