@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { apiPost, apiGet } from "@/lib/api";
 
-type OrderItem = {
+export type OrderItem = {
   id: string;
   name: string;
   quantity: number;
@@ -23,7 +23,7 @@ type OrderItem = {
   total: number;
 };
 
-type TimelineEntry = {
+export type TimelineEntry = {
   status: string;
   timestamp: string;
   note?: string;
@@ -34,7 +34,7 @@ type TimelineEntry = {
   refundAmount?: number;
 };
 
-type Order = {
+export type Order = {
   id: string;
   orderNumber: string;
   status: string;
@@ -44,7 +44,7 @@ type Order = {
   currency: string;
   items: OrderItem[];
   metadata?: { statusTimeline?: TimelineEntry[] };
-  shipments?: any[];
+  shipments?: { carrier?: string; trackingNumber?: string; trackingUrl?: string }[];
 };
 
 const STATUS_STEPS = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED"];

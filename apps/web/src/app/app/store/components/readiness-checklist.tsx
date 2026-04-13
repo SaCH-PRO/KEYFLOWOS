@@ -38,7 +38,7 @@ const WIZARD_STEPS = [
     title: "Set Your Store URL",
     description: "Choose a memorable, shareable URL slug for your storefront",
     action: "Set URL",
-    tab: "setup",
+    tab: "launch",
   },
   {
     key: "catalog",
@@ -46,7 +46,7 @@ const WIZARD_STEPS = [
     title: "Add Products or Services",
     description: "List at least one product or service for customers to browse",
     action: "Add Items",
-    tab: "setup",
+    tab: "catalog",
   },
   {
     key: "design",
@@ -54,7 +54,7 @@ const WIZARD_STEPS = [
     title: "Customize Your Theme",
     description: "Pick your colors, fonts, and storefront theme to match your brand",
     action: "Customize",
-    tab: "setup",
+    tab: "design",
   },
   {
     key: "hours",
@@ -62,7 +62,7 @@ const WIZARD_STEPS = [
     title: "Set Business Hours",
     description: "Let customers know when you're available for bookings or orders",
     action: "Set Hours",
-    tab: "setup",
+    tab: "operations",
   },
   {
     key: "golive",
@@ -70,7 +70,7 @@ const WIZARD_STEPS = [
     title: "Go Live",
     description: "Enable your store and start accepting orders from customers",
     action: "Enable Store",
-    tab: "setup",
+    tab: "operations",
   },
 ];
 

@@ -1,4 +1,4 @@
-import { Store, Truck } from "lucide-react";
+import { LayoutDashboard, Palette, ShoppingBag, Package, Settings2, Rocket } from "lucide-react";
 
 export type Banner = { text: string; type: "success" | "error" | "info" | "warning" };
 
@@ -11,11 +11,15 @@ export type DriftedItem = {
   commerceDuration: number | null;
 };
 
-export type TabKey = "setup" | "orders";
+export type TabKey = "overview" | "design" | "merchandising" | "catalog" | "operations" | "launch";
 
 export const VIEW_TABS: { key: TabKey; label: string; icon: React.ElementType; tooltip?: string }[] = [
-  { key: "setup", label: "My Store", icon: Store, tooltip: "Configure your storefront — branding, products, hours, and settings." },
-  { key: "orders", label: "Orders", icon: Truck, tooltip: "Manage orders, fulfillment, delivery, and promo codes." },
+  { key: "overview", label: "Overview", icon: LayoutDashboard, tooltip: "Strategic control center — health scores, KPIs, and quick actions." },
+  { key: "design", label: "Design", icon: Palette, tooltip: "Appearance, typography, section layout, and storefront branding." },
+  { key: "merchandising", label: "Merch", icon: ShoppingBag, tooltip: "Featured products, social proof, promotions, and SEO." },
+  { key: "catalog", label: "Catalog", icon: Package, tooltip: "Manage products and services in your store." },
+  { key: "operations", label: "Ops", icon: Settings2, tooltip: "Store status, delivery, business hours, and order fulfillment." },
+  { key: "launch", label: "Launch", icon: Rocket, tooltip: "Launch checklist, store URL, QR code, and go-live." },
 ];
 
 export type Testimonial = { id: string; name: string; text: string; rating: number; date: string };
