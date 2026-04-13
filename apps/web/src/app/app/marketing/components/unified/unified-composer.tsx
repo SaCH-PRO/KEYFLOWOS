@@ -110,6 +110,8 @@ function inferContentType(destinations: ChannelDestination[]): ContentTypeOption
   return "social";
 }
 
+const PLATFORM_MAP: Record<string, string> = { GOOGLE: "EMAIL", META: "FACEBOOK" };
+
 interface ChannelWarning {
   platform: string;
   message: string;
@@ -358,7 +360,6 @@ export function UnifiedComposer({
   }, [contentType]);
 
   const selectedPlatforms = useMemo(() => {
-    const PLATFORM_MAP: Record<string, string> = { GOOGLE: "EMAIL", META: "FACEBOOK" };
     const platforms = selectedDestinations.map((d) => {
       const upper = d.platform.toUpperCase();
       return PLATFORM_MAP[upper] || upper;
