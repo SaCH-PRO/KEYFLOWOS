@@ -1,3 +1,4 @@
+import { createHmac } from 'crypto';
 import {
   ChannelAdapter,
   PublishPayload,
@@ -41,10 +42,12 @@ export class EmailAdapter implements ChannelAdapter {
           const openUrl = `${baseUrl}/communications/deliveries/${deliveryId}/track-open?t=${trackingToken}`;
           htmlBody += `<img src="${openUrl}" width="1" height="1" style="display:none" alt="" />`;
 
+          const trackingHmacSecret = process.env.TRACKING_HMAC_SECRET || '';
           htmlBody = htmlBody.replace(
             /href="(https?:\/\/[^"]+)"/g,
             (_match: string, url: string) => {
-              const clickUrl = `${baseUrl}/communications/deliveries/${deliveryId}/track-click?t=${trackingToken}&r=${encodeURIComponent(url)}`;
+              const clickToken = createHmac('sha256', trackingHmacSecret).update(`${deliveryId}:${url}`).digest('hex').slice(0, 16);
+              const clickUrl = `${baseUrl}/communications/deliveries/${deliveryId}/track-click?t=${clickToken}&r=${encodeURIComponent(url)}`;
               return `href="${clickUrl}"`;
             },
           );
