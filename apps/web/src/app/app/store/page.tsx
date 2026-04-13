@@ -274,6 +274,10 @@ export default function StorePage() {
                 onSaveHours={s.handleSaveHours}
                 hoursSaving={s.hoursSaving}
                 onReorderProducts={s.handleReorderProducts}
+                itemOverrides={s.storefrontConfig.catalog?.itemOverrides}
+                onItemOverrideChange={s.handleItemOverrideChange}
+                categoryEmphasis={s.storefrontConfig.catalog?.categoryEmphasis}
+                onCategoryEmphasisChange={s.handleCategoryEmphasisChange}
               />
             )}
             {activeTab === "operations" && (

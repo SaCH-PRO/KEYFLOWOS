@@ -18,6 +18,7 @@ import {
   updateStorefrontConfig,
   fetchStoreAnalytics,
   StoreAnalytics,
+  CatalogItemOverride,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { apiGet } from "@/lib/api";
@@ -385,6 +386,20 @@ export function useStoreData() {
     }
   }
 
+  function handleItemOverrideChange(productId: string, override: Partial<CatalogItemOverride>) {
+    const currentOverrides = storefrontConfig.catalog?.itemOverrides ?? {};
+    const current = currentOverrides[productId] ?? {};
+    const merged = { ...current, ...override };
+    const newOverrides = { ...currentOverrides, [productId]: merged };
+    handleConfigChange("catalog", { itemOverrides: newOverrides });
+  }
+
+  function handleCategoryEmphasisChange(category: string, emphasis: "high" | "medium" | "low" | "default") {
+    const current = storefrontConfig.catalog?.categoryEmphasis ?? {};
+    const updated = { ...current, [category]: emphasis };
+    handleConfigChange("catalog", { categoryEmphasis: updated });
+  }
+
   async function handleSaveConfig() {
     if (!businessId) return;
     setConfigSaving(true);
@@ -437,6 +452,8 @@ export function useStoreData() {
     handleSaveConfig,
     handleDeleteServiceFromStore,
     handleReorderProducts,
+    handleItemOverrideChange,
+    handleCategoryEmphasisChange,
     storeServiceNames,
     storeItemCount,
     emitEvent,

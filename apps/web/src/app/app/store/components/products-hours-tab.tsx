@@ -2,7 +2,7 @@
 
 import { CatalogManager } from "./catalog-manager";
 import { HoursEditor, type BusinessHoursMap } from "./hours-editor";
-import type { Product, Service } from "@/lib/client";
+import type { Product, Service, CatalogItemOverride } from "@/lib/client";
 
 type Props = {
   commerceProducts: Product[];
@@ -21,6 +21,10 @@ type Props = {
   onSaveHours: () => Promise<void>;
   hoursSaving: boolean;
   onReorderProducts?: (orderedIds: string[]) => void;
+  itemOverrides?: Record<string, CatalogItemOverride>;
+  onItemOverrideChange?: (productId: string, override: Partial<CatalogItemOverride>) => void;
+  categoryEmphasis?: Record<string, "high" | "medium" | "low" | "default">;
+  onCategoryEmphasisChange?: (category: string, emphasis: "high" | "medium" | "low" | "default") => void;
 };
 
 export function ProductsHoursTab({
@@ -40,6 +44,10 @@ export function ProductsHoursTab({
   onSaveHours,
   hoursSaving,
   onReorderProducts,
+  itemOverrides,
+  onItemOverrideChange,
+  categoryEmphasis,
+  onCategoryEmphasisChange,
 }: Props) {
   return (
     <div className="space-y-6">
@@ -56,6 +64,10 @@ export function ProductsHoursTab({
         onDeleteFromStore={onDeleteFromStore}
         services={services.map((s) => ({ id: s.id, name: s.name }))}
         onReorder={onReorderProducts}
+        itemOverrides={itemOverrides}
+        onItemOverrideChange={onItemOverrideChange}
+        categoryEmphasis={categoryEmphasis}
+        onCategoryEmphasisChange={onCategoryEmphasisChange}
       />
 
       <HoursEditor

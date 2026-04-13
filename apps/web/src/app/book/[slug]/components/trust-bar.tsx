@@ -1,6 +1,7 @@
 "use client";
 
-import { ShieldCheck, Clock, CreditCard, Star, Award, Zap } from "lucide-react";
+import { ShieldCheck, Clock, CreditCard, Star, Award, Zap, Truck, CheckCircle2, Headphones, Layers, BadgeCheck } from "lucide-react";
+import type { TrustRailItem } from "@/lib/client";
 
 type Props = {
   primaryColor: string;
@@ -9,6 +10,25 @@ type Props = {
   showPaymentBadge?: boolean;
   completedOrdersCount?: number;
   businessHoursToday?: string | null;
+  configuredRails?: TrustRailItem[];
+};
+
+const TRUST_RAIL_ICONS: Record<TrustRailItem, React.ElementType> = {
+  secure_checkout: ShieldCheck,
+  fast_delivery: Truck,
+  verified_business: BadgeCheck,
+  instant_booking: Zap,
+  custom_support: Headphones,
+  digital_delivery: Layers,
+};
+
+const TRUST_RAIL_LABELS: Record<TrustRailItem, string> = {
+  secure_checkout: "Secure Checkout",
+  fast_delivery: "Fast Delivery",
+  verified_business: "Verified Business",
+  instant_booking: "Instant Booking",
+  custom_support: "Custom Support",
+  digital_delivery: "Digital Delivery",
 };
 
 function formatOrderCount(count: number): string {
@@ -18,18 +38,28 @@ function formatOrderCount(count: number): string {
   return `${count}`;
 }
 
-export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true, completedOrdersCount, businessHoursToday }: Props) {
-  const trustItems = [
-    { icon: ShieldCheck, label: "Secure Checkout", key: "secure" },
-    ...(completedOrdersCount && completedOrdersCount > 0
-      ? [{ icon: Star, label: `${formatOrderCount(completedOrdersCount)} Orders Completed`, key: "orders" }]
-      : [{ icon: Clock, label: "Instant Confirmation", key: "instant" }]),
-    ...(showPaymentBadge ? [{ icon: CreditCard, label: "Secure Payments", key: "payments" }] : []),
-    ...(businessHoursToday
-      ? [{ icon: Clock, label: `Today: ${businessHoursToday}`, key: "hours" }]
-      : [{ icon: Award, label: "Guaranteed by KeyFlowOS", key: "guarantee" }]),
-  ];
-  const visibleItems = trustItems;
+export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true, completedOrdersCount, businessHoursToday, configuredRails }: Props) {
+  let visibleItems: { icon: React.ElementType; label: string; key: string }[];
+
+  if (configuredRails && configuredRails.length > 0) {
+    visibleItems = configuredRails.map((rail) => ({
+      icon: TRUST_RAIL_ICONS[rail],
+      label: TRUST_RAIL_LABELS[rail],
+      key: rail,
+    }));
+  } else {
+    const trustItems = [
+      { icon: ShieldCheck, label: "Secure Checkout", key: "secure" },
+      ...(completedOrdersCount && completedOrdersCount > 0
+        ? [{ icon: Star, label: `${formatOrderCount(completedOrdersCount)} Orders Completed`, key: "orders" }]
+        : [{ icon: Clock, label: "Instant Confirmation", key: "instant" }]),
+      ...(showPaymentBadge ? [{ icon: CreditCard, label: "Secure Payments", key: "payments" }] : []),
+      ...(businessHoursToday
+        ? [{ icon: Clock, label: `Today: ${businessHoursToday}`, key: "hours" }]
+        : [{ icon: Award, label: "Guaranteed by KeyFlowOS", key: "guarantee" }]),
+    ];
+    visibleItems = trustItems;
+  }
 
   return (
     <div

@@ -3237,7 +3237,22 @@ export type DeliveryMethod = 'shipping' | 'pickup' | 'digital';
 
 export type StoreStatus = 'active' | 'paused' | 'coming_soon';
 
-export type BadgeType = 'popular' | 'new' | 'best_seller' | 'limited' | 'sale';
+export type BadgeType = 'popular' | 'new' | 'best_seller' | 'limited' | 'sale' | 'best_value' | 'fast_delivery' | 'book_today' | 'verified' | 'digital_delivery' | 'staff_pick';
+
+export type CatalogVisibilityRule = 'visible' | 'hidden' | 'preorder' | 'low_stock' | 'consultation_first' | 'service_only' | 'digital_only';
+
+export type TrustRailItem = 'secure_checkout' | 'fast_delivery' | 'verified_business' | 'instant_booking' | 'custom_support' | 'digital_delivery';
+
+export interface CatalogItemOverride {
+  label?: string;
+  shortDescription?: string;
+  badge?: BadgeType | 'none';
+  visibilityRule?: CatalogVisibilityRule;
+  hidePrice?: boolean;
+  section?: string;
+  featured?: boolean;
+  categoryEmphasis?: 'high' | 'medium' | 'low' | 'default';
+}
 
 export interface FontPairing {
   id: string;
@@ -3269,8 +3284,14 @@ export interface StorefrontConfig {
   };
   merchandising: {
     featuredItemIds?: string[];
-    collections?: { id: string; name: string; itemIds: string[] }[];
+    collections?: { id: string; name: string; itemIds: string[]; railType?: 'featured' | 'seasonal' | 'landing' }[];
     badges?: Record<string, BadgeType>;
+    trustRails?: TrustRailItem[];
+    spotlights?: { id: string; itemId: string; itemType: 'service' | 'product' | 'package'; spotlightType: 'service' | 'package' | 'hybrid'; headline?: string; subheadline?: string }[];
+    highlightHighMargin?: boolean;
+    showBestsellers?: boolean;
+    showNewArrivals?: boolean;
+    showLimitedTimeOffers?: boolean;
   };
   promotions: {
     bannerEnabled?: boolean;
@@ -3278,6 +3299,8 @@ export interface StorefrontConfig {
     bannerColor?: string;
     bannerLink?: string;
     bannerExpiry?: string;
+    bannerStartDate?: string;
+    bannerCta?: string;
   };
   socialProof: {
     testimonials?: { id: string; name: string; text: string; rating: number; date: string }[];
@@ -3293,6 +3316,9 @@ export interface StorefrontConfig {
   };
   catalog?: {
     productOrder?: string[];
+    itemOverrides?: Record<string, CatalogItemOverride>;
+    categoryEmphasis?: Record<string, 'high' | 'medium' | 'low' | 'default'>;
+    sections?: { id: string; name: string; itemIds: string[]; railType?: 'featured' | 'seasonal' | 'landing' }[];
   };
   sections?: StorefrontSection[];
   faqEntries?: FaqEntry[];
