@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigationContext } from "@/lib/navigation-context";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
 import {
   CreditCard,
   FileText,
@@ -33,6 +35,7 @@ import { useCommerceOverview } from "./hooks/use-commerce-overview";
 import { useCommerceCopilot } from "./hooks/use-commerce-copilot";
 import { useCommerceComposer } from "./hooks/use-commerce-composer";
 import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
+import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { SearchableHelpDrawer } from "./components/contextual-onboarding";
 import { ProgressivePrompts } from "../profile/components/progressive-prompts";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
@@ -68,6 +71,8 @@ const OPS_SECTIONS: { key: string; label: string; icon: React.ElementType }[] = 
 ];
 
 export default function CommercePage() {
+  const { setCurrentMeta } = useNavigationContext();
+  useReturnNavigation({ restoreScrollOnMount: true });
   const shell = useCommerceShell();
   const billing = useBillingWorkspace();
   const { checkLimit } = usePlan();
@@ -120,7 +125,8 @@ export default function CommercePage() {
     }
     overview.handleTabChange(t);
     setOpsSection(t);
-  }, [overview.handleTabChange]);
+    setCurrentMeta({ tab: t });
+  }, [overview.handleTabChange, setCurrentMeta]);
 
   useModuleEvent("commerce:create_quote_for_contact", useCallback((event: any) => {
     const { contactId, items } = event.data ?? {};
@@ -319,6 +325,7 @@ export default function CommercePage() {
 
   return (
     <div className="space-y-5" aria-label="Revenue">
+      <ResumePrompt module="commerce" />
       <PageHeader
         icon={TrendingUp}
         title="Revenue"

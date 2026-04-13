@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { useNavigationContext } from "@/lib/navigation-context";
 import { FolderKanban, Send, LayoutGrid, List, FileStack } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
@@ -17,6 +18,8 @@ import { TemplateManager } from "./components/template-manager";
 import { ProjectExecutionStrip } from "./components/project-execution-strip";
 import { ProjectDetail } from "./components/project-detail";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
+import { ResumePrompt } from "@/components/ui/resume-task-system";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
 
 const TABS = [
   { key: "board", label: "Board", icon: LayoutGrid, tooltip: "Kanban board view grouped by delivery stage." },
@@ -25,6 +28,8 @@ const TABS = [
 ];
 
 export default function ProjectsPage() {
+  useReturnNavigation({ restoreScrollOnMount: true });
+  const { setCurrentMeta } = useNavigationContext();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -37,6 +42,10 @@ export default function ProjectsPage() {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
   }, []);
+
+  useEffect(() => {
+    setCurrentMeta({ selectedEntityLabel: "Projects" });
+  }, [setCurrentMeta]);
 
   const loadProjects = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
@@ -74,6 +83,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-4">
+      <ResumePrompt module="projects" />
       <PageHeader
         icon={FolderKanban}
         title="Projects"

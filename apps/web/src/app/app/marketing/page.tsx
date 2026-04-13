@@ -33,6 +33,8 @@ import { useSearchParams } from "next/navigation";
 import { useModuleEvent } from "@/hooks/use-module-events";
 import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
 import { useMarketing } from "./hooks/use-marketing";
+import { ResumePrompt } from "@/components/ui/resume-task-system";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { AiBadge } from "@/components/ui/ai-badge";
@@ -335,6 +337,7 @@ function BusinessPulseStrip({
 }
 
 export default function ContentPage() {
+  useReturnNavigation({ restoreScrollOnMount: true });
   const searchParams = useSearchParams();
   const mk = useMarketing();
   const marketingAi = useMarketingAiHub();
@@ -543,6 +546,7 @@ export default function ContentPage() {
 
   return (
     <div className="space-y-5" aria-label="Content">
+      <ResumePrompt module="marketing" />
       <PageHeader
         icon={Megaphone}
         title="Content"

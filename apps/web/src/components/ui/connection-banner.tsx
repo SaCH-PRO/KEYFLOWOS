@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { CheckCircle2, Loader2, ExternalLink, Link2, Settings } from "lucide-react";
 import Link from "next/link";
+import { useNavigationContext } from "@/lib/navigation-context";
 
 interface ConnectionBannerProps {
   icon: React.ElementType;
@@ -16,6 +17,7 @@ interface ConnectionBannerProps {
   loading?: boolean;
   compact?: boolean;
   manageHref?: string;
+  taskIntent?: string;
 }
 
 export function ConnectionBanner({
@@ -30,7 +32,15 @@ export function ConnectionBanner({
   loading = false,
   compact = false,
   manageHref = "/app/settings/connections",
+  taskIntent,
 }: ConnectionBannerProps) {
+  const { pushContext, setTaskOrigin, current } = useNavigationContext();
+
+  function handleManageClick() {
+    if (current) setTaskOrigin(current);
+    pushContext({ taskIntent: taskIntent ?? `manage-${title.toLowerCase().replace(/\s+/g, "-")}` });
+  }
+
   if (compact) {
     return (
       <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-card/60">
@@ -65,6 +75,7 @@ export function ConnectionBanner({
         ) : (
           <Link
             href={manageHref}
+            onClick={handleManageClick}
             className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
           >
             <Settings className="w-3 h-3" />
@@ -132,6 +143,7 @@ export function ConnectionBanner({
               )}
               <Link
                 href={manageHref}
+                onClick={handleManageClick}
                 className="kf-btn-secondary !py-1.5 !px-3 text-xs flex items-center gap-1.5"
               >
                 <Settings className="w-3 h-3" />
