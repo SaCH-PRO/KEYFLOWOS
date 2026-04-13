@@ -1,6 +1,8 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Inject } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { InventoryLowPayload, InventoryOutPayload, PurchaseOrderReceivedPayload } from '../../core/event-bus/events.types';
 
 export interface OrderStatusTimelineEntry {
   status: string;
@@ -183,6 +185,7 @@ export class FulfillmentRoutingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: TransactionalEmailService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   private generatePONumber(): string {
@@ -890,12 +893,30 @@ export class FulfillmentRoutingService {
           `(${stock.product.sku ?? stock.productId}) in warehouse "${stock.warehouse.name}". ` +
           `Business: ${businessId}`,
       );
+      this.events.emit('inventory.out', {
+        businessId,
+        productId: stock.productId,
+        productName: stock.product.name,
+        productSku: stock.product.sku,
+        warehouseId: stock.warehouseId,
+        warehouseName: stock.warehouse.name,
+      } as InventoryOutPayload);
     } else if (available <= stock.reorderAt) {
       this.logger.warn(
         `[STOCK ALERT] LOW STOCK: Product "${stock.product.name}" ` +
           `(${stock.product.sku ?? stock.productId}) in warehouse "${stock.warehouse.name}". ` +
           `Available: ${available}, Reorder threshold: ${stock.reorderAt}. Business: ${businessId}`,
       );
+      this.events.emit('inventory.low', {
+        businessId,
+        productId: stock.productId,
+        productName: stock.product.name,
+        productSku: stock.product.sku,
+        warehouseId: stock.warehouseId,
+        warehouseName: stock.warehouse.name,
+        quantity: available,
+        reorderAt: stock.reorderAt,
+      } as InventoryLowPayload);
     }
   }
 
@@ -948,6 +969,16 @@ export class FulfillmentRoutingService {
         where: { businessId, purchaseOrderId: poId },
         data: { status: 'PICKING_PACKING' },
       });
+
+      this.events.emit('purchaseOrder.received', {
+        businessId,
+        purchaseOrderId: poId,
+        poNumber: updatedPO.poNumber,
+        supplierName: updatedPO.supplierName,
+        items: (updatedPO.items as any[]) ?? [],
+        total: updatedPO.total,
+        currency: updatedPO.currency,
+      } as PurchaseOrderReceivedPayload);
     }
 
     return updatedPO;

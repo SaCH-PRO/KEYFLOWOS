@@ -195,6 +195,54 @@ export class StoreOrderCancelledPayload {
   businessId!: string;
 }
 
+export class StoreOrderRefundedPayload {
+  order!: any;
+  businessId!: string;
+  refundAmount?: number;
+}
+
+export class InventoryLowPayload {
+  businessId!: string;
+  productId!: string;
+  productName!: string;
+  productSku?: string | null;
+  warehouseId!: string;
+  warehouseName!: string;
+  quantity!: number;
+  reorderAt!: number;
+}
+
+export class InventoryOutPayload {
+  businessId!: string;
+  productId!: string;
+  productName!: string;
+  productSku?: string | null;
+  warehouseId!: string;
+  warehouseName!: string;
+}
+
+export class PurchaseOrderReceivedPayload {
+  businessId!: string;
+  purchaseOrderId!: string;
+  poNumber!: string;
+  supplierName?: string | null;
+  items!: any[];
+  total!: number;
+  currency!: string;
+}
+
+export class PreorderDelayedPayload {
+  businessId!: string;
+  preOrderId!: string;
+  productId!: string;
+  productName!: string;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  originalExpectedDate?: Date | null;
+  newExpectedDate?: Date | null;
+  reason?: string | null;
+}
+
 export class ContentPublishedPayload {
   deliveryId!: string;
   contentId!: string;
@@ -256,6 +304,11 @@ export interface KeyFlowEventMap {
   'store_order.shipped': StoreOrderShippedPayload;
   'store_order.delivered': StoreOrderDeliveredPayload;
   'store_order.cancelled': StoreOrderCancelledPayload;
+  'store_order.refunded': StoreOrderRefundedPayload;
+  'inventory.low': InventoryLowPayload;
+  'inventory.out': InventoryOutPayload;
+  'purchaseOrder.received': PurchaseOrderReceivedPayload;
+  'preorder.delayed': PreorderDelayedPayload;
   'content.published': ContentPublishedPayload;
   'content.failed': ContentFailedPayload;
   'delivery.completed': DeliveryCompletedPayload;

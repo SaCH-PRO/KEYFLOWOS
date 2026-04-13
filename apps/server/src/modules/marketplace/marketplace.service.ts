@@ -1,8 +1,18 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { createHash } from 'crypto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, canTransitionOrder } from './fulfillment-routing.service';
+import {
+  PreorderDelayedPayload,
+  StoreOrderCreatedPayload,
+  StoreOrderPaidPayload,
+  StoreOrderShippedPayload,
+  StoreOrderDeliveredPayload,
+  StoreOrderCancelledPayload,
+  StoreOrderRefundedPayload,
+} from '../../core/event-bus/events.types';
 
 @Injectable()
 export class MarketplaceService {
@@ -13,6 +23,7 @@ export class MarketplaceService {
     @Inject(forwardRef(() => TransactionalEmailService))
     private readonly emailService: TransactionalEmailService,
     private readonly fulfillmentRoutingService: FulfillmentRoutingService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   private generateOrderNumber(): string {
@@ -353,6 +364,11 @@ export class MarketplaceService {
       this.logger.error(`Failed to send seller new order notification: ${(err as Error).message}`),
     );
 
+    this.events.emit('store_order.created', { order, businessId } as StoreOrderCreatedPayload);
+    if (initialStatus === 'paid') {
+      this.events.emit('store_order.paid', { order, businessId } as StoreOrderPaidPayload);
+    }
+
     this.autoRouteOrder(businessId, order.id, initialStatus === 'paid');
 
     return order;
@@ -475,11 +491,15 @@ export class MarketplaceService {
       updateData.paymentRef = paymentData.paymentRef;
     }
 
-    return this.prisma.client.marketplaceOrder.update({
+    const updated = await this.prisma.client.marketplaceOrder.update({
       where: { id: orderId },
       data: updateData,
       include: { items: { include: { product: true } }, shipments: true },
     });
+
+    this.emitOrderLifecycleEvent(businessId, updated, status);
+
+    return updated;
   }
 
   async createShipment(businessId: string, data: any) {
@@ -692,6 +712,7 @@ export class MarketplaceService {
   async updatePreOrder(businessId: string, preOrderId: string, data: any) {
     const po = await this.prisma.client.preOrder.findFirst({
       where: { id: preOrderId, businessId },
+      include: { product: true },
     });
     if (!po) throw new NotFoundException('Pre-order not found');
 
@@ -707,15 +728,33 @@ export class MarketplaceService {
     if (data.status === 'FULFILLED' && !po.fulfilledAt) {
       updateData.fulfilledAt = new Date();
     }
+    const isDateDelayed = data.expectedDate && po.expectedDate &&
+      new Date(data.expectedDate) > po.expectedDate;
     if (data.expectedDate) {
       updateData.expectedDate = new Date(data.expectedDate);
     }
 
-    return this.prisma.client.preOrder.update({
+    const updated = await this.prisma.client.preOrder.update({
       where: { id: preOrderId },
       data: updateData,
       include: { product: true },
     });
+
+    if (isDateDelayed && updated.customerEmail) {
+      this.events.emit('preorder.delayed', {
+        businessId,
+        preOrderId,
+        productId: po.productId,
+        productName: po.product?.name ?? 'Product',
+        customerName: updated.customerName,
+        customerEmail: updated.customerEmail,
+        originalExpectedDate: po.expectedDate,
+        newExpectedDate: new Date(data.expectedDate),
+        reason: data.notes ?? null,
+      } as PreorderDelayedPayload);
+    }
+
+    return updated;
   }
 
   async createPurchaseOrder(businessId: string, data: any) {
@@ -1003,6 +1042,12 @@ export class MarketplaceService {
           where: { id: orderId },
           include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
         });
+        if (paidOrder) {
+          this.emitOrderLifecycleEvent(businessId, paidOrder, 'paid');
+          this.sendFulfillmentNotification(businessId, paidOrder, 'paid', data).catch((err) =>
+            this.logger.error(`Failed to send paid notification: ${(err as Error).message}`),
+          );
+        }
         return paidOrder;
       }
 
@@ -1222,11 +1267,40 @@ export class MarketplaceService {
       include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
     });
 
+    this.emitOrderLifecycleEvent(businessId, updated, newStatus, {
+      refundAmount: action === 'refund' ? (data?.refundAmount ?? updated.total) : undefined,
+    });
+
     this.sendFulfillmentNotification(businessId, updated, newStatus, data).catch((err) =>
       this.logger.error(`Failed to send fulfillment notification: ${(err as Error).message}`),
     );
 
     return updated;
+  }
+
+  private emitOrderLifecycleEvent(businessId: string, order: any, status: string, extra?: { refundAmount?: number }) {
+    const normalizedStatus = status.toLowerCase();
+    switch (normalizedStatus) {
+      case 'paid':
+        this.events.emit('store_order.paid', { order, businessId } as StoreOrderPaidPayload);
+        break;
+      case 'shipped':
+        this.events.emit('store_order.shipped', { order, businessId } as StoreOrderShippedPayload);
+        break;
+      case 'delivered':
+        this.events.emit('store_order.delivered', { order, businessId } as StoreOrderDeliveredPayload);
+        break;
+      case 'cancelled':
+        this.events.emit('store_order.cancelled', { order, businessId } as StoreOrderCancelledPayload);
+        break;
+      case 'refunded':
+        this.events.emit('store_order.refunded', {
+          order,
+          businessId,
+          refundAmount: extra?.refundAmount ?? order.total,
+        } as StoreOrderRefundedPayload);
+        break;
+    }
   }
 
   private async sendFulfillmentNotification(
