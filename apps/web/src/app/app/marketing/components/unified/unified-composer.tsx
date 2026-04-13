@@ -108,8 +108,8 @@ function inferContentType(destinations: ChannelDestination[]): ContentTypeOption
   const hasEmail = platforms.has("GOOGLE") || platforms.has("EMAIL");
   const hasWhatsApp = platforms.has("WHATSAPP");
   const hasSocial = platforms.has("FACEBOOK") || platforms.has("INSTAGRAM") || platforms.has("META");
-  if ((hasEmail || hasWhatsApp) && hasSocial) return "multi";
-  if (hasEmail || hasWhatsApp) return "email";
+  if ((hasEmail && hasSocial) || (hasWhatsApp && hasSocial) || (hasEmail && hasWhatsApp)) return "multi";
+  if (hasEmail) return "email";
   return "social";
 }
 
@@ -361,9 +361,14 @@ export function UnifiedComposer({
 
   const contentTypeForApi = useMemo(() => {
     if (contentType === "email") return "campaign_email";
-    if (contentType === "social") return "social_post";
+    if (contentType === "social") {
+      const allWhatsApp = selectedDestinations.length > 0 &&
+        selectedDestinations.every(d => d.platform.toUpperCase() === "WHATSAPP");
+      if (allWhatsApp) return "whatsapp_message";
+      return "social_post";
+    }
     return "multi_channel_broadcast";
-  }, [contentType]);
+  }, [contentType, selectedDestinations]);
 
   const selectedPlatforms = useMemo(() => {
     const platforms = selectedDestinations.map((d) => {
