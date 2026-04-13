@@ -431,21 +431,28 @@ export class ChannelConnectionService {
   async expandAudience(businessId: string, input: {
     segmentTags?: string[];
     limit?: number;
+    channel?: string;
   }) {
     const contactWhere: Record<string, unknown> = {
       businessId,
       deletedAt: null,
-      email: { not: null },
       doNotContact: { not: true },
       marketingOptIn: { not: false },
     };
+
+    if (input.channel === 'whatsapp') {
+      contactWhere.phone = { not: null };
+    } else {
+      contactWhere.OR = [{ email: { not: null } }, { phone: { not: null } }];
+    }
+
     if (input.segmentTags && input.segmentTags.length > 0) {
       contactWhere.tags = { hasSome: input.segmentTags };
     }
 
     const contacts = await this.prisma.client.contact.findMany({
       where: contactWhere,
-      select: { id: true, email: true, firstName: true, lastName: true, tags: true },
+      select: { id: true, email: true, phone: true, firstName: true, lastName: true, tags: true },
       take: input.limit ?? 500,
       orderBy: { createdAt: 'desc' },
     });
@@ -454,7 +461,6 @@ export class ChannelConnectionService {
       where: {
         businessId,
         deletedAt: null,
-        email: { not: null },
         OR: [{ doNotContact: true }, { marketingOptIn: false }],
         ...(input.segmentTags && input.segmentTags.length > 0 ? { tags: { hasSome: input.segmentTags } } : {}),
       },
@@ -463,9 +469,14 @@ export class ChannelConnectionService {
     const allTags = new Set<string>();
     contacts.forEach(c => c.tags?.forEach((t: string) => allTags.add(t)));
 
+    const withEmail = contacts.filter(c => c.email).length;
+    const withPhone = contacts.filter(c => c.phone).length;
+
     return {
       contacts,
       total: contacts.length,
+      withEmail,
+      withPhone,
       suppressed: suppressedCount,
       availableTags: Array.from(allTags).sort(),
     };
