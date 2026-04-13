@@ -74,8 +74,8 @@ export async function GET(request: NextRequest) {
       return publicRedirect(location, request);
     }
 
-    if (res.ok) {
-      const data = await res.json().catch(() => null);
+    if (res.ok || res.status === 302 || res.status === 301) {
+      const data = res.ok ? await res.json().catch(() => null) : null;
       const imported = data?.imported ?? "";
       return publicRedirect(`/app/crm/pipeline?google_success=true${imported ? `&imported=${imported}` : ""}`, request);
     }
