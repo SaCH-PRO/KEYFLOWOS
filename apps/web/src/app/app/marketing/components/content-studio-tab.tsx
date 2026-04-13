@@ -14,11 +14,12 @@ import {
   createChannelConnection,
   deleteChannelConnection,
   toggleChannelDestination,
+  updateChannelConnection,
   startSocialOAuth,
   disconnectSocial,
   testSocialConnection,
 } from "@/lib/client";
-import type { ChannelDestination, SocialConnection } from "@/lib/client";
+import type { ChannelConnection, ChannelDestination, SocialConnection } from "@/lib/client";
 import {
   useChannelHealth,
   HEALTH_BG_COLORS,
@@ -99,10 +100,11 @@ function HealthBadge({ state, size = "sm" }: { state: string; size?: "sm" | "md"
   );
 }
 
-function HealthSummaryStrip({ summary, refreshing, onRefresh }: {
+function HealthSummaryStrip({ summary, connections, refreshing, onRunHealthChecks }: {
   summary: { total: number; healthy: number; needsAttention: number; expired: number; totalDestinations: number; activeDestinations: number } | null;
+  connections: EnrichedConnection[];
   refreshing: boolean;
-  onRefresh: () => void;
+  onRunHealthChecks: () => void;
 }) {
   if (!summary) return null;
 
@@ -121,8 +123,8 @@ function HealthSummaryStrip({ summary, refreshing, onRefresh }: {
           <span className="text-xs font-semibold">Channel Health</span>
         </div>
         <button
-          onClick={onRefresh}
-          disabled={refreshing}
+          onClick={onRunHealthChecks}
+          disabled={refreshing || connections.length === 0}
           className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/20 transition-colors disabled:opacity-50"
         >
           <RefreshCw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} />
@@ -157,7 +159,7 @@ function HealthSummaryStrip({ summary, refreshing, onRefresh }: {
 
 function DestinationCard({ dest, onToggle }: { dest: ChannelDestination; onToggle: (id: string, active: boolean) => void }) {
   const [toggling, setToggling] = useState(false);
-  const capabilities = (dest as any).capabilities || [];
+  const capabilities = dest.capabilities ?? [];
 
   const handleToggle = async () => {
     setToggling(true);
@@ -169,8 +171,8 @@ function DestinationCard({ dest, onToggle }: { dest: ChannelDestination; onToggl
     <div className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all ${
       dest.isActive ? "border-border/30 bg-muted/5" : "border-border/20 bg-muted/5 opacity-60"
     }`}>
-      {(dest as any).avatarUrl ? (
-        <img src={(dest as any).avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover border border-border/30" />
+      {dest.avatarUrl ? (
+        <img src={dest.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover border border-border/30" />
       ) : (
         <div className="w-8 h-8 rounded-full bg-muted/30 border border-border/30 flex items-center justify-center">
           <Globe className="w-4 h-4 text-muted-foreground/50" />
@@ -227,21 +229,27 @@ function DestinationCard({ dest, onToggle }: { dest: ChannelDestination; onToggl
 
 function ConnectionCard({
   connection,
+  businessId,
   onHealthCheck,
   onDisconnect,
+  onReconnect,
   onToggleDestination,
 }: {
   connection: EnrichedConnection;
+  businessId: string;
   onHealthCheck: (id: string) => void;
   onDisconnect: (id: string) => void;
+  onReconnect: (provider: string) => void;
   onToggleDestination: (destId: string, active: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [checking, setChecking] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
-  const meta = getProviderMeta(connection.platform || (connection as any).providerType || connection.provider || "");
+  const provider = connection.provider || connection.platform || connection.providerType || "";
+  const meta = getProviderMeta(provider);
   const Icon = meta.icon;
-  const dests = connection.enrichedDestinations || (connection as any).destinations || [];
+  const dests = connection.enrichedDestinations ?? connection.destinations ?? [];
+  const needsReconnect = connection.healthState === "Expired" || connection.healthState === "NeedsRefresh" || connection.healthState === "MissingPermission" || connection.healthState === "Error";
 
   const handleHealthCheck = async () => {
     setChecking(true);
@@ -265,7 +273,7 @@ function ConnectionCard({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium truncate">{(connection as any).label || connection.displayName || meta.label}</span>
+            <span className="text-sm font-medium truncate">{connection.label || connection.displayName || meta.label}</span>
             <HealthBadge state={connection.healthState} />
           </div>
           <div className="flex items-center gap-2 mt-0.5">
@@ -294,7 +302,15 @@ function ConnectionCard({
           "text-red-400 bg-red-500/5"
         }`}>
           <AlertCircle className="w-3 h-3 shrink-0" />
-          {connection.healthMessage}
+          <span className="flex-1">{connection.healthMessage}</span>
+          {needsReconnect && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onReconnect(provider); }}
+              className="px-2 py-0.5 rounded text-[10px] font-medium bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/25 transition-colors shrink-0"
+            >
+              Reconnect
+            </button>
+          )}
         </div>
       )}
 
@@ -331,6 +347,15 @@ function ConnectionCard({
                   {checking ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                   Check Health
                 </button>
+                {needsReconnect && (
+                  <button
+                    onClick={() => onReconnect(provider)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors border border-[hsl(var(--kf-accent1))]/30"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    Reconnect
+                  </button>
+                )}
                 {confirmDisconnect ? (
                   <div className="flex items-center gap-1.5 ml-auto">
                     <span className="text-[10px] text-red-400">Disconnect?</span>
@@ -487,7 +512,7 @@ function EmailSenderSetup({ businessId, connections, onRefresh }: {
   onRefresh: () => void;
 }) {
   const emailConnections = connections.filter((c) => {
-    const provider = ((c as any).provider || c.platform || (c as any).providerType || "").toUpperCase();
+    const provider = (c.provider || c.platform || c.providerType || "").toUpperCase();
     return provider === "EMAIL" || provider === "GOOGLE";
   });
 
@@ -503,31 +528,118 @@ function EmailSenderSetup({ businessId, connections, onRefresh }: {
         Configure your sender identity for email campaigns. This is the name and email address recipients will see.
       </p>
       {emailConnections.map((conn) => (
-        <div key={conn.id} className="rounded-lg border border-border/20 bg-muted/5 p-3 space-y-2">
-          <div className="flex items-center gap-2">
-            <Mail className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
-            <span className="text-xs font-medium">{(conn as any).label || conn.displayName || "Email Sender"}</span>
-            <HealthBadge state={conn.healthState} />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-[10px] text-muted-foreground block mb-1">From Name</label>
-              <div className="text-xs text-foreground px-2 py-1.5 rounded-md bg-muted/20 border border-border/20">
-                {(conn as any).label || "Not set"}
-              </div>
-            </div>
-            <div>
-              <label className="text-[10px] text-muted-foreground block mb-1">From Email</label>
-              <div className="text-xs text-foreground px-2 py-1.5 rounded-md bg-muted/20 border border-border/20">
-                {(conn as any).accountEmail || "Not configured"}
-              </div>
-            </div>
-          </div>
-          <p className="text-[9px] text-muted-foreground/60">
-            Manage email credentials in Settings → Integrations or connect Gmail via OAuth.
-          </p>
-        </div>
+        <EmailSenderForm key={conn.id} connection={conn} businessId={businessId} onRefresh={onRefresh} />
       ))}
+    </div>
+  );
+}
+
+function EmailSenderForm({ connection, businessId, onRefresh }: {
+  connection: EnrichedConnection;
+  businessId: string;
+  onRefresh: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [label, setLabel] = useState(connection.label || "");
+  const [accountEmail, setAccountEmail] = useState(connection.accountEmail || "");
+
+  const handleSave = async () => {
+    if (!label.trim()) {
+      toast.error("From Name is required");
+      return;
+    }
+    if (!accountEmail.trim() || !accountEmail.includes("@")) {
+      toast.error("A valid From Email is required");
+      return;
+    }
+    setSaving(true);
+    const res = await updateChannelConnection(connection.id, { label: label.trim(), accountEmail: accountEmail.trim() }, businessId);
+    if (res.data) {
+      toast.success("Sender identity updated");
+      setEditing(false);
+      onRefresh();
+    } else {
+      toast.error(res.error || "Failed to update sender identity");
+    }
+    setSaving(false);
+  };
+
+  const handleCancel = () => {
+    setLabel(connection.label || "");
+    setAccountEmail(connection.accountEmail || "");
+    setEditing(false);
+  };
+
+  return (
+    <div className="rounded-lg border border-border/20 bg-muted/5 p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <Mail className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+        <span className="text-xs font-medium">{connection.label || connection.displayName || "Email Sender"}</span>
+        <HealthBadge state={connection.healthState} />
+        {!editing && (
+          <button onClick={() => setEditing(true)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+            <Settings className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] text-muted-foreground block mb-1">From Name</label>
+          {editing ? (
+            <input
+              type="text"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Your Business Name"
+              className="w-full text-xs text-foreground px-2 py-1.5 rounded-md bg-muted/10 border border-border/30 focus:border-[hsl(var(--kf-accent1))]/50 focus:outline-none transition-colors"
+            />
+          ) : (
+            <div className="text-xs text-foreground px-2 py-1.5 rounded-md bg-muted/20 border border-border/20">
+              {connection.label || "Not set"}
+            </div>
+          )}
+        </div>
+        <div>
+          <label className="text-[10px] text-muted-foreground block mb-1">From Email</label>
+          {editing ? (
+            <input
+              type="email"
+              value={accountEmail}
+              onChange={(e) => setAccountEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full text-xs text-foreground px-2 py-1.5 rounded-md bg-muted/10 border border-border/30 focus:border-[hsl(var(--kf-accent1))]/50 focus:outline-none transition-colors"
+            />
+          ) : (
+            <div className="text-xs text-foreground px-2 py-1.5 rounded-md bg-muted/20 border border-border/20">
+              {connection.accountEmail || "Not configured"}
+            </div>
+          )}
+        </div>
+      </div>
+      {editing ? (
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/25 transition-colors"
+          >
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            Save
+          </button>
+          <button
+            onClick={handleCancel}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/20 transition-colors"
+          >
+            <X className="w-3 h-3" />
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <p className="text-[9px] text-muted-foreground/60">
+          Click the settings icon to edit your sender identity.
+        </p>
+      )}
     </div>
   );
 }
@@ -663,6 +775,24 @@ export function ContentStudioTab({ businessId }: ContentStudioTabProps) {
     }
   }, [health]);
 
+  const handleRunAllHealthChecks = useCallback(async () => {
+    const conns = health.connections;
+    if (conns.length === 0) return;
+    toast.info(`Checking health for ${conns.length} connection${conns.length !== 1 ? "s" : ""}...`);
+    const results = await Promise.allSettled(conns.map((c) => health.runHealthCheckForConnection(c.id)));
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (failed > 0) {
+      toast.warning(`Health checks complete — ${failed} of ${conns.length} failed`);
+    } else {
+      toast.success("All health checks complete");
+    }
+  }, [health]);
+
+  const handleReconnect = useCallback((provider: string) => {
+    if (!businessId) return;
+    startSocialOAuth(provider, businessId);
+  }, [businessId]);
+
   if (health.loading) {
     return (
       <div className="space-y-4">
@@ -693,8 +823,9 @@ export function ContentStudioTab({ businessId }: ContentStudioTabProps) {
     <div className="space-y-4">
       <HealthSummaryStrip
         summary={health.summary}
+        connections={health.connections}
         refreshing={health.refreshing}
-        onRefresh={health.refresh}
+        onRunHealthChecks={handleRunAllHealthChecks}
       />
 
       {health.connections.length > 0 && (
@@ -704,8 +835,10 @@ export function ContentStudioTab({ businessId }: ContentStudioTabProps) {
             <ConnectionCard
               key={conn.id}
               connection={conn}
+              businessId={businessId}
               onHealthCheck={handleHealthCheck}
               onDisconnect={handleDisconnect}
+              onReconnect={handleReconnect}
               onToggleDestination={handleToggleDestination}
             />
           ))}

@@ -93,7 +93,7 @@ export function useChannelHealth(businessId: string | null): ChannelHealthData {
       ]);
       if (connRes.data) setConnections(Array.isArray(connRes.data) ? connRes.data : []);
       if (destRes.data) setDestinations(Array.isArray(destRes.data) ? destRes.data : []);
-      if (summRes.data) setSummary(summRes.data as any);
+      if (summRes.data) setSummary(summRes.data);
       if (socialRes.data) setSocialConnections(Array.isArray(socialRes.data) ? socialRes.data : []);
       if (oauthRes.data && typeof oauthRes.data === "object") setOauthAvailability(oauthRes.data as Record<string, boolean>);
     } catch {
@@ -124,9 +124,9 @@ export function useChannelHealth(businessId: string | null): ChannelHealthData {
       const summaryConn = summary?.connections.find((c) => c.id === conn.id);
       return {
         ...conn,
-        healthState: (summaryConn?.healthState || (conn as any).healthState || "Connected") as HealthState,
-        healthMessage: summaryConn?.healthMessage || (conn as any).healthMessage || null,
-        lastCheckedAt: summaryConn?.lastCheckedAt || (conn as any).lastCheckedAt || null,
+        healthState: (summaryConn?.healthState || conn.healthState || "Connected") as HealthState,
+        healthMessage: summaryConn?.healthMessage || conn.healthMessage || null,
+        lastCheckedAt: summaryConn?.lastCheckedAt || conn.lastCheckedAt || null,
         enrichedDestinations: connDests,
       };
     });
