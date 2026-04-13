@@ -56,6 +56,10 @@ export default function StorePage() {
     }
   }, [searchParams]);
 
+  const productCount = s.commerceProducts.length;
+  const serviceCount = s.services.length;
+  const deliveryCount = s.activeDeliveryMethodsCount ?? 0;
+
   useEffect(() => {
     if (!s.businessId) return;
     const _hero = s.storefrontConfig.hero as HeroSection | undefined;
@@ -65,7 +69,7 @@ export default function StorePage() {
     ai.updateStoreContext({
       businessId: s.businessId,
       activeView: activeTab,
-      itemCount: s.commerceProducts.length,
+      itemCount: productCount,
       products: s.commerceProducts,
       services: s.services,
       testimonials: (s.storefrontConfig.socialProof as SocialProofSection | undefined)?.testimonials ?? [],
@@ -82,9 +86,9 @@ export default function StorePage() {
       hasMetaDescription: !!(_seo?.metaDescription && _seo.metaDescription.trim().length > 0),
       hasPolicies: Object.values(_policies).some((p: any) => p?.enabled),
       hasFaq: Array.isArray(_faqEntries) && _faqEntries.length > 0,
-      activeDeliveryCount: s.activeDeliveryMethodsCount,
+      activeDeliveryCount: deliveryCount,
     });
-  }, [s.businessId, activeTab, s.commerceProducts.length, s.services.length, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, s.activeDeliveryMethodsCount]);
+  }, [s.businessId, activeTab, productCount, serviceCount, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, deliveryCount]);
 
   const handleTabChange = useCallback((key: string) => {
     if (!TAB_KEYS.includes(key as TabKey)) return;
