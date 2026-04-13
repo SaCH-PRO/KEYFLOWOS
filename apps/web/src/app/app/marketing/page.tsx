@@ -347,7 +347,7 @@ export default function ContentPage() {
 
   const [activeTab, setActiveTab] = useState<ContentTab>("create");
   const [createSubmode, setCreateSubmode] = useState<CreateSubmode>("compose");
-  const [composeType, setComposeType] = useState<"email" | "social">("email");
+  const [composeType, setComposeType] = useState<"email" | "social" | "multi">("email");
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [outboundContent, setOutboundContent] = useState<OutboundContent[]>([]);
@@ -437,6 +437,7 @@ export default function ContentPage() {
       setActiveTab("create");
       setCreateSubmode("compose");
       if (contentTypeParam === "email") setComposeType("email");
+      else if (contentTypeParam === "multi") setComposeType("multi");
       else setComposeType("social");
     }
   }, [searchParams]);
@@ -654,7 +655,7 @@ export default function ContentPage() {
                     <UnifiedComposer
                       businessId={mk.businessId}
                       editContentId={editingContentId}
-                      initialContentType={composeType === "email" ? "email" : "social"}
+                      initialContentType={composeType === "email" ? "email" : composeType === "multi" ? "multi" : "social"}
                       onContentCreated={() => { setEditingContentId(undefined); void mk.loadData(); }}
                       onClose={() => { setEditingContentId(undefined); setCreateSubmode("posts"); void mk.loadData(); }}
                     />

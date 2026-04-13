@@ -143,11 +143,27 @@ function getChannelWarnings(
   return warnings;
 }
 
-function saveDraftToStorage(data: { body: string; subject: string; objective: string; tone: string; audience: string; contentType: string; mediaUrls: string[] }) {
+interface DraftState {
+  body: string;
+  subject: string;
+  objective: string;
+  tone: string;
+  audience: string;
+  contentType: string;
+  mediaUrls: string[];
+  selectedDestinationIds?: string[];
+  variants?: VariantData[];
+  scheduleMode?: string;
+  scheduledAt?: string;
+  timezone?: string;
+  savedAt?: number;
+}
+
+function saveDraftToStorage(data: DraftState) {
   try { sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ ...data, savedAt: Date.now() })); } catch {}
 }
 
-function loadDraftFromStorage(): { body: string; subject: string; objective: string; tone: string; audience: string; contentType: string; mediaUrls: string[] } | null {
+function loadDraftFromStorage(): DraftState | null {
   try {
     const raw = sessionStorage.getItem(DRAFT_STORAGE_KEY);
     if (!raw) return null;
@@ -264,7 +280,7 @@ export function UnifiedComposer({
     if (prefill.body) setBody(prefill.body);
     if (prefill.subject) setSubject(prefill.subject);
 
-    if (!prefill.body) {
+    if (!prefill.body && !prefill.subject) {
       const draft = loadDraftFromStorage();
       if (draft && draft.body) {
         setBody(draft.body);
@@ -274,6 +290,20 @@ export function UnifiedComposer({
         setAudience(draft.audience || "all");
         setContentType((draft.contentType as ContentTypeOption) || "social");
         setMediaUrls(draft.mediaUrls || []);
+        if (draft.variants && draft.variants.length > 0) setVariants(draft.variants);
+        if (draft.scheduleMode) setScheduleMode(draft.scheduleMode as "now" | "later");
+        if (draft.scheduledAt) setScheduledAt(draft.scheduledAt);
+        if (draft.timezone) setTimezone(draft.timezone);
+        if (draft.selectedDestinationIds && draft.selectedDestinationIds.length > 0) {
+          void (async () => {
+            const { listChannelDestinations } = await import("@/lib/client");
+            const destRes = await listChannelDestinations(businessId);
+            if (destRes.data) {
+              const restored = destRes.data.filter(d => draft.selectedDestinationIds!.includes(d.id));
+              if (restored.length > 0) setSelectedDestinations(restored);
+            }
+          })();
+        }
         setDraftRestored(true);
       }
     }
@@ -281,9 +311,14 @@ export function UnifiedComposer({
 
   useEffect(() => {
     if (body.trim()) {
-      saveDraftToStorage({ body, subject, objective, tone, audience, contentType, mediaUrls });
+      saveDraftToStorage({
+        body, subject, objective, tone, audience, contentType, mediaUrls,
+        selectedDestinationIds: selectedDestinations.map(d => d.id),
+        variants: variants.filter(v => v.customized),
+        scheduleMode, scheduledAt, timezone,
+      });
     }
-  }, [body, subject, objective, tone, audience, contentType, mediaUrls]);
+  }, [body, subject, objective, tone, audience, contentType, mediaUrls, selectedDestinations, variants, scheduleMode, scheduledAt, timezone]);
 
   const handleDestinationChange = useCallback((dests: ChannelDestination[]) => {
     setSelectedDestinations(dests);
