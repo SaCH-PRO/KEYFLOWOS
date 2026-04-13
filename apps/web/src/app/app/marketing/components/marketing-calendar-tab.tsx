@@ -263,10 +263,16 @@ export function MarketingCalendarTab({ campaigns, socialPosts, onTabChange }: Ma
                       <span className="text-[9px] text-muted-foreground pl-1">+{dayEntries.length - 3} more</span>
                     )}
                   </div>
-                  {(campaignCount > 0 || postCount > 0) && (
-                    <div className="absolute bottom-1 right-1 flex gap-0.5">
+                  {dayEntries.length > 0 && (
+                    <div className="absolute bottom-1 right-1 flex items-center gap-0.5">
+                      {dayEntries.length >= 4 && (
+                        <span className="text-[8px] font-bold text-amber-400 mr-0.5" title="Busy day — consider spreading content">!</span>
+                      )}
                       {campaignCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent1))]/60" title={`${campaignCount} campaign(s)`} />}
                       {postCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))]/60" title={`${postCount} post(s)`} />}
+                      {dayEntries.length > 1 && (
+                        <span className="text-[8px] text-muted-foreground/50 font-medium">{dayEntries.length}</span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -284,6 +290,10 @@ export function MarketingCalendarTab({ campaigns, socialPosts, onTabChange }: Ma
               const dayEntries = entriesByDate[dateStr] || [];
               const isToday = dateStr === todayStr;
 
+              const campaignCount = dayEntries.filter((e) => e.type === "campaign").length;
+              const postCount = dayEntries.filter((e) => e.type === "post").length;
+              const isOverloaded = dayEntries.length >= 4;
+
               return (
                 <div
                   key={dateStr}
@@ -293,13 +303,21 @@ export function MarketingCalendarTab({ campaigns, socialPosts, onTabChange }: Ma
                     ...(isToday ? { boxShadow: "inset 0 0 0 1px hsl(var(--kf-accent1) / 0.5)" } : {}),
                   }}
                 >
-                  <div className="px-2 py-2 text-center border-b" style={{ borderColor: "hsl(var(--kf-border))" }}>
+                  <div className="px-2 py-2 text-center border-b relative" style={{ borderColor: "hsl(var(--kf-border))" }}>
                     <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
                       {DAYS[wd.getDay()]}
                     </span>
                     <span className={`block text-sm font-semibold ${isToday ? "text-[hsl(var(--kf-accent1))]" : ""}`}>
                       {wd.getDate()}
                     </span>
+                    {dayEntries.length > 0 && (
+                      <div className="flex items-center justify-center gap-0.5 mt-0.5">
+                        {isOverloaded && <span className="text-[8px] font-bold text-amber-400" title="Busy day">!</span>}
+                        {campaignCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent1))]/60" title={`${campaignCount} campaign(s)`} />}
+                        {postCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))]/60" title={`${postCount} post(s)`} />}
+                        {dayEntries.length > 1 && <span className="text-[8px] text-muted-foreground/50 font-medium">{dayEntries.length}</span>}
+                      </div>
+                    )}
                   </div>
                   <div className="p-1.5 space-y-1">
                     {dayEntries.map((entry) => {

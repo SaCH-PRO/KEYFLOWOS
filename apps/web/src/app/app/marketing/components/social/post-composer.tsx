@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Clock, ImagePlus, Send, FileText, Hash, ChevronDown, Layers, Globe,
   Trash2, Image as ImageIcon, Loader2, Eye, Calendar, Link2, Plus,
+  Sparkles, Wand2, MessageSquare, Target, Users, CheckCircle, AlertCircle,
 } from "lucide-react";
 import { SocialConnection } from "@/lib/client";
 
@@ -27,6 +28,22 @@ const TONES = [
   { key: "warm", label: "Warm" },
   { key: "authority", label: "Authority" },
   { key: "concise", label: "Concise" },
+] as const;
+
+const AUDIENCES = [
+  { key: "all", label: "All Contacts" },
+  { key: "vip", label: "VIP" },
+  { key: "new", label: "New Leads" },
+  { key: "active", label: "Active" },
+  { key: "at_risk", label: "At-Risk" },
+] as const;
+
+const AI_ACTIONS = [
+  { key: "generate", label: "Generate Draft", icon: Sparkles, desc: "AI writes a post based on your objective and tone" },
+  { key: "improve", label: "Improve Hook", icon: Wand2, desc: "Strengthen the opening line" },
+  { key: "cta", label: "Add CTA", icon: Target, desc: "Generate a compelling call-to-action" },
+  { key: "hashtags", label: "Suggest Hashtags", icon: Hash, desc: "Auto-generate relevant hashtags" },
+  { key: "rewrite", label: "Rewrite for Engagement", icon: MessageSquare, desc: "Optimize for more engagement" },
 ] as const;
 
 const HASHTAG_SUGGESTIONS = [
@@ -109,6 +126,8 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
   const [urlInput, setUrlInput] = useState("");
   const [objective, setObjective] = useState<string>("");
   const [tone, setTone] = useState<string>("");
+  const [audience, setAudience] = useState<string>("all");
+  const [showAiActions, setShowAiActions] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -281,7 +300,7 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
       </div>
 
       <div className="p-5 space-y-4">
-        <div className="flex flex-wrap gap-3">
+        <div className="space-y-2.5">
           <div className="space-y-1">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Objective</span>
             <div className="flex flex-wrap gap-1">
@@ -300,22 +319,42 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
               ))}
             </div>
           </div>
-          <div className="space-y-1">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Tone</span>
-            <div className="flex flex-wrap gap-1">
-              {TONES.map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => setTone(tone === t.key ? "" : t.key)}
-                  className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all border ${
-                    tone === t.key
-                      ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] border-[hsl(var(--kf-accent2))]/30"
-                      : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
+          <div className="flex flex-wrap gap-3">
+            <div className="space-y-1">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Audience</span>
+              <div className="flex flex-wrap gap-1">
+                {AUDIENCES.map((a) => (
+                  <button
+                    key={a.key}
+                    onClick={() => setAudience(a.key)}
+                    className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all border ${
+                      audience === a.key
+                        ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] border-[hsl(var(--kf-accent2))]/30"
+                        : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
+                    }`}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Tone</span>
+              <div className="flex flex-wrap gap-1">
+                {TONES.map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setTone(tone === t.key ? "" : t.key)}
+                    className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all border ${
+                      tone === t.key
+                        ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] border-[hsl(var(--kf-accent2))]/30"
+                        : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -596,6 +635,76 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
                 <button onClick={() => { setShowSchedule(false); setScheduledFor(""); }} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
                   Clear
                 </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowAiActions(!showAiActions)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all border ${
+              showAiActions
+                ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]/30"
+                : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
+            }`}
+          >
+            <Sparkles className="w-3 h-3" />
+            AI Assist
+          </button>
+          <div className="flex items-center gap-1.5 ml-auto text-[10px]">
+            {content.trim() ? (
+              <CheckCircle className="w-3 h-3 text-emerald-400" />
+            ) : (
+              <AlertCircle className="w-3 h-3 text-muted-foreground/40" />
+            )}
+            <span className={content.trim() ? "text-emerald-400" : "text-muted-foreground/40"}>Content</span>
+            <span className="text-muted-foreground/20 mx-0.5">·</span>
+            {selectedChannels.size > 0 ? (
+              <CheckCircle className="w-3 h-3 text-emerald-400" />
+            ) : (
+              <AlertCircle className="w-3 h-3 text-muted-foreground/40" />
+            )}
+            <span className={selectedChannels.size > 0 ? "text-emerald-400" : "text-muted-foreground/40"}>Channel</span>
+            <span className="text-muted-foreground/20 mx-0.5">·</span>
+            {mediaFiles.filter(m => !m.error && m.url).length > 0 ? (
+              <CheckCircle className="w-3 h-3 text-emerald-400" />
+            ) : (
+              <AlertCircle className="w-3 h-3 text-muted-foreground/40" />
+            )}
+            <span className={mediaFiles.filter(m => !m.error && m.url).length > 0 ? "text-emerald-400" : "text-muted-foreground/40"}>Media</span>
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {showAiActions && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+            >
+              <div className="rounded-xl border border-[hsl(var(--kf-accent1))]/20 bg-[hsl(var(--kf-accent1))]/[0.03] p-3">
+                <div className="flex items-center gap-2 mb-2.5">
+                  <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--kf-accent1))]">AI Actions</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {AI_ACTIONS.map((action) => (
+                    <button
+                      key={action.key}
+                      className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-border/20 hover:border-[hsl(var(--kf-accent1))]/30 hover:bg-[hsl(var(--kf-accent1))]/5 transition-all text-left group"
+                      title={action.desc}
+                    >
+                      <action.icon className="w-3.5 h-3.5 text-muted-foreground group-hover:text-[hsl(var(--kf-accent1))] transition-colors shrink-0" />
+                      <span className="text-[10px] font-medium text-muted-foreground group-hover:text-foreground transition-colors">{action.label}</span>
+                    </button>
+                  ))}
+                </div>
+                {(objective || tone) && (
+                  <p className="text-[9px] text-muted-foreground/50 mt-2">
+                    AI will use your {objective ? `"${OBJECTIVES.find(o => o.key === objective)?.label}" objective` : ""}{objective && tone ? " and " : ""}{tone ? `"${TONES.find(t => t.key === tone)?.label}" tone` : ""} to generate content
+                  </p>
+                )}
               </div>
             </motion.div>
           )}

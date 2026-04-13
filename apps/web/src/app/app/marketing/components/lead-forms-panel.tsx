@@ -23,6 +23,7 @@ import {
   EyeOff,
   Download,
   Search,
+  Tag,
 } from "lucide-react";
 import {
   LeadForm,
@@ -500,9 +501,23 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                       </button>
                     </div>
                     {form.description && <p className="text-xs text-muted-foreground mb-2">{form.description}</p>}
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                       <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> {form.fields.length} fields</span>
                       <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {form._count?.submissions ?? 0} submissions</span>
+                      {(() => {
+                        const emailField = form.fields.find((f: FormField) => f.type === "email");
+                        const hasName = form.fields.some((f: FormField) => f.type === "text" && /name/i.test(f.label));
+                        const hasPhone = form.fields.some((f: FormField) => f.type === "phone");
+                        const segments: string[] = [];
+                        if (emailField) segments.push("Email");
+                        if (hasName) segments.push("Name");
+                        if (hasPhone) segments.push("Phone");
+                        return segments.length > 0 ? (
+                          <span className="flex items-center gap-1 text-[hsl(var(--kf-accent2))]">
+                            <Tag className="w-3 h-3" /> Captures {segments.join(", ")}
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
