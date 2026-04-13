@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Check, ChevronDown, Facebook, Instagram, Mail, MessageCircle,
-  Globe, Wifi, WifiOff, Plus, RefreshCw, Loader2,
+  Globe, Wifi, WifiOff, Plus, RefreshCw, Loader2, AlertCircle,
+  Lock, Image as ImageIcon, FileText, MessageSquare,
 } from "lucide-react";
 import { listChannelConnections, listChannelDestinations } from "@/lib/client";
 import type { ChannelConnection, ChannelDestination } from "@/lib/client";
@@ -16,39 +17,61 @@ interface ChannelSelectorProps {
   contentType?: string;
 }
 
-const PLATFORM_ICONS: Record<string, { icon: React.ElementType; color: string; label: string }> = {
-  FACEBOOK: { icon: Facebook, color: "#1877F2", label: "Facebook" },
-  INSTAGRAM: { icon: Instagram, color: "#E4405F", label: "Instagram" },
-  GOOGLE: { icon: Mail, color: "#F97316", label: "Email (Gmail)" },
-  EMAIL: { icon: Mail, color: "#F97316", label: "Email" },
-  WHATSAPP: { icon: MessageCircle, color: "#25D366", label: "WhatsApp" },
-  META: { icon: Globe, color: "#0668E1", label: "Meta" },
+const PLATFORM_ICONS: Record<string, { icon: React.ElementType; color: string; label: string; capabilities: string[] }> = {
+  FACEBOOK: { icon: Facebook, color: "#1877F2", label: "Facebook", capabilities: ["text", "image", "video", "link"] },
+  INSTAGRAM: { icon: Instagram, color: "#E4405F", label: "Instagram", capabilities: ["image", "video", "carousel"] },
+  GOOGLE: { icon: Mail, color: "#F97316", label: "Email (Gmail)", capabilities: ["text", "html", "attachments"] },
+  EMAIL: { icon: Mail, color: "#F97316", label: "Email", capabilities: ["text", "html", "attachments"] },
+  WHATSAPP: { icon: MessageCircle, color: "#25D366", label: "WhatsApp", capabilities: ["text", "image", "template"] },
+  META: { icon: Globe, color: "#0668E1", label: "Meta", capabilities: ["text", "image", "video"] },
+};
+
+const CAPABILITY_ICONS: Record<string, React.ElementType> = {
+  text: FileText,
+  image: ImageIcon,
+  video: Globe,
+  html: FileText,
+  link: Globe,
+  carousel: ImageIcon,
+  attachments: FileText,
+  template: MessageSquare,
 };
 
 function getPlatformMeta(platform: string) {
-  return PLATFORM_ICONS[platform.toUpperCase()] || { icon: Globe, color: "#94a3b8", label: platform };
+  return PLATFORM_ICONS[platform.toUpperCase()] || { icon: Globe, color: "#94a3b8", label: platform, capabilities: ["text"] };
+}
+
+function getDisabledReason(connection: ChannelConnection): string | null {
+  if (connection.healthStatus === "error") return "Connection error — reconnect required";
+  if (connection.healthStatus === "degraded") return "Connection degraded — may have limited functionality";
+  if (!connection.isActive) return "Connection inactive — reactivate in Settings";
+  return null;
 }
 
 export function ChannelSelector({ businessId, selectedDestinations, onSelectionChange, contentType }: ChannelSelectorProps) {
   const [connections, setConnections] = useState<ChannelConnection[]>([]);
-  const [destinations, setDestinations] = useState<ChannelDestination[]>([]);
+  const [activeDestinations, setActiveDestinations] = useState<ChannelDestination[]>([]);
+  const [allDestinations, setAllDestinations] = useState<ChannelDestination[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [connRes, destRes] = await Promise.all([
+    const [connRes, activeDestRes, allDestRes] = await Promise.all([
       listChannelConnections(businessId),
       listChannelDestinations(businessId, { activeOnly: true }),
+      listChannelDestinations(businessId, {}),
     ]);
     if (connRes.data) setConnections(connRes.data);
-    if (destRes.data) setDestinations(destRes.data);
+    if (activeDestRes.data) setActiveDestinations(activeDestRes.data);
+    if (allDestRes.data) setAllDestinations(allDestRes.data);
     setLoading(false);
   }, [businessId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
   const toggleDestination = (dest: ChannelDestination) => {
+    if (!dest.isActive) return;
     const exists = selectedDestinations.find((d) => d.id === dest.id);
     if (exists) {
       onSelectionChange(selectedDestinations.filter((d) => d.id !== dest.id));
@@ -58,17 +81,30 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
   };
 
   const selectAll = () => {
-    onSelectionChange([...destinations]);
+    onSelectionChange([...activeDestinations]);
   };
 
   const selectedIds = new Set(selectedDestinations.map((d) => d.id));
+  const activeIds = new Set(activeDestinations.map((d) => d.id));
 
-  const groupedByConnection = connections.map((conn) => ({
-    connection: conn,
-    destinations: destinations.filter((d) => d.connectionId === conn.id),
-  })).filter((g) => g.destinations.length > 0);
+  const groupedByConnection = useMemo(() => {
+    return connections.map((conn) => ({
+      connection: conn,
+      destinations: allDestinations.filter((d) => d.connectionId === conn.id),
+      disabledReason: getDisabledReason(conn),
+    })).filter((g) => g.destinations.length > 0);
+  }, [connections, allDestinations]);
 
-  const ungrouped = destinations.filter((d) => !connections.some((c) => c.id === d.connectionId));
+  const ungrouped = useMemo(() => {
+    return allDestinations.filter((d) => !connections.some((c) => c.id === d.connectionId));
+  }, [allDestinations, connections]);
+
+  const notConnectedPlatforms = useMemo(() => {
+    const connectedPlatforms = new Set(connections.map((c) => (c.platform || c.providerType).toUpperCase()));
+    return Object.entries(PLATFORM_ICONS)
+      .filter(([key]) => !connectedPlatforms.has(key) && key !== "META" && key !== "EMAIL")
+      .map(([key, meta]) => ({ key, ...meta }));
+  }, [connections]);
 
   return (
     <div className="space-y-2">
@@ -116,7 +152,7 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                 <div className="flex items-center justify-center py-6">
                   <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                 </div>
-              ) : destinations.length === 0 ? (
+              ) : allDestinations.length === 0 && notConnectedPlatforms.length > 0 ? (
                 <div className="text-center py-6 space-y-2">
                   <WifiOff className="w-8 h-8 text-muted-foreground/40 mx-auto" />
                   <p className="text-xs text-muted-foreground">No channels connected yet</p>
@@ -127,58 +163,86 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Channels</span>
                     <div className="flex items-center gap-2">
-                      <button onClick={selectAll} className="text-[10px] text-[hsl(var(--kf-accent1))] hover:underline">Select all</button>
+                      {activeDestinations.length > 0 && (
+                        <button onClick={selectAll} className="text-[10px] text-[hsl(var(--kf-accent1))] hover:underline">Select all</button>
+                      )}
                       <button onClick={() => { void loadData(); }} className="p-1 rounded hover:bg-muted/20">
                         <RefreshCw className="w-3 h-3 text-muted-foreground" />
                       </button>
                     </div>
                   </div>
 
-                  {groupedByConnection.map(({ connection, destinations: dests }) => {
+                  {groupedByConnection.map(({ connection, destinations: dests, disabledReason }) => {
                     const connMeta = getPlatformMeta(connection.platform || connection.providerType);
+                    const isConnectionDisabled = !!disabledReason;
                     return (
                       <div key={connection.id} className="space-y-1.5">
                         <div className="flex items-center gap-2 px-1">
-                          <connMeta.icon className="w-3 h-3" style={{ color: connMeta.color }} />
-                          <span className="text-[10px] font-medium">{connection.displayName}</span>
+                          <connMeta.icon className="w-3 h-3" style={{ color: isConnectionDisabled ? "#94a3b8" : connMeta.color }} />
+                          <span className={`text-[10px] font-medium ${isConnectionDisabled ? "text-muted-foreground/50" : ""}`}>{connection.displayName}</span>
                           <div className={`w-1.5 h-1.5 rounded-full ${connection.healthStatus === "healthy" ? "bg-emerald-400" : connection.healthStatus === "degraded" ? "bg-amber-400" : "bg-red-400"}`} />
+                          <div className="flex items-center gap-0.5 ml-auto">
+                            {connMeta.capabilities.slice(0, 3).map((cap) => {
+                              const CapIcon = CAPABILITY_ICONS[cap] || Globe;
+                              return <CapIcon key={cap} className="w-2.5 h-2.5 text-muted-foreground/40" title={cap} />;
+                            })}
+                          </div>
                         </div>
-                        {dests.map((dest) => (
-                          <button
-                            key={dest.id}
-                            onClick={() => toggleDestination(dest)}
-                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all ${
-                              selectedIds.has(dest.id)
-                                ? "bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/30"
-                                : "hover:bg-muted/15 border border-transparent"
-                            }`}
-                          >
-                            <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
-                              selectedIds.has(dest.id) ? "bg-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]" : "border-border/50"
-                            }`}>
-                              {selectedIds.has(dest.id) && <Check className="w-2.5 h-2.5 text-white" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium truncate">{dest.displayName}</p>
-                              <p className="text-[10px] text-muted-foreground capitalize">{dest.destinationType.replace(/_/g, " ")}</p>
-                            </div>
-                            {dest.isActive && <Wifi className="w-3 h-3 text-emerald-400/60" />}
-                          </button>
-                        ))}
+                        {disabledReason && (
+                          <p className="text-[9px] text-red-400/70 px-1 flex items-center gap-1">
+                            <AlertCircle className="w-2.5 h-2.5" /> {disabledReason}
+                          </p>
+                        )}
+                        {dests.map((dest) => {
+                          const isActive = activeIds.has(dest.id);
+                          return (
+                            <button
+                              key={dest.id}
+                              onClick={() => toggleDestination(dest)}
+                              disabled={!isActive}
+                              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all ${
+                                !isActive
+                                  ? "opacity-40 cursor-not-allowed"
+                                  : selectedIds.has(dest.id)
+                                    ? "bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/30"
+                                    : "hover:bg-muted/15 border border-transparent"
+                              }`}
+                            >
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                                selectedIds.has(dest.id) ? "bg-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]" : "border-border/50"
+                              }`}>
+                                {selectedIds.has(dest.id) && <Check className="w-2.5 h-2.5 text-white" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium truncate">{dest.displayName}</p>
+                                <p className="text-[10px] text-muted-foreground capitalize">{dest.destinationType.replace(/_/g, " ")}</p>
+                              </div>
+                              {isActive ? (
+                                <Wifi className="w-3 h-3 text-emerald-400/60" />
+                              ) : (
+                                <Lock className="w-3 h-3 text-muted-foreground/40" />
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     );
                   })}
 
                   {ungrouped.map((dest) => {
                     const meta = getPlatformMeta(dest.platform);
+                    const isActive = activeIds.has(dest.id);
                     return (
                       <button
                         key={dest.id}
                         onClick={() => toggleDestination(dest)}
+                        disabled={!isActive}
                         className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all ${
-                          selectedIds.has(dest.id)
-                            ? "bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/30"
-                            : "hover:bg-muted/15 border border-transparent"
+                          !isActive
+                            ? "opacity-40 cursor-not-allowed"
+                            : selectedIds.has(dest.id)
+                              ? "bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/30"
+                              : "hover:bg-muted/15 border border-transparent"
                         }`}
                       >
                         <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
@@ -191,9 +255,34 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                           <p className="text-xs font-medium truncate">{dest.displayName}</p>
                           <p className="text-[10px] text-muted-foreground capitalize">{dest.platform}</p>
                         </div>
+                        {isActive ? (
+                          <Wifi className="w-3 h-3 text-emerald-400/60" />
+                        ) : (
+                          <Lock className="w-3 h-3 text-muted-foreground/40" />
+                        )}
                       </button>
                     );
                   })}
+
+                  {notConnectedPlatforms.length > 0 && (
+                    <div className="pt-2 border-t border-border/20 space-y-1">
+                      <span className="text-[9px] font-medium text-muted-foreground/50 uppercase tracking-wider px-1">Not Connected</span>
+                      {notConnectedPlatforms.map((platform) => {
+                        const Icon = platform.icon;
+                        return (
+                          <div key={platform.key} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg opacity-30 cursor-not-allowed">
+                            <div className="w-4 h-4 rounded border border-border/30 shrink-0" />
+                            <Icon className="w-3.5 h-3.5" style={{ color: platform.color }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium">{platform.label}</p>
+                              <p className="text-[10px] text-muted-foreground">Not connected — go to Settings to connect</p>
+                            </div>
+                            <Plus className="w-3 h-3 text-muted-foreground/40" />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </>
               )}
             </div>

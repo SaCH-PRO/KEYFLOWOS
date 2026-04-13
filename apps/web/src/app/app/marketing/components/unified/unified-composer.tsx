@@ -242,9 +242,9 @@ export function UnifiedComposer({
   const maxChars = contentType === "social" ? 2200 : 0;
 
   const contentTypeForApi = useMemo(() => {
-    if (contentType === "email") return "email";
+    if (contentType === "email") return "email_campaign";
     if (contentType === "social") return "social_post";
-    return "multi_channel";
+    return "multi_channel_broadcast";
   }, [contentType]);
 
   const selectedPlatforms = useMemo(() => {
@@ -364,11 +364,15 @@ export function UnifiedComposer({
 
       const customVariants = variants.filter((v) => v.customized);
       for (const v of customVariants) {
+        const variantMeta: Record<string, unknown> = {};
+        if (v.subject) variantMeta.subject = v.subject;
+        if (v.previewText) variantMeta.previewText = v.previewText;
+        if (v.hashtags) variantMeta.hashtags = v.hashtags;
+
         const varRes = await upsertOutboundVariant(contentId, {
-          destinationId: v.destinationId,
           platform: v.platform,
-          body: v.body,
-          subject: v.subject,
+          textBody: v.textBody,
+          variantMeta: Object.keys(variantMeta).length > 0 ? variantMeta : undefined,
         }, businessId);
         if (varRes.error) {
           toast.error(`Failed to save variant for ${v.platform}: ${varRes.error}`);
