@@ -3,14 +3,14 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  BarChart3, Download, Loader2, RefreshCw, ChevronDown, Send, Clock, Lightbulb, X, FileSpreadsheet, GitCompare
+  BarChart3, Download, Loader2, RefreshCw, ChevronDown, Send, Clock, FileSpreadsheet, GitCompare
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatCardSkeleton, ChartSkeleton } from "@/components/ui/skeleton";
 import { TabNav } from "@/components/ui/tab-nav";
-import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { REPORTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { fetchReport, GeneratedReport } from "@/lib/client";
@@ -44,7 +44,6 @@ export default function ReportsPage() {
   const [exporting, setExporting] = useState(false);
   const [exportingCSV, setExportingCSV] = useState(false);
   const [comparePrevious, setComparePrevious] = useState(false);
-  const [showGuide, setShowGuide] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -145,70 +144,7 @@ export default function ReportsPage() {
         icon={BarChart3}
         title="Reports"
         subtitle="Generate intelligent business reports with AI-powered insights"
-        titleExtra={
-          <div className="relative flex items-center gap-2">
-            <WalkthroughTrigger moduleKey="reports" />
-            <button
-              onClick={() => setShowGuide(!showGuide)}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
-                showGuide
-                  ? "bg-amber-400 text-foreground shadow-md shadow-amber-400/40 scale-110"
-                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
-              }`}
-              aria-label="Getting started guide"
-              title="Getting started guide"
-            >
-              <Lightbulb className="w-3.5 h-3.5" />
-            </button>
-            <AnimatePresence>
-              {showGuide && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.12 }}
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-1.5 rounded-lg bg-amber-400/10">
-                        <Lightbulb className="w-4 h-4 text-amber-400" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold">Getting Started</h4>
-                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
-                      </div>
-                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
-                        <X className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[
-                        { step: "1", title: "Choose Report Type", desc: "Select from Executive, P&L, Revenue, Expenses, or Clients report views." },
-                        { step: "2", title: "Set Date Range", desc: "Pick a preset period or set custom start and end dates for your report." },
-                        { step: "3", title: "Generate Report", desc: "AI analyzes your business data and generates comprehensive insights." },
-                        { step: "4", title: "View AI Insights", desc: "Get intelligent summaries, trends, and actionable recommendations." },
-                        { step: "5", title: "Export Data", desc: "Download reports as PDF for sharing with partners or accountants." },
-                        { step: "6", title: "Schedule Reports", desc: "Set up recurring report generation to stay on top of your metrics." },
-                      ].map((item) => (
-                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
-                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
-                            {item.step}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium">{item.title}</p>
-                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
-        }
+        titleExtra={<PageGuideTrigger moduleKey="reports" />}
         rightSlot={
           <div className="flex items-center gap-2">
             <button
@@ -400,7 +336,10 @@ export default function ReportsPage() {
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
 
-      <ModuleWalkthrough moduleKey="reports" steps={REPORTS_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="reports"
+        walkthroughSteps={REPORTS_WALKTHROUGH}
+      />
     </div>
   );
 }

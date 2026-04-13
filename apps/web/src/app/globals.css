@@ -55,6 +55,13 @@
     --kf-info: 217 91% 60%;
     --kf-info-foreground: 0 0% 100%;
     --kf-neutral: 215 16% 47%;
+
+    --kf-z-fab: 30;
+    --kf-z-drawer: 40;
+    --kf-z-overlay: 50;
+    --kf-z-modal: 60;
+    --kf-z-toast: 80;
+    --kf-z-guide: 100;
   }
 
   .dark {
@@ -358,6 +365,13 @@
   
   .kf-nav-item.active .kf-nav-icon {
     color: hsl(var(--kf-accent1));
+  }
+
+  .kf-glass {
+    background: hsl(var(--kf-card) / 0.8);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid hsl(var(--kf-border) / 0.8);
   }
 }
 

@@ -235,7 +235,8 @@ export function AiCopilotTrigger() {
             setMessages([greeting]);
           }
         }}
-        className="fixed right-4 bottom-4 z-40 flex md:hidden items-center gap-2 pl-3.5 pr-4 py-2.5 min-w-[44px] min-h-[44px] rounded-2xl border border-border/50 bg-card/90 backdrop-blur-xl hover:border-[hsl(var(--kf-accent1))]/30 text-foreground/80 hover:text-foreground shadow-lg shadow-black/30 hover:shadow-xl transition-all"
+        className="fixed right-4 bottom-4 flex md:hidden items-center gap-2 pl-3.5 pr-4 py-2.5 min-w-[44px] min-h-[44px] rounded-2xl border border-border/50 bg-card/90 backdrop-blur-xl hover:border-[hsl(var(--kf-accent1))]/30 text-foreground/80 hover:text-foreground shadow-lg shadow-black/30 hover:shadow-xl transition-all"
+        style={{ zIndex: "var(--kf-z-fab)" }}
         aria-label="Open AI Copilot"
       >
         <Brain className="w-5 h-5" />

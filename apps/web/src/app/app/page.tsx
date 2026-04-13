@@ -10,7 +10,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
-import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { TODAY_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { formatTTD } from "./_command/types";
 import { useCommandData } from "./_command/use-command-data";
@@ -86,7 +86,9 @@ export default function CommandPage() {
             </div>
           </div>
 
-          <div className="relative flex-shrink-0" ref={moreRef}>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <PageGuideTrigger moduleKey="today" />
+            <div className="relative" ref={moreRef}>
             <button
               onClick={() => setMoreOpen((prev) => !prev)}
               className="flex items-center justify-center min-w-[44px] min-h-[44px] kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all"
@@ -111,6 +113,7 @@ export default function CommandPage() {
                 </div>
               </>
             )}
+            </div>
           </div>
         </div>
         <div data-walkthrough="today-ai">
@@ -194,7 +197,10 @@ export default function CommandPage() {
         />
       </div>
 
-      <ModuleWalkthrough moduleKey="today" steps={TODAY_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="today"
+        walkthroughSteps={TODAY_WALKTHROUGH}
+      />
     </div>
   );
 }

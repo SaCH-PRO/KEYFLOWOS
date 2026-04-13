@@ -16,8 +16,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ProgressivePrompts } from "../../profile/components/progressive-prompts";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { FeatureGuide } from "@/components/ui/feature-guide";
-import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { CRM_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { PipelineTabContent } from "./pipeline-tab-content";
@@ -192,24 +191,7 @@ export default function ContactsPage() {
         icon={Users}
         title="Clients"
         subtitle={<span className="inline-flex items-center gap-1.5">Manage relationships, follow-ups, health, and client activity across your pipeline <InfoBadge title="Client Workspace" body="Your client workspace centralizes relationship intelligence, communication history, and AI-powered insights. Use Smart Segments to triage clients by engagement and health." side="bottom" iconSize={12} /></span>}
-        titleExtra={
-          <div className="flex items-center gap-2">
-            <FeatureGuide
-              featureKey="crm-pipeline"
-              title="Getting Started with Clients"
-              description="Triage relationships, track health, and take action on what matters."
-              steps={[
-                { title: "Add Clients", description: "Create manually, scan business cards, import CSV/VCF, or sync from Google Contacts." },
-                { title: "Smart Segments", description: "Filter with one-tap segments like High Value, New This Week, and At Risk." },
-                { title: "Communicate", description: "Reach out via WhatsApp, email, or phone directly from any client card." },
-                { title: "Bulk Actions", description: "Select multiple clients for broadcast messages, tagging, or status updates." },
-                { title: "Insights & AI", description: "Track pipeline health, revenue data, and use AI tools for summaries and scoring." },
-                { title: "Action Queue", description: "See who needs attention and why — sorted by urgency and value." },
-              ]}
-            />
-            <WalkthroughTrigger moduleKey="crm" />
-          </div>
-        }
+        titleExtra={<PageGuideTrigger moduleKey="crm" />}
       />
 
 
@@ -259,7 +241,10 @@ export default function ContactsPage() {
 
       <ProgressivePrompts moduleFilter={["customer", "sales", "partnerships"]} />
 
-      <ModuleWalkthrough moduleKey="crm" steps={CRM_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="crm"
+        walkthroughSteps={CRM_WALKTHROUGH}
+      />
     </div>
   );
 }

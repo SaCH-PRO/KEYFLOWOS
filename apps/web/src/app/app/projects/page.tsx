@@ -4,8 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { FolderKanban, Send } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
-import { FeatureGuide } from "@/components/ui/feature-guide";
-import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { PROJECTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactPickerDrawer } from "@/components/contacts";
@@ -45,18 +44,7 @@ export default function ProjectsPage() {
       />
 
       <div className="flex items-center gap-2">
-        <FeatureGuide
-          featureKey="projects"
-          title="Getting Started with Projects"
-          description="Organize work with kanban boards and task tracking"
-          steps={[
-            { title: "Create Projects", description: "Click '+ New Project' to set up a project with a name and color for organizing work." },
-            { title: "Add Tasks", description: "Expand a project and add tasks — check them off as you complete each action item." },
-            { title: "Use Kanban Board", description: "Projects are displayed in columns by status: Active, In Progress, Completed, and On Hold." },
-            { title: "Track Progress", description: "Monitor task completion with progress bars and move projects between statuses." },
-          ]}
-        />
-        <WalkthroughTrigger moduleKey="projects" />
+        <PageGuideTrigger moduleKey="projects" />
       </div>
 
       <TemplateManager businessId={businessId} onProjectCreated={handleTemplateProjectCreated} />
@@ -67,7 +55,10 @@ export default function ProjectsPage() {
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
 
-      <ModuleWalkthrough moduleKey="projects" steps={PROJECTS_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="projects"
+        walkthroughSteps={PROJECTS_WALKTHROUGH}
+      />
     </div>
   );
 }
