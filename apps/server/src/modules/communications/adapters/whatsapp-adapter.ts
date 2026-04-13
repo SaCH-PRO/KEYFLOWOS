@@ -36,11 +36,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
       return { success: false, errorCode: 'MISSING_CREDENTIALS', errorMessage: 'Missing WhatsApp access token or phone number ID', isTransient: false };
     }
 
-    if (!payload.recipientEmail && !payload.meta?.recipientPhone) {
+    const recipientPhone = payload.meta?.recipientPhone ? String(payload.meta.recipientPhone) : '';
+    if (!recipientPhone) {
       return { success: false, errorCode: 'MISSING_RECIPIENT', errorMessage: 'Recipient phone number is required for WhatsApp delivery', isTransient: false };
     }
-
-    const recipientPhone = String(payload.meta?.recipientPhone || '');
 
     try {
       const templateName = payload.meta?.templateName ? String(payload.meta.templateName) : undefined;

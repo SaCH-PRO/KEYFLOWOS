@@ -1,10 +1,21 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { createHmac } from 'crypto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ChannelConnectionService } from './channel-connection.service';
 import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
 import { WhatsAppAdapter } from './adapters/whatsapp-adapter';
+
+const TRACKING_SECRET = process.env.TRACKING_HMAC_SECRET || 'keyflowos-tracking-default-secret';
+
+function signTrackingToken(deliveryId: string): string {
+  return createHmac('sha256', TRACKING_SECRET).update(deliveryId).digest('hex').slice(0, 16);
+}
+
+function verifyTrackingToken(deliveryId: string, token: string): boolean {
+  return signTrackingToken(deliveryId) === token;
+}
 
 @Controller('communications')
 export class CommunicationsController {
@@ -140,13 +151,19 @@ export class CommunicationsController {
   }
 
   @Post('deliveries/:deliveryId/track-open')
-  async trackOpen(@Param('deliveryId') deliveryId: string) {
+  async trackOpen(@Param('deliveryId') deliveryId: string, @Query('t') token?: string) {
+    if (!token || !verifyTrackingToken(deliveryId, token)) {
+      throw new BadRequestException('Invalid tracking token');
+    }
     await this.delivery.trackOpen(deliveryId);
     return { ok: true };
   }
 
   @Post('deliveries/:deliveryId/track-click')
-  async trackClick(@Param('deliveryId') deliveryId: string) {
+  async trackClick(@Param('deliveryId') deliveryId: string, @Query('t') token?: string) {
+    if (!token || !verifyTrackingToken(deliveryId, token)) {
+      throw new BadRequestException('Invalid tracking token');
+    }
     await this.delivery.trackClick(deliveryId);
     return { ok: true };
   }
