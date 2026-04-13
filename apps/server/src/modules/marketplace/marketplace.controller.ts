@@ -1,4 +1,6 @@
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, Req, Res, UseGuards, Inject, UploadedFile, UseInterceptors, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { MarketplaceService } from './marketplace.service';
@@ -358,6 +360,68 @@ export class MarketplaceController {
   @Post('businesses/:businessId/post-purchase/process')
   processPostPurchaseJobs(@Param('businessId') businessId: string) {
     return this.commerceIntegration.processPostPurchaseJobs(businessId);
+  }
+
+  @Get('businesses/:businessId/inventory/summary')
+  getInventorySummary(@Param('businessId') businessId: string) {
+    return this.marketplaceService.getInventorySummary(businessId);
+  }
+
+  @Get('businesses/:businessId/inventory/movements')
+  getInventoryMovements(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.marketplaceService.getInventoryMovements(businessId, limit ? parseInt(limit, 10) : 100);
+  }
+
+  @Post('businesses/:businessId/inventory/adjust')
+  adjustInventory(
+    @Param('businessId') businessId: string,
+    @Body() body: any,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    if (!body.reasonCode) throw new BadRequestException('reasonCode is required for stock adjustments');
+    if (body.reasonCode === 'MANUAL' && !body.note?.trim()) throw new BadRequestException('A note is required for manual adjustments');
+    return this.marketplaceService.adjustInventory(businessId, { ...body, userId: req.user?.id });
+  }
+
+  @Post('businesses/:businessId/inventory/transfer')
+  transferInventory(
+    @Param('businessId') businessId: string,
+    @Body() body: any,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.marketplaceService.transferInventory(businessId, { ...body, userId: req.user?.id });
+  }
+
+  @Get('businesses/:businessId/inventory/export-excel')
+  async exportInventoryExcel(
+    @Param('businessId') businessId: string,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.marketplaceService.exportInventoryExcel(businessId);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="inventory-${Date.now()}.xlsx"`);
+    res.send(buffer);
+  }
+
+  @Get('businesses/:businessId/inventory/template-excel')
+  getInventoryTemplate(@Param('businessId') businessId: string, @Res() res: Response) {
+    const buffer = this.marketplaceService.getInventoryExcelTemplate();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-import-template.xlsx"');
+    res.send(buffer);
+  }
+
+  @Post('businesses/:businessId/inventory/import-excel')
+  @UseInterceptors(FileInterceptor('file'))
+  importInventoryExcel(
+    @Param('businessId') businessId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    return this.marketplaceService.importInventoryExcel(businessId, file.buffer);
   }
 
 }

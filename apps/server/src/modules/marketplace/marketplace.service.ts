@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { utils as xlsxUtils, write as xlsxWrite, read as xlsxRead } from 'xlsx';
 import { createHash } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -289,11 +290,29 @@ export class MarketplaceService {
     const where: any = { businessId };
     if (warehouseId) where.warehouseId = warehouseId;
 
-    return this.prisma.client.inventoryStock.findMany({
-      where,
-      include: { product: true, warehouse: true },
-      orderBy: { product: { name: 'asc' } },
-    });
+    const [inventory, lastMovements] = await Promise.all([
+      this.prisma.client.inventoryStock.findMany({
+        where,
+        include: { product: true, warehouse: true },
+        orderBy: { product: { name: 'asc' } },
+      }),
+      this.prisma.client.stockMovement.findMany({
+        where: { businessId, ...(warehouseId ? { warehouseId } : {}) },
+        orderBy: { createdAt: 'desc' },
+        select: { productId: true, warehouseId: true, createdAt: true, type: true, quantityChange: true },
+      }),
+    ]);
+
+    const lastMovementMap: Record<string, (typeof lastMovements)[0]> = {};
+    for (const m of lastMovements) {
+      const key = `${m.productId}|${m.warehouseId}`;
+      if (!lastMovementMap[key]) lastMovementMap[key] = m;
+    }
+
+    return inventory.map(inv => ({
+      ...inv,
+      lastMovement: lastMovementMap[`${inv.productId}|${inv.warehouseId}`] ?? null,
+    }));
   }
 
   async createOrder(businessId: string, data: any) {
@@ -1398,5 +1417,272 @@ export class MarketplaceService {
     });
 
     return config;
+  }
+
+  async getInventorySummary(businessId: string) {
+    const [inventory, warehouses, products] = await Promise.all([
+      this.prisma.client.inventoryStock.findMany({
+        where: { businessId },
+        include: { product: { include: { costProfile: true } }, warehouse: true },
+      }),
+      this.prisma.client.warehouse.findMany({ where: { businessId, isActive: true } }),
+      this.prisma.client.product.findMany({ where: { businessId, deletedAt: null }, select: { id: true } }),
+    ]);
+
+    const totalSKUs = inventory.length;
+    const totalStockValue = inventory.reduce((sum, inv) => {
+      const costPerUnit = inv.costPerUnit ?? inv.product?.costProfile?.landedCostEstimate ?? 0;
+      return sum + (inv.quantity * costPerUnit);
+    }, 0);
+    const belowReorderCount = inventory.filter(inv => inv.reorderAt !== null && inv.quantity <= (inv.reorderAt ?? 0)).length;
+    const outOfStockCount = inventory.filter(inv => inv.quantity <= 0).length;
+    const inStockCount = inventory.filter(inv => inv.quantity > 0 && (inv.reorderAt === null || inv.quantity > (inv.reorderAt ?? 0))).length;
+    const healthScore = totalSKUs > 0 ? Math.round((inStockCount / totalSKUs) * 100) : 100;
+
+    const warehouseBreakdown = warehouses.map(wh => {
+      const whInv = inventory.filter(inv => inv.warehouseId === wh.id);
+      const totalUnits = whInv.reduce((s, i) => s + i.quantity, 0);
+      const capacityUtil = wh.capacity ? Math.min(Math.round((totalUnits / wh.capacity) * 100), 100) : null;
+      return { id: wh.id, name: wh.name, skuCount: whInv.length, totalUnits, capacity: wh.capacity, capacityUtilization: capacityUtil };
+    });
+
+    return {
+      totalSKUs,
+      totalStockValue,
+      belowReorderCount,
+      outOfStockCount,
+      inStockCount,
+      healthScore,
+      warehouseBreakdown,
+      totalProducts: products.length,
+    };
+  }
+
+  async adjustInventory(businessId: string, data: { stockId: string; quantityChange: number; reasonCode: string; note?: string; userId?: string }) {
+    const stock = await this.prisma.client.inventoryStock.findFirst({
+      where: { id: data.stockId, businessId },
+    });
+    if (!stock) throw new NotFoundException('Inventory stock record not found');
+
+    const newQuantity = stock.quantity + data.quantityChange;
+    if (newQuantity < 0) throw new BadRequestException('Adjustment would result in negative stock quantity');
+
+    const [updated] = await this.prisma.client.$transaction([
+      this.prisma.client.inventoryStock.update({
+        where: { id: stock.id },
+        data: { quantity: newQuantity },
+        include: { product: true, warehouse: true },
+      }),
+      this.prisma.client.stockMovement.create({
+        data: {
+          businessId,
+          warehouseId: stock.warehouseId,
+          productId: stock.productId,
+          type: 'ADJUSTMENT',
+          quantityChange: data.quantityChange,
+          reasonCode: data.reasonCode,
+          note: data.note,
+          createdBy: data.userId,
+          referenceId: stock.id,
+        },
+      }),
+    ]);
+
+    return updated;
+  }
+
+  async transferInventory(businessId: string, data: { productId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; note?: string; userId?: string }) {
+    if (data.quantity <= 0) throw new BadRequestException('Transfer quantity must be positive');
+    if (data.fromWarehouseId === data.toWarehouseId) throw new BadRequestException('Source and destination warehouses must be different');
+
+    const fromStock = await this.prisma.client.inventoryStock.findUnique({
+      where: { productId_warehouseId: { productId: data.productId, warehouseId: data.fromWarehouseId } },
+    });
+    if (!fromStock || fromStock.businessId !== businessId) throw new NotFoundException('Source inventory not found');
+
+    const available = fromStock.quantity - fromStock.reserved;
+    if (available < data.quantity) throw new BadRequestException(`Insufficient available stock. Available: ${available}`);
+
+    const toWarehouse = await this.prisma.client.warehouse.findFirst({ where: { id: data.toWarehouseId, businessId } });
+    if (!toWarehouse) throw new NotFoundException('Destination warehouse not found');
+
+    const toStock = await this.prisma.client.inventoryStock.findUnique({
+      where: { productId_warehouseId: { productId: data.productId, warehouseId: data.toWarehouseId } },
+    });
+
+    const refId = `TRF-${Date.now()}`;
+
+    await this.prisma.client.$transaction([
+      this.prisma.client.inventoryStock.update({
+        where: { id: fromStock.id },
+        data: { quantity: fromStock.quantity - data.quantity },
+      }),
+      toStock
+        ? this.prisma.client.inventoryStock.update({
+            where: { id: toStock.id },
+            data: { quantity: toStock.quantity + data.quantity },
+          })
+        : this.prisma.client.inventoryStock.create({
+            data: {
+              businessId,
+              productId: data.productId,
+              warehouseId: data.toWarehouseId,
+              quantity: data.quantity,
+              reserved: 0,
+              currency: fromStock.currency,
+              costPerUnit: fromStock.costPerUnit,
+              reorderAt: fromStock.reorderAt,
+            },
+          }),
+      this.prisma.client.stockMovement.create({
+        data: { businessId, warehouseId: data.fromWarehouseId, productId: data.productId, type: 'TRANSFER_OUT', quantityChange: -data.quantity, reasonCode: 'TRANSFER', note: data.note, createdBy: data.userId, referenceId: refId },
+      }),
+      this.prisma.client.stockMovement.create({
+        data: { businessId, warehouseId: data.toWarehouseId, productId: data.productId, type: 'TRANSFER_IN', quantityChange: data.quantity, reasonCode: 'TRANSFER', note: data.note, createdBy: data.userId, referenceId: refId },
+      }),
+    ]);
+
+    return { success: true, transferRef: refId };
+  }
+
+  async getInventoryMovements(businessId: string, limit = 100) {
+    const movements = await this.prisma.client.stockMovement.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    const productIds = [...new Set(movements.map(m => m.productId).filter(Boolean))] as string[];
+    const warehouseIds = [...new Set(movements.map(m => m.warehouseId).filter(Boolean))] as string[];
+
+    const [prods, whs] = await Promise.all([
+      this.prisma.client.product.findMany({ where: { id: { in: productIds } }, select: { id: true, name: true, sku: true } }),
+      this.prisma.client.warehouse.findMany({ where: { id: { in: warehouseIds } }, select: { id: true, name: true } }),
+    ]);
+
+    const prodMap = Object.fromEntries(prods.map(p => [p.id, p]));
+    const whMap = Object.fromEntries(whs.map(w => [w.id, w]));
+
+    return movements.map(m => ({
+      ...m,
+      product: m.productId ? prodMap[m.productId] : null,
+      warehouse: m.warehouseId ? whMap[m.warehouseId] : null,
+    }));
+  }
+
+  async exportInventoryExcel(businessId: string): Promise<Buffer> {
+    const inventory = await this.prisma.client.inventoryStock.findMany({
+      where: { businessId },
+      include: { product: { include: { costProfile: true } }, warehouse: true },
+      orderBy: { product: { name: 'asc' } },
+    });
+
+    const rows = inventory.map(inv => ({
+      SKU: inv.product?.sku || '',
+      'Product Name': inv.product?.name || '',
+      Warehouse: inv.warehouse?.name || '',
+      'Quantity On Hand': inv.quantity,
+      Reserved: inv.reserved,
+      Available: inv.quantity - inv.reserved,
+      'Reorder Level': inv.reorderAt ?? '',
+      'Cost Per Unit': inv.costPerUnit ?? inv.product?.costProfile?.landedCostEstimate ?? '',
+      Currency: inv.currency,
+      Status: inv.quantity <= 0 ? 'Out of Stock' : (inv.reorderAt && inv.quantity <= inv.reorderAt ? 'Low Stock' : 'In Stock'),
+    }));
+
+    const ws = xlsxUtils.json_to_sheet(rows);
+    const wb = xlsxUtils.book_new();
+    xlsxUtils.book_append_sheet(wb, ws, 'Inventory');
+
+    const summaryRows = [
+      { Metric: 'Total SKUs', Value: inventory.length },
+      { Metric: 'Out of Stock', Value: inventory.filter(i => i.quantity <= 0).length },
+      { Metric: 'Low Stock', Value: inventory.filter(i => i.reorderAt && i.quantity <= i.reorderAt && i.quantity > 0).length },
+      { Metric: 'Report Date', Value: new Date().toISOString().split('T')[0] },
+    ];
+    const summaryWs = xlsxUtils.json_to_sheet(summaryRows);
+    xlsxUtils.book_append_sheet(wb, summaryWs, 'Summary');
+
+    return Buffer.from(xlsxWrite(wb, { type: 'buffer', bookType: 'xlsx' }));
+  }
+
+  async importInventoryExcel(businessId: string, buffer: Buffer) {
+    const wb = xlsxRead(buffer, { type: 'buffer' });
+    const sheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[sheetName];
+    const rows: any[] = xlsxUtils.sheet_to_json(sheet, { defval: null });
+
+    const warehouses = await this.prisma.client.warehouse.findMany({ where: { businessId, isActive: true } });
+    const products = await this.prisma.client.product.findMany({ where: { businessId, deletedAt: null }, select: { id: true, name: true, sku: true } });
+
+    const whByName = Object.fromEntries(warehouses.map(w => [w.name.toLowerCase(), w]));
+    const prodBySku = Object.fromEntries(products.filter(p => p.sku).map(p => [p.sku!.toLowerCase(), p]));
+    const prodByName = Object.fromEntries(products.map(p => [p.name.toLowerCase(), p]));
+
+    const results = { imported: 0, skipped: 0, errors: [] as string[] };
+
+    for (const row of rows) {
+      try {
+        const sku = String(row['SKU'] || row['sku'] || '').trim();
+        const productName = String(row['Product Name'] || row['product_name'] || row['name'] || '').trim();
+        const warehouseName = String(row['Warehouse'] || row['warehouse'] || '').trim();
+        const qty = parseInt(row['Quantity On Hand'] ?? row['quantity'] ?? row['qty'] ?? 0, 10);
+        const reorderLevel = row['Reorder Level'] !== null ? parseInt(row['Reorder Level'] ?? row['reorder_level'] ?? '', 10) : undefined;
+        const costPerUnit = row['Cost Per Unit'] !== null ? parseFloat(row['Cost Per Unit'] ?? row['cost_per_unit'] ?? '') : undefined;
+
+        if (isNaN(qty) || qty < 0) { results.errors.push(`Row skipped: invalid quantity (must be a non-negative integer)`); results.skipped++; continue; }
+
+        const product = (sku && prodBySku[sku.toLowerCase()]) || (productName && prodByName[productName.toLowerCase()]);
+        if (!product) { results.errors.push(`Product not found: ${sku || productName}`); results.skipped++; continue; }
+
+        const warehouse = warehouseName ? whByName[warehouseName.toLowerCase()] : warehouses[0];
+        if (!warehouse) { results.errors.push(`Warehouse not found: ${warehouseName}`); results.skipped++; continue; }
+
+        const existingStock = await this.prisma.client.inventoryStock.findUnique({
+          where: { productId_warehouseId: { productId: product.id, warehouseId: warehouse.id } },
+        });
+        const previousQty = existingStock?.quantity ?? null;
+
+        await this.upsertInventory(businessId, {
+          productId: product.id,
+          warehouseId: warehouse.id,
+          quantity: qty,
+          reorderAt: isNaN(reorderLevel as number) ? undefined : reorderLevel,
+          costPerUnit: isNaN(costPerUnit as number) ? undefined : costPerUnit,
+        });
+
+        const qtyChange = previousQty !== null ? qty - previousQty : qty;
+        if (qtyChange !== 0) {
+          await this.prisma.client.stockMovement.create({
+            data: {
+              businessId,
+              warehouseId: warehouse.id,
+              productId: product.id,
+              type: 'ADJUSTMENT',
+              quantityChange: qtyChange,
+              reasonCode: 'EXCEL_IMPORT',
+              note: `Excel import: ${sku || productName}${previousQty !== null ? ` (was ${previousQty})` : ' (new)'}`,
+            },
+          });
+        }
+
+        results.imported++;
+      } catch (err: any) {
+        results.errors.push(err.message);
+        results.skipped++;
+      }
+    }
+
+    return results;
+  }
+
+  getInventoryExcelTemplate(): Buffer {
+    const rows = [
+      { SKU: 'EXAMPLE-SKU-001', 'Product Name': 'Example Product', Warehouse: 'Main Warehouse', 'Quantity On Hand': 100, Reserved: 0, 'Reorder Level': 10, 'Cost Per Unit': 25.00, Currency: 'TTD' },
+    ];
+    const ws = xlsxUtils.json_to_sheet(rows);
+    const wb = xlsxUtils.book_new();
+    xlsxUtils.book_append_sheet(wb, ws, 'Inventory Import Template');
+    return Buffer.from(xlsxWrite(wb, { type: 'buffer', bookType: 'xlsx' }));
   }
 }

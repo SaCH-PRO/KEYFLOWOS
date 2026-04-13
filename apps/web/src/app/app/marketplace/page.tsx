@@ -24,7 +24,7 @@ import { CommerceCatalogTab } from "./components/commerce-catalog-tab";
 import { CommerceListingsTab } from "./components/commerce-listings-tab";
 import { CommerceOrdersTab } from "./components/commerce-orders-tab";
 import { CommerceFulfillmentTab } from "./components/commerce-fulfillment-tab";
-import { CommerceInventoryTab } from "./components/commerce-inventory-tab";
+import { InventoryCommandCenter } from "./components/inventory-command-center";
 import { CommerceSuppliersTab } from "./components/commerce-suppliers-tab";
 import { CommerceInsightsTab } from "./components/commerce-insights-tab";
 import { ProductEditorModal } from "./components/product-editor-modal";
@@ -467,11 +467,14 @@ export default function MarketplacePage() {
                 }
               />
             )}
-            {activeTab === "inventory" && (
-              <CommerceInventoryTab
+            {activeTab === "inventory" && businessId && (
+              <InventoryCommandCenter
+                businessId={businessId}
+                basePath={basePath}
                 warehouses={warehouses}
                 inventory={inventory}
                 products={products}
+                purchaseOrders={purchaseOrders}
                 onEditWarehouse={(item) => openEdit("warehouse", item)}
                 onDeleteWarehouse={(id) => handleDelete("warehouse", id)}
                 onAddInventory={() =>
@@ -492,6 +495,19 @@ export default function MarketplacePage() {
                     capacity: "",
                   })
                 }
+                onCreatePO={() =>
+                  openCreate("purchase-order", {
+                    supplierName: "",
+                    supplierEmail: "",
+                    productId: "",
+                    quantity: "",
+                    unitCost: "",
+                    expectedDelivery: "",
+                    status: "DRAFT",
+                  })
+                }
+                onEditPO={(po) => openEdit("purchase-order", po)}
+                onRefresh={() => loadTab("inventory")}
               />
             )}
             {activeTab === "suppliers" && (
