@@ -3,7 +3,9 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Pencil, Trash2, ArrowUpDown, Repeat, FileText,
+  Pencil, Trash2, ArrowUpDown, Repeat, FileText, Receipt,
+  CreditCard, Banknote, Smartphone, CheckCircle, AlertCircle,
+  Tag,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoBadge } from "@/components/ui/info-badge";
@@ -27,6 +29,22 @@ interface ExpenseListProps {
   onViewDetail: (exp: Expense) => void;
   onAdd?: () => void;
 }
+
+const PAYMENT_ICONS: Record<string, typeof CreditCard> = {
+  card: CreditCard,
+  cash: Banknote,
+  bank_transfer: Banknote,
+  mobile_money: Smartphone,
+  cheque: FileText,
+};
+
+const RECURRING_LABELS: Record<string, string> = {
+  WEEKLY: "Weekly",
+  BIWEEKLY: "Bi-weekly",
+  MONTHLY: "Monthly",
+  QUARTERLY: "Quarterly",
+  YEARLY: "Yearly",
+};
 
 export function ExpenseList({
   expenses, totalExpenses, categories,
@@ -79,7 +97,7 @@ export function ExpenseList({
             description="Track your business expenses to understand spending patterns and maximize deductions."
             actionLabel={onAdd ? "Add Expense" : undefined}
             onAction={onAdd}
-            tip="Categorize expenses to see spending breakdowns in your Analytics tab."
+            tip="Categorize expenses and set budgets to unlock spending intelligence in the Insights tab."
           />
         ) : (
           <div className="p-8 text-center text-sm text-muted-foreground">No expenses match the selected filters.</div>
@@ -93,17 +111,52 @@ export function ExpenseList({
             {filteredExpenses.map(exp => {
               const cat = categories.find(c => c.id === exp.categoryId) || exp.category;
               const pmLabel = PAYMENT_METHODS.find(m => m.value === exp.paymentMethod)?.label;
+              const PayIcon = PAYMENT_ICONS[exp.paymentMethod || ""] || CreditCard;
+              const hasReceipt = !!exp.receiptUrl;
+              const hasTags = exp.tags && exp.tags.length > 0;
               return (
-                <motion.div key={exp.id} role="row" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} className="grid grid-cols-1 md:grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-1 md:gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors group items-center cursor-pointer" onClick={() => onViewDetail(exp)}>
+                <motion.div key={exp.id} role="row" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} className="grid grid-cols-1 md:grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-1 md:gap-3 px-4 py-2.5 hover:bg-white/[0.02] transition-colors group items-center cursor-pointer" onClick={() => onViewDetail(exp)}>
                   <span className="text-xs text-muted-foreground">{formatDate(exp.date)}</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium truncate">{exp.description}</span>
-                    {exp.isRecurring && <Repeat className="w-3 h-3 text-blue-400 flex-shrink-0" />}
-                    {exp.receiptUrl && <FileText className="w-3 h-3 text-green-400 flex-shrink-0" />}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {exp.isRecurring && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400" title={`Recurring: ${RECURRING_LABELS[exp.recurringFrequency || "MONTHLY"] || "Monthly"}`}>
+                          <Repeat className="w-2.5 h-2.5" />
+                          {RECURRING_LABELS[exp.recurringFrequency || "MONTHLY"]?.[0] || "M"}
+                        </span>
+                      )}
+                      {hasReceipt ? (
+                        <span className="inline-flex items-center text-[10px] px-1 py-0.5 rounded-full bg-green-500/10 text-green-400" title="Receipt attached">
+                          <CheckCircle className="w-2.5 h-2.5" />
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center text-[10px] px-1 py-0.5 rounded-full bg-amber-500/10 text-amber-400 opacity-50 group-hover:opacity-100" title="No receipt">
+                          <AlertCircle className="w-2.5 h-2.5" />
+                        </span>
+                      )}
+                      {hasTags && (
+                        <span className="inline-flex items-center text-[10px] px-1 py-0.5 rounded-full bg-white/5 text-muted-foreground" title={exp.tags!.join(", ")}>
+                          <Tag className="w-2.5 h-2.5" />
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-xs text-muted-foreground truncate">{exp.vendor || "---"}</span>
-                  <span className="flex items-center gap-1.5 text-xs">{cat && <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: cat.color || "#6366f1" }} />}{cat?.name || "---"}</span>
-                  <span className="text-xs text-muted-foreground">{pmLabel || "---"}</span>
+                  <span className="text-xs text-muted-foreground truncate">{exp.vendor || <span className="opacity-40">---</span>}</span>
+                  <span className="flex items-center gap-1.5 text-xs">
+                    {cat ? (
+                      <>
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: cat.color || "#6366f1" }} />
+                        <span className="truncate">{cat.name}</span>
+                      </>
+                    ) : (
+                      <span className="text-amber-400/60 text-[10px]">Uncategorized</span>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    {exp.paymentMethod && <PayIcon className="w-3 h-3 shrink-0" />}
+                    <span className="truncate">{pmLabel || <span className="opacity-40">---</span>}</span>
+                  </span>
                   <span className="text-sm font-semibold text-right text-red-400">{formatCurrency(exp.amount)}</span>
                   <div className="flex items-center gap-1 w-20 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={e => { e.stopPropagation(); onEdit(exp); }} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
