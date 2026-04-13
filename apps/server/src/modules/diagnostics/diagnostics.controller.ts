@@ -1,10 +1,10 @@
-import { Controller, Get, Post, Body, Param, ForbiddenException, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, ForbiddenException, Req, Inject } from '@nestjs/common';
 import { DiagnosticsService } from './diagnostics.service';
 import { Request } from 'express';
 
 @Controller('api/diagnostics')
 export class DiagnosticsController {
-  constructor(private readonly diagnosticsService: DiagnosticsService) {}
+  constructor(@Inject(DiagnosticsService) private readonly diagnosticsService: DiagnosticsService) {}
 
   private assertSuperAdmin(req: Request) {
     const user = (req as any).user;

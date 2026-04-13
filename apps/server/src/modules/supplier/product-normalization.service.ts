@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NormalizedProduct } from './supplier-adapter.interface';
@@ -7,7 +7,7 @@ import { NormalizedProduct } from './supplier-adapter.interface';
 export class ProductNormalizationService {
   private readonly logger = new Logger(ProductNormalizationService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private cleanTitle(title: string): string {
     return title

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards, Inject } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { SupplierService } from './supplier.service';
@@ -6,7 +6,7 @@ import { SupplierService } from './supplier.service';
 @Controller('supplier')
 @UseGuards(AuthGuard, BusinessGuard)
 export class SupplierController {
-  constructor(private readonly supplierService: SupplierService) {}
+  constructor(@Inject(SupplierService) private readonly supplierService: SupplierService) {}
 
   // ---- SupplierConnection ----
 
