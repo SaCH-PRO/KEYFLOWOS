@@ -495,10 +495,13 @@ export function UnifiedComposer({
           break;
         }
         case "channels": {
-          const res = await aiSuggestChannels({ body, objective, audience, contentType }, businessId);
+          const channelNames = selectedDestinations.length > 0
+            ? selectedDestinations.map(d => d.platform || d.label || "unknown")
+            : ["email", "social", "whatsapp"];
+          const res = await aiSuggestChannels({ body, objective, audience, availableChannels: channelNames }, businessId);
           if (res.error) { toast.error(res.error); break; }
-          if (res.data?.channels?.length) {
-            setAiSuggestions({ type: "channels", data: res.data.channels });
+          if (res.data?.recommended?.length) {
+            setAiSuggestions({ type: "channels", data: res.data.recommended });
           }
           break;
         }
@@ -508,7 +511,7 @@ export function UnifiedComposer({
     } finally {
       setAiRunning(null);
     }
-  }, [aiRunning, body, contentType, objective, tone, audience, businessId, timezone]);
+  }, [aiRunning, body, contentType, objective, tone, audience, businessId, timezone, selectedDestinations]);
 
   const handleMediaUpload = useCallback(async (files: FileList) => {
     if (files.length === 0) return;
@@ -844,13 +847,15 @@ export function UnifiedComposer({
                             )}
                             {aiSuggestions.type === "channels" && (
                               <div className="space-y-1">
-                                {(aiSuggestions.data as { channel: string; reason: string; score: number }[]).map((ch, i) => (
+                                {(aiSuggestions.data as { channel: string; reason: string; priority: string }[]).map((ch, i) => (
                                   <div key={i} className="flex items-center justify-between text-[11px] text-purple-200 px-2 py-1.5 rounded-md bg-purple-500/5">
                                     <div>
                                       <span className="font-medium capitalize">{ch.channel}</span>
                                       <span className="text-[9px] text-purple-400/50 ml-2">{ch.reason}</span>
                                     </div>
-                                    <span className="text-[9px] font-medium text-purple-400">{ch.score}%</span>
+                                    <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${ch.priority === "primary" ? "bg-emerald-500/20 text-emerald-400" : "bg-blue-500/20 text-blue-400"}`}>
+                                      {ch.priority}
+                                    </span>
                                   </div>
                                 ))}
                               </div>

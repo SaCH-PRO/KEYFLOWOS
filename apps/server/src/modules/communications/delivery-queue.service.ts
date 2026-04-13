@@ -792,47 +792,39 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async listDeliveries(businessId: string, opts?: { status?: string; channel?: string; contentId?: string; limit?: number; offset?: number }) {
+  async listDeliveries(businessId: string, opts?: { status?: string; channel?: string; contentId?: string; contentType?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }) {
     const where: Record<string, unknown> = { businessId };
     if (opts?.status) where.status = opts.status;
     if (opts?.contentId) where.contentId = opts.contentId;
+    if (opts?.contentType) where.content = { ...(where.content as Record<string, unknown> || {}), contentType: opts.contentType };
+    if (opts?.dateFrom || opts?.dateTo) {
+      const createdAtFilter: Record<string, Date> = {};
+      if (opts?.dateFrom) createdAtFilter.gte = new Date(opts.dateFrom);
+      if (opts?.dateTo) createdAtFilter.lte = new Date(opts.dateTo);
+      where.createdAt = createdAtFilter;
+    }
 
     const take = Math.min(opts?.limit || 50, 200);
     const skip = opts?.offset || 0;
 
-    let deliveries: unknown[];
-    if (opts?.channel) {
-      deliveries = await this.prisma.client.outboundDelivery.findMany({
-        where: {
-          ...where,
-          destination: { platform: opts.channel.toUpperCase() },
-        },
-        include: {
-          destination: { select: { platform: true, displayName: true, label: true } },
-          content: { select: { id: true, subject: true, contentType: true, status: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take,
-        skip,
-      });
-    } else {
-      deliveries = await this.prisma.client.outboundDelivery.findMany({
-        where,
-        include: {
-          destination: { select: { platform: true, displayName: true, label: true } },
-          content: { select: { id: true, subject: true, contentType: true, status: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take,
-        skip,
-      });
-    }
+    const includeRelations = {
+      destination: { select: { platform: true, displayName: true, label: true } },
+      content: { select: { id: true, subject: true, contentType: true, status: true } },
+    };
 
-    const total = await this.prisma.client.outboundDelivery.count({
-      where: opts?.channel
-        ? { ...where, destination: { platform: opts.channel.toUpperCase() } }
-        : where,
+    const fullWhere = opts?.channel
+      ? { ...where, destination: { ...(where.destination as Record<string, unknown> || {}), platform: opts.channel.toUpperCase() } }
+      : where;
+
+    const deliveries = await this.prisma.client.outboundDelivery.findMany({
+      where: fullWhere,
+      include: includeRelations,
+      orderBy: { createdAt: 'desc' },
+      take,
+      skip,
     });
+
+    const total = await this.prisma.client.outboundDelivery.count({ where: fullWhere });
 
     return { deliveries, total, limit: take, offset: skip };
   }
