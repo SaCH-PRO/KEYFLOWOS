@@ -8,7 +8,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
 import { OriginAwareBreadcrumbs } from "@/components/ui/origin-aware-breadcrumbs";
 import { NavigationContextProvider, useNavigationContext } from "@/lib/navigation-context";
-import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDisplayName, getUserInitials, refreshWorkspace, getCachedBusiness } from "@/lib/workspace";
+import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDisplayName, getUserInitials, refreshWorkspace, getCachedBusiness, isSuperAdmin } from "@/lib/workspace";
 import { apiGet, apiPatch } from "@/lib/api";
 import { useThemeColors } from "@/lib/theme-context";
 import {
@@ -48,6 +48,7 @@ import {
   BookOpen,
   ChevronRight,
   Users2,
+  Shield,
 } from "lucide-react";
 import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
 import { FlowChatPanel, FlowTriggerButton } from "./_command/flow-chat-panel";
@@ -310,6 +311,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [initials, setInitials] = useState("KF");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [isAdminUser, setIsAdminUser] = useState(false);
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
   const [flowOpen, setFlowOpen] = useState(false);
@@ -352,6 +354,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         setDisplayName(getUserDisplayName());
         setInitials(getUserInitials());
         if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
+        setIsAdminUser(isSuperAdmin());
       }
 
       const businessId = getStoredBusinessId();
@@ -517,6 +520,15 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             })}
 
             <div className="mt-auto flex flex-col items-center gap-1">
+              {isAdminUser && (
+                <Link
+                  href="/admin"
+                  className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+                  title="Owner Console"
+                >
+                  <Shield className="w-[18px] h-[18px]" />
+                </Link>
+              )}
               <button
                 onClick={() => setKfStoreOpen(true)}
                 className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
@@ -770,6 +782,17 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                       <Settings className="w-3.5 h-3.5 text-muted-foreground" />
                       Studio
                     </Link>
+                    {isAdminUser && (
+                      <Link
+                        href="/admin"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-foreground/80 hover:bg-muted transition-colors min-h-[44px]"
+                        role="menuitem"
+                      >
+                        <Shield className="w-3.5 h-3.5 text-muted-foreground" />
+                        Owner Console
+                      </Link>
+                    )}
                     <div className="border-t border-border mt-1 pt-1">
                       <button
                         onClick={() => { setUserMenuOpen(false); handleLogout(); }}
@@ -906,6 +929,17 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 </div>
                 <span>KF Store</span>
               </button>
+
+              {isAdminUser && (
+                <Link
+                  href="/admin"
+                  onClick={() => setMobileDrawerOpen(false)}
+                  className="kf-nav-item py-2.5 active:scale-[0.98]"
+                >
+                  <Shield className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                  <span>Owner Console</span>
+                </Link>
+              )}
             </div>
 
             <div className="mt-auto px-2 pb-4 space-y-1 border-t border-border pt-2">

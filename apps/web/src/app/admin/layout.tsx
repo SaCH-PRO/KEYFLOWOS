@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { ReactNode, useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Shield,
   Users,
@@ -12,8 +12,11 @@ import {
   Cpu,
   LayoutTemplate,
   Home,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isSuperAdmin, refreshWorkspace } from "@/lib/workspace";
+import { toast } from "sonner";
 
 const navItems = [
   { label: "Overview", href: "/admin", icon: Home },
@@ -26,6 +29,27 @@ const navItems = [
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [checked, setChecked] = useState(false);
+  const [allowed, setAllowed] = useState(false);
+
+  useEffect(() => {
+    const check = async () => {
+      await refreshWorkspace();
+      if (isSuperAdmin()) {
+        setAllowed(true);
+      } else {
+        toast.error("Access denied: super admin only");
+        router.replace("/app");
+      }
+      setChecked(true);
+    };
+    check();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!checked) return null;
+  if (!allowed) return null;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-slate-950 to-slate-900 text-foreground">
@@ -65,8 +89,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               );
             })}
           </nav>
-          <div className="px-4 pb-4 border-t border-border/70 text-xs text-muted-foreground">
-            <div className="flex items-center justify-between">
+          <div className="px-3 pb-4 space-y-2 border-t border-border/70 pt-3">
+            <Link
+              href="/app"
+              className="group relative flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium transition-colors border border-transparent text-muted-foreground hover:text-foreground hover:bg-slate-900/60 hover:border-border/60"
+            >
+              <ExternalLink className="w-4 h-4 shrink-0" />
+              <span className="relative z-10">Business Workspace</span>
+            </Link>
+            <div className="flex items-center justify-between px-3 text-xs text-muted-foreground">
               <span>Platform status</span>
               <span className="inline-flex items-center gap-1 text-emerald-300">
                 <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
