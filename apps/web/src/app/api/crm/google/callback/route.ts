@@ -74,6 +74,12 @@ export async function GET(request: NextRequest) {
       return publicRedirect(location, request);
     }
 
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      const imported = data?.imported ?? "";
+      return publicRedirect(`/app/crm/pipeline?google_success=true${imported ? `&imported=${imported}` : ""}`, request);
+    }
+
     return publicRedirect("/app/crm/pipeline?google_success=true", request);
   } catch (err) {
     console.error("Google Contacts callback proxy error:", err);

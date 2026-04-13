@@ -28,17 +28,13 @@ export class CrmGoogleController {
     @Query('state') state: string,
     @Res() res: Response,
   ) {
-    const frontendUrl = process.env.REPLIT_DEV_DOMAIN 
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
-      : 'http://localhost:5000';
-
     if (!code || !state) {
-      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=missing_params`);
+      return res.redirect('/app/crm/pipeline?google_error=missing_params');
     }
 
     const verifiedState = this.google.verifyState(state);
     if (!verifiedState) {
-      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=invalid_state`);
+      return res.redirect('/app/crm/pipeline?google_error=invalid_state');
     }
 
     try {
@@ -49,10 +45,10 @@ export class CrmGoogleController {
         refreshToken: tokens.refresh_token,
       });
 
-      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_success=true&imported=${result.imported}`);
+      return res.redirect(`/app/crm/pipeline?google_success=true&imported=${result.imported}`);
     } catch (err) {
       this.logger.error('Google OAuth callback failed', (err as Error).message);
-      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=import_failed`);
+      return res.redirect('/app/crm/pipeline?google_error=import_failed');
     }
   }
 
