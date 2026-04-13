@@ -492,3 +492,93 @@ export function documentGeneratedTemplate(ctx: TemplateContext & {
 
   return { subject, html: baseLayout(ctx, subject, body) };
 }
+
+export function reviewRequestTemplate(ctx: TemplateContext & {
+  orderNumber: string;
+  productNames?: string[];
+}): { subject: string; html: string } {
+  const subject = `How was your order from ${ctx.businessName}?`;
+
+  const productList = ctx.productNames && ctx.productNames.length > 0
+    ? `<ul style="margin:8px 0 16px;padding-left:20px;color:#d4d4d8;font-size:14px;">
+${ctx.productNames.map((n) => `<li style="margin:4px 0;">${n}</li>`).join('')}
+</ul>`
+    : '';
+
+  const body = [
+    heading(`Your Review Matters`),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`We hope you're enjoying your recent purchase from <strong>${ctx.businessName}</strong>! We'd love to hear your thoughts on order <strong>#${ctx.orderNumber}</strong>.`),
+    productList,
+    paragraph(`Your feedback helps us improve and helps other customers make informed decisions. It only takes a minute!`),
+    ctaButton('Leave a Review', '#'),
+    paragraph(`Thank you for choosing ${ctx.businessName}. We look forward to hearing from you!`),
+  ].join('');
+
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function preorderDelayNoticeTemplate(ctx: TemplateContext & {
+  productName: string;
+  originalExpectedDate?: string;
+  newExpectedDate: string;
+  reason?: string;
+}): { subject: string; html: string } {
+  const subject = `Update on your pre-order: ${ctx.productName}`;
+
+  const reasonRow = ctx.reason
+    ? detailRow('Reason', ctx.reason)
+    : '';
+
+  const originalRow = ctx.originalExpectedDate
+    ? detailRow('Original Date', ctx.originalExpectedDate)
+    : '';
+
+  const body = [
+    heading(`Pre-order Update`),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`We wanted to keep you informed about an update to your pre-order for <strong>${ctx.productName}</strong>.`),
+    paragraph(`We sincerely apologise for any inconvenience this may cause. Here are the updated details:`),
+    detailTable([
+      detailRow('Product', ctx.productName),
+      originalRow,
+      detailRow('New Expected Date', ctx.newExpectedDate),
+      reasonRow,
+    ].join('')),
+    paragraph(`We are working hard to get your order to you as soon as possible. Your pre-order remains active and will be fulfilled on the new date.`),
+    paragraph(`If you have any questions or concerns, please don't hesitate to contact us.`),
+    paragraph(`Thank you for your patience and understanding.`),
+  ].join('');
+
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function reorderPromptTemplate(ctx: TemplateContext & {
+  orderNumber: string;
+  productNames?: string[];
+  daysSincePurchase?: number;
+}): { subject: string; html: string } {
+  const subject = `Time to restock? Your ${ctx.businessName} favourites await`;
+
+  const productList = ctx.productNames && ctx.productNames.length > 0
+    ? `<ul style="margin:8px 0 16px;padding-left:20px;color:#d4d4d8;font-size:14px;">
+${ctx.productNames.map((n) => `<li style="margin:4px 0;">${n}</li>`).join('')}
+</ul>`
+    : '';
+
+  const timeframe = ctx.daysSincePurchase
+    ? `It's been ${ctx.daysSincePurchase} days since your last order`
+    : `It's been a while since your last order`;
+
+  const body = [
+    heading(`Ready to Reorder?`),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`${timeframe} (#${ctx.orderNumber}) from <strong>${ctx.businessName}</strong>. If you loved what you got, it might be time to stock up!`),
+    productList,
+    paragraph(`We make reordering easy — your items are just a click away.`),
+    ctaButton('Shop Again', '#'),
+    paragraph(`As always, thank you for being a valued customer.`),
+  ].join('');
+
+  return { subject, html: baseLayout(ctx, subject, body) };
+}

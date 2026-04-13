@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ActivityService } from './activity.service';
 import { CrmService } from '../crm/crm.service';
 import { GmailService } from '../commerce/gmail.service';
+import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import {
   QuoteSentPayload,
   QuoteConvertedPayload,
@@ -117,6 +118,93 @@ export const WORKFLOW_DEFINITIONS: WorkflowDefinition[] = [
     defaultEnabled: true,
     configSchema: [],
   },
+  {
+    key: 'store_order_crm_sync',
+    name: 'Store Order → CRM Sync',
+    description: 'When a store order is placed or paid, automatically find or create the customer in your CRM and log the order event to their timeline.',
+    category: 'Commerce',
+    triggerEvent: 'store_order.created',
+    defaultEnabled: true,
+    configSchema: [
+      { key: 'createContactOnOrder', label: 'Auto-create CRM contact from order', type: 'boolean', default: true },
+    ],
+  },
+  {
+    key: 'store_order_revenue',
+    name: 'Store Order → Revenue Record',
+    description: 'When a store order is paid, automatically create an invoice in the Revenue module to keep your financials up to date.',
+    category: 'Commerce',
+    triggerEvent: 'store_order.paid',
+    defaultEnabled: true,
+    configSchema: [],
+  },
+  {
+    key: 'store_order_refund_expense',
+    name: 'Order Refund → Expense Tracking',
+    description: 'When an order is refunded, record the refund amount as an expense so your P&L stays accurate.',
+    category: 'Commerce',
+    triggerEvent: 'store_order.refunded',
+    defaultEnabled: true,
+    configSchema: [],
+  },
+  {
+    key: 'post_purchase_review_request',
+    name: 'Post-Purchase Review Request',
+    description: 'Three days after order delivery, send the customer a review request email and create a follow-up task in your CRM.',
+    category: 'Commerce',
+    triggerEvent: 'store_order.delivered',
+    defaultEnabled: true,
+    configSchema: [
+      { key: 'reviewDelayDays', label: 'Days to wait before requesting review', type: 'number', default: 3 },
+    ],
+  },
+  {
+    key: 'post_purchase_reorder_prompt',
+    name: 'Post-Purchase Reorder Prompt',
+    description: '30 days after order delivery, automatically send a reorder prompt email and create a follow-up CRM task to re-engage the customer.',
+    category: 'Commerce',
+    triggerEvent: 'store_order.delivered',
+    defaultEnabled: true,
+    configSchema: [
+      { key: 'reorderDelayDays', label: 'Days to wait before prompting reorder', type: 'number', default: 30 },
+    ],
+  },
+  {
+    key: 'inventory_low_alert',
+    name: 'Low Stock Alert',
+    description: 'When product inventory drops below the reorder threshold, send an in-app alert so you can restock in time.',
+    category: 'Commerce',
+    triggerEvent: 'inventory.low',
+    defaultEnabled: true,
+    configSchema: [],
+  },
+  {
+    key: 'inventory_out_alert',
+    name: 'Out of Stock Alert',
+    description: 'When a product goes completely out of stock, trigger an immediate alert.',
+    category: 'Commerce',
+    triggerEvent: 'inventory.out',
+    defaultEnabled: true,
+    configSchema: [],
+  },
+  {
+    key: 'purchase_order_expense',
+    name: 'Purchase Order → Expense Record',
+    description: 'When a purchase order is received, automatically log the sourcing cost as an expense.',
+    category: 'Commerce',
+    triggerEvent: 'purchaseOrder.received',
+    defaultEnabled: true,
+    configSchema: [],
+  },
+  {
+    key: 'preorder_delay_notice',
+    name: 'Pre-order Delay Notification',
+    description: 'When a pre-order expected date is pushed back, automatically notify the customer by email.',
+    category: 'Commerce',
+    triggerEvent: 'preorder.delayed',
+    defaultEnabled: true,
+    configSchema: [],
+  },
 ];
 
 @Injectable()
@@ -129,6 +217,7 @@ export class CrossModuleAgentService {
     @Inject(ActivityService) private readonly activity: ActivityService,
     @Inject(CrmService) private readonly crm: CrmService,
     @Optional() @Inject(GmailService) private readonly gmail: GmailService | null,
+    @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
   ) {
     this.logger.log('CrossModuleAgentService initialized');
     this.startJobPoller();
@@ -181,8 +270,118 @@ export class CrossModuleAgentService {
   private async executeScheduledJob(job: { id: string; businessId: string; jobType: string; entityId: string; checkpoint: string; payload: any }) {
     if (job.jobType === 'quote_followup') {
       await this.executeQuoteFollowUpJob(job);
+    } else if (job.jobType === 'post_purchase_review_request') {
+      await this.executePostPurchaseReviewRequestJob(job);
+    } else if (job.jobType === 'post_purchase_reorder_prompt') {
+      await this.executePostPurchaseReorderPromptJob(job);
     } else {
       this.logger.warn(`[CrossModule] Unknown job type: ${job.jobType}`);
+    }
+  }
+
+  private async executePostPurchaseReviewRequestJob(job: { businessId: string; entityId: string; payload: any }) {
+    const { businessId, entityId: orderId, payload } = job;
+    const p = payload as {
+      contactId?: string;
+      orderNumber?: string;
+      orderId: string;
+      customerEmail?: string;
+      customerName?: string;
+      currency?: string;
+      total?: number;
+      productNames?: string[];
+    };
+
+    if (p.customerEmail) {
+      const productNames = p.productNames ?? [];
+
+      await this.emailService.send({
+        businessId,
+        type: 'review_request',
+        recipientEmail: p.customerEmail,
+        recipientName: p.customerName ?? 'Customer',
+        templateData: {
+          customerName: p.customerName ?? 'Customer',
+          orderNumber: p.orderNumber ?? p.orderId,
+          productNames,
+        },
+        dedupeKey: `review-request-${orderId}`,
+      });
+
+      this.logger.log(`[CrossModule] Sent review request email for order ${p.orderNumber ?? orderId} to ${p.customerEmail}`);
+    }
+
+    if (p.contactId) {
+      const reviewTitle = `Request product review for order ${p.orderNumber ?? orderId}`;
+      const existingReviewTask = await this.prisma.client.contactTask.findFirst({
+        where: { businessId, contactId: p.contactId, title: reviewTitle },
+        select: { id: true },
+      }).catch(() => null);
+      if (!existingReviewTask) {
+        await this.crm.addTask({
+          businessId,
+          contactId: p.contactId,
+          title: reviewTitle,
+          priority: 'NORMAL',
+          dueDate: new Date().toISOString(),
+          source: 'cross-module-agent',
+        });
+      }
+    }
+  }
+
+  private async executePostPurchaseReorderPromptJob(job: { businessId: string; entityId: string; payload: any }) {
+    const { businessId, entityId: orderId, payload } = job;
+    const p = payload as {
+      contactId?: string;
+      orderNumber?: string;
+      orderId: string;
+      customerEmail?: string;
+      customerName?: string;
+      deliveredAt?: string;
+      productNames?: string[];
+    };
+
+    if (p.customerEmail) {
+      let daysSincePurchase: number | undefined;
+      if (p.deliveredAt) {
+        const delivered = new Date(p.deliveredAt);
+        daysSincePurchase = Math.round((Date.now() - delivered.getTime()) / (1000 * 60 * 60 * 24));
+      }
+
+      await this.emailService.send({
+        businessId,
+        type: 'reorder_prompt',
+        recipientEmail: p.customerEmail,
+        recipientName: p.customerName ?? 'Customer',
+        templateData: {
+          customerName: p.customerName ?? 'Customer',
+          orderNumber: p.orderNumber ?? p.orderId,
+          productNames: p.productNames ?? [],
+          daysSincePurchase,
+        },
+        dedupeKey: `reorder-prompt-${orderId}`,
+      });
+
+      this.logger.log(`[CrossModule] Sent reorder prompt email for order ${p.orderNumber ?? orderId} to ${p.customerEmail}`);
+    }
+
+    if (p.contactId) {
+      const reorderTitle = `Follow up for reorder — order ${p.orderNumber ?? orderId}`;
+      const existingReorderTask = await this.prisma.client.contactTask.findFirst({
+        where: { businessId, contactId: p.contactId, title: reorderTitle },
+        select: { id: true },
+      }).catch(() => null);
+      if (!existingReorderTask) {
+        await this.crm.addTask({
+          businessId,
+          contactId: p.contactId,
+          title: reorderTitle,
+          priority: 'NORMAL',
+          dueDate: new Date().toISOString(),
+          source: 'cross-module-agent',
+        });
+      }
     }
   }
 

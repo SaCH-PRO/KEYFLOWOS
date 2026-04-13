@@ -18,6 +18,9 @@ import {
   sellerNewOrderTemplate,
   sellerLowStockTemplate,
   documentGeneratedTemplate,
+  reviewRequestTemplate,
+  preorderDelayNoticeTemplate,
+  reorderPromptTemplate,
 } from './email-templates';
 
 export type NotificationType =
@@ -34,7 +37,10 @@ export type NotificationType =
   | 'order_cancelled'
   | 'seller_new_order'
   | 'seller_low_stock'
-  | 'document_generated';
+  | 'document_generated'
+  | 'review_request'
+  | 'preorder_delay_notice'
+  | 'reorder_prompt';
 
 export interface NotificationPreferences {
   booking_confirmed?: boolean;
@@ -51,6 +57,9 @@ export interface NotificationPreferences {
   seller_new_order?: boolean;
   seller_low_stock?: boolean;
   document_generated?: boolean;
+  review_request?: boolean;
+  preorder_delay_notice?: boolean;
+  reorder_prompt?: boolean;
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -68,6 +77,9 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   seller_new_order: true,
   seller_low_stock: true,
   document_generated: true,
+  review_request: true,
+  preorder_delay_notice: true,
+  reorder_prompt: true,
 };
 
 const QUEUE_DRAIN_INTERVAL_MS = 5 * 60 * 1000;
@@ -350,6 +362,30 @@ export class TransactionalEmailService implements OnModuleInit {
             version: data.version,
             sections: data.sections,
             documentUrl: data.documentUrl,
+          });
+          break;
+        case 'review_request':
+          rendered = reviewRequestTemplate({
+            ...baseCtx,
+            orderNumber: data.orderNumber,
+            productNames: data.productNames,
+          });
+          break;
+        case 'preorder_delay_notice':
+          rendered = preorderDelayNoticeTemplate({
+            ...baseCtx,
+            productName: data.productName,
+            originalExpectedDate: data.originalExpectedDate,
+            newExpectedDate: data.newExpectedDate,
+            reason: data.reason,
+          });
+          break;
+        case 'reorder_prompt':
+          rendered = reorderPromptTemplate({
+            ...baseCtx,
+            orderNumber: data.orderNumber,
+            productNames: data.productNames,
+            daysSincePurchase: data.daysSincePurchase,
           });
           break;
         default:

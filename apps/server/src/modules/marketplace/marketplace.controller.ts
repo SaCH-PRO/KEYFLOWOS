@@ -2,11 +2,15 @@ import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuard
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { MarketplaceService } from './marketplace.service';
+import { CommerceIntegrationService } from './commerce-integration.service';
 
 @Controller('marketplace')
 @UseGuards(AuthGuard, BusinessGuard)
 export class MarketplaceController {
-  constructor(@Inject(MarketplaceService) private readonly marketplaceService: MarketplaceService) {}
+  constructor(
+    @Inject(MarketplaceService) private readonly marketplaceService: MarketplaceService,
+    @Inject(CommerceIntegrationService) private readonly commerceIntegration: CommerceIntegrationService,
+  ) {}
 
   @Get('businesses/:businessId/dashboard')
   getDashboard(@Param('businessId') businessId: string) {
@@ -316,6 +320,44 @@ export class MarketplaceController {
   @Put('businesses/:businessId/delivery-config')
   updateDeliveryConfig(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.updateDeliveryConfig(businessId, body);
+  }
+
+  @Get('businesses/:businessId/orders/:orderId/cross-links')
+  getOrderCrossLinks(
+    @Param('businessId') businessId: string,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.commerceIntegration.getOrderCrossLinks(businessId, orderId);
+  }
+
+  @Get('businesses/:businessId/contacts/:contactId/order-history')
+  getContactOrderHistory(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.commerceIntegration.getContactOrderHistory(businessId, contactId);
+  }
+
+  @Post('businesses/:businessId/products/:productId/promote')
+  promoteProductToContent(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.commerceIntegration.promoteProductToContent(businessId, productId);
+  }
+
+  @Post('businesses/:businessId/orders/:orderId/create-project')
+  createProjectForBundleOrder(
+    @Param('businessId') businessId: string,
+    @Param('orderId') orderId: string,
+    @Body() body: { name?: string; description?: string; contactId?: string },
+  ) {
+    return this.commerceIntegration.createProjectForBundleOrder(businessId, orderId, body);
+  }
+
+  @Post('businesses/:businessId/post-purchase/process')
+  processPostPurchaseJobs(@Param('businessId') businessId: string) {
+    return this.commerceIntegration.processPostPurchaseJobs(businessId);
   }
 
 }

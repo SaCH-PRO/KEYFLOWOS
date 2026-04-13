@@ -387,7 +387,7 @@ export class StoreOrderService {
       include: { items: true },
     });
 
-    this.events.emit('store_order.cancelled', { order: updated, businessId });
+    this.events.emit('store_order.refunded', { order: updated, businessId, refundAmount: updated.total });
 
     return updated;
   }
