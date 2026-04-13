@@ -10,8 +10,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { ModuleAccordion, type AccordionSection } from "@/components/ui/module-accordion";
 
 import { ListPageSkeleton } from "@/components/ui/skeleton";
-import { FeatureGuide } from "@/components/ui/feature-guide";
-import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { MetricExplainer } from "@/components/ui/metric-explainer";
 import { EXPENSES_WALKTHROUGH, METRIC_DEFINITIONS } from "@/lib/walkthrough-definitions";
 import { formatCurrency } from "./components/expense-utils";
@@ -35,15 +34,6 @@ function ChangeIndicator({ value }: { value: number }) {
     </span>
   );
 }
-
-const GUIDE_STEPS = [
-  { title: "Add Expenses", description: "Record business expenses with amount, vendor, date, and payment method." },
-  { title: "Set Budgets", description: "Create monthly spending budgets per category and get alerts when approaching limits." },
-  { title: "Track Vendors", description: "See analytics on your top vendors and spending distribution." },
-  { title: "Categorize Spending", description: "Create custom categories with colors to organize and visualize your expenses." },
-  { title: "Export Reports", description: "Download your expense data as CSV for accounting and tax purposes." },
-  { title: "Upload Receipts", description: "Attach receipt images to expenses for record-keeping and compliance." },
-];
 
 export default function ExpensesPage() {
   const d = useExpensesData();
@@ -78,8 +68,7 @@ export default function ExpensesPage() {
       <PageHeader icon={Receipt} title="Expenses" subtitle="Track, analyze, and optimize your business spending" actionLabel="Add Expense" onAction={openAddModal} actionDataAttr="expenses-add"
         rightSlot={<button onClick={handleExport} className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"><Download className="w-4 h-4" /> Export CSV</button>} />
       <div className="flex items-center gap-2">
-        <FeatureGuide featureKey="expenses" title="Getting Started with Expenses" description="Track spending, set budgets, and manage vendors" steps={GUIDE_STEPS} />
-        <WalkthroughTrigger moduleKey="expenses" />
+        <PageGuideTrigger moduleKey="expenses" />
       </div>
       <div data-walkthrough="expenses-kpi">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
@@ -154,7 +143,10 @@ export default function ExpensesPage() {
       <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} onClose={() => setShowModal(false)} onSaved={d.loadData} />}</AnimatePresence>
       <AnimatePresence>{detailExpense && <ExpenseDetailModal expense={detailExpense} onClose={() => setDetailExpense(null)} onEdit={openEditModal} />}</AnimatePresence>
 
-      <ModuleWalkthrough moduleKey="expenses" steps={EXPENSES_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="expenses"
+        walkthroughSteps={EXPENSES_WALKTHROUGH}
+      />
     </div>
   );
 }

@@ -35,7 +35,7 @@ import { useCommerceComposer } from "./hooks/use-commerce-composer";
 import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { SearchableHelpDrawer } from "./components/contextual-onboarding";
 import { ProgressivePrompts } from "../profile/components/progressive-prompts";
-import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { COMMERCE_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
@@ -323,7 +323,7 @@ export default function CommercePage() {
         icon={TrendingUp}
         title="Revenue"
         subtitle="Invoices, quotes, payments, collections, and billing operations"
-        titleExtra={<WalkthroughTrigger moduleKey="commerce" />}
+        titleExtra={<PageGuideTrigger moduleKey="commerce" />}
         rightSlot={
           <div className="flex items-center gap-2">
             <RichTooltip title="Revenue Pulse" description="Total payments collected this month across all invoices." side="bottom">
@@ -789,7 +789,10 @@ export default function CommercePage() {
 
       <ProgressivePrompts moduleFilter={["sales", "revenue", "finance"]} />
 
-      <ModuleWalkthrough moduleKey="commerce" steps={COMMERCE_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="commerce"
+        walkthroughSteps={COMMERCE_WALKTHROUGH}
+      />
     </div>
   );
 }

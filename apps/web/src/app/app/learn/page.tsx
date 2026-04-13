@@ -6,8 +6,6 @@ import {
   GraduationCap,
   BookOpen,
   Play,
-  Lightbulb,
-  X,
 } from "lucide-react";
 import {
   fetchCourses,
@@ -20,7 +18,7 @@ import {
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { LEARN_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
@@ -45,7 +43,6 @@ export default function LearnPage() {
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [selectedEnrollment, setSelectedEnrollment] = useState<CourseEnrollment | null>(null);
   const [enrollingId, setEnrollingId] = useState<string | null>(null);
-  const [showGuide, setShowGuide] = useState(false);
   const [tab, setTab] = useState("learning");
   const [slideDirection, setSlideDirection] = useState(0);
 
@@ -141,8 +138,7 @@ export default function LearnPage() {
         { key: "2", description: "Catalog tab", action: () => handleTabChange("catalog") },
         { key: "3", description: "Certificates tab", action: () => handleTabChange("certificates") },
         { key: "r", description: "Refresh courses", action: () => { void loadData(); } },
-        { key: "g", description: "Toggle guide", action: () => setShowGuide((p) => !p) },
-        { key: "Escape", description: "Close viewer/guide", action: () => { if (selectedCourse) closeCourseViewer(); else setShowGuide(false); } },
+        { key: "Escape", description: "Close viewer", action: () => { if (selectedCourse) closeCourseViewer(); } },
       ],
     },
   ], [handleTabChange, loadData, selectedCourse, closeCourseViewer]);
@@ -171,75 +167,7 @@ export default function LearnPage() {
         icon={GraduationCap}
         title="MasterClass"
         subtitle="Level up your business skills"
-        titleExtra={
-          <div className="relative flex items-center gap-2">
-            <WalkthroughTrigger moduleKey="learn" />
-            <button
-              onClick={() => setShowGuide(!showGuide)}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
-                showGuide
-                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
-                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
-              }`}
-              aria-label="Getting started guide"
-              title="Getting started guide"
-            >
-              <Lightbulb className="w-3.5 h-3.5" />
-            </button>
-            <AnimatePresence>
-              {showGuide && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.12 }}
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-1.5 rounded-lg bg-amber-400/10">
-                        <Lightbulb className="w-4 h-4 text-amber-400" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold">Getting Started</h4>
-                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
-                      </div>
-                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
-                        <X className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[
-                        { step: "1", title: "Browse Courses", desc: "Explore courses by difficulty level (Beginner, Intermediate, Advanced)." },
-                        { step: "2", title: "Enroll", desc: "Click any course to see the curriculum, then enroll to start learning." },
-                        { step: "3", title: "Complete Lessons", desc: "Work through lessons at your own pace. Your progress is saved automatically." },
-                        { step: "4", title: "Earn Certificates", desc: "Complete all lessons in a course to unlock a downloadable certificate." },
-                      ].map((item) => (
-                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
-                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
-                            {item.step}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium">{item.title}</p>
-                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-3 pt-3 border-t border-border/30 text-[10px] text-muted-foreground/60">
-                      Keyboard: <kbd className="px-1 py-0.5 rounded bg-white/10 font-mono">1-3</kbd> tabs
-                      <span className="mx-1.5">|</span>
-                      <kbd className="px-1 py-0.5 rounded bg-white/10 font-mono">R</kbd> refresh
-                      <span className="mx-1.5">|</span>
-                      <kbd className="px-1 py-0.5 rounded bg-white/10 font-mono">G</kbd> guide
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
-        }
+        titleExtra={<PageGuideTrigger moduleKey="learn" />}
       />
 
       <TabNav
@@ -306,7 +234,10 @@ export default function LearnPage() {
           )}
         </AnimatePresence>
       </div>
-      <ModuleWalkthrough moduleKey="learn" steps={LEARN_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="learn"
+        walkthroughSteps={LEARN_WALKTHROUGH}
+      />
     </div>
   );
 }

@@ -348,3 +348,128 @@ export const METRIC_DEFINITIONS: Record<string, { label: string; explanation: st
     goodValue: "Higher is better. Aim to increase this through repeat services and upselling.",
   },
 };
+
+export interface PageOverview {
+  title: string;
+  description: string;
+  concepts: { step: string; title: string; desc: string }[];
+}
+
+export const PAGE_OVERVIEWS: Record<string, PageOverview> = {
+  today: {
+    title: "Welcome to Your Command Center",
+    description: "Your daily briefing, AI-powered insights, and priority actions — all in one place.",
+    concepts: [
+      { step: "1", title: "Daily Briefing", desc: "See what needs attention right now — priority tasks, financial pulse, and AI-recommended actions." },
+      { step: "2", title: "AI Command Bar", desc: "Type natural language commands to get instant insights, create items, or navigate anywhere." },
+      { step: "3", title: "Next Best Actions", desc: "AI analyzes your entire business and suggests the most impactful actions to take today." },
+    ],
+  },
+  expenses: {
+    title: "Getting Started with Expenses",
+    description: "Track spending, set budgets, and manage vendors.",
+    concepts: [
+      { step: "1", title: "Add Expenses", desc: "Record business expenses with amount, vendor, date, and payment method." },
+      { step: "2", title: "Set Budgets", desc: "Create monthly spending budgets per category and get alerts when approaching limits." },
+      { step: "3", title: "Track Vendors", desc: "See analytics on your top vendors and spending distribution." },
+      { step: "4", title: "Categorize Spending", desc: "Create custom categories with colors to organize and visualize your expenses." },
+      { step: "5", title: "Export Reports", desc: "Download your expense data as CSV for accounting and tax purposes." },
+      { step: "6", title: "Upload Receipts", desc: "Attach receipt images to expenses for record-keeping and compliance." },
+    ],
+  },
+  crm: {
+    title: "Getting Started with Clients",
+    description: "Triage relationships, track health, and take action on what matters.",
+    concepts: [
+      { step: "1", title: "Add Clients", desc: "Create manually, scan business cards, import CSV/VCF, or sync from Google Contacts." },
+      { step: "2", title: "Smart Segments", desc: "Filter with one-tap segments like High Value, New This Week, and At Risk." },
+      { step: "3", title: "Communicate", desc: "Reach out via WhatsApp, email, or phone directly from any client card." },
+      { step: "4", title: "Bulk Actions", desc: "Select multiple clients for broadcast messages, tagging, or status updates." },
+      { step: "5", title: "Insights & AI", desc: "Track pipeline health, revenue data, and use AI tools for summaries and scoring." },
+      { step: "6", title: "Action Queue", desc: "See who needs attention and why — sorted by urgency and value." },
+    ],
+  },
+  commerce: {
+    title: "Getting Started with Revenue",
+    description: "Create invoices, quotes, and manage payments — all in one place.",
+    concepts: [
+      { step: "1", title: "Revenue Workspace", desc: "Commerce has four tabs: Invoices, Quotes, Payments, and Recurring billing." },
+      { step: "2", title: "Create Invoices & Quotes", desc: "Hit '+ New' to create an invoice or quote. Add line items, tax, and send to your client." },
+      { step: "3", title: "Financial Snapshot", desc: "Overview cards show outstanding balance, overdue amount, and monthly collections." },
+      { step: "4", title: "Help & AI Assistant", desc: "Use the AI search bar to ask questions like 'Show invoices over $5000' in plain English." },
+    ],
+  },
+  bookings: {
+    title: "Getting Started with Bookings",
+    description: "Set up your schedule, services, and staff to start accepting bookings.",
+    concepts: [
+      { step: "1", title: "Add Services", desc: "Define your bookable services with pricing and duration." },
+      { step: "2", title: "Add Staff", desc: "Add team members who can be assigned to bookings." },
+      { step: "3", title: "Manage Schedule", desc: "View bookings on the calendar, confirm or cancel appointments." },
+      { step: "4", title: "Connect Google Calendar", desc: "Sync bookings to your Google Calendar from Catalog & Capacity." },
+      { step: "5", title: "Track Performance", desc: "Monitor volume, revenue, and schedule health." },
+    ],
+  },
+  marketing: {
+    title: "Getting Started with Marketing",
+    description: "Create campaigns, capture leads, and grow your audience.",
+    concepts: [
+      { step: "1", title: "Create & Schedule", desc: "Build email campaigns, compose social posts, and schedule content from one surface." },
+      { step: "2", title: "Calendar", desc: "View all scheduled campaigns and posts on a unified content calendar." },
+      { step: "3", title: "Audiences & Forms", desc: "Manage lead forms and audience segments for targeted outreach." },
+      { step: "4", title: "Performance", desc: "Track campaign performance, open rates, leads, and conversion funnels." },
+    ],
+  },
+  reports: {
+    title: "Getting Started with Reports",
+    description: "Generate intelligent business reports with AI-powered insights.",
+    concepts: [
+      { step: "1", title: "Choose Report Type", desc: "Select from Executive, P&L, Revenue, Expenses, or Clients report views." },
+      { step: "2", title: "Set Date Range", desc: "Pick a preset period or set custom start and end dates for your report." },
+      { step: "3", title: "Generate Report", desc: "AI analyzes your business data and generates comprehensive insights." },
+      { step: "4", title: "View AI Insights", desc: "Get intelligent summaries, trends, and actionable recommendations." },
+      { step: "5", title: "Export Data", desc: "Download reports as PDF for sharing with partners or accountants." },
+      { step: "6", title: "Schedule Reports", desc: "Set up recurring report generation to stay on top of your metrics." },
+    ],
+  },
+  automations: {
+    title: "Getting Started with Automations",
+    description: "Automate repetitive tasks and connect your business modules.",
+    concepts: [
+      { step: "1", title: "Create an Automation", desc: "Click 'New Automation' or use a template to set up trigger-to-action workflows." },
+      { step: "2", title: "Pick a Trigger", desc: "Choose what starts the automation — like a paid invoice, new booking, or form submission." },
+      { step: "3", title: "Add Actions", desc: "Define what happens next — send an email, create a task, tag a contact, or more." },
+      { step: "4", title: "Toggle On/Off", desc: "Enable or disable automations anytime without losing your configuration." },
+      { step: "5", title: "Monitor Activity", desc: "Check the Activity Log tab to see when automations ran and what they did." },
+    ],
+  },
+  projects: {
+    title: "Getting Started with Projects",
+    description: "Organize work with kanban boards and task tracking.",
+    concepts: [
+      { step: "1", title: "Create Projects", desc: "Click '+ New Project' to set up a project with a name and color for organizing work." },
+      { step: "2", title: "Add Tasks", desc: "Expand a project and add tasks — check them off as you complete each action item." },
+      { step: "3", title: "Use Kanban Board", desc: "Projects are displayed in columns by status: Active, In Progress, Completed, and On Hold." },
+      { step: "4", title: "Track Progress", desc: "Monitor task completion with progress bars and move projects between statuses." },
+    ],
+  },
+  learn: {
+    title: "Getting Started with MasterClass",
+    description: "Level up your business skills with guided courses and earn certificates.",
+    concepts: [
+      { step: "1", title: "Browse Courses", desc: "Explore courses by difficulty level (Beginner, Intermediate, Advanced)." },
+      { step: "2", title: "Enroll", desc: "Click any course to see the curriculum, then enroll to start learning." },
+      { step: "3", title: "Complete Lessons", desc: "Work through lessons at your own pace. Your progress is saved automatically." },
+      { step: "4", title: "Earn Certificates", desc: "Complete all lessons in a course to unlock a downloadable certificate." },
+    ],
+  },
+  store: {
+    title: "Getting Started with Store",
+    description: "Configure your online storefront, showcase your services, and attract customers.",
+    concepts: [
+      { step: "1", title: "Your Online Storefront", desc: "Configure your public store with products, branding, business hours, and a shareable URL." },
+      { step: "2", title: "Customize Appearance", desc: "Choose a theme, set brand colors, upload a hero image, and add testimonials to build trust." },
+      { step: "3", title: "Track Performance", desc: "Monitor page views, popular items, and how many visitors convert into customers." },
+    ],
+  },
+};

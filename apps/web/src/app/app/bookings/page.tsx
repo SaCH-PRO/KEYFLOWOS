@@ -54,10 +54,9 @@ import { ScheduleHints } from "./components/schedule-hints";
 import ScheduleFilters from "./components/schedule-filters";
 import CatalogCapacityTab from "./components/catalog-capacity-tab";
 import PerformanceView from "./components/performance-view";
-import { FeatureGuide } from "@/components/ui/feature-guide";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
-import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { BOOKINGS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
@@ -448,19 +447,7 @@ export default function BookingsPage() {
         subtitle="Schedule, booking health, and capacity"
         titleExtra={
           <div className="flex items-center gap-2">
-            <FeatureGuide
-              featureKey="bookings"
-              title="Getting Started with Bookings"
-              description="Set up your schedule, services, and staff to start accepting bookings."
-              steps={[
-                { title: "Add Services", description: "Define your bookable services with pricing and duration." },
-                { title: "Add Staff", description: "Add team members who can be assigned to bookings." },
-                { title: "Manage Schedule", description: "View bookings on the calendar, confirm or cancel appointments." },
-                { title: "Connect Google Calendar", description: "Sync bookings to your Google Calendar from Catalog & Capacity." },
-                { title: "Track Performance", description: "Monitor volume, revenue, and schedule health." },
-              ]}
-            />
-            <WalkthroughTrigger moduleKey="bookings" />
+            <PageGuideTrigger moduleKey="bookings" />
           </div>
         }
         rightSlot={
@@ -676,7 +663,10 @@ export default function BookingsPage() {
         />
       )}
 
-      <ModuleWalkthrough moduleKey="bookings" steps={BOOKINGS_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="bookings"
+        walkthroughSteps={BOOKINGS_WALKTHROUGH}
+      />
     </div>
   );
 }

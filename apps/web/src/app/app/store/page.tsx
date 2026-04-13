@@ -11,7 +11,7 @@ import { useSearchParams } from "next/navigation";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { WorkspaceError } from "@/components/ui/workspace-error";
-import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { STORE_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { formatPrice } from "@/lib/format";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
@@ -162,7 +162,7 @@ export default function StorePage() {
                     }} />
                     {s.storeEnabled ? "Live" : "Draft"}
                   </div>
-                  <WalkthroughTrigger moduleKey="store" />
+                  <PageGuideTrigger moduleKey="store" />
                 </div>
                 <p className="text-xs mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
                   {s.storeEnabled && s.getPublicBookingUrl() ? s.getPublicBookingUrl().replace("https://", "") : "Your online storefront"}
@@ -282,7 +282,10 @@ export default function StorePage() {
         </AnimatePresence>
       </div>
 
-      <ModuleWalkthrough moduleKey="store" steps={STORE_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="store"
+        walkthroughSteps={STORE_WALKTHROUGH}
+      />
     </div>
   );
 }

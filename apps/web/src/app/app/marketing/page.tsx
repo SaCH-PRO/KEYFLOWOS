@@ -22,8 +22,7 @@ import { useModuleEvent } from "@/hooks/use-module-events";
 import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
 import { useMarketing } from "./hooks/use-marketing";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
-import { FeatureGuide } from "@/components/ui/feature-guide";
-import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
+import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { AiBadge } from "@/components/ui/ai-badge";
 import { MARKETING_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { CampaignsPanel } from "./components/campaigns-panel";
@@ -201,22 +200,7 @@ export default function MarketingPage() {
         subtitle="Create, engage & measure"
         actionLabel={actionLabel}
         onAction={actionLabel ? handleNewItem : undefined}
-        titleExtra={
-          <div className="flex items-center gap-2">
-            <FeatureGuide
-              featureKey="marketing"
-              title="Getting Started with Marketing"
-              description="Create campaigns, capture leads, and grow your audience."
-              steps={[
-                { title: "Create & Schedule", description: "Build email campaigns, compose social posts, and schedule content from one surface." },
-                { title: "Calendar", description: "View all scheduled campaigns and posts on a unified content calendar." },
-                { title: "Audiences & Forms", description: "Manage lead forms and audience segments for targeted outreach." },
-                { title: "Performance", description: "Track campaign performance, open rates, leads, and conversion funnels." },
-              ]}
-            />
-            <WalkthroughTrigger moduleKey="marketing" />
-          </div>
-        }
+        titleExtra={<PageGuideTrigger moduleKey="marketing" />}
         rightSlot={
           <div className="flex items-center gap-1.5">
             {showSearch ? (
@@ -311,7 +295,10 @@ export default function MarketingPage() {
 
       <ProgressivePrompts moduleFilter={["marketingStrategy", "growth"]} />
 
-      <ModuleWalkthrough moduleKey="marketing" steps={MARKETING_WALKTHROUGH} />
+      <PageGuide
+        moduleKey="marketing"
+        walkthroughSteps={MARKETING_WALKTHROUGH}
+      />
     </div>
   );
 }
