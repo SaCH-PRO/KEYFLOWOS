@@ -139,6 +139,7 @@ model Business {
   preOrders        PreOrder[]
   purchaseOrders   PurchaseOrder[]
   marketplaceOrders MarketplaceOrder[]
+  fulfillmentRoutes FulfillmentRoute[]
   promoCodes       PromoCode[]
   crmSequences      CrmSequence[]
   crossModuleWorkflows CrossModuleWorkflow[]
@@ -519,7 +520,6 @@ model Product {
   sourceLinks     ProductSourceLink[]
   costProfile     ProductCostProfile?
   marginSnapshots MarginSnapshot[]
-  fulfillmentRoutes FulfillmentRoute[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -1744,6 +1744,13 @@ model MarketplaceListing {
   countries    String[]
   regions      String[]
 
+  fulfillmentStrategy String @default("LOCAL_STOCK") @map("fulfillment_strategy")
+  supplierName        String? @map("supplier_name")
+  supplierEmail       String? @map("supplier_email")
+  supplierPhone       String? @map("supplier_phone")
+  supplierCountry     String? @map("supplier_country")
+  depositPercent      Float?  @map("deposit_percent")
+
   pricingOverrides Json?  @map("pricing_overrides")
   shippingEnabled  Boolean @default(true) @map("shipping_enabled")
   digitalDelivery  Boolean @default(false) @map("digital_delivery")
@@ -1758,16 +1765,55 @@ model MarketplaceListing {
   maxOrderQty     Int?     @map("max_order_qty")
   leadTimeDays    Int?     @map("lead_time_days")
 
-  // Mission 2: Fulfillment strategy
-  fulfillmentStrategy String? @default("local_stock") @map("fulfillment_strategy") // local_stock, dropship, preorder, manual, hybrid
-
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  fulfillmentRoutes FulfillmentRoute[]
+
   @@index([businessId])
   @@index([marketReach])
   @@map("marketplace_listings")
+}
+
+model FulfillmentRoute {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  orderId     String   @map("order_id")
+  order       MarketplaceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId String?  @map("order_item_id")
+  listingId   String?  @map("listing_id")
+  listing     MarketplaceListing? @relation(fields: [listingId], references: [id])
+
+  strategy      String
+  status        String   @default("PENDING")
+  sourceType    String?  @map("source_type")
+  warehouseId   String?  @map("warehouse_id")
+  warehouse     Warehouse? @relation(fields: [warehouseId], references: [id])
+
+  purchaseOrderId String?  @map("purchase_order_id")
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+
+  preOrderId    String?  @map("pre_order_id")
+  preOrder      PreOrder? @relation(fields: [preOrderId], references: [id])
+
+  shipmentId    String?  @map("shipment_id")
+  shipment      Shipment? @relation(fields: [shipmentId], references: [id])
+
+  sourceLinkId  String?  @map("source_link_id")
+  sourceLink    ProductSourceLink? @relation(fields: [sourceLinkId], references: [id])
+
+  notes         String?
+  metadata      Json?
+
+  resolvedAt    DateTime? @map("resolved_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@index([orderId])
+  @@map("fulfillment_routes")
 }
 
 model ShippingZone {
@@ -1806,7 +1852,8 @@ model Warehouse {
   capacity    Int?
   isActive    Boolean  @default(true) @map("is_active")
 
-  inventoryStocks InventoryStock[]
+  inventoryStocks   InventoryStock[]
+  fulfillmentRoutes FulfillmentRoute[]
 
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -1843,7 +1890,7 @@ model MarketplaceOrder {
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   orderNumber String   @unique @map("order_number")
-  status      String   @default("PENDING")
+  status      String   @default("placed")
   type        String   @default("STANDARD")
 
   customerName  String  @map("customer_name")
@@ -1872,8 +1919,9 @@ model MarketplaceOrder {
   promoCodeId String?  @map("promo_code_id")
   promoCode   PromoCode? @relation(fields: [promoCodeId], references: [id])
 
-  items       MarketplaceOrderItem[]
-  shipments   Shipment[]
+  items              MarketplaceOrderItem[]
+  shipments          Shipment[]
+  fulfillmentRoutes  FulfillmentRoute[]
 
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -1928,6 +1976,8 @@ model Shipment {
   deliveredAt       DateTime? @map("delivered_at")
 
   milestones  Json?
+
+  fulfillmentRoutes FulfillmentRoute[]
 
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -1995,6 +2045,8 @@ model PreOrder {
 
   notes       String?
 
+  fulfillmentRoutes FulfillmentRoute[]
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -2030,8 +2082,13 @@ model PurchaseOrder {
 
   expectedDelivery DateTime? @map("expected_delivery")
   receivedAt       DateTime? @map("received_at")
+  submittedAt      DateTime? @map("submitted_at")
+  acknowledgedAt   DateTime? @map("acknowledged_at")
+  shippedAt        DateTime? @map("shipped_at")
 
   notes       String?
+
+  fulfillmentRoutes FulfillmentRoute[]
 
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -3275,6 +3332,8 @@ model ProductSourceLink {
 
   isActive  Boolean  @default(true) @map("is_active")
 
+  fulfillmentRoutes FulfillmentRoute[]
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt      @map("updated_at")
 
@@ -3325,31 +3384,3 @@ model MarginSnapshot {
   @@map("margin_snapshots")
 }
 
-model FulfillmentRoute {
-  id        String  @id @default(cuid())
-  productId String? @map("product_id")
-  product   Product? @relation(fields: [productId], references: [id])
-
-  orderId        String? @map("order_id")
-  orderLineId    String? @map("order_line_id")
-
-  fulfillmentModel String  @map("fulfillment_model") // local_stock, dropship, preorder, manual, hybrid
-  sourceSupplier   String? @map("source_supplier")
-  warehouse        String?
-
-  leadTimeDays  Int?    @map("lead_time_days")
-  shippingMethod String? @map("shipping_method")
-  trackingState  String? @map("tracking_state")  // pending, shipped, in_transit, delivered, failed
-  status         String  @default("pending")      // pending, processing, shipped, delivered, cancelled
-
-  fallbackLogic  Json?  @map("fallback_logic")   // JSON describing fallback rules
-  costSnapshot   Json?  @map("cost_snapshot")    // snapshot of costs at fulfillment time
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt      @map("updated_at")
-
-  @@index([orderId])
-  @@index([productId])
-  @@index([status])
-  @@map("fulfillment_routes")
-}

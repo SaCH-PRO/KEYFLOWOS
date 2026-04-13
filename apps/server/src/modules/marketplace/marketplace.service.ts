@@ -1,7 +1,8 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
-import { createHash, randomBytes } from 'crypto';
+import { createHash } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
+import { FulfillmentRoutingService, canTransitionOrder } from './fulfillment-routing.service';
 
 @Injectable()
 export class MarketplaceService {
@@ -11,6 +12,7 @@ export class MarketplaceService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => TransactionalEmailService))
     private readonly emailService: TransactionalEmailService,
+    private readonly fulfillmentRoutingService: FulfillmentRoutingService,
   ) {}
 
   private generateOrderNumber(): string {
@@ -35,6 +37,12 @@ export class MarketplaceService {
         marketReach: data.marketReach || 'LOCAL',
         countries: data.countries || [],
         regions: data.regions || [],
+        fulfillmentStrategy: data.fulfillmentStrategy || 'LOCAL_STOCK',
+        supplierName: data.supplierName,
+        supplierEmail: data.supplierEmail,
+        supplierPhone: data.supplierPhone,
+        supplierCountry: data.supplierCountry,
+        depositPercent: data.depositPercent,
         pricingOverrides: data.pricingOverrides,
         shippingEnabled: data.shippingEnabled ?? true,
         digitalDelivery: data.digitalDelivery ?? false,
@@ -85,6 +93,12 @@ export class MarketplaceService {
         marketReach: data.marketReach,
         countries: data.countries,
         regions: data.regions,
+        fulfillmentStrategy: data.fulfillmentStrategy,
+        supplierName: data.supplierName,
+        supplierEmail: data.supplierEmail,
+        supplierPhone: data.supplierPhone,
+        supplierCountry: data.supplierCountry,
+        depositPercent: data.depositPercent,
         pricingOverrides: data.pricingOverrides,
         shippingEnabled: data.shippingEnabled,
         digitalDelivery: data.digitalDelivery,
@@ -305,10 +319,13 @@ export class MarketplaceService {
     const discountAmount = data.discountAmount || 0;
     const total = subtotal + shippingFee + taxAmount + dutyAmount - discountAmount;
 
+    const initialStatus = data.paymentOnCreation ? 'paid' : 'placed';
+
     const order = await this.prisma.client.marketplaceOrder.create({
       data: {
         businessId,
         orderNumber,
+        status: initialStatus,
         type: data.type || 'STANDARD',
         customerName: data.customerName,
         customerEmail: data.customerEmail,
@@ -325,6 +342,9 @@ export class MarketplaceService {
         currency: data.currency || 'TTD',
         notes: data.notes,
         items: { create: orderItems },
+        metadata: {
+          statusTimeline: [{ status: initialStatus, timestamp: new Date().toISOString(), note: 'Order placed' }],
+        },
       },
       include: { items: { include: { product: true } }, shipments: true },
     });
@@ -333,7 +353,46 @@ export class MarketplaceService {
       this.logger.error(`Failed to send seller new order notification: ${(err as Error).message}`),
     );
 
+    this.autoRouteOrder(businessId, order.id, initialStatus === 'paid');
+
     return order;
+  }
+
+  private autoRouteOrder(businessId: string, orderId: string, isPaid: boolean): void {
+    const doRoute = async () => {
+      const now = new Date().toISOString();
+      const existing = await this.prisma.client.marketplaceOrder.findUnique({
+        where: { id: orderId },
+        select: { metadata: true, status: true },
+      });
+      const existingMeta = (existing?.metadata as Record<string, unknown>) ?? {};
+      const existingTimeline = Array.isArray(existingMeta.statusTimeline)
+        ? (existingMeta.statusTimeline as unknown[])
+        : [];
+
+      const routingNote = isPaid
+        ? 'Order paid — routing fulfillment'
+        : 'Order placed — routing fulfillment and reserving inventory';
+
+      await this.prisma.client.marketplaceOrder.update({
+        where: { id: orderId },
+        data: {
+          metadata: {
+            ...existingMeta,
+            statusTimeline: [
+              ...existingTimeline,
+              { status: existing?.status ?? 'placed', timestamp: now, note: routingNote },
+            ],
+          },
+        },
+      });
+
+      await this.fulfillmentRoutingService.routeOrder(businessId, orderId);
+    };
+
+    doRoute().catch((err) =>
+      this.logger.error(`Auto-routing failed for order ${orderId}: ${(err as Error).message}`),
+    );
   }
 
   private async sendSellerNewOrderNotification(businessId: string, order: any, items: any[]) {
@@ -718,6 +777,14 @@ export class MarketplaceService {
     });
     if (!po) throw new NotFoundException('Purchase order not found');
 
+    if (data.status && data.status !== po.status) {
+      return this.fulfillmentRoutingService.advancePurchaseOrderStatus(
+        businessId,
+        poId,
+        data.status as 'SUBMITTED' | 'ACKNOWLEDGED' | 'SHIPPED' | 'RECEIVED',
+      );
+    }
+
     const updateData: Record<string, unknown> = {
       supplierName: data.supplierName,
       supplierEmail: data.supplierEmail,
@@ -726,11 +793,7 @@ export class MarketplaceService {
       shippingCost: data.shippingCost,
       taxAmount: data.taxAmount,
       notes: data.notes,
-      status: data.status,
     };
-    if (data.status === 'RECEIVED' && !po.receivedAt) {
-      updateData.receivedAt = new Date();
-    }
     if (data.expectedDelivery) {
       updateData.expectedDelivery = new Date(data.expectedDelivery);
     }
@@ -739,6 +802,47 @@ export class MarketplaceService {
       where: { id: poId },
       data: updateData,
     });
+  }
+
+  async advancePurchaseOrderStatus(
+    businessId: string,
+    poId: string,
+    data: { status: 'SUBMITTED' | 'ACKNOWLEDGED' | 'SHIPPED' | 'RECEIVED' },
+  ) {
+    return this.fulfillmentRoutingService.advancePurchaseOrderStatus(businessId, poId, data.status);
+  }
+
+  async getFulfillmentRoutes(businessId: string, orderId: string) {
+    return this.fulfillmentRoutingService.getFulfillmentRoutes(businessId, orderId);
+  }
+
+  async updateFulfillmentRoute(businessId: string, routeId: string, data: any) {
+    return this.fulfillmentRoutingService.updateFulfillmentRoute(businessId, routeId, data);
+  }
+
+  async routeOrder(businessId: string, orderId: string) {
+    const order = await this.prisma.client.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const validRoutingStatuses = ['placed', 'awaiting_fulfillment', 'paid'];
+    if (!validRoutingStatuses.includes(order.status)) {
+      throw new BadRequestException(
+        `Cannot manually route order in status "${order.status}". ` +
+          `Order must be in placed, paid, or awaiting_fulfillment status.`,
+      );
+    }
+
+    return this.fulfillmentRoutingService.routeOrder(businessId, orderId);
+  }
+
+  async activatePreorderRoute(businessId: string, routeId: string) {
+    return this.fulfillmentRoutingService.activatePreorderRoute(businessId, routeId);
+  }
+
+  async getInventoryAlerts(businessId: string) {
+    return this.fulfillmentRoutingService.getInventoryAlerts(businessId);
   }
 
   async getDashboard(businessId: string) {
@@ -761,7 +865,7 @@ export class MarketplaceService {
       this.prisma.client.marketplaceListing.count({ where: { businessId } }),
       this.prisma.client.marketplaceListing.count({ where: { businessId, isActive: true } }),
       this.prisma.client.marketplaceOrder.count({ where: { businessId } }),
-      this.prisma.client.marketplaceOrder.count({ where: { businessId, status: 'PENDING' } }),
+      this.prisma.client.marketplaceOrder.count({ where: { businessId, status: { in: ['placed', 'awaiting_payment', 'awaiting_fulfillment', 'PENDING'] } } }),
       this.prisma.client.shipment.count({ where: { businessId } }),
       this.prisma.client.shipment.count({ where: { businessId, status: 'IN_TRANSIT' } }),
       this.prisma.client.customsDeclaration.count({ where: { businessId, status: { in: ['DRAFT', 'FILED'] } } }),
@@ -860,43 +964,86 @@ export class MarketplaceService {
     const timeline: any[] = meta.statusTimeline ?? [];
     const now = new Date().toISOString();
 
-    const validTransitions: Record<string, string[]> = {
-      PENDING: ['CONFIRMED', 'CANCELLED'],
-      CONFIRMED: ['PROCESSING', 'CANCELLED'],
-      PROCESSING: ['SHIPPED', 'CANCELLED'],
-      SHIPPED: ['DELIVERED'],
-      DELIVERED: [],
-      CANCELLED: [],
-      REFUNDED: [],
-    };
-
     let newStatus = order.status;
     const updateData: Record<string, unknown> = {};
 
     switch (action) {
-      case 'confirm':
-        if (!validTransitions[order.status]?.includes('CONFIRMED')) {
-          throw new BadRequestException(`Cannot confirm order in ${order.status} status`);
+      case 'confirm': {
+        if (!canTransitionOrder(order.status, 'awaiting_payment')) {
+          throw new BadRequestException(`Cannot confirm order from ${order.status} status`);
         }
-        newStatus = 'CONFIRMED';
-        timeline.push({ status: 'CONFIRMED', timestamp: now, note: data?.note });
+        newStatus = 'awaiting_payment';
+        timeline.push({ status: 'awaiting_payment', timestamp: now, note: data?.note ?? 'Order confirmed, awaiting payment' });
         break;
+      }
 
-      case 'process':
-        if (!validTransitions[order.status]?.includes('PROCESSING')) {
+      case 'mark_awaiting_payment': {
+        if (!canTransitionOrder(order.status, 'awaiting_payment')) {
+          throw new BadRequestException(`Cannot transition order from ${order.status} to awaiting_payment`);
+        }
+        newStatus = 'awaiting_payment';
+        timeline.push({ status: 'awaiting_payment', timestamp: now, note: data?.note });
+        break;
+      }
+
+      case 'mark_paid': {
+        if (!canTransitionOrder(order.status, 'paid')) {
+          throw new BadRequestException(`Cannot transition order from ${order.status} to paid`);
+        }
+        newStatus = 'paid';
+        timeline.push({ status: 'paid', timestamp: now, note: data?.note });
+        if (data?.paymentMethod) updateData.paymentMethod = data.paymentMethod;
+        if (data?.paymentRef) updateData.paymentRef = data.paymentRef;
+        updateData.paymentStatus = 'PAID';
+        updateData.status = newStatus;
+        updateData.metadata = { ...meta, statusTimeline: [...timeline] };
+        await this.prisma.client.marketplaceOrder.update({ where: { id: orderId }, data: updateData });
+        this.autoRouteOrder(businessId, orderId, true);
+        const paidOrder = await this.prisma.client.marketplaceOrder.findFirst({
+          where: { id: orderId },
+          include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+        });
+        return paidOrder;
+      }
+
+      case 'route': {
+        if (!canTransitionOrder(order.status, 'awaiting_fulfillment')) {
+          throw new BadRequestException(`Cannot route order from ${order.status} status`);
+        }
+        newStatus = 'awaiting_fulfillment';
+        timeline.push({ status: 'awaiting_fulfillment', timestamp: now, note: data?.note });
+        updateData.status = newStatus;
+        updateData.metadata = { ...meta, statusTimeline: timeline };
+        await this.prisma.client.marketplaceOrder.update({
+          where: { id: orderId },
+          data: updateData,
+        });
+        await this.fulfillmentRoutingService.routeOrder(businessId, orderId);
+        const routedOrder = await this.prisma.client.marketplaceOrder.findFirst({
+          where: { id: orderId },
+          include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+        });
+        return routedOrder;
+      }
+
+      case 'process': {
+        const target = 'picking_packing';
+        if (!canTransitionOrder(order.status, target)) {
           throw new BadRequestException(`Cannot process order in ${order.status} status`);
         }
-        newStatus = 'PROCESSING';
-        timeline.push({ status: 'PROCESSING', timestamp: now, note: data?.note });
+        newStatus = target;
+        timeline.push({ status: target, timestamp: now, note: data?.note });
+        await this.fulfillmentRoutingService.createPickPackTasks(businessId, orderId, order.items);
         break;
+      }
 
-      case 'ship':
-        if (!validTransitions[order.status]?.includes('SHIPPED')) {
+      case 'ship': {
+        if (!canTransitionOrder(order.status, 'shipped')) {
           throw new BadRequestException(`Cannot ship order in ${order.status} status`);
         }
-        newStatus = 'SHIPPED';
+        newStatus = 'shipped';
         timeline.push({
-          status: 'SHIPPED',
+          status: 'shipped',
           timestamp: now,
           carrier: data?.carrier,
           trackingNumber: data?.trackingNumber,
@@ -904,8 +1051,10 @@ export class MarketplaceService {
           note: data?.note,
         });
 
+        let shipmentId: string | undefined;
+
         if (data?.carrier || data?.trackingNumber) {
-          await this.prisma.client.shipment.create({
+          const shipment = await this.prisma.client.shipment.create({
             data: {
               businessId,
               orderId,
@@ -917,15 +1066,49 @@ export class MarketplaceService {
               destinationAddress: order.shippingAddress ?? undefined,
             },
           });
+          shipmentId = shipment.id;
         }
-        break;
 
-      case 'deliver':
-        if (!validTransitions[order.status]?.includes('DELIVERED')) {
+        const localRoutes = await this.prisma.client.fulfillmentRoute.findMany({
+          where: { businessId, orderId, strategy: 'LOCAL_STOCK', status: 'RESERVED' },
+        });
+        for (const route of localRoutes) {
+          await this.fulfillmentRoutingService.decrementInventoryOnShip(businessId, route.id);
+          await this.prisma.client.fulfillmentRoute.update({
+            where: { id: route.id },
+            data: {
+              status: 'SHIPPED',
+              shipmentId: shipmentId,
+            },
+          });
+        }
+
+        if (shipmentId) {
+          await this.prisma.client.fulfillmentRoute.updateMany({
+            where: {
+              businessId,
+              orderId,
+              status: { in: ['PICKING_PACKING', 'PO_RAISED', 'PREORDER_ACCEPTED'] },
+              shipmentId: null,
+            },
+            data: { status: 'SHIPPED', shipmentId },
+          });
+        } else {
+          await this.prisma.client.fulfillmentRoute.updateMany({
+            where: { businessId, orderId, status: { in: ['PICKING_PACKING', 'PO_RAISED', 'PREORDER_ACCEPTED'] } },
+            data: { status: 'SHIPPED' },
+          });
+        }
+
+        break;
+      }
+
+      case 'deliver': {
+        if (!canTransitionOrder(order.status, 'delivered')) {
           throw new BadRequestException(`Cannot deliver order in ${order.status} status`);
         }
-        newStatus = 'DELIVERED';
-        timeline.push({ status: 'DELIVERED', timestamp: now, note: data?.note });
+        newStatus = 'delivered';
+        timeline.push({ status: 'delivered', timestamp: now, note: data?.note });
 
         if (order.shipments?.length > 0) {
           for (const shipment of order.shipments) {
@@ -937,36 +1120,51 @@ export class MarketplaceService {
             }
           }
         }
-        break;
 
-      case 'cancel':
-        if (!validTransitions[order.status]?.includes('CANCELLED')) {
+        await this.prisma.client.fulfillmentRoute.updateMany({
+          where: { businessId, orderId, status: 'SHIPPED' },
+          data: { status: 'DELIVERED', resolvedAt: new Date() },
+        });
+        break;
+      }
+
+      case 'complete': {
+        if (!canTransitionOrder(order.status, 'completed')) {
+          throw new BadRequestException(`Cannot complete order in ${order.status} status`);
+        }
+        newStatus = 'completed';
+        timeline.push({ status: 'completed', timestamp: now, note: data?.note });
+
+        await this.prisma.client.fulfillmentRoute.updateMany({
+          where: { businessId, orderId, status: 'DELIVERED' },
+          data: { status: 'COMPLETED', resolvedAt: new Date() },
+        });
+        break;
+      }
+
+      case 'cancel': {
+        if (!canTransitionOrder(order.status, 'cancelled')) {
           throw new BadRequestException(`Cannot cancel order in ${order.status} status`);
         }
-        newStatus = 'CANCELLED';
-        timeline.push({ status: 'CANCELLED', timestamp: now, reason: data?.reason, note: data?.note });
+        newStatus = 'cancelled';
+        timeline.push({ status: 'cancelled', timestamp: now, reason: data?.reason, note: data?.note });
 
-        for (const item of order.items) {
-          if (item.productId) {
-            const inv = await this.prisma.client.inventoryStock.findFirst({
-              where: { productId: item.productId, businessId },
-            });
-            if (inv) {
-              await this.prisma.client.inventoryStock.update({
-                where: { id: inv.id },
-                data: {
-                  quantity: inv.quantity + item.quantity,
-                },
-              });
-            }
-          }
-        }
+        await this.fulfillmentRoutingService.releaseInventoryReservation(businessId, orderId);
+
+        await this.prisma.client.fulfillmentRoute.updateMany({
+          where: { businessId, orderId, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+          data: { status: 'CANCELLED' },
+        });
         break;
+      }
 
-      case 'refund':
-        newStatus = 'REFUNDED';
+      case 'refund': {
+        if (!canTransitionOrder(order.status, 'refunded')) {
+          throw new BadRequestException(`Cannot refund order in ${order.status} status`);
+        }
+        newStatus = 'refunded';
         timeline.push({
-          status: 'REFUNDED',
+          status: 'refunded',
           timestamp: now,
           refundAmount: data?.refundAmount ?? order.total,
           reason: data?.reason,
@@ -974,8 +1172,9 @@ export class MarketplaceService {
         });
         updateData.paymentStatus = 'REFUNDED';
         break;
+      }
 
-      case 'add_tracking':
+      case 'add_tracking': {
         timeline.push({
           status: 'TRACKING_UPDATED',
           timestamp: now,
@@ -985,7 +1184,7 @@ export class MarketplaceService {
         });
 
         if (data?.carrier || data?.trackingNumber) {
-          const existingShipment = order.shipments?.find(s => s.orderId === orderId);
+          const existingShipment = order.shipments?.find((s: any) => s.orderId === orderId);
           if (existingShipment) {
             await this.prisma.client.shipment.update({
               where: { id: existingShipment.id },
@@ -1008,6 +1207,7 @@ export class MarketplaceService {
           }
         }
         break;
+      }
 
       default:
         throw new BadRequestException(`Unknown fulfillment action: ${action}`);
@@ -1045,6 +1245,11 @@ export class MarketplaceService {
       DELIVERED: 'order_delivered',
       CANCELLED: 'order_cancelled',
       REFUNDED: 'order_refunded',
+      paid: 'order_confirmed',
+      shipped: 'order_shipped',
+      delivered: 'order_delivered',
+      cancelled: 'order_cancelled',
+      refunded: 'order_refunded',
     };
 
     const type = notificationMap[status];
@@ -1074,7 +1279,7 @@ export class MarketplaceService {
       trackingNumber: data?.trackingNumber,
       reason: data?.reason,
       refundAmount: data?.refundAmount ?? order.total,
-      deliveredAt: status === 'DELIVERED' ? new Date().toISOString() : undefined,
+      deliveredAt: (status === 'DELIVERED' || status === 'delivered') ? new Date().toISOString() : undefined,
     };
 
     await this.emailService.send({
