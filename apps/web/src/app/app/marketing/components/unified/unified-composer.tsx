@@ -224,6 +224,35 @@ export function UnifiedComposer({
           if (c.contentType === "email_campaign") setContentType("email");
           else if (c.contentType === "multi_channel_broadcast") setContentType("multi");
           else setContentType("social");
+
+          if (c.deliveries && c.deliveries.length > 0) {
+            const destIds = [...new Set(c.deliveries.map(d => d.destinationId))];
+            const { listChannelDestinations } = await import("@/lib/client");
+            const destRes = await listChannelDestinations(businessId);
+            if (destRes.data) {
+              const restored = destRes.data.filter(d => destIds.includes(d.id));
+              if (restored.length > 0) setSelectedDestinations(restored);
+            }
+          }
+
+          if (c.variants && c.variants.length > 0) {
+            const meta = (v: typeof c.variants[0]) => (v.metadata || {}) as Record<string, string>;
+            setVariants(c.variants.map(v => ({
+              platform: v.platform,
+              textBody: v.body || c.body || "",
+              subject: v.subject || meta(v).subject,
+              previewText: meta(v).previewText,
+              hashtags: meta(v).hashtags,
+              customized: true,
+            })));
+          }
+
+          if (c.scheduledAt) {
+            setScheduleMode("later");
+            setScheduledAt(new Date(c.scheduledAt).toISOString().slice(0, 16));
+          }
+          if (c.timezone) setTimezone(c.timezone);
+
           setDraftRestored(true);
         }
       })();
@@ -271,7 +300,11 @@ export function UnifiedComposer({
   }, [contentType]);
 
   const selectedPlatforms = useMemo(() => {
-    const platforms = selectedDestinations.map((d) => d.platform.toUpperCase());
+    const PLATFORM_MAP: Record<string, string> = { GOOGLE: "EMAIL", META: "FACEBOOK" };
+    const platforms = selectedDestinations.map((d) => {
+      const upper = d.platform.toUpperCase();
+      return PLATFORM_MAP[upper] || upper;
+    });
     return [...new Set(platforms)] as ("FACEBOOK" | "INSTAGRAM" | "EMAIL" | "WHATSAPP" | "GENERIC")[];
   }, [selectedDestinations]);
 

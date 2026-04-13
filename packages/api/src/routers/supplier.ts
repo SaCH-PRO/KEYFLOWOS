@@ -1,6 +1,7 @@
 import { protectedProcedure, router } from '../trpc';
 import { z } from 'zod';
 import { assertBusinessAccess } from '../lib/access';
+import type { Prisma } from '@prisma/client';
 
 export const supplierRouter = router({
   // ---- SupplierConnection ----
@@ -64,8 +65,8 @@ export const supplierRouter = router({
           businessId: input.businessId,
           providerType: input.providerType,
           displayName: input.displayName,
-          credentials: encryptedCredentials as any,
-          accountMeta: input.accountMeta as any,
+          credentials: encryptedCredentials as Prisma.InputJsonValue,
+          accountMeta: input.accountMeta as Prisma.InputJsonValue,
           syncCapabilities: input.syncCapabilities ?? [],
           connectionHealth: 'unknown',
         },
@@ -189,7 +190,7 @@ export const supplierRouter = router({
         data: {
           supplierConnectionId: input.supplierConnectionId,
           externalId: input.externalId,
-          rawData: input.rawData as any,
+          rawData: input.rawData as Prisma.InputJsonValue,
           normalizedTitle: input.normalizedTitle,
           normalizedDescription: input.normalizedDescription,
           normalizedPrice: input.normalizedPrice,
@@ -290,7 +291,7 @@ export const supplierRouter = router({
       return ctx.db.productVariant.create({
         data: {
           productId: input.productId,
-          attributes: input.attributes as any,
+          attributes: input.attributes as Prisma.InputJsonValue,
           sku: input.sku,
           priceOverride: input.priceOverride,
           imageUrl: input.imageUrl,
@@ -398,7 +399,7 @@ export const supplierRouter = router({
           sourceCost: input.sourceCost,
           leadTimeDays: input.leadTimeDays,
           moq: input.moq ?? 1,
-          shippingAssumptions: input.shippingAssumptions as any,
+          shippingAssumptions: input.shippingAssumptions as Prisma.InputJsonValue,
           availabilityState: input.availabilityState ?? 'available',
           priority: input.priority ?? 1,
         },

@@ -7,7 +7,13 @@ const TAG_LENGTH = 16;
 const PREFIX = 'enc:v1:';
 
 function getDerivedKey(): Buffer {
-  const secret = process.env['CREDENTIALS_ENCRYPTION_KEY'] || process.env['JWT_SECRET'] || 'default-insecure-key-change-in-production';
+  const secret = process.env['CREDENTIALS_ENCRYPTION_KEY'] || process.env['JWT_SECRET'];
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('CREDENTIALS_ENCRYPTION_KEY or JWT_SECRET must be set in production');
+    }
+    return scryptSync('dev-only-local-key', 'supplier-credentials-salt', KEY_LENGTH);
+  }
   return scryptSync(secret, 'supplier-credentials-salt', KEY_LENGTH);
 }
 

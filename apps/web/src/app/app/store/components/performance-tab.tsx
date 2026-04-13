@@ -25,8 +25,10 @@ import {
   Tag,
   Pause,
   Play,
+  Megaphone,
 } from "lucide-react";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useOpenComposer } from "@/hooks/use-open-composer";
 import type { StoreAnalytics, ConversionFunnel, ConversionFunnelStage } from "@/lib/client";
 import { fetchConversionFunnel } from "@/lib/client";
 import { DashboardKpis, type KpiData } from "./dashboard-kpis";
@@ -368,6 +370,7 @@ function QuickActions({ publicUrl, businessName, storeEnabled, onToggleStore }: 
 }) {
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
+  const openComposer = useOpenComposer();
 
   function handleCopy() {
     if (!publicUrl) return;
@@ -478,6 +481,18 @@ function QuickActions({ publicUrl, businessName, storeEnabled, onToggleStore }: 
               <ExternalLink className="w-3 h-3 text-muted-foreground" />
               Preview
             </a>
+            <button
+              onClick={() => openComposer({
+                contentType: "multi",
+                body: publicUrl ? `Check out ${businessName ? businessName + "'s" : "our"} store! Browse & book: ${publicUrl}` : "",
+                subject: businessName ? `${businessName} — Shop Now` : "Shop Now",
+              })}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-colors hover:bg-[hsl(var(--kf-muted)/0.15)] min-h-[44px]"
+              style={{ borderColor: "hsl(var(--kf-border)/0.6)" }}
+            >
+              <Megaphone className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
+              Promote
+            </button>
             {onToggleStore && (
               <button
                 onClick={onToggleStore}
