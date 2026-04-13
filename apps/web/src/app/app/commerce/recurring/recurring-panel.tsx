@@ -471,6 +471,40 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
         )}
       </AnimatePresence>
 
+      {recurring.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap text-[10px] px-1">
+          {(() => {
+            const active = recurring.filter((r) => r.isActive).length;
+            const inactive = recurring.length - active;
+            const projectedMonthly = recurring
+              .filter((r) => r.isActive)
+              .reduce((sum, r) => {
+                const scheduleTotal = Number(r.total ?? 0);
+                const multiplier = r.frequency === "WEEKLY" ? 4 : r.frequency === "BIWEEKLY" ? 2 : r.frequency === "QUARTERLY" ? 0.33 : r.frequency === "YEARLY" ? 0.083 : 1;
+                return sum + scheduleTotal * multiplier;
+              }, 0);
+            const nextRun = recurring
+              .filter((r) => r.isActive && r.nextRunDate)
+              .sort((a, b) => new Date(a.nextRunDate!).getTime() - new Date(b.nextRunDate!).getTime())[0];
+            const nextRunLabel = nextRun?.nextRunDate ? new Date(nextRun.nextRunDate).toLocaleDateString("en-TT", { month: "short", day: "numeric" }) : null;
+            return (
+              <>
+                <span className="text-emerald-400 font-medium">{active} Active</span>
+                {inactive > 0 && <span className="text-muted-foreground/50 font-medium">{inactive} Paused</span>}
+                <span className="text-muted-foreground/30">|</span>
+                <span className="text-amber-400 font-medium">~{currency} {Math.round(projectedMonthly).toLocaleString()}/mo projected</span>
+                {nextRunLabel && (
+                  <>
+                    <span className="text-muted-foreground/30">|</span>
+                    <span className="text-blue-400 font-medium">Next: {nextRunLabel}</span>
+                  </>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       <div className="flex items-center gap-3 flex-wrap">
         <DateRangeFilter value={dateRange} onChange={setDateRange} />
       </div>
@@ -484,10 +518,23 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
           <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
             <RefreshCw className="w-7 h-7 text-muted-foreground/50" />
           </div>
-          <h3 className="text-lg font-semibold mb-1">No recurring invoices</h3>
-          <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-4">
-            Set up automatic invoice generation on a schedule for retainer clients, subscriptions, or regular services.
+          <h3 className="text-lg font-semibold mb-1">Automate Your Revenue</h3>
+          <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-3">
+            Set up recurring billing schedules to automate invoice generation for retainer clients, subscriptions, and regular services.
           </p>
+          <div className="grid grid-cols-2 gap-2 max-w-xs mx-auto mb-5">
+            {[
+              { label: "Subscriptions", desc: "Monthly memberships" },
+              { label: "Retainers", desc: "Ongoing client work" },
+              { label: "Service Plans", desc: "Recurring services" },
+              { label: "Auto-billing", desc: "Hands-off invoicing" },
+            ].map((item) => (
+              <div key={item.label} className="rounded-lg border border-border/30 p-2 text-left">
+                <p className="text-[11px] font-medium">{item.label}</p>
+                <p className="text-[9px] text-muted-foreground/50">{item.desc}</p>
+              </div>
+            ))}
+          </div>
           <Button onClick={() => { resetForm(); setShowBuilder(true); }} className="gap-2">
             <Plus className="w-4 h-4" /> Create Your First Schedule
           </Button>

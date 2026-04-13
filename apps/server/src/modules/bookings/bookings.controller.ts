@@ -135,6 +135,7 @@ export class BookingsController {
         lastName: body.lastName,
         email: body.email,
         phone: body.phone,
+        companyName: body.company,
       },
     });
   }
