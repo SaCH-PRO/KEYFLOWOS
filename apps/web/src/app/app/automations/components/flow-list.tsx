@@ -12,7 +12,7 @@ import {
 } from "@/lib/client";
 import {
   getTriggerLabel, getActionLabels, getWorkflowActionSummary,
-  getFlowModules, MODULE_COLORS,
+  getFlowModules, getTriggerModule, MODULE_COLORS,
 } from "./automation-constants";
 import { PlaybookEditor } from "./playbook-editor";
 import type { AutomationTemplate, ActionStep } from "./automation-constants";
@@ -351,6 +351,7 @@ export function FlowList({
             const wfHealth = getHealthIndicator(wf.enabled, wf.lastRunAt, wf.runCount);
             const WfHealthIcon = wfHealth.icon;
             const wfWarnings = getFlowWarnings(wf.enabled, wf.lastRunAt, wf.runCount);
+            const wfModules = [getTriggerModule(wf.triggerEvent)].filter((m) => m !== "General");
 
             return (
               <motion.div
@@ -423,6 +424,23 @@ export function FlowList({
                     </div>
                   ))}
                 </div>
+
+                {wfModules.length > 0 && (
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {wfModules.map((mod) => (
+                      <span
+                        key={mod}
+                        className="text-[9px] px-1.5 py-0.5 rounded-md font-medium"
+                        style={{
+                          background: `${MODULE_COLORS[mod] ?? "hsl(var(--muted-foreground))"}15`,
+                          color: MODULE_COLORS[mod] ?? "hsl(var(--muted-foreground))",
+                        }}
+                      >
+                        {mod}
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 {wfWarnings.length > 0 && (
                   <div className="flex items-center gap-1.5 text-[10px] px-2 py-1.5 rounded-md" style={{ background: "hsl(var(--kf-warning) / 0.08)", color: "hsl(var(--kf-warning))" }}>
