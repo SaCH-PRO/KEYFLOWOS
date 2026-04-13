@@ -5969,7 +5969,7 @@ export async function deleteOutboundContent(contentId: string, businessId?: stri
   return apiDelete<{ deleted: boolean }>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}`);
 }
 
-export async function upsertOutboundVariant(contentId: string, data: { platform: string; textBody?: string; htmlBody?: string; mediaUrls?: string[]; variantMeta?: Record<string, unknown> }, businessId?: string): Promise<ApiResult<OutboundVariant>> {
+export async function upsertOutboundVariant(contentId: string, data: { platform: string; textBody?: string; htmlBody?: string; mediaUrls?: string[]; variantMeta?: Record<string, unknown>; destinationId?: string }, businessId?: string): Promise<ApiResult<OutboundVariant>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<OutboundVariant>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/variants`, body: data });
 }

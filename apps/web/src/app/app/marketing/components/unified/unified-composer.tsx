@@ -116,29 +116,51 @@ interface ChannelWarning {
   severity: "error" | "warning";
 }
 
+function resolveEffectiveContent(
+  dest: ChannelDestination,
+  masterBody: string,
+  masterSubject: string,
+  variants: VariantData[],
+): { body: string; subject: string } {
+  const variant = variants.find(v => v.destinationId === dest.id && v.customized);
+  return {
+    body: variant?.textBody || masterBody,
+    subject: variant?.subject || masterSubject,
+  };
+}
+
 function getChannelWarnings(
   destinations: ChannelDestination[],
-  body: string,
-  subject: string,
+  masterBody: string,
+  masterSubject: string,
   mediaUrls: string[],
+  variants: VariantData[],
 ): ChannelWarning[] {
   const warnings: ChannelWarning[] = [];
-  const platforms = new Set(destinations.map((d) => d.platform.toUpperCase()));
+  const seen = new Set<string>();
 
-  if (platforms.has("INSTAGRAM") && mediaUrls.length === 0) {
-    warnings.push({ platform: "Instagram", message: "Instagram posts require at least one image or video", severity: "error" });
-  }
-  if ((platforms.has("GOOGLE") || platforms.has("EMAIL")) && !subject.trim()) {
-    warnings.push({ platform: "Email", message: "Email requires a subject line", severity: "error" });
-  }
-  if (platforms.has("WHATSAPP") && body.length > 4096) {
-    warnings.push({ platform: "WhatsApp", message: `Content exceeds WhatsApp limit (${body.length}/4096 chars)`, severity: "error" });
-  }
-  if (platforms.has("INSTAGRAM") && body.length > 2200) {
-    warnings.push({ platform: "Instagram", message: `Caption exceeds limit (${body.length}/2200 chars)`, severity: "warning" });
-  }
-  if (platforms.has("FACEBOOK") && body.length > 63206) {
-    warnings.push({ platform: "Facebook", message: `Post exceeds Facebook limit`, severity: "warning" });
+  for (const dest of destinations) {
+    const plat = (PLATFORM_MAP[dest.platform.toUpperCase()] || dest.platform).toUpperCase();
+    const { body: effBody, subject: effSubject } = resolveEffectiveContent(dest, masterBody, masterSubject, variants);
+    const key = `${plat}:${dest.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    if (plat === "INSTAGRAM" && mediaUrls.length === 0) {
+      warnings.push({ platform: "Instagram", message: "Instagram posts require at least one image or video", severity: "error" });
+    }
+    if (plat === "EMAIL" && !effSubject.trim()) {
+      warnings.push({ platform: "Email", message: `Email requires a subject line${dest.label ? ` (${dest.label})` : ""}`, severity: "error" });
+    }
+    if (plat === "WHATSAPP" && effBody.length > 4096) {
+      warnings.push({ platform: "WhatsApp", message: `Content exceeds WhatsApp limit (${effBody.length}/4096 chars)`, severity: "error" });
+    }
+    if (plat === "INSTAGRAM" && effBody.length > 2200) {
+      warnings.push({ platform: "Instagram", message: `Caption exceeds limit (${effBody.length}/2200 chars)`, severity: "warning" });
+    }
+    if (plat === "FACEBOOK" && effBody.length > 63206) {
+      warnings.push({ platform: "Facebook", message: `Post exceeds Facebook limit`, severity: "warning" });
+    }
   }
   return warnings;
 }
@@ -345,8 +367,8 @@ export function UnifiedComposer({
   }, [selectedDestinations]);
 
   const channelWarnings = useMemo(
-    () => getChannelWarnings(selectedDestinations, body, subject, mediaUrls),
-    [selectedDestinations, body, subject, mediaUrls],
+    () => getChannelWarnings(selectedDestinations, body, subject, mediaUrls, variants),
+    [selectedDestinations, body, subject, mediaUrls, variants],
   );
 
   const hasBlockingWarnings = channelWarnings.some((w) => w.severity === "error");
@@ -415,6 +437,7 @@ export function UnifiedComposer({
       const res = await upsertOutboundVariant(contentId, {
         platform: v.platform,
         textBody: v.textBody,
+        destinationId: v.destinationId,
         variantMeta: Object.keys(variantMeta).length > 0 ? variantMeta : undefined,
       }, businessId);
       if (res.error) { failed++; }
@@ -948,6 +971,7 @@ export function UnifiedComposer({
               mediaUrls={mediaUrls}
               selectedPlatforms={selectedPlatforms.length > 0 ? selectedPlatforms : ["GENERIC"]}
               businessName={businessName}
+              variants={variants}
             />
           </div>
         )}
