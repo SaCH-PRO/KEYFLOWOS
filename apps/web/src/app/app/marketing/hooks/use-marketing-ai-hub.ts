@@ -120,6 +120,82 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     });
   }
 
+  const pulse = customData?.businessPulse as { pipeline?: { contactsGoingCold?: number; newThisWeek?: number; leads?: number; totalContacts?: number }; financial?: { revenueGrowthPct?: number; topServices?: { name: string }[]; revenueAtRisk?: number; totalCollected?: number; avgClientValue?: number }; contactCount?: number } | undefined;
+
+  if (pulse?.pipeline) {
+    const { contactsGoingCold, newThisWeek, leads, totalContacts } = pulse.pipeline;
+    if (contactsGoingCold && contactsGoingCold > 0) {
+      suggestions.push({
+        id: `cold-contacts-${Date.now()}`,
+        type: "warning",
+        title: "Contacts Going Cold",
+        description: `${contactsGoingCold} contact${contactsGoingCold > 1 ? "s are" : " is"} going cold. Create a re-engagement email campaign to win them back before they're lost.`,
+        priority: "high",
+        actionLabel: "Create win-back campaign",
+        actionKey: "tool:campaign-content-generator",
+      });
+    }
+    if (newThisWeek && newThisWeek > 2) {
+      suggestions.push({
+        id: `new-contacts-week-${Date.now()}`,
+        type: "insight",
+        title: "Growing Audience",
+        description: `${newThisWeek} new contacts this week. Welcome them with an introductory campaign or social post showcasing your best work.`,
+        priority: "medium",
+        actionLabel: "Create welcome content",
+        actionKey: "tool:campaign-content-generator",
+      });
+    }
+    if (leads && totalContacts && totalContacts > 0 && (leads / totalContacts) > 0.4) {
+      suggestions.push({
+        id: `lead-nurture-${Date.now()}`,
+        type: "insight",
+        title: "Lead Nurture Opportunity",
+        description: `${Math.round((leads / totalContacts) * 100)}% of your contacts are still leads. Create a nurture sequence to convert them into paying clients.`,
+        priority: "medium",
+        actionLabel: "Build nurture campaign",
+        actionKey: "tool:campaign-content-generator",
+      });
+    }
+  }
+
+  if (pulse?.financial) {
+    const { topServices, revenueAtRisk, revenueGrowthPct } = pulse.financial;
+    if (topServices && topServices.length > 0) {
+      suggestions.push({
+        id: `promote-service-${Date.now()}`,
+        type: "tip",
+        title: `Promote "${topServices[0].name}"`,
+        description: `Your top-earning service deserves spotlight content. Create a social post or campaign highlighting what makes it special.`,
+        priority: "low",
+        actionLabel: "Create content",
+        actionKey: "tool:campaign-content-generator",
+      });
+    }
+    if (revenueAtRisk && revenueAtRisk > 0) {
+      suggestions.push({
+        id: `revenue-risk-${Date.now()}`,
+        type: "warning",
+        title: "Revenue at Risk",
+        description: `You have revenue at risk from overdue payments. Send a friendly payment reminder campaign to recover outstanding amounts.`,
+        priority: "high",
+        actionLabel: "Create reminder",
+        actionKey: "tool:campaign-content-generator",
+      });
+    }
+    if (revenueGrowthPct !== undefined && revenueGrowthPct > 10) {
+      suggestions.push({
+        id: `growth-story-${Date.now()}`,
+        type: "tip",
+        title: "Share Your Growth Story",
+        description: `Revenue is up ${Math.round(revenueGrowthPct)}%. Share a milestone post to build trust and attract new clients.`,
+        priority: "low",
+        actionLabel: "Create post",
+        actionKey: "switch_tab:create",
+      });
+    }
+  }
+
   const recentSignals = signals.filter((s) => Date.now() - s.timestamp < 300_000);
   for (const signal of recentSignals.slice(0, 3)) {
     if (signal.type === "contacts_imported") {
@@ -352,6 +428,7 @@ export function useMarketingAiHub() {
     forms?: unknown[];
     socialPosts?: unknown[];
     crossModuleSignals?: unknown[];
+    businessPulse?: unknown;
   }) => {
     ai.updateContext({
       businessId: params.businessId,
@@ -363,6 +440,7 @@ export function useMarketingAiHub() {
         forms: params.forms,
         socialPosts: params.socialPosts,
         crossModuleSignals: params.crossModuleSignals,
+        businessPulse: params.businessPulse,
       },
     });
   }, [ai.updateContext]);
