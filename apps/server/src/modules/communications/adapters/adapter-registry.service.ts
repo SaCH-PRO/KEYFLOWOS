@@ -29,6 +29,7 @@ export class AdapterRegistryService {
       FACEBOOK_PAGE: 'META',
       INSTAGRAM_BUSINESS: 'META',
       EMAIL: 'GOOGLE',
+      GOOGLE: 'GOOGLE',
       WHATSAPP: 'WHATSAPP',
     };
     const provider = providerMap[platform];
