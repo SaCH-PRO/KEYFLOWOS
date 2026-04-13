@@ -15,6 +15,7 @@ import {
   publishContentNow, scheduleContent, getOutboundContent,
   aiGenerateDraft, aiRewriteContent, aiSuggestSubjects, aiSuggestCta,
   aiSuggestHashtags, aiShortenExpand, aiSuggestSendTime, aiSuggestChannels,
+  aiSuggestPreviewText, aiSuggestAudienceSegments, aiSuggestContentIdeas,
 } from "@/lib/client";
 import type { ChannelDestination, OutboundContent } from "@/lib/client";
 import { ChannelSelector } from "./channel-selector";
@@ -83,6 +84,9 @@ const AI_ACTIONS: { key: string; label: string; icon: LucideIcon; desc: string; 
   { key: "expand", label: "Expand", icon: Maximize2, desc: "Add more detail", needsBody: true },
   { key: "send_time", label: "Best Time", icon: Clock, desc: "Optimal send time" },
   { key: "channels", label: "Suggest Channels", icon: Layers, desc: "Best channels for this", needsBody: true },
+  { key: "preview_text", label: "Preview Text", icon: Eye, desc: "Email preheader text", needsBody: true },
+  { key: "audience", label: "Audience Segments", icon: Target, desc: "AI-recommended segments", needsBody: true },
+  { key: "ideas", label: "Content Ideas", icon: Zap, desc: "Cross-module inspiration" },
 ];
 
 const STEPS: { key: ComposerStep; label: string; num: number }[] = [
@@ -242,6 +246,7 @@ export function UnifiedComposer({
   const [contentType, setContentType] = useState<ContentTypeOption>(initialContentType);
   const [body, setBody] = useState(initialBody);
   const [subject, setSubject] = useState(initialSubject);
+  const [previewText, setPreviewText] = useState("");
   const [objective, setObjective] = useState("");
   const [tone, setTone] = useState("");
   const [audience, setAudience] = useState("all");
@@ -502,6 +507,30 @@ export function UnifiedComposer({
           if (res.error) { toast.error(res.error); break; }
           if (res.data?.recommended?.length) {
             setAiSuggestions({ type: "channels", data: res.data.recommended });
+          }
+          break;
+        }
+        case "preview_text": {
+          const res = await aiSuggestPreviewText({ subject: subject || "Untitled", body, objective }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.previews?.length) {
+            setAiSuggestions({ type: "preview_text", data: res.data.previews });
+          }
+          break;
+        }
+        case "audience": {
+          const res = await aiSuggestAudienceSegments({ body, contentType, objective }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.segments?.length) {
+            setAiSuggestions({ type: "audience", data: { segments: res.data.segments, primarySegment: res.data.primarySegment } });
+          }
+          break;
+        }
+        case "ideas": {
+          const res = await aiSuggestContentIdeas({ objective, audience, contentType }, businessId);
+          if (res.error) { toast.error(res.error); break; }
+          if (res.data?.ideas?.length) {
+            setAiSuggestions({ type: "ideas", data: res.data.ideas });
           }
           break;
         }
@@ -802,7 +831,7 @@ export function UnifiedComposer({
                           <div className="rounded-lg bg-purple-500/10 border border-purple-500/20 p-2 space-y-1.5">
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">
-                                {aiSuggestions.type === "subjects" ? "Subject Line Suggestions" : aiSuggestions.type === "cta" ? "CTA Suggestions" : aiSuggestions.type === "channels" ? "Channel Suggestions" : "Send Time Suggestions"}
+                                {aiSuggestions.type === "subjects" ? "Subject Line Suggestions" : aiSuggestions.type === "cta" ? "CTA Suggestions" : aiSuggestions.type === "channels" ? "Channel Suggestions" : aiSuggestions.type === "preview_text" ? "Preview Text Suggestions" : aiSuggestions.type === "audience" ? "Audience Segments" : aiSuggestions.type === "ideas" ? "Content Ideas" : "Send Time Suggestions"}
                               </span>
                               <button onClick={() => setAiSuggestions(null)} className="p-0.5 rounded hover:bg-purple-500/20">
                                 <X className="w-3 h-3 text-purple-400" />
@@ -860,6 +889,50 @@ export function UnifiedComposer({
                                 ))}
                               </div>
                             )}
+                            {aiSuggestions.type === "preview_text" && (
+                              <div className="space-y-1">
+                                {(aiSuggestions.data as { text: string; approach: string; charCount: number }[]).map((p, i) => (
+                                  <button key={i} onClick={() => { setPreviewText(p.text); setAiSuggestions(null); toast.success("Preview text applied"); }} className="flex items-center justify-between w-full text-left text-[11px] text-purple-200 px-2 py-1.5 rounded-md hover:bg-purple-500/15 transition-colors">
+                                    <span className="flex-1 truncate">{p.text}</span>
+                                    <span className="text-[9px] text-purple-400/50 ml-2 shrink-0">{p.approach} · {p.charCount}ch</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            {aiSuggestions.type === "audience" && (
+                              <div className="space-y-1">
+                                {((aiSuggestions.data as { segments: { name: string; description: string; reason: string; expectedImpact: string; estimatedReach: string }[]; primarySegment: string }).segments || []).map((seg, i) => (
+                                  <div key={i} className="text-[11px] text-purple-200 px-2 py-1.5 rounded-md bg-purple-500/5 space-y-0.5">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-medium">{seg.name}</span>
+                                      <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${seg.expectedImpact === "high" ? "bg-emerald-500/20 text-emerald-400" : seg.expectedImpact === "medium" ? "bg-amber-500/20 text-amber-400" : "bg-muted/20 text-muted-foreground"}`}>
+                                        {seg.expectedImpact} impact
+                                      </span>
+                                    </div>
+                                    <p className="text-[9px] text-purple-400/60">{seg.description}</p>
+                                    <p className="text-[9px] text-purple-400/50">{seg.reason}</p>
+                                  </div>
+                                ))}
+                                {(aiSuggestions.data as { primarySegment?: string }).primarySegment && (
+                                  <div className="text-[10px] text-purple-400/70 px-2 pt-1">
+                                    Primary: {(aiSuggestions.data as { primarySegment: string }).primarySegment}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {aiSuggestions.type === "ideas" && (
+                              <div className="space-y-1">
+                                {(aiSuggestions.data as { title: string; brief: string; contentType: string; category: string; effort: string }[]).map((idea, i) => (
+                                  <button key={i} onClick={() => { setBody(idea.brief); setSubject(idea.title); setAiSuggestions(null); toast.success("Idea loaded as draft"); }} className="block w-full text-left text-[11px] text-purple-200 px-2 py-1.5 rounded-md hover:bg-purple-500/15 transition-colors space-y-0.5">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-medium">{idea.title}</span>
+                                      <span className="text-[9px] text-purple-400/50">{idea.category} · {idea.effort}</span>
+                                    </div>
+                                    <p className="text-[9px] text-purple-400/60">{idea.brief}</p>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -868,13 +941,22 @@ export function UnifiedComposer({
                 </AnimatePresence>
 
                 {(contentType === "email" || contentType === "multi") && (
-                  <input
-                    type="text"
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
-                    placeholder="Email subject line..."
-                    className="w-full px-3 py-2 rounded-lg bg-muted/10 border border-border/30 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50 placeholder:text-muted-foreground/50"
-                  />
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      placeholder="Email subject line..."
+                      className="w-full px-3 py-2 rounded-lg bg-muted/10 border border-border/30 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50 placeholder:text-muted-foreground/50"
+                    />
+                    <input
+                      type="text"
+                      value={previewText}
+                      onChange={(e) => setPreviewText(e.target.value)}
+                      placeholder="Preview text (preheader)..."
+                      className="w-full px-3 py-1.5 rounded-lg bg-muted/5 border border-border/20 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50 placeholder:text-muted-foreground/40"
+                    />
+                  </div>
                 )}
 
                 <div className="relative">

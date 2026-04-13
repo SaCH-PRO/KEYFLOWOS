@@ -372,4 +372,25 @@ export class CommunicationsController {
     if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.suggestSendTime(businessId, body);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/content-ai/suggest-preview-text')
+  async aiSuggestPreviewText(@Param('businessId') businessId: string, @Body() body: { subject: string; body: string; objective?: string }) {
+    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
+    return this.contentAi.suggestPreviewText(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/content-ai/suggest-audience-segments')
+  async aiSuggestAudienceSegments(@Param('businessId') businessId: string, @Body() body: { body: string; contentType?: string; objective?: string; existingSegments?: string[] }) {
+    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
+    return this.contentAi.suggestAudienceSegments(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/content-ai/suggest-content-ideas')
+  async aiSuggestContentIdeas(@Param('businessId') businessId: string, @Body() body: { objective?: string; audience?: string; recentTopics?: string[]; contentType?: string }) {
+    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
+    return this.contentAi.suggestContentIdeas(businessId, body);
+  }
 }
