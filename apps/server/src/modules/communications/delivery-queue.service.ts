@@ -6,6 +6,47 @@ import { AdapterRegistryService } from './adapters/adapter-registry.service';
 const POLL_INTERVAL_MS = 30_000;
 const MAX_BATCH_SIZE = 20;
 const BACKOFF_BASE_MS = 60_000;
+const DEFAULT_TIMEZONE = 'America/Port_of_Spain';
+
+function resolveScheduledAtUtc(scheduledAt: string, timezone?: string): Date {
+  const tz = timezone || DEFAULT_TIMEZONE;
+  try {
+    const formatted = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    }).format(new Date());
+    void formatted;
+
+    const localDate = new Date(scheduledAt);
+    if (isNaN(localDate.getTime())) throw new Error('Invalid date');
+
+    const inputStr = scheduledAt.includes('T') ? scheduledAt : `${scheduledAt}T00:00:00`;
+    const hasOffset = /[+-]\d{2}:\d{2}$|Z$/.test(inputStr);
+    if (hasOffset) {
+      return new Date(inputStr);
+    }
+
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+    const nowInTz: Record<string, string> = {};
+    for (const p of parts) nowInTz[p.type] = p.value;
+
+    const nowUtc = new Date();
+    const nowTzDate = new Date(`${nowInTz.year}-${nowInTz.month}-${nowInTz.day}T${nowInTz.hour}:${nowInTz.minute}:${nowInTz.second}Z`);
+    const offsetMs = nowUtc.getTime() - nowTzDate.getTime();
+
+    const naiveMs = new Date(inputStr + 'Z').getTime();
+    return new Date(naiveMs + offsetMs);
+  } catch {
+    return new Date(scheduledAt);
+  }
+}
 
 @Injectable()
 export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
@@ -98,13 +139,13 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   private async executeDelivery(delivery: any) {
     const { destination, content, variant } = delivery;
     if (!destination?.connection) {
-      await this.failDelivery(delivery.id, 'NO_CONNECTION', 'Destination has no active connection', delivery.status);
+      await this.failDelivery(delivery.id, delivery.contentId, delivery.businessId, 'NO_CONNECTION', 'Destination has no active connection', 'Sending');
       return;
     }
 
     const adapter = this.adapters.resolveByPlatform(destination.platform);
     if (!adapter) {
-      await this.failDelivery(delivery.id, 'NO_ADAPTER', `No adapter for platform: ${destination.platform}`, delivery.status);
+      await this.failDelivery(delivery.id, delivery.contentId, delivery.businessId, 'NO_ADAPTER', `No adapter for platform: ${destination.platform}`, 'Sending');
       return;
     }
 
@@ -132,6 +173,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     try {
       const result = await adapter.publish(destination.connection, destination, payload);
       const attemptNumber = delivery.retryCount + 1;
+      const resultSnapshot = result.raw ?? undefined;
 
       if (result.success) {
         await this.prisma.client.outboundDelivery.update({
@@ -141,13 +183,13 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
             sentAt: new Date(),
             externalPostId: result.externalPostId,
             externalUrl: result.externalUrl,
-            resultSnapshot: result.raw ?? undefined,
+            resultSnapshot,
             errorCode: null,
             errorMessage: null,
           },
         });
 
-        await this.recordEvent(delivery.id, 'success', 'Sending', 'Published', attemptNumber);
+        await this.recordEvent(delivery.id, 'success', 'Sending', 'Published', attemptNumber, undefined, undefined, resultSnapshot);
 
         this.events.emit('content.published', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId, destinationId: delivery.destinationId });
         this.events.emit('delivery.completed', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId });
@@ -156,6 +198,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       } else {
         const isTransient = result.isTransient ?? false;
         const newRetryCount = delivery.retryCount + 1;
+        const errorSnapshot = { errorCode: result.errorCode, errorMessage: result.errorMessage, raw: resultSnapshot };
 
         if (isTransient && newRetryCount < delivery.maxRetries) {
           const backoffMs = BACKOFF_BASE_MS * Math.pow(2, delivery.retryCount);
@@ -172,7 +215,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
             },
           });
 
-          await this.recordEvent(delivery.id, 'retry_scheduled', 'Sending', 'RetryPending', attemptNumber, result.errorCode, result.errorMessage);
+          await this.recordEvent(delivery.id, 'retry_scheduled', 'Sending', 'RetryPending', attemptNumber, result.errorCode, result.errorMessage, errorSnapshot);
         } else {
           await this.prisma.client.outboundDelivery.update({
             where: { id: delivery.id },
@@ -181,11 +224,11 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
               retryCount: newRetryCount,
               errorCode: result.errorCode,
               errorMessage: result.errorMessage,
-              resultSnapshot: result.raw ?? undefined,
+              resultSnapshot,
             },
           });
 
-          await this.recordEvent(delivery.id, 'failure', 'Sending', 'Failed', attemptNumber, result.errorCode, result.errorMessage);
+          await this.recordEvent(delivery.id, 'failure', 'Sending', 'Failed', attemptNumber, result.errorCode, result.errorMessage, errorSnapshot);
 
           this.events.emit('content.failed', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId, errorCode: result.errorCode });
           this.events.emit('delivery.failed', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId });
@@ -196,6 +239,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       const normalized = adapter.normalizeError(err);
       const newRetryCount = delivery.retryCount + 1;
+      const errorSnapshot = { errorCode: normalized.code, errorMessage: normalized.message };
 
       if (normalized.isTransient && newRetryCount < delivery.maxRetries) {
         const backoffMs = BACKOFF_BASE_MS * Math.pow(2, delivery.retryCount);
@@ -203,25 +247,33 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
           where: { id: delivery.id },
           data: { status: 'RetryPending', retryCount: newRetryCount, nextRetryAt: new Date(Date.now() + backoffMs), errorCode: normalized.code, errorMessage: normalized.message },
         });
-        await this.recordEvent(delivery.id, 'retry_scheduled', 'Sending', 'RetryPending', newRetryCount, normalized.code, normalized.message);
+        await this.recordEvent(delivery.id, 'retry_scheduled', 'Sending', 'RetryPending', newRetryCount, normalized.code, normalized.message, errorSnapshot);
       } else {
         await this.prisma.client.outboundDelivery.update({
           where: { id: delivery.id },
           data: { status: 'Failed', retryCount: newRetryCount, errorCode: normalized.code, errorMessage: normalized.message },
         });
-        await this.recordEvent(delivery.id, 'failure', 'Sending', 'Failed', newRetryCount, normalized.code, normalized.message);
+        await this.recordEvent(delivery.id, 'failure', 'Sending', 'Failed', newRetryCount, normalized.code, normalized.message, errorSnapshot);
+
+        this.events.emit('content.failed', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId, errorCode: normalized.code });
         this.events.emit('delivery.failed', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId });
+
         await this.updateContentStatus(delivery.contentId);
       }
     }
   }
 
-  private async failDelivery(deliveryId: string, errorCode: string, errorMessage: string, statusBefore: string) {
+  private async failDelivery(deliveryId: string, contentId: string, businessId: string, errorCode: string, errorMessage: string, statusBefore: string) {
     await this.prisma.client.outboundDelivery.update({
       where: { id: deliveryId },
       data: { status: 'Failed', errorCode, errorMessage },
     });
-    await this.recordEvent(deliveryId, 'failure', statusBefore, 'Failed', 1, errorCode, errorMessage);
+    await this.recordEvent(deliveryId, 'failure', statusBefore, 'Failed', 1, errorCode, errorMessage, { errorCode, errorMessage });
+
+    this.events.emit('content.failed', { deliveryId, contentId, businessId, errorCode });
+    this.events.emit('delivery.failed', { deliveryId, contentId, businessId });
+
+    await this.updateContentStatus(contentId);
   }
 
   private async recordEvent(deliveryId: string, eventType: string, statusBefore: string, statusAfter: string, attemptNumber?: number, errorCode?: string, errorMessage?: string, resultData?: Record<string, unknown>) {
@@ -301,14 +353,15 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     return { queued: deliveries.length, deliveryIds: deliveries.map(d => d.id) };
   }
 
-  async schedule(businessId: string, contentId: string, destinationIds: string[], scheduledAt: string) {
+  async schedule(businessId: string, contentId: string, destinationIds: string[], scheduledAt: string, timezone?: string) {
     const content = await this.prisma.client.outboundContent.findFirst({
       where: { id: contentId, businessId, deletedAt: null },
       include: { variants: true },
     });
     if (!content) throw new NotFoundException('Content not found');
 
-    const scheduleDate = new Date(scheduledAt);
+    const tz = timezone || content.timezone || DEFAULT_TIMEZONE;
+    const scheduleDate = resolveScheduledAtUtc(scheduledAt, tz);
     if (scheduleDate <= new Date()) throw new BadRequestException('Scheduled date must be in the future');
 
     const destinations = await this.prisma.client.channelDestination.findMany({
@@ -332,19 +385,21 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     await this.prisma.client.outboundContent.update({
       where: { id: contentId },
-      data: { status: 'Scheduled', scheduledAt: scheduleDate },
+      data: { status: 'Scheduled', scheduledAt: scheduleDate, timezone: tz },
     });
 
-    return { scheduled: deliveries.length, scheduledAt: scheduleDate.toISOString(), deliveryIds: deliveries.map(d => d.id) };
+    return { scheduled: deliveries.length, scheduledAt: scheduleDate.toISOString(), timezone: tz, deliveryIds: deliveries.map(d => d.id) };
   }
 
-  async reschedule(businessId: string, deliveryId: string, newScheduledAt: string) {
+  async reschedule(businessId: string, deliveryId: string, newScheduledAt: string, timezone?: string) {
     const delivery = await this.prisma.client.outboundDelivery.findFirst({
       where: { id: deliveryId, businessId, status: { in: ['Scheduled', 'Queued'] } },
+      include: { content: { select: { timezone: true } } },
     });
     if (!delivery) throw new NotFoundException('Pending delivery not found');
 
-    const newDate = new Date(newScheduledAt);
+    const tz = timezone || (delivery as any).content?.timezone || DEFAULT_TIMEZONE;
+    const newDate = resolveScheduledAtUtc(newScheduledAt, tz);
     if (newDate <= new Date()) throw new BadRequestException('New scheduled date must be in the future');
 
     const updated = await this.prisma.client.outboundDelivery.update({
@@ -352,7 +407,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       data: { scheduledAt: newDate, status: 'Scheduled' },
     });
 
-    await this.recordEvent(deliveryId, 'rescheduled', delivery.status, 'Scheduled', undefined, undefined, `Rescheduled to ${newDate.toISOString()}`);
+    await this.recordEvent(deliveryId, 'rescheduled', delivery.status, 'Scheduled', undefined, undefined, `Rescheduled to ${newDate.toISOString()} (${tz})`);
 
     return updated;
   }
@@ -396,7 +451,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   async getDeliverySummary(businessId: string, contentId: string) {
     const content = await this.prisma.client.outboundContent.findFirst({
       where: { id: contentId, businessId, deletedAt: null },
-      select: { id: true, status: true, contentType: true, subject: true, scheduledAt: true, publishedAt: true },
+      select: { id: true, status: true, contentType: true, subject: true, scheduledAt: true, publishedAt: true, timezone: true },
     });
     if (!content) throw new NotFoundException('Content not found');
 
@@ -419,6 +474,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     return {
       contentId: content.id,
       contentStatus: content.status,
+      timezone: content.timezone,
       totalDestinations,
       published,
       failed,
