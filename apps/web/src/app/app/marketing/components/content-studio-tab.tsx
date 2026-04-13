@@ -436,9 +436,16 @@ function ConnectNewChannel({ businessId, oauthAvailability, onConnected }: {
         const checkInterval = setInterval(async () => {
           if (popup.closed) {
             clearInterval(checkInterval);
-            await syncChannelConnectionsFromSocial(businessId);
+            const syncRes = await syncChannelConnectionsFromSocial(businessId);
+            const synced = syncRes.data?.synced ?? 0;
             setConnecting(null);
-            onConnected();
+            if (synced > 0) {
+              toast.success("Channel connected successfully");
+              onConnected();
+            } else {
+              toast.warning("Connection flow closed — no new channels were detected. Please try again.");
+              onConnected();
+            }
           }
         }, 1000);
       } else {
@@ -808,9 +815,14 @@ export function ContentStudioTab({ businessId, sharedHealth }: ContentStudioTabP
         const checkInterval = setInterval(async () => {
           if (popup.closed) {
             clearInterval(checkInterval);
-            await syncChannelConnectionsFromSocial(businessId);
+            const syncRes = await syncChannelConnectionsFromSocial(businessId);
             await health.refresh();
-            toast.success("Reconnection flow completed — channels synced");
+            const synced = syncRes.data?.synced ?? 0;
+            if (synced > 0) {
+              toast.success("Reconnection completed — channels synced");
+            } else {
+              toast.warning("Reconnection flow closed — no changes detected. Please try again.");
+            }
           }
         }, 1000);
       } else {
