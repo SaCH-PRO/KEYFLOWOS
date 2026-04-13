@@ -19,7 +19,7 @@ import {
   type FlowIntelligenceData,
   type FinancialGrowthData,
 } from "@/lib/client";
-import { getStoredBusinessId } from "@/lib/workspace";
+import { getStoredBusinessId, refreshWorkspace } from "@/lib/workspace";
 import { toast } from "sonner";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useRouter } from "next/navigation";
@@ -132,8 +132,14 @@ export function useMarketing(): UseMarketingReturn {
   const bumpVersion = useCallback(() => setDataVersion((v) => v + 1), []);
 
   useEffect(() => {
-    const bid = getStoredBusinessId();
-    if (bid) setBusinessId(bid);
+    const stored = getStoredBusinessId();
+    if (stored) {
+      setBusinessId(stored);
+      return;
+    }
+    refreshWorkspace().then((fresh) => {
+      if (fresh) setBusinessId(fresh);
+    });
   }, []);
 
   const addSignal = useCallback((signal: Omit<CrossModuleSignal, "id" | "timestamp">) => {

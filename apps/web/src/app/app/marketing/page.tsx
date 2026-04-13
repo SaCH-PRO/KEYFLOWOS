@@ -23,6 +23,7 @@ import {
   Target,
   UserPlus,
   Layers,
+  Settings,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
@@ -49,17 +50,19 @@ import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
 import { AudienceHealthSection } from "./components/campaign-intelligence-cards";
 import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
 import { UnifiedComposer } from "./components/unified/unified-composer";
+import { ContentStudioTab } from "./components/content-studio-tab";
 import { listOutboundContent } from "@/lib/client";
 import type { EmailCampaign, LeadForm, OutboundContent } from "@/lib/client";
 import type { BusinessPulse } from "./hooks/use-marketing";
 
-type ContentTab = "create" | "calendar" | "audience";
+type ContentTab = "create" | "calendar" | "audience" | "studio";
 type CreateSubmode = "compose" | "campaigns" | "posts" | "scheduled";
 
 const TABS: { key: ContentTab; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "create", label: "Create & Schedule", icon: PenSquare, tooltip: "Compose content, manage campaigns and posts, and schedule delivery." },
   { key: "calendar", label: "Calendar", icon: CalendarDays, tooltip: "Visual calendar of all scheduled and sent content." },
   { key: "audience", label: "Audiences & Forms", icon: Users, tooltip: "Build audience segments and lead capture forms for targeting." },
+  { key: "studio", label: "Studio", icon: Settings, tooltip: "Manage connected channels, health diagnostics, and sender settings." },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
@@ -78,6 +81,8 @@ const LEGACY_TAB_MAP: Record<string, ContentTab> = {
   forms: "audience",
   insights: "create",
   performance: "create",
+  connections: "studio",
+  channels: "studio",
 };
 
 const slideVariants = {
@@ -376,6 +381,9 @@ export default function ContentPage() {
         setActiveTab("create");
         setCreateSubmode("scheduled");
         initialTabSet.current = true;
+      } else if (tabParam === "studio" || tabParam === "connections" || tabParam === "channels") {
+        setActiveTab("studio");
+        initialTabSet.current = true;
       } else {
         const mapped = LEGACY_TAB_MAP[tabParam] || tabParam;
         if (TAB_KEYS.includes(mapped as ContentTab)) {
@@ -540,6 +548,7 @@ export default function ContentPage() {
         { key: "1", description: "Create & Schedule", action: () => handleTabChange("create") },
         { key: "2", description: "Calendar", action: () => handleTabChange("calendar") },
         { key: "3", description: "Audiences & Forms", action: () => handleTabChange("audience") },
+        { key: "4", description: "Studio", action: () => handleTabChange("studio") },
         { key: "n", description: "New item", action: handleNewItem },
         { key: "r", description: "Refresh", action: () => { void mk.loadData(); } },
         { key: "/", description: "Search", action: () => setShowSearch(true) },
@@ -851,6 +860,9 @@ export default function ContentPage() {
                   <LeadFormsPanel businessId={mk.businessId} forms={mk.forms} setForms={mk.setForms} onViewContact={mk.handleViewContact} onAiOptimize={() => handleAiAction("lead-form-optimizer")} />
                 </div>
               </div>
+            )}
+            {activeTab === "studio" && (
+              <ContentStudioTab businessId={mk.businessId || ""} />
             )}
           </motion.div>
         </AnimatePresence>

@@ -21,6 +21,12 @@ export class CommunicationsController {
   // --- Channel Connections ---
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/connections/health-summary')
+  async healthSummary(@Param('businessId') businessId: string) {
+    return this.connections.getHealthSummary(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/connections')
   listConnections(@Param('businessId') businessId: string) {
     return this.connections.list(businessId);
@@ -48,6 +54,18 @@ export class CommunicationsController {
   @Delete('businesses/:businessId/connections/:id')
   deleteConnection(@Param('businessId') businessId: string, @Param('id') id: string) {
     return this.connections.delete(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/connections/:id/health-check')
+  async healthCheck(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.connections.runHealthCheck(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/destinations/:destId/toggle')
+  toggleDestination(@Param('businessId') businessId: string, @Param('destId') destId: string, @Body() body: { isActive: boolean }) {
+    return this.connections.toggleDestination(businessId, destId, body.isActive);
   }
 
   // --- Destinations ---

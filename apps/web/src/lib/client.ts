@@ -5847,25 +5847,44 @@ export async function submitPublicIntake(slug: string, input: {
 export type ChannelConnection = {
   id: string;
   businessId: string;
-  platform: string;
-  providerType: string;
-  displayName: string;
-  isActive: boolean;
-  healthStatus: string;
-  capabilities: string[];
+  provider: string;
+  label: string | null;
+  accountEmail: string | null;
+  token: string | null;
+  refreshToken: string | null;
+  expiresAt: string | null;
+  scopes: string | null;
+  providerMeta: Record<string, unknown> | null;
+  healthState: string;
+  healthMessage: string | null;
+  lastCheckedAt: string | null;
   createdAt: string;
   updatedAt: string;
   destinations?: ChannelDestination[];
+  platform?: string;
+  providerType?: string;
+  displayName?: string;
+  isActive?: boolean;
+  healthStatus?: string;
+  capabilities?: string[];
 };
 
 export type ChannelDestination = {
   id: string;
   connectionId: string;
   platform: string;
-  destinationType: string;
-  externalId: string;
-  displayName: string;
+  platformId: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  capabilities: string[];
   isActive: boolean;
+  destinationMeta: Record<string, unknown> | null;
+  businessId: string;
+  createdAt: string;
+  updatedAt: string;
+  connection?: ChannelConnection;
+  destinationType?: string;
+  externalId?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -5925,7 +5944,7 @@ export async function listChannelConnections(businessId?: string): Promise<ApiRe
   return apiGetSimple<ChannelConnection[]>(`/communications/businesses/${encodeURIComponent(bid)}/connections`);
 }
 
-export async function createChannelConnection(data: { platform: string; providerType: string; displayName: string; credentials?: Record<string, unknown>; capabilities?: string[] }, businessId?: string): Promise<ApiResult<ChannelConnection>> {
+export async function createChannelConnection(data: { provider: string; label?: string; accountEmail?: string; token?: string; refreshToken?: string; scopes?: string; providerMeta?: Record<string, unknown> }, businessId?: string): Promise<ApiResult<ChannelConnection>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<ChannelConnection>({ path: `/communications/businesses/${encodeURIComponent(bid)}/connections`, body: data });
 }
@@ -6002,6 +6021,58 @@ export async function retryDelivery(deliveryId: string, businessId?: string): Pr
 export async function getDeliverySummary(contentId: string, businessId?: string): Promise<ApiResult<DeliverySummary>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGetSimple<DeliverySummary>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/delivery-summary`);
+}
+
+export type HealthSummary = {
+  total: number;
+  healthy: number;
+  needsAttention: number;
+  expired: number;
+  totalDestinations: number;
+  activeDestinations: number;
+  connections: {
+    id: string;
+    provider: string;
+    label: string | null;
+    healthState: string;
+    healthMessage: string | null;
+    lastCheckedAt: string | null;
+    destinationCount: number;
+    activeDestinationCount: number;
+  }[];
+};
+
+export type HealthCheckResult = {
+  id: string;
+  healthState: string;
+  healthMessage: string | null;
+  lastCheckedAt: string;
+  destinations: ChannelDestination[];
+};
+
+export async function getChannelHealthSummary(businessId?: string): Promise<ApiResult<HealthSummary>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<HealthSummary>(`/communications/businesses/${encodeURIComponent(bid)}/connections/health-summary`);
+}
+
+export async function runChannelHealthCheck(connectionId: string, businessId?: string): Promise<ApiResult<HealthCheckResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<HealthCheckResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/connections/${encodeURIComponent(connectionId)}/health-check`, body: {} });
+}
+
+export async function toggleChannelDestination(destId: string, isActive: boolean, businessId?: string): Promise<ApiResult<ChannelDestination>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPatch<ChannelDestination>(`/communications/businesses/${encodeURIComponent(bid)}/destinations/${encodeURIComponent(destId)}/toggle`, { isActive });
+}
+
+export async function updateChannelConnection(connectionId: string, data: Record<string, unknown>, businessId?: string): Promise<ApiResult<ChannelConnection>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPatch<ChannelConnection>(`/communications/businesses/${encodeURIComponent(bid)}/connections/${encodeURIComponent(connectionId)}`, data);
+}
+
+export async function deleteChannelConnection(connectionId: string, businessId?: string): Promise<ApiResult<{ deleted: boolean }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiDelete<{ deleted: boolean }>(`/communications/businesses/${encodeURIComponent(bid)}/connections/${encodeURIComponent(connectionId)}`);
 }
 
 export { DEFAULT_BUSINESS_ID };
