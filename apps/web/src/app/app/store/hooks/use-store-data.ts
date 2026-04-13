@@ -20,6 +20,7 @@ import {
   StoreAnalytics,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { apiGet } from "@/lib/api";
 import { onProductsChanged, hasProductChangedSinceLastFetch, markProductsFetched } from "@/lib/product-sync";
 import { toast } from "sonner";
 import { useModuleEmit } from "@/hooks/use-module-events";
@@ -62,6 +63,7 @@ export function useStoreData() {
   const [syncing, setSyncing] = useState(false);
   const [overviewAnalytics, setOverviewAnalytics] = useState<StoreAnalytics | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeDeliveryMethodsCount, setActiveDeliveryMethodsCount] = useState(0);
 
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>({
     hero: {},
@@ -154,12 +156,17 @@ export function useStoreData() {
       }
       setDriftedItems(drifts);
 
-      const [configRes, analyticsRes] = await Promise.all([
+      const [configRes, analyticsRes, deliveryRes] = await Promise.all([
         fetchStorefrontConfig(businessId).catch(() => ({ data: null, error: null })),
         fetchStoreAnalytics(businessId, 30).catch(() => ({ data: null, error: null })),
+        apiGet<Record<string, { enabled?: boolean }>>(`/marketplace/businesses/${businessId}/delivery-config`).catch(() => ({ data: null })),
       ]);
       if (configRes.data) setStorefrontConfig(configRes.data);
       if (analyticsRes.data) setOverviewAnalytics(analyticsRes.data);
+      if (deliveryRes.data) {
+        const count = Object.values(deliveryRes.data).filter((m) => m?.enabled).length;
+        setActiveDeliveryMethodsCount(count);
+      }
     } catch (e) {
       console.error("Failed to load store data:", e);
       setLoadError("Failed to load store data. Please refresh the page.");
@@ -433,5 +440,6 @@ export function useStoreData() {
     storeServiceNames,
     storeItemCount,
     emitEvent,
+    activeDeliveryMethodsCount,
   };
 }

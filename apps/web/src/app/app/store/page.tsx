@@ -2,29 +2,26 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Store, Package, ShoppingBag, TrendingUp, ExternalLink,
-  ArrowUpRight, Eye, DollarSign, CalendarCheck, Image as ImageIcon,
-  Sparkles, ChevronRight, BarChart3,
-} from "lucide-react";
+import { Store } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useNavigationContext } from "@/lib/navigation-context";
-import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { STORE_WALKTHROUGH } from "@/lib/walkthrough-definitions";
-import { formatPrice } from "@/lib/format";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
 import { useStoreData } from "./hooks/use-store-data";
 import { StoreSkeleton } from "./components/store-skeleton";
 import { StoreHeaderActions } from "./components/store-header-actions";
-import { StorefrontTab } from "./components/storefront-tab";
-import { ProductsHoursTab } from "./components/products-hours-tab";
-import { FulfillmentTab } from "./components/fulfillment-tab";
 import { VIEW_TABS, type TabKey } from "./components/store-types";
+import { OverviewMode } from "./components/overview-mode";
+import { DesignMode } from "./components/design-mode";
+import { MerchandisingMode } from "./components/merchandising-mode";
+import { CatalogMode } from "./components/catalog-mode";
+import { OperationsMode } from "./components/operations-mode";
+import { LaunchMode } from "./components/launch-mode";
 
 type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string; subheadline?: string };
 type SocialProofSection = { testimonials?: unknown[] };
@@ -32,17 +29,18 @@ type BusinessHourEntry = { enabled?: boolean };
 type AppearanceSection = { primaryColor?: string; secondaryColor?: string; accentColor?: string };
 
 const TAB_KEYS = VIEW_TABS.map((t) => t.key);
+
 const SLIDE = {
-  enter: (d: number) => ({ x: d > 0 ? 60 : -60, opacity: 0 }),
+  enter: (d: number) => ({ x: d > 0 ? 40 : -40, opacity: 0 }),
   center: { x: 0, opacity: 1 },
-  exit: (d: number) => ({ x: d > 0 ? -60 : 60, opacity: 0 }),
+  exit: (d: number) => ({ x: d > 0 ? -40 : 40, opacity: 0 }),
 };
 
 export default function StorePage() {
   const searchParams = useSearchParams();
   const s = useStoreData();
   const ai = useStoreAiHub();
-  const [activeTab, setActiveTab] = useState<TabKey>("setup");
+  const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const dirRef = useRef(0);
   const initRef = useRef(false);
   const { setCurrentMeta } = useNavigationContext();
@@ -51,17 +49,23 @@ export default function StorePage() {
   useEffect(() => {
     if (initRef.current) return;
     const p = searchParams.get("tab");
-    if (p && TAB_KEYS.includes(p as TabKey)) { setActiveTab(p as TabKey); initRef.current = true; }
+    if (p && TAB_KEYS.includes(p as TabKey)) {
+      setActiveTab(p as TabKey);
+      initRef.current = true;
+    }
   }, [searchParams]);
 
   useEffect(() => {
     if (!s.businessId) return;
     ai.updateStoreContext({
-      businessId: s.businessId, activeView: activeTab,
+      businessId: s.businessId,
+      activeView: activeTab,
       itemCount: s.commerceProducts.length,
-      products: s.commerceProducts, services: s.services,
+      products: s.commerceProducts,
+      services: s.services,
       testimonials: (s.storefrontConfig.socialProof as SocialProofSection | undefined)?.testimonials ?? [],
-      storeEnabled: s.storeEnabled, hasHeroImage: !!(s.storefrontConfig.hero as HeroSection | undefined)?.imageUrl,
+      storeEnabled: s.storeEnabled,
+      hasHeroImage: !!(s.storefrontConfig.hero as HeroSection | undefined)?.imageUrl,
       hasLogo: !!s.businessData?.logoUrl,
       hoursConfigured: Object.values(s.businessHours).some((h) => (h as BusinessHourEntry)?.enabled),
       storeName: s.businessData?.name,
@@ -72,19 +76,22 @@ export default function StorePage() {
     if (!TAB_KEYS.includes(key as TabKey)) return;
     dirRef.current = TAB_KEYS.indexOf(key as TabKey) > TAB_KEYS.indexOf(activeTab) ? 1 : -1;
     setActiveTab(key as TabKey);
-    setCurrentMeta({ tab: key === "setup" ? null : key });
+    setCurrentMeta({ tab: key === "overview" ? null : key });
     s.emitEvent("module:tab_changed", "store", { tab: key });
     const url = new URL(window.location.href);
-    key === "setup" ? url.searchParams.delete("tab") : url.searchParams.set("tab", key);
+    key === "overview" ? url.searchParams.delete("tab") : url.searchParams.set("tab", key);
     window.history.replaceState({}, "", url.toString());
   }, [activeTab, s.emitEvent, setCurrentMeta]);
 
-  const { swipeHandlers } = useSwipeTabs({ tabs: TAB_KEYS, activeTab, onTabChange: handleTabChange });
-
-  const shortcuts = useMemo<ShortcutGroup[]>(() => [{ groupName: "Store",
+  const shortcuts = useMemo<ShortcutGroup[]>(() => [{
+    groupName: "Store",
     shortcuts: [
-      { key: "1", description: "My Store", action: () => handleTabChange("setup") },
-      { key: "2", description: "Orders", action: () => handleTabChange("orders") },
+      { key: "1", description: "Overview", action: () => handleTabChange("overview") },
+      { key: "2", description: "Design", action: () => handleTabChange("design") },
+      { key: "3", description: "Merchandising", action: () => handleTabChange("merchandising") },
+      { key: "4", description: "Catalog", action: () => handleTabChange("catalog") },
+      { key: "5", description: "Operations", action: () => handleTabChange("operations") },
+      { key: "6", description: "Launch", action: () => handleTabChange("launch") },
       { key: "r", description: "Refresh", action: () => { void s.loadData(); } },
     ],
   }], [handleTabChange, s.loadData]);
@@ -99,221 +106,215 @@ export default function StorePage() {
   const hero = cfg.hero as HeroSection | undefined;
   const pc = appearance?.primaryColor || s.businessData?.primaryColor || "#F97316";
   const sc = appearance?.secondaryColor || s.businessData?.secondaryColor || "#14B8A6";
-  const ac = appearance?.accentColor || "#a78bfa";
   const coverImage = hero?.coverImageUrl || hero?.imageUrl;
   const logoUrl = s.businessData?.logoUrl;
   const storeName = s.businessData?.name || "My Store";
-  const analytics = s.overviewAnalytics;
 
-  const catalogItems = s.commerceProducts.slice(0, 6);
-  const totalItems = s.commerceProducts.length + s.services.length;
-  const inStoreCount = s.storeItemCount ?? totalItems;
+  const hasHeroImage = !!(hero?.imageUrl || hero?.coverImageUrl);
+  const hoursConfigured = Object.values(s.businessHours).some((h) => (h as BusinessHourEntry)?.enabled);
+  const hasTestimonials = !!((cfg.socialProof as SocialProofSection | undefined)?.testimonials?.length);
 
   return (
-    <div className="space-y-5" aria-label="Store">
+    <div className="space-y-4" aria-label="Presence Studio">
       <ResumePrompt module="store" />
+
       <div className="relative rounded-2xl overflow-hidden" style={{ border: `1px solid ${pc}20` }}>
         {coverImage ? (
           <div className="absolute inset-0">
             <img src={coverImage} alt="" className="w-full h-full object-cover" />
-            <div
-              className="absolute inset-0"
-              style={{ background: `linear-gradient(135deg, hsl(var(--kf-background) / 0.92) 0%, hsl(var(--kf-background) / 0.85) 50%, hsl(var(--kf-background) / 0.75) 100%)` }}
-            />
-            <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${pc}15 0%, transparent 60%)` }} />
+            <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, hsl(var(--kf-background)/0.92) 0%, hsl(var(--kf-background)/0.82) 100%)` }} />
+            <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${pc}10 0%, transparent 60%)` }} />
           </div>
         ) : (
-          <div
-            className="absolute inset-0"
-            style={{ background: `linear-gradient(135deg, ${pc}14 0%, ${sc}08 50%, hsl(var(--kf-card)) 100%)` }}
-          />
+          <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${pc}12 0%, ${sc}06 60%, hsl(var(--kf-card)) 100%)` }} />
         )}
 
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full" style={{ background: `radial-gradient(circle, ${pc}12, transparent 60%)` }} />
-          <div className="absolute top-1/2 -right-10 w-44 h-44 rounded-2xl rotate-45" style={{ border: `2px solid ${pc}08` }} />
-          <div className="absolute -bottom-16 -left-16 w-56 h-56 rounded-full" style={{ background: `radial-gradient(circle, ${sc}0a, transparent 60%)` }} />
+          <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full" style={{ background: `radial-gradient(circle, ${pc}10, transparent 60%)` }} />
+          <div className="absolute -bottom-12 -left-12 w-48 h-48 rounded-full" style={{ background: `radial-gradient(circle, ${sc}08, transparent 60%)` }} />
         </div>
 
-        <div className="relative px-6 pt-6 pb-6">
-          <div className="flex items-start justify-between gap-4 mb-5">
-            <div className="flex items-center gap-4">
+        <div className="relative px-5 pt-5 pb-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3.5 min-w-0">
               {logoUrl ? (
-                <div
-                  className="h-[52px] w-[52px] rounded-2xl flex items-center justify-center flex-shrink-0 overflow-hidden"
-                  style={{ border: `2px solid ${pc}30`, boxShadow: `0 6px 20px ${pc}15`, background: "hsl(var(--kf-card))" }}
-                >
+                <div className="h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0 overflow-hidden" style={{ border: `2px solid ${pc}30`, boxShadow: `0 4px 16px ${pc}15`, background: "hsl(var(--kf-card))" }}>
                   <img src={logoUrl} alt="" className="w-full h-full object-cover" />
                 </div>
               ) : (
-                <div
-                  className="h-[52px] w-[52px] rounded-2xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: `linear-gradient(135deg, ${pc}, ${sc})`, boxShadow: `0 6px 20px ${pc}30` }}
-                >
-                  <Store className="w-6 h-6" style={{ color: "white" }} />
+                <div className="h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: `linear-gradient(135deg, ${pc}, ${sc})`, boxShadow: `0 4px 16px ${pc}25` }}>
+                  <Store className="w-5 h-5 text-white" />
                 </div>
               )}
-              <div>
-                <div className="flex items-center gap-2.5">
-                  <h1 className="text-xl font-bold tracking-tight" style={{ color: "hsl(var(--kf-foreground))" }}>{storeName}</h1>
-                  <div
-                    className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                    style={{
-                      background: s.storeEnabled ? "hsl(var(--kf-success) / 0.12)" : "hsl(var(--kf-warning) / 0.12)",
-                      color: s.storeEnabled ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
-                    }}
-                  >
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-lg font-bold tracking-tight truncate" style={{ color: "hsl(var(--kf-foreground))" }}>{storeName}</h1>
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0" style={{
+                    background: s.storeEnabled ? "hsl(var(--kf-success)/0.12)" : "hsl(var(--kf-warning)/0.12)",
+                    color: s.storeEnabled ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
+                  }}>
                     <div className="w-1.5 h-1.5 rounded-full" style={{
                       background: s.storeEnabled ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
-                      boxShadow: s.storeEnabled ? "0 0 6px hsl(var(--kf-success) / 0.4)" : "none",
+                      boxShadow: s.storeEnabled ? "0 0 6px hsl(var(--kf-success)/0.4)" : "none",
                     }} />
                     {s.storeEnabled ? "Live" : "Draft"}
                   </div>
                   <PageGuideTrigger moduleKey="store" />
                 </div>
-                <p className="text-xs mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-                  {s.storeEnabled && s.getPublicBookingUrl() ? s.getPublicBookingUrl().replace("https://", "") : "Your online storefront"}
+                <p className="text-xs mt-0.5 truncate" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                  {s.storeEnabled && s.getPublicBookingUrl() ? s.getPublicBookingUrl().replace("https://", "") : "Presence Studio — your storefront workspace"}
                 </p>
               </div>
             </div>
             <StoreHeaderActions storeEnabled={s.storeEnabled} publicUrl={s.getPublicBookingUrl()} onToggleEnabled={s.toggleStoreEnabled} />
           </div>
-
-          <div className="grid grid-cols-4 gap-2.5">
-            <StatCard label="Products" value={s.commerceProducts.length} icon={Package} color={pc} />
-            <StatCard label="Services" value={s.services.length} icon={ShoppingBag} color={sc} />
-            <StatCard label="In Store" value={inStoreCount} icon={TrendingUp} color={ac} />
-            <StatCard
-              label="Revenue"
-              value={analytics?.revenue?.inPeriod != null ? formatPrice(analytics.revenue.inPeriod) : "—"}
-              icon={DollarSign}
-              color={pc}
-              small
-            />
-          </div>
-
-          {catalogItems.length > 0 && (
-            <div className="mt-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--kf-muted-foreground) / 0.5)" }}>
-                  Catalog Preview
-                </span>
-                {s.commerceProducts.length > 6 && (
-                  <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground) / 0.4)" }}>
-                    +{s.commerceProducts.length - 6} more
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-none">
-                {catalogItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex-shrink-0 w-[100px] rounded-xl overflow-hidden transition-transform hover:scale-[1.03]"
-                    style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.3)" }}
-                  >
-                    {item.imageUrl ? (
-                      <div className="h-[64px] overflow-hidden">
-                        <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
-                      </div>
-                    ) : (
-                      <div className="h-[64px] flex items-center justify-center" style={{ background: `${pc}08` }}>
-                        <ImageIcon className="w-5 h-5" style={{ color: `${pc}40` }} />
-                      </div>
-                    )}
-                    <div className="px-2 py-1.5">
-                      <p className="text-[10px] font-medium truncate" style={{ color: "hsl(var(--kf-foreground))" }}>{item.name}</p>
-                      <p className="text-[9px] tabular-nums" style={{ color: pc }}>{formatPrice(item.price, item.currency)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {s.storeEnabled && s.getPublicBookingUrl() && (
-            <a
-              href={s.getPublicBookingUrl()}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all hover:brightness-110 min-h-[44px]"
-              style={{ background: pc, color: "white", boxShadow: `0 4px 12px ${pc}40` }}
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              View Live Store
-              <ArrowUpRight className="w-3 h-3 opacity-70" />
-            </a>
-          )}
         </div>
       </div>
 
       <div data-walkthrough="store-setup">
-        <div className="flex gap-1 p-1 rounded-xl" role="tablist" style={{ background: "hsl(var(--kf-muted) / 0.06)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
-          {VIEW_TABS.map(({ key, label, icon: Icon }) => {
-            const isActive = activeTab === key;
-            return (
-              <button
-                key={key}
-                onClick={() => handleTabChange(key)}
-                className="relative flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all min-h-[44px]"
-                style={{ color: isActive ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))" }}
-                aria-selected={isActive}
-                role="tab"
-              >
-                {isActive && (
-                  <motion.div
-                    layoutId="store-active-tab"
-                    className="absolute inset-0 rounded-lg"
-                    style={{ background: "hsl(var(--kf-card))", border: `1px solid ${pc}20`, boxShadow: `0 2px 8px hsl(var(--kf-background) / 0.4)` }}
-                    transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
-                  />
-                )}
-                <Icon className="w-4 h-4 relative z-10" style={isActive ? { color: pc } : undefined} />
-                <span className="relative z-10">{label}</span>
-              </button>
-            );
-          })}
+        <div className="relative rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.35)" }}>
+          <div className="flex items-center overflow-x-auto scrollbar-none p-1 gap-0.5">
+            {VIEW_TABS.map(({ key, label, icon: Icon }) => {
+              const isActive = activeTab === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => handleTabChange(key)}
+                  className="relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap min-h-[40px] flex-shrink-0"
+                  style={{ color: isActive ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))" }}
+                  aria-selected={isActive}
+                  role="tab"
+                >
+                  {isActive && (
+                    <motion.div
+                      layoutId="studio-active-mode"
+                      className="absolute inset-0 rounded-xl"
+                      style={{ background: `${pc}12`, border: `1px solid ${pc}25`, boxShadow: `0 2px 8px ${pc}10` }}
+                      transition={{ type: "spring", bounce: 0.12, duration: 0.38 }}
+                    />
+                  )}
+                  <Icon className="w-3.5 h-3.5 relative z-10 flex-shrink-0" style={isActive ? { color: pc } : undefined} />
+                  <span className="relative z-10">{label}</span>
+                  {isActive && (
+                    <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full relative z-10" style={{ background: pc }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      <div {...swipeHandlers} className="touch-pan-y">
+      <div className="touch-pan-y">
         <AnimatePresence mode="wait" custom={dirRef.current}>
-          <motion.div key={activeTab} custom={dirRef.current} variants={SLIDE} initial="enter" animate="center" exit="exit" transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}>
-            {activeTab === "setup" && (
-              <div data-walkthrough="store-customize" className="space-y-6">
-                <StorefrontTab businessId={s.businessId} storeEnabled={s.storeEnabled} slug={s.storeSlug} currentSlug={s.businessData?.slug ?? null} publicUrl={s.getPublicBookingUrl()} onSlugChange={s.setStoreSlug} onSaveSlug={s.handleSaveSlug} slugSaving={s.slugSaving} storefrontConfig={cfg} onConfigChange={s.handleConfigChange} onSaveConfig={s.handleSaveConfig} configSaving={s.configSaving} businessData={s.businessData} services={s.services} commerceProducts={s.commerceProducts} hasHeroImage={!!(cfg.hero as HeroSection | undefined)?.imageUrl || !!(cfg.hero as HeroSection | undefined)?.coverImageUrl} hoursConfigured={Object.values(s.businessHours).some((h) => (h as BusinessHourEntry)?.enabled)} hasTestimonials={!!((cfg.socialProof as SocialProofSection | undefined)?.testimonials?.length)} onTabChange={handleTabChange} />
-                <ProductsHoursTab commerceProducts={s.commerceProducts} storeServiceNames={s.storeServiceNames} storeItemCount={s.storeItemCount} processingItems={s.processingItems} confirmRemove={s.confirmRemove} onToggleItem={s.handleToggleStoreItem} onSelectAll={s.handleSelectAll} onDeselectAll={s.handleDeselectAll} onConfirmRemoveChange={s.setConfirmRemove} onDeleteFromStore={s.handleDeleteServiceFromStore} services={s.services} businessHours={s.businessHours} onHoursChange={s.setBusinessHours} onSaveHours={s.handleSaveHours} hoursSaving={s.hoursSaving} onReorderProducts={s.handleReorderProducts} />
-              </div>
+          <motion.div
+            key={activeTab}
+            custom={dirRef.current}
+            variants={SLIDE}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ type: "spring", bounce: 0.12, duration: 0.3 }}
+          >
+            {activeTab === "overview" && (
+              <OverviewMode
+                businessId={s.businessId}
+                storeEnabled={s.storeEnabled}
+                publicUrl={s.getPublicBookingUrl()}
+                businessData={s.businessData}
+                commerceProducts={s.commerceProducts}
+                services={s.services}
+                storefrontConfig={cfg}
+                analytics={s.overviewAnalytics}
+                businessHours={s.businessHours as Record<string, { enabled?: boolean }>}
+                onModeChange={handleTabChange}
+                activeDeliveryMethodsCount={s.activeDeliveryMethodsCount}
+              />
             )}
-            {activeTab === "orders" && <FulfillmentTab businessId={s.businessId} />}
+            {activeTab === "design" && (
+              <DesignMode
+                businessData={s.businessData}
+                services={s.services}
+                commerceProducts={s.commerceProducts}
+                storefrontConfig={cfg}
+                onConfigChange={s.handleConfigChange}
+                onSaveConfig={s.handleSaveConfig}
+                configSaving={s.configSaving}
+                slug={s.storeSlug}
+              />
+            )}
+            {activeTab === "merchandising" && (
+              <MerchandisingMode
+                businessData={s.businessData}
+                services={s.services}
+                commerceProducts={s.commerceProducts}
+                storefrontConfig={cfg}
+                onConfigChange={s.handleConfigChange}
+                onSaveConfig={s.handleSaveConfig}
+                configSaving={s.configSaving}
+                publicUrl={s.getPublicBookingUrl()}
+                hasTestimonials={hasTestimonials}
+              />
+            )}
+            {activeTab === "catalog" && (
+              <CatalogMode
+                commerceProducts={s.commerceProducts}
+                storeServiceNames={s.storeServiceNames}
+                storeItemCount={s.storeItemCount}
+                processingItems={s.processingItems}
+                confirmRemove={s.confirmRemove}
+                onToggleItem={s.handleToggleStoreItem}
+                onSelectAll={s.handleSelectAll}
+                onDeselectAll={s.handleDeselectAll}
+                onConfirmRemoveChange={s.setConfirmRemove}
+                onDeleteFromStore={s.handleDeleteServiceFromStore}
+                services={s.services}
+                businessHours={s.businessHours}
+                onHoursChange={s.setBusinessHours}
+                onSaveHours={s.handleSaveHours}
+                hoursSaving={s.hoursSaving}
+                onReorderProducts={s.handleReorderProducts}
+              />
+            )}
+            {activeTab === "operations" && (
+              <OperationsMode
+                businessId={s.businessId}
+                storeEnabled={s.storeEnabled}
+                businessHours={s.businessHours}
+                storefrontConfig={cfg}
+                onConfigChange={s.handleConfigChange}
+                onSaveConfig={s.handleSaveConfig}
+                configSaving={s.configSaving}
+                onHoursChange={s.setBusinessHours}
+                onSaveHours={s.handleSaveHours}
+                hoursSaving={s.hoursSaving}
+                onToggleStoreEnabled={s.toggleStoreEnabled}
+              />
+            )}
+            {activeTab === "launch" && (
+              <LaunchMode
+                businessId={s.businessId}
+                storeEnabled={s.storeEnabled}
+                slug={s.storeSlug}
+                currentSlug={s.businessData?.slug ?? null}
+                publicUrl={s.getPublicBookingUrl()}
+                onSlugChange={s.setStoreSlug}
+                onSaveSlug={s.handleSaveSlug}
+                slugSaving={s.slugSaving}
+                businessData={s.businessData}
+                services={s.services}
+                commerceProducts={s.commerceProducts}
+                hasHeroImage={hasHeroImage}
+                hoursConfigured={hoursConfigured}
+                hasTestimonials={hasTestimonials}
+                onModeChange={handleTabChange}
+              />
+            )}
           </motion.div>
         </AnimatePresence>
       </div>
 
-      <PageGuide
-        moduleKey="store"
-        walkthroughSteps={STORE_WALKTHROUGH}
-      />
-    </div>
-  );
-}
-
-function StatCard({ label, value, icon: Icon, color, small }: { label: string; value: string | number; icon: React.ElementType; color: string; small?: boolean }) {
-  return (
-    <div
-      className="group rounded-xl px-3 py-3 transition-all duration-200 hover:scale-[1.02] cursor-default overflow-hidden relative"
-      style={{ background: `${color}0a`, border: `1px solid ${color}15` }}
-    >
-      <div className="absolute top-2 right-2 opacity-[0.06] group-hover:opacity-[0.1] transition-opacity">
-        <Icon className="w-8 h-8" style={{ color }} />
-      </div>
-      <div className="relative">
-        <div className={`${small ? "text-sm" : "text-lg"} font-bold tabular-nums leading-tight`} style={{ color: "hsl(var(--kf-foreground))" }}>
-          {value}
-        </div>
-        <div className="text-[10px] font-medium mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-          {label}
-        </div>
-      </div>
+      <PageGuide moduleKey="store" walkthroughSteps={STORE_WALKTHROUGH} />
     </div>
   );
 }
