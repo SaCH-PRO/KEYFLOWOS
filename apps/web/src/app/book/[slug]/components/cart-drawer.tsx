@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useScrollLock } from "@/hooks/use-scroll-lock";
 import {
   ShoppingCart,
@@ -374,7 +374,7 @@ export function CartDrawer({
         </div>
       )}
 
-      <style jsx>{`
+      <style>{`
         @keyframes fadeIn {
           from { opacity: 0; }
           to { opacity: 1; }
