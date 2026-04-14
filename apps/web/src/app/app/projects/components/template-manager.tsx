@@ -400,6 +400,14 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
                     )}
                   </div>
                 )}
+                {INTELLIGENT_DEFAULTS[serviceType]?.milestones.length > 0 && (
+                  <div className="flex items-center gap-1 pl-12 mt-1">
+                    <Flag className="w-2.5 h-2.5 shrink-0" style={{ color: "hsl(var(--kf-accent2))" }} />
+                    <span className="text-[9px] text-muted-foreground">
+                      {INTELLIGENT_DEFAULTS[serviceType].milestones.length} milestone{INTELLIGENT_DEFAULTS[serviceType].milestones.length !== 1 ? "s" : ""} suggested
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 mt-auto pt-1">
                   <button
                     onClick={() => handleUseTemplate(t)}

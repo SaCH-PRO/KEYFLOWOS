@@ -404,10 +404,10 @@ export function ProjectDetail({
           <RevenueTab invoiceId={project.invoiceId} businessId={businessId ?? undefined} projectId={project.id} />
         )}
         {activeTab === "calendar" && (
-          <CalendarTab project={project} />
+          <CalendarTab project={project} milestones={milestones} />
         )}
         {activeTab === "flows" && (
-          <FlowsTab />
+          <FlowsTab projectId={project.id} businessId={businessId ?? undefined} />
         )}
         {activeTab === "deliverables" && (
           <DeliverablesTab

@@ -437,7 +437,9 @@ export function ProjectBoard({
                                     }}
                                   />
                                 </div>
-                                <span className="text-[10px] tabular-nums">{completedTasks}/{totalTasks}</span>
+                                <span className="text-[10px] tabular-nums font-medium" style={{ color: progress === 100 ? "hsl(var(--kf-success))" : undefined }}>
+                                  {progress}% · {completedTasks}/{totalTasks}
+                                </span>
                               </div>
                             )}
 
