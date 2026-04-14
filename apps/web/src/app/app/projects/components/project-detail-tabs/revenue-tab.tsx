@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DollarSign, FileText, ExternalLink, CreditCard, TrendingDown, Wallet } from "lucide-react";
+import { DollarSign, FileText, ExternalLink, CreditCard, TrendingDown, Wallet, AlertCircle } from "lucide-react";
 import { fetchExpensesByProject, type Expense } from "@/lib/client";
 
 interface RevenueTabProps {
@@ -13,18 +13,25 @@ interface RevenueTabProps {
 export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps) {
   const [projectExpenses, setProjectExpenses] = useState<Expense[]>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
+  const [expenseError, setExpenseError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!businessId || !projectId) return;
     let cancelled = false;
     async function loadExpenses() {
       setLoadingExpenses(true);
+      setExpenseError(null);
       try {
         const res = await fetchExpensesByProject(businessId!, projectId!);
         if (!cancelled && res.data) {
           setProjectExpenses(res.data.expenses);
         }
-      } catch { /* silently handle */ }
+      } catch (err) {
+        if (!cancelled) {
+          setExpenseError("Failed to load project expenses. Please try again.");
+          console.error("[RevenueTab] expense fetch error:", err);
+        }
+      }
       if (!cancelled) setLoadingExpenses(false);
     }
     void loadExpenses();
@@ -79,6 +86,11 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
           <div className="flex items-center gap-2 py-4">
             <div className="w-4 h-4 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" />
             <p className="text-xs text-muted-foreground">Loading expenses...</p>
+          </div>
+        ) : expenseError ? (
+          <div className="flex items-center gap-2 py-3 px-3 rounded-lg" style={{ background: "hsl(var(--kf-error) / 0.06)" }}>
+            <AlertCircle className="w-4 h-4 shrink-0" style={{ color: "hsl(var(--kf-error))" }} />
+            <span className="text-xs" style={{ color: "hsl(var(--kf-error))" }}>{expenseError}</span>
           </div>
         ) : projectExpenses.length === 0 ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">

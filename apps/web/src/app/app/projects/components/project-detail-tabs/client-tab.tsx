@@ -29,7 +29,7 @@ export function ClientTab({ contactId }: ClientTabProps) {
             <p className="text-[10px] text-muted-foreground">ID: {contactId.slice(0, 8)}...</p>
           </div>
           <a
-            href={`/app/clients?contact=${contactId}`}
+            href={`/app/crm/contacts/${contactId}`}
             className="text-xs px-3 py-1.5 rounded-lg font-medium inline-flex items-center gap-1 transition-colors"
             style={{ background: "hsl(var(--kf-info) / 0.1)", color: "hsl(var(--kf-info))" }}
           >
