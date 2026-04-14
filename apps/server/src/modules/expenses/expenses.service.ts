@@ -113,12 +113,25 @@ export class ExpensesService {
         isRecurring: input.isRecurring ?? false,
         recurringFrequency: input.recurringFrequency ?? null,
         categoryId: input.categoryId ?? null,
-        projectId: input.projectId ?? null,
-        contactId: input.contactId ?? null,
-        serviceId: input.serviceId ?? null,
+        projectId: null as string | null,
+        contactId: null as string | null,
+        serviceId: null as string | null,
       },
       include: { category: true },
     });
+
+    if (input.projectId) {
+      const proj = await this.prisma.client.project.findFirst({ where: { id: input.projectId, businessId: input.businessId } });
+      if (proj) await this.prisma.client.expense.update({ where: { id: expense.id }, data: { projectId: input.projectId } });
+    }
+    if (input.contactId) {
+      const ct = await this.prisma.client.contact.findFirst({ where: { id: input.contactId, businessId: input.businessId } });
+      if (ct) await this.prisma.client.expense.update({ where: { id: expense.id }, data: { contactId: input.contactId } });
+    }
+    if (input.serviceId) {
+      const svc = await this.prisma.client.service.findFirst({ where: { id: input.serviceId, businessId: input.businessId } });
+      if (svc) await this.prisma.client.expense.update({ where: { id: expense.id }, data: { serviceId: input.serviceId } });
+    }
 
     this.events.emit('expense.created', {
       expense: { id: expense.id, businessId: input.businessId, amount: expense.amount, description: expense.description, categoryId: expense.categoryId },
@@ -162,10 +175,37 @@ export class ExpensesService {
         ...(input.isRecurring !== undefined && { isRecurring: input.isRecurring }),
         ...(input.recurringFrequency !== undefined && { recurringFrequency: input.recurringFrequency }),
         ...(input.categoryId !== undefined && { categoryId: input.categoryId }),
-        ...(input.projectId !== undefined && { projectId: input.projectId }),
-        ...(input.contactId !== undefined && { contactId: input.contactId }),
-        ...(input.serviceId !== undefined && { serviceId: input.serviceId }),
       },
+      include: { category: true },
+    });
+
+    if (input.projectId !== undefined) {
+      if (input.projectId === null) {
+        await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { projectId: null } });
+      } else {
+        const proj = await this.prisma.client.project.findFirst({ where: { id: input.projectId, businessId: input.businessId } });
+        if (proj) await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { projectId: input.projectId } });
+      }
+    }
+    if (input.contactId !== undefined) {
+      if (input.contactId === null) {
+        await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { contactId: null } });
+      } else {
+        const ct = await this.prisma.client.contact.findFirst({ where: { id: input.contactId, businessId: input.businessId } });
+        if (ct) await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { contactId: input.contactId } });
+      }
+    }
+    if (input.serviceId !== undefined) {
+      if (input.serviceId === null) {
+        await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { serviceId: null } });
+      } else {
+        const svc = await this.prisma.client.service.findFirst({ where: { id: input.serviceId, businessId: input.businessId } });
+        if (svc) await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { serviceId: input.serviceId } });
+      }
+    }
+
+    return this.prisma.client.expense.findFirst({
+      where: { id: input.expenseId, businessId: input.businessId },
       include: { category: true },
     });
   }
@@ -352,7 +392,7 @@ export class ExpensesService {
     const projectIds = Object.keys(byProject);
     if (projectIds.length > 0) {
       const projects = await this.prisma.client.project.findMany({
-        where: { id: { in: projectIds } },
+        where: { id: { in: projectIds }, businessId },
         select: { id: true, name: true },
       });
       for (const p of projects) {
@@ -492,7 +532,7 @@ export class ExpensesService {
     let clientNames: Record<string, string> = {};
     if (clientIds.length > 0) {
       const contacts = await this.prisma.client.contact.findMany({
-        where: { id: { in: clientIds } },
+        where: { id: { in: clientIds }, businessId },
         select: { id: true, firstName: true, lastName: true, displayName: true },
       });
       for (const c of contacts) {
@@ -504,7 +544,7 @@ export class ExpensesService {
     let projectNames: Record<string, string> = {};
     if (projectIds.length > 0) {
       const projects = await this.prisma.client.project.findMany({
-        where: { id: { in: projectIds } },
+        where: { id: { in: projectIds }, businessId },
         select: { id: true, name: true },
       });
       for (const p of projects) {
@@ -516,7 +556,7 @@ export class ExpensesService {
     let serviceNames: Record<string, string> = {};
     if (serviceIds.length > 0) {
       const services = await this.prisma.client.service.findMany({
-        where: { id: { in: serviceIds } },
+        where: { id: { in: serviceIds }, businessId },
         select: { id: true, name: true },
       });
       for (const s of services) {
