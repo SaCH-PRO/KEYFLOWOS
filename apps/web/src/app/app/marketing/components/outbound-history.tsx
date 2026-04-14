@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Clock, AlertCircle, CheckCircle, XCircle,
@@ -185,6 +185,45 @@ function OutboundContentRow({ item, businessId }: { item: OutboundContent; busin
   );
 }
 
+function DeliveryStatsStrip({ items }: { items: OutboundContent[] }) {
+  const stats = useMemo(() => {
+    const sent = items.filter(c => c.status === "Sent" || c.status === "Published").length;
+    const failed = items.filter(c => c.status === "Failed" || c.status === "PartiallyFailed").length;
+    const pending = items.filter(c => c.status === "Queued" || c.status === "Sending").length;
+    const scheduled = items.filter(c => c.status === "Scheduled").length;
+    const total = items.length;
+    const successRate = total > 0 ? Math.round((sent / total) * 100) : 0;
+    return { sent, failed, pending, scheduled, total, successRate };
+  }, [items]);
+
+  if (stats.total === 0) return null;
+
+  return (
+    <div className="grid grid-cols-5 gap-2">
+      <div className="text-center px-2 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+        <div className="text-sm font-semibold text-emerald-400">{stats.sent}</div>
+        <div className="text-[9px] text-muted-foreground">Delivered</div>
+      </div>
+      <div className="text-center px-2 py-1.5 rounded-lg bg-red-500/5 border border-red-500/10">
+        <div className="text-sm font-semibold text-red-400">{stats.failed}</div>
+        <div className="text-[9px] text-muted-foreground">Failed</div>
+      </div>
+      <div className="text-center px-2 py-1.5 rounded-lg bg-blue-500/5 border border-blue-500/10">
+        <div className="text-sm font-semibold text-blue-400">{stats.pending}</div>
+        <div className="text-[9px] text-muted-foreground">Pending</div>
+      </div>
+      <div className="text-center px-2 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
+        <div className="text-sm font-semibold text-amber-400">{stats.scheduled}</div>
+        <div className="text-[9px] text-muted-foreground">Scheduled</div>
+      </div>
+      <div className="text-center px-2 py-1.5 rounded-lg bg-muted/10 border border-border/20">
+        <div className={`text-sm font-semibold ${stats.successRate >= 80 ? "text-emerald-400" : stats.successRate >= 50 ? "text-amber-400" : "text-red-400"}`}>{stats.successRate}%</div>
+        <div className="text-[9px] text-muted-foreground">Success</div>
+      </div>
+    </div>
+  );
+}
+
 export function OutboundHistory({ businessId, refreshTrigger }: OutboundHistoryProps) {
   const [items, setItems] = useState<OutboundContent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -239,6 +278,8 @@ export function OutboundHistory({ businessId, refreshTrigger }: OutboundHistoryP
           </button>
         </div>
       </div>
+
+      <DeliveryStatsStrip items={items} />
 
       <div className="flex items-center gap-1 flex-wrap">
         <button
