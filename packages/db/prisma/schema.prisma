@@ -238,15 +238,39 @@ model Membership {
   id   String @id @default(cuid())
   role String // "OWNER", "ADMIN", "STAFF"
 
+  permissionScopes Json?    @map("permission_scopes")
+  maxApprovalTier  Int      @default(0) @map("max_approval_tier")
+
   userId     String   @map("user_id")
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade) // Safe to cascade
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   businessId String   @map("business_id")
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade) // Safe to cascade
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now()) @map("created_at")
 
   @@unique([userId, businessId])
   @@index([userId])
   @@index([businessId])
   @@map("memberships")
+}
+
+model TeamActivityLog {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  userId     String   @map("user_id")
+  module     String
+  action     String
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  title      String
+  detail     String?
+  meta       Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, createdAt])
+  @@index([businessId, userId])
+  @@index([businessId, module])
+  @@map("team_activity_logs")
 }
 
 model Session {
