@@ -16,6 +16,9 @@ interface AiRecommendationCardProps {
   description: string;
   explanation?: string;
   actionLabel?: string;
+  sourceModule?: string;
+  targetModule?: string;
+  severity?: number;
   onAction?: () => void;
   onDismiss?: () => void;
   className?: string;
@@ -53,6 +56,16 @@ const PRIORITY_LABEL: Record<RecommendationPriority, string> = {
   low: "FYI",
 };
 
+const MODULE_LABELS: Record<string, string> = {
+  crm: "CRM",
+  revenue: "Revenue",
+  bookings: "Bookings",
+  marketing: "Marketing",
+  projects: "Projects",
+  expenses: "Expenses",
+  automations: "Flows",
+};
+
 export function AiRecommendationCard({
   type,
   priority,
@@ -60,6 +73,9 @@ export function AiRecommendationCard({
   description,
   explanation,
   actionLabel,
+  sourceModule,
+  targetModule,
+  severity,
   onAction,
   onDismiss,
   className = "",
@@ -114,6 +130,31 @@ export function AiRecommendationCard({
                 </button>
               )}
             </div>
+            {(sourceModule || targetModule || (severity !== undefined && severity > 0)) && (
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                {sourceModule && targetModule && sourceModule !== targetModule && (
+                  <span className="kf-text-micro text-muted-foreground/50">
+                    {MODULE_LABELS[sourceModule] || sourceModule} → {MODULE_LABELS[targetModule] || targetModule}
+                  </span>
+                )}
+                {sourceModule && (!targetModule || sourceModule === targetModule) && (
+                  <span className="kf-text-micro text-muted-foreground/50">
+                    {MODULE_LABELS[sourceModule] || sourceModule}
+                  </span>
+                )}
+                {severity !== undefined && severity > 0 && (
+                  <span
+                    className="kf-text-micro px-1 py-px rounded"
+                    style={{
+                      background: severity >= 80 ? "hsl(var(--kf-error) / 0.1)" : severity >= 50 ? "hsl(var(--kf-warning) / 0.1)" : "hsl(var(--kf-muted) / 0.15)",
+                      color: severity >= 80 ? "hsl(var(--kf-error))" : severity >= 50 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-muted-foreground) / 0.7)",
+                    }}
+                  >
+                    {severity >= 80 ? "Critical" : severity >= 50 ? "Important" : "Minor"}
+                  </span>
+                )}
+              </div>
+            )}
             <p
               className="kf-text-micro leading-relaxed mb-1"
               style={{ color: "hsl(var(--kf-muted-foreground) / 0.8)" }}

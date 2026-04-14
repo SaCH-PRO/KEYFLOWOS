@@ -114,6 +114,9 @@ export function WorkspaceInsightsPanel({
                       description={rec.description}
                       explanation={rec.explanation}
                       actionLabel={rec.actionLabel}
+                      sourceModule={rec.sourceModule}
+                      targetModule={rec.targetModule}
+                      severity={rec.severity}
                       onAction={rec.actionRoute && onNavigate ? () => onNavigate(rec.actionRoute!) : undefined}
                       onDismiss={() => onDismiss(rec.id)}
                     />
