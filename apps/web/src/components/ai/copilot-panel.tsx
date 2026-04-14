@@ -65,12 +65,16 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
   const loadSidebarData = useCallback(async () => {
     const biz = getStoredBusinessId();
     if (!biz) return;
-    const [approvalRes, statsRes] = await Promise.all([
-      fetchAiPendingApprovals(biz),
-      fetchAiExecutionStats(biz, 7),
-    ]);
-    if (approvalRes.data) setPendingApprovals(approvalRes.data.filter(a => a.status === "pending"));
-    if (statsRes.data) setStats(statsRes.data);
+    try {
+      const [approvalRes, statsRes] = await Promise.all([
+        fetchAiPendingApprovals(biz),
+        fetchAiExecutionStats(biz, 7),
+      ]);
+      if (approvalRes.data) setPendingApprovals(approvalRes.data.filter(a => a.status === "pending"));
+      if (statsRes.data) setStats(statsRes.data);
+    } catch {
+      /* silently fail on sidebar data load */
+    }
   }, []);
 
   const handleSend = useCallback(async (text?: string) => {
@@ -85,42 +89,56 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
     setSending(true);
 
     const history = messages.map(m => ({ role: m.role, content: m.content }));
-    const res = await sendFlowChat(biz, msg, history);
-
-    if (res.data) {
-      setMessages(prev => [...prev, { role: "assistant", content: res.data!.reply, timestamp: Date.now() }]);
-    } else {
+    try {
+      const res = await sendFlowChat(biz, msg, history);
+      if (res.data) {
+        setMessages(prev => [...prev, { role: "assistant", content: res.data!.reply, timestamp: Date.now() }]);
+      } else {
+        setMessages(prev => [...prev, { role: "assistant", content: "Sorry, I encountered an error. Please try again.", timestamp: Date.now() }]);
+      }
+    } catch {
       setMessages(prev => [...prev, { role: "assistant", content: "Sorry, I encountered an error. Please try again.", timestamp: Date.now() }]);
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   }, [input, sending, messages]);
 
   const handleApprove = useCallback(async (id: string) => {
     const biz = getStoredBusinessId();
     if (!biz) return;
     setResolvingId(id);
-    const res = await resolveAiApproval(biz, id, "approved");
-    if (res.data) {
-      setPendingApprovals(prev => prev.filter(a => a.id !== id));
-      toast.success("Action approved");
-    } else {
-      toast.error(res.error || "Failed to approve");
+    try {
+      const res = await resolveAiApproval(biz, id, "approved");
+      if (res.data) {
+        setPendingApprovals(prev => prev.filter(a => a.id !== id));
+        toast.success("Action approved");
+      } else {
+        toast.error(res.error || "Failed to approve");
+      }
+    } catch {
+      toast.error("Failed to approve action");
+    } finally {
+      setResolvingId(null);
     }
-    setResolvingId(null);
   }, []);
 
   const handleReject = useCallback(async (id: string) => {
     const biz = getStoredBusinessId();
     if (!biz) return;
     setResolvingId(id);
-    const res = await resolveAiApproval(biz, id, "rejected");
-    if (res.data) {
-      setPendingApprovals(prev => prev.filter(a => a.id !== id));
-      toast.success("Action rejected");
-    } else {
-      toast.error(res.error || "Failed to reject");
+    try {
+      const res = await resolveAiApproval(biz, id, "rejected");
+      if (res.data) {
+        setPendingApprovals(prev => prev.filter(a => a.id !== id));
+        toast.success("Action rejected");
+      } else {
+        toast.error(res.error || "Failed to reject");
+      }
+    } catch {
+      toast.error("Failed to reject action");
+    } finally {
+      setResolvingId(null);
     }
-    setResolvingId(null);
   }, []);
 
   return (
@@ -178,7 +196,7 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
               </div>
             </div>
 
-            <div className="flex items-center border-b border-border/20">
+            <div className="flex items-center border-b border-border/20" role="tablist" aria-label="Copilot sections">
               {([
                 { id: "chat" as Tab, label: "Chat", icon: Sparkles },
                 { id: "queue" as Tab, label: `Queue${pendingApprovals.length > 0 ? ` (${pendingApprovals.length})` : ""}`, icon: Shield },
@@ -186,6 +204,10 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
               ]).map(t => (
                 <button
                   key={t.id}
+                  id={`copilot-tab-${t.id}`}
+                  role="tab"
+                  aria-selected={tab === t.id}
+                  aria-controls={`copilot-panel-${t.id}`}
                   onClick={() => setTab(t.id)}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-all border-b-2 ${
                     tab === t.id
@@ -201,7 +223,7 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
 
             <div className="flex-1 overflow-y-auto">
               {tab === "chat" && (
-                <div className="flex flex-col h-full">
+                <div id="copilot-panel-chat" role="tabpanel" aria-labelledby="copilot-tab-chat" className="flex flex-col h-full">
                   <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
                     {messages.length === 0 && (
                       <div className="flex flex-col items-center py-8 gap-4">
@@ -260,7 +282,7 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
               )}
 
               {tab === "queue" && (
-                <div className="px-4 py-3 space-y-2">
+                <div id="copilot-panel-queue" role="tabpanel" aria-labelledby="copilot-tab-queue" className="px-4 py-3 space-y-2">
                   {pendingApprovals.length === 0 ? (
                     <div className="flex flex-col items-center py-8 gap-2">
                       <CheckCircle2 className="w-6 h-6 text-emerald-400/60" />
@@ -282,7 +304,7 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
               )}
 
               {tab === "activity" && (
-                <div className="px-4 py-3 space-y-3">
+                <div id="copilot-panel-activity" role="tabpanel" aria-labelledby="copilot-tab-activity" className="px-4 py-3 space-y-3">
                   {stats ? (
                     <>
                       <div className="grid grid-cols-2 gap-2">

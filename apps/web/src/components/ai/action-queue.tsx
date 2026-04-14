@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
   Loader2, RefreshCw, Inbox, CheckCircle2,
@@ -67,21 +67,26 @@ export function ActionQueue({ maxItems, showFilters = true, onCountChange }: Act
     const businessId = getStoredBusinessId();
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
-    const [pendingRes, historyRes] = await Promise.all([
-      fetchAiPendingApprovals(businessId),
-      fetchAiApprovalHistory(businessId, 20),
-    ]);
-    if (pendingRes.data) {
-      setPendingItems(pendingRes.data);
-      const pendingCount = pendingRes.data.filter(i => i.status === "pending").length;
-      onCountChange?.(pendingCount);
-    } else if (pendingRes.error) {
-      toast.error(pendingRes.error);
+    try {
+      const [pendingRes, historyRes] = await Promise.all([
+        fetchAiPendingApprovals(businessId),
+        fetchAiApprovalHistory(businessId, 20),
+      ]);
+      if (pendingRes.data) {
+        setPendingItems(pendingRes.data);
+        const pendingCount = pendingRes.data.filter(i => i.status === "pending").length;
+        onCountChange?.(pendingCount);
+      } else if (pendingRes.error) {
+        toast.error(pendingRes.error);
+      }
+      if (historyRes.data) {
+        setHandledItems(historyRes.data.filter(i => i.status !== "pending"));
+      }
+    } catch {
+      toast.error("Failed to load action queue");
+    } finally {
+      setLoading(false);
     }
-    if (historyRes.data) {
-      setHandledItems(historyRes.data.filter(i => i.status !== "pending"));
-    }
-    setLoading(false);
   }, [onCountChange]);
 
   useEffect(() => { loadItems(); }, [loadItems]);
@@ -90,25 +95,59 @@ export function ActionQueue({ maxItems, showFilters = true, onCountChange }: Act
     const businessId = getStoredBusinessId();
     if (!businessId) return;
     setResolving(approvalId);
-    const res = await resolveAiApproval(businessId, approvalId, resolution);
-    if (res.data) {
-      const resolved = pendingItems.find(i => i.id === approvalId);
-      setPendingItems(prev => prev.filter(i => i.id !== approvalId));
-      if (resolved && resolution !== "deferred") {
-        setHandledItems(prev => [{ ...resolved, status: resolution, resolution, resolvedAt: new Date().toISOString() }, ...prev]);
-      } else if (resolved && resolution === "deferred") {
-        setPendingItems(prev => [...prev, { ...resolved, status: "deferred", resolution: "deferred" }]);
+    try {
+      const res = await resolveAiApproval(businessId, approvalId, resolution);
+      if (res.data) {
+        const resolved = pendingItems.find(i => i.id === approvalId);
+        setPendingItems(prev => prev.filter(i => i.id !== approvalId));
+        if (resolved && resolution !== "deferred") {
+          setHandledItems(prev => [{ ...resolved, status: resolution, resolution, resolvedAt: new Date().toISOString() }, ...prev]);
+        } else if (resolved && resolution === "deferred") {
+          setPendingItems(prev => [...prev, { ...resolved, status: "deferred", resolution: "deferred" }]);
+        }
+        toast.success(`Action ${resolution}`);
+        const remaining = pendingItems.filter(i => i.id !== approvalId && i.status === "pending").length;
+        onCountChange?.(remaining);
+      } else {
+        toast.error(res.error || "Failed to resolve");
       }
-      toast.success(`Action ${resolution}`);
-      const remaining = pendingItems.filter(i => i.id !== approvalId && i.status === "pending").length;
-      onCountChange?.(remaining);
-    } else {
-      toast.error(res.error || "Failed to resolve");
+    } catch {
+      toast.error("Failed to resolve action");
+    } finally {
+      setResolving(null);
     }
-    setResolving(null);
   }, [pendingItems, onCountChange]);
 
-  const allItems = [...pendingItems, ...pendingItems.filter(i => i.resolution === "deferred")];
+  const [editingItem, setEditingItem] = useState<AiApprovalItem | null>(null);
+
+  const handleEdit = useCallback((approvalId: string) => {
+    const item = pendingItems.find(i => i.id === approvalId);
+    if (item) {
+      setEditingItem(item);
+      toast.info("Edit mode: review and modify parameters before approving");
+    }
+  }, [pendingItems]);
+
+  const queueRef = useRef<HTMLDivElement>(null);
+
+  const handleQueueKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!queueRef.current) return;
+    const cards = Array.from(queueRef.current.querySelectorAll<HTMLElement>('[role="article"]'));
+    const active = document.activeElement as HTMLElement;
+    const idx = cards.indexOf(active);
+
+    if (e.key === "ArrowDown" && idx < cards.length - 1) {
+      e.preventDefault();
+      cards[idx + 1]?.focus();
+    } else if (e.key === "ArrowUp" && idx > 0) {
+      e.preventDefault();
+      cards[idx - 1]?.focus();
+    } else if (e.key === "ArrowDown" && idx === -1 && cards.length > 0) {
+      e.preventDefault();
+      cards[0]?.focus();
+    }
+  }, []);
+
   const pendingCount = pendingItems.filter(i => i.status === "pending").length;
   const handledCount = handledItems.length;
 
@@ -157,8 +196,58 @@ export function ActionQueue({ maxItems, showFilters = true, onCountChange }: Act
         </div>
       )}
 
+      {editingItem && (
+        <div className="p-3 rounded-xl border border-[hsl(var(--kf-accent2))]/30 bg-[hsl(var(--kf-accent2))]/5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-foreground/80">Editing: {editingItem.title}</span>
+            <button
+              onClick={() => setEditingItem(null)}
+              className="text-[10px] text-muted-foreground/50 hover:text-foreground/70"
+              aria-label="Cancel edit"
+            >
+              Cancel
+            </button>
+          </div>
+          {editingItem.inputPayload && Object.keys(editingItem.inputPayload).length > 0 ? (
+            <div className="space-y-1.5">
+              {Object.entries(editingItem.inputPayload).map(([key, val]) => (
+                <div key={key} className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground/60 w-24 shrink-0">{key}</span>
+                  <span className="text-foreground/70 truncate flex-1">{typeof val === 'string' ? val : JSON.stringify(val)}</span>
+                </div>
+              ))}
+              <p className="text-[10px] text-muted-foreground/40 mt-2">
+                Parameter editing will be available in a future update. For now, review parameters and approve or reject.
+              </p>
+            </div>
+          ) : (
+            <p className="text-[10px] text-muted-foreground/50">No editable parameters for this action.</p>
+          )}
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              onClick={() => { handleResolve(editingItem.id, "approved"); setEditingItem(null); }}
+              className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/20 transition-all"
+            >
+              Approve as-is
+            </button>
+            <button
+              onClick={() => { handleResolve(editingItem.id, "rejected"); setEditingItem(null); }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-all"
+            >
+              Reject
+            </button>
+          </div>
+        </div>
+      )}
+
       {view === "waiting" && (
-        <div className="space-y-4" role="tabpanel" aria-label="AI waiting on you">
+        <div
+          ref={queueRef}
+          className="space-y-4"
+          role="tabpanel"
+          aria-label="AI waiting on you"
+          onKeyDown={handleQueueKeyDown}
+        >
           {QUEUE_CATEGORIES.map(cat => {
             const catItems = pendingItems.filter(cat.filter);
             if (catItems.length === 0) return null;
@@ -178,6 +267,7 @@ export function ActionQueue({ maxItems, showFilters = true, onCountChange }: Act
                       onApprove={(id) => handleResolve(id, "approved")}
                       onReject={(id) => handleResolve(id, "rejected")}
                       onDefer={(id) => handleResolve(id, "deferred")}
+                      onEdit={handleEdit}
                       loading={resolving === item.id}
                     />
                   ))}

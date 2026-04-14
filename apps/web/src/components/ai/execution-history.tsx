@@ -132,21 +132,26 @@ export function ExecutionHistory({ maxEntries = 50, showStats = true, moduleFilt
     const businessId = getStoredBusinessId();
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
-    const [logsRes, statsRes] = await Promise.all([
-      fetchAiExecutionLogs(businessId, {
-        module: selectedModule || undefined,
-        limit: maxEntries,
-      }),
-      showStats ? fetchAiExecutionStats(businessId) : Promise.resolve({ data: null, error: null }),
-    ]);
-    if (logsRes.data) setLogs(logsRes.data);
-    if (statsRes.data) setStats(statsRes.data);
-    setLoading(false);
+    try {
+      const [logsRes, statsRes] = await Promise.all([
+        fetchAiExecutionLogs(businessId, {
+          module: selectedModule || undefined,
+          limit: maxEntries,
+        }),
+        showStats ? fetchAiExecutionStats(businessId) : Promise.resolve({ data: null, error: null }),
+      ]);
+      if (logsRes.data) setLogs(logsRes.data);
+      if (statsRes.data) setStats(statsRes.data);
+    } catch {
+      /* fail gracefully */
+    } finally {
+      setLoading(false);
+    }
   }, [maxEntries, showStats, selectedModule]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const modules = Array.from(new Set(logs.map(l => l.module).filter(Boolean))) as string[];
+  const modules = stats?.byModule?.map(m => m.module) ?? Array.from(new Set(logs.map(l => l.module).filter(Boolean))) as string[];
 
   const filtered = logs.filter(entry => {
     if (!searchTerm) return true;
@@ -196,18 +201,17 @@ export function ExecutionHistory({ maxEntries = 50, showStats = true, moduleFilt
             className="w-full pl-9 pr-3 py-2 rounded-lg bg-muted/20 border border-border/30 text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/40"
           />
         </div>
-        {modules.length > 1 && (
-          <select
-            value={selectedModule}
-            onChange={(e) => setSelectedModule(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-muted/20 border border-border/30 text-xs text-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]/40"
-          >
-            <option value="">All modules</option>
-            {modules.map(m => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        )}
+        <select
+          value={selectedModule}
+          onChange={(e) => setSelectedModule(e.target.value)}
+          className="px-3 py-2 rounded-lg bg-muted/20 border border-border/30 text-xs text-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]/40"
+          aria-label="Filter by module"
+        >
+          <option value="">All modules</option>
+          {modules.map(m => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
         <button
           onClick={loadData}
           disabled={loading}

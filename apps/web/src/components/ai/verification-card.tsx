@@ -96,6 +96,7 @@ export function VerificationCard({ item, onApprove, onReject, onDefer, onEdit, l
       className={`rounded-xl border ${tierCfg.border} ${tierCfg.bg} overflow-hidden`}
       role="article"
       aria-label={`${item.title} — ${tierCfg.label}`}
+      tabIndex={0}
     >
       <div className="p-3.5">
         <div className="flex items-start gap-3">
