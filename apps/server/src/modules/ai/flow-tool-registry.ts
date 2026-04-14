@@ -436,10 +436,10 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
   {
     name: 'segment_contacts',
-    description: 'Filter contacts into a named segment based on status, tag, or spending criteria. Returns matching contacts without persisting the segment.',
-    family: 'read',
-    riskLevel: 'low',
-    riskTier: 1 as RiskTier,
+    description: 'Filter contacts into a named segment based on status, tag, or spending criteria. Returns matching contacts for the segment.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
