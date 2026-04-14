@@ -322,6 +322,11 @@ export interface ThemeStyles {
   heroCtaSize: "sm" | "md" | "lg";
   sectionSequence: string[];
   trustStyle: "minimal" | "prominent" | "badge_row";
+  commercialMode: "conversion" | "authority" | "luxury" | "utility" | "editorial" | "catalog" | "hybrid";
+  ctaStrategy: "urgency" | "value" | "exclusivity" | "convenience" | "trust";
+  heroHeadlineScale: "compact" | "standard" | "dramatic";
+  cardDensity: "dense" | "balanced" | "spacious";
+  socialProofWeight: "subtle" | "moderate" | "prominent";
 }
 
 export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryColor: string, accentColor: string): ThemeStyles {
@@ -378,6 +383,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "lg",
         sectionSequence: ["hero", "trust", "featured", "catalog", "testimonials", "faq", "contact"],
         trustStyle: "badge_row",
+        commercialMode: "conversion",
+        ctaStrategy: "urgency",
+        heroHeadlineScale: "dramatic",
+        cardDensity: "dense",
+        socialProofWeight: "prominent",
       };
 
     case "premium_services":
@@ -431,6 +441,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "md",
         sectionSequence: ["hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact"],
         trustStyle: "prominent",
+        commercialMode: "authority",
+        ctaStrategy: "value",
+        heroHeadlineScale: "standard",
+        cardDensity: "spacious",
+        socialProofWeight: "moderate",
       };
 
     case "luxury_editorial":
@@ -484,6 +499,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "sm",
         sectionSequence: ["hero", "featured", "catalog", "testimonials", "faq", "contact"],
         trustStyle: "minimal",
+        commercialMode: "luxury",
+        ctaStrategy: "exclusivity",
+        heroHeadlineScale: "dramatic",
+        cardDensity: "spacious",
+        socialProofWeight: "subtle",
       };
 
     case "booking_optimized":
@@ -537,6 +557,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "lg",
         sectionSequence: ["hero", "trust", "categories", "catalog", "faq", "contact"],
         trustStyle: "badge_row",
+        commercialMode: "utility",
+        ctaStrategy: "convenience",
+        heroHeadlineScale: "compact",
+        cardDensity: "balanced",
+        socialProofWeight: "moderate",
       };
 
     case "catalog_heavy":
@@ -590,6 +615,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "md",
         sectionSequence: ["hero", "categories", "featured", "catalog", "testimonials", "contact"],
         trustStyle: "minimal",
+        commercialMode: "catalog",
+        ctaStrategy: "convenience",
+        heroHeadlineScale: "compact",
+        cardDensity: "dense",
+        socialProofWeight: "subtle",
       };
 
     case "authority_brand":
@@ -643,6 +673,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "md",
         sectionSequence: ["hero", "trust", "featured", "catalog", "testimonials", "faq", "contact"],
         trustStyle: "prominent",
+        commercialMode: "authority",
+        ctaStrategy: "trust",
+        heroHeadlineScale: "standard",
+        cardDensity: "balanced",
+        socialProofWeight: "prominent",
       };
 
     case "creator_expert":
@@ -696,6 +731,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "md",
         sectionSequence: ["hero", "featured", "categories", "catalog", "testimonials", "faq", "contact"],
         trustStyle: "badge_row",
+        commercialMode: "editorial",
+        ctaStrategy: "value",
+        heroHeadlineScale: "standard",
+        cardDensity: "balanced",
+        socialProofWeight: "moderate",
       };
 
     case "hybrid_storefront":
@@ -749,6 +789,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "md",
         sectionSequence: ["hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact"],
         trustStyle: "badge_row",
+        commercialMode: "hybrid",
+        ctaStrategy: "value",
+        heroHeadlineScale: "standard",
+        cardDensity: "balanced",
+        socialProofWeight: "moderate",
       };
 
     case "minimal":
@@ -802,6 +847,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "sm",
         sectionSequence: ["hero", "catalog", "contact"],
         trustStyle: "minimal",
+        commercialMode: "utility",
+        ctaStrategy: "convenience",
+        heroHeadlineScale: "compact",
+        cardDensity: "balanced",
+        socialProofWeight: "subtle",
       };
 
     case "bold":
@@ -855,6 +905,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "lg",
         sectionSequence: ["hero", "trust", "featured", "catalog", "testimonials", "contact"],
         trustStyle: "badge_row",
+        commercialMode: "conversion",
+        ctaStrategy: "urgency",
+        heroHeadlineScale: "dramatic",
+        cardDensity: "dense",
+        socialProofWeight: "prominent",
       };
 
     case "elegant":
@@ -908,6 +963,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "sm",
         sectionSequence: ["hero", "featured", "catalog", "testimonials", "contact"],
         trustStyle: "minimal",
+        commercialMode: "luxury",
+        ctaStrategy: "exclusivity",
+        heroHeadlineScale: "standard",
+        cardDensity: "spacious",
+        socialProofWeight: "subtle",
       };
 
     case "luxe":
@@ -961,6 +1021,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "sm",
         sectionSequence: ["hero", "featured", "catalog", "testimonials", "contact"],
         trustStyle: "minimal",
+        commercialMode: "luxury",
+        ctaStrategy: "exclusivity",
+        heroHeadlineScale: "dramatic",
+        cardDensity: "spacious",
+        socialProofWeight: "subtle",
       };
 
     case "fresh":
@@ -1014,6 +1079,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "md",
         sectionSequence: ["hero", "featured", "categories", "catalog", "testimonials", "contact"],
         trustStyle: "badge_row",
+        commercialMode: "utility",
+        ctaStrategy: "convenience",
+        heroHeadlineScale: "standard",
+        cardDensity: "balanced",
+        socialProofWeight: "moderate",
       };
 
     default:
@@ -1067,6 +1137,11 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         heroCtaSize: "md",
         sectionSequence: ["hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact"],
         trustStyle: "badge_row",
+        commercialMode: "hybrid",
+        ctaStrategy: "value",
+        heroHeadlineScale: "standard",
+        cardDensity: "balanced",
+        socialProofWeight: "moderate",
       };
   }
 }

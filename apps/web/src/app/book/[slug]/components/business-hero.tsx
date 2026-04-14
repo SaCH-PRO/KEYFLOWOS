@@ -240,7 +240,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
             )}
 
             <h1
-              className={`text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem] tracking-tight leading-[1.1] ${ts.headerWeight} ${ts.textStyle}`}
+              className={`${ts.heroHeadlineScale === "dramatic" ? "text-3xl sm:text-5xl md:text-6xl lg:text-[3.75rem]" : ts.heroHeadlineScale === "compact" ? "text-xl sm:text-3xl md:text-4xl lg:text-[2.75rem]" : "text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem]"} tracking-tight leading-[1.1] ${ts.headerWeight} ${ts.textStyle}`}
               style={{
                 background: coverUrl || coverVideoUrl
                   ? undefined

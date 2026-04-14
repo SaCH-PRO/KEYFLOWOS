@@ -15,6 +15,7 @@ type Props = {
   testimonials: Testimonial[];
   primaryColor: string;
   secondaryColor: string;
+  socialProofWeight?: "subtle" | "moderate" | "prominent";
 };
 
 function AvatarCircle({ name, color }: { name: string; color: string }) {
@@ -29,7 +30,7 @@ function AvatarCircle({ name, color }: { name: string; color: string }) {
   );
 }
 
-export function TestimonialsSection({ testimonials, primaryColor, secondaryColor }: Props) {
+export function TestimonialsSection({ testimonials, primaryColor, secondaryColor, socialProofWeight = "moderate" }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -77,11 +78,13 @@ export function TestimonialsSection({ testimonials, primaryColor, secondaryColor
   };
 
   const useCarousel = testimonials.length > 2;
+  const gridMode = !useCarousel;
+  const sectionPadding = socialProofWeight === "prominent" ? "space-y-6" : socialProofWeight === "subtle" ? "space-y-3" : "space-y-5";
 
   return (
     <section
       ref={sectionRef}
-      className="space-y-5"
+      className={sectionPadding}
       style={{
         opacity: visible ? 1 : 0,
         transform: visible ? "translateY(0)" : "translateY(20px)",
