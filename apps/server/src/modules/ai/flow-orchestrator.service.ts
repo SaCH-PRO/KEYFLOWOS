@@ -935,11 +935,12 @@ export class FlowOrchestratorService {
           stepsFailed++;
           results.push({ stepId: step.id, action: step.action, status: 'failed', error: toolResult.error });
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
         const durationMs = Date.now() - startTime;
-        await this.planner.updateStepStatus(step.id, 'failed', null, err.message, durationMs);
+        await this.planner.updateStepStatus(step.id, 'failed', null, errorMessage, durationMs);
         stepsFailed++;
-        results.push({ stepId: step.id, action: step.action, status: 'failed', error: err.message });
+        results.push({ stepId: step.id, action: step.action, status: 'failed', error: errorMessage });
       }
     }
 
