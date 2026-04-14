@@ -52,6 +52,8 @@ export function OverviewTab({ project, onStageChange, milestones = [], deliverab
       if (!cancelled && res.data) {
         setProjectExpenses(res.data.expenses);
       }
+    }).catch((err) => {
+      console.error("[OverviewTab] expense fetch error:", err);
     });
     return () => { cancelled = true; };
   }, [project.id]);
@@ -231,7 +233,7 @@ export function OverviewTab({ project, onStageChange, milestones = [], deliverab
               value={project.contactId ? (clientName || "Loading...") : "No client linked"}
               subValue={clientEmail || undefined}
               linked={!!project.contactId}
-              href={project.contactId ? `/app/clients?id=${project.contactId}` : undefined}
+              href={project.contactId ? `/app/crm/contacts/${project.contactId}` : undefined}
             />
             <LinkedRecord
               icon={DollarSign}
@@ -251,7 +253,7 @@ export function OverviewTab({ project, onStageChange, milestones = [], deliverab
               label="Comms"
               value={project.contactId ? "View client messages" : "Link a client first"}
               linked={!!project.contactId}
-              href={project.contactId ? `/app/clients?id=${project.contactId}&tab=communications` : undefined}
+              href={project.contactId ? `/app/crm/contacts/${project.contactId}?tab=communications` : undefined}
             />
             <LinkedRecord
               icon={Zap}
