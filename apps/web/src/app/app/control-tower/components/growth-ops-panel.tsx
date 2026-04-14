@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Loader2, TrendingUp, Sparkles } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
@@ -79,6 +80,7 @@ export function GrowthOpsPanel({
   dashboard: StrategicDashboard;
   modules: ControlTowerModules;
 }) {
+  const router = useRouter();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiInsights, setAiInsights] = useState<Array<{ title: string; description: string; priority: string; category: string }> | null>(null);
 
@@ -120,7 +122,7 @@ export function GrowthOpsPanel({
             description={ins.description}
             explanation={ins.explanation}
             actionLabel={ins.actionLabel}
-            onAction={() => window.location.href = ins.actionRoute}
+            onAction={() => router.push(ins.actionRoute)}
           />
         ))}
 

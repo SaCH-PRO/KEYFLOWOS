@@ -185,6 +185,23 @@ const towerTools: AiTool[] = [
       return res.data;
     },
   },
+  {
+    id: "send_overdue_reminders",
+    name: "Send Payment Reminders",
+    description: "Queue follow-up reminders for all overdue invoices (governed — requires approval if Tier 2+)",
+    icon: "send",
+    category: "execute",
+    requiresSelection: false,
+    creditCost: 2,
+    execute: async (ctx) => {
+      const { apiPost } = await import("@/lib/api");
+      const res = await apiPost<Record<string, unknown>>(
+        `/ai/businesses/${ctx.businessId}/ai/execute`,
+        { toolId: "queue_payment_reminder", params: {} },
+      );
+      return res.data ?? { message: "Payment reminders queued (subject to governance tier)" };
+    },
+  },
 ];
 
 export function useControlTowerAiHub(customData: TowerCustomData) {
