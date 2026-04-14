@@ -2,23 +2,27 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { X, Upload, Image, Repeat, DollarSign, FileText, Store, Tag, Calendar, CreditCard } from "lucide-react";
+import { X, Upload, Image, Repeat, DollarSign, FileText, Store, Tag, Calendar, CreditCard, FolderKanban, Users, Briefcase } from "lucide-react";
 import { toast } from "sonner";
 import {
   Expense, ExpenseCategory, PAYMENT_METHODS,
   createExpense, updateExpense,
 } from "@/lib/client";
 import { API_BASE, getAuthHeaders } from "@/lib/api";
+import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 
 interface ExpenseFormModalProps {
   businessId: string;
   categories: ExpenseCategory[];
   editingExpense: Expense | null;
+  projects?: ProjectOption[];
+  contacts?: ContactOption[];
+  services?: ServiceOption[];
   onClose: () => void;
   onSaved: () => void;
 }
 
-export function ExpenseFormModal({ businessId, categories, editingExpense, onClose, onSaved }: ExpenseFormModalProps) {
+export function ExpenseFormModal({ businessId, categories, editingExpense, projects = [], contacts = [], services = [], onClose, onSaved }: ExpenseFormModalProps) {
   const [uploading, setUploading] = useState(false);
   const [formData, setFormData] = useState(() => {
     if (editingExpense) {
@@ -27,12 +31,14 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, onClo
         vendor: editingExpense.vendor || "", categoryId: editingExpense.categoryId || "", notes: editingExpense.notes || "",
         receiptUrl: editingExpense.receiptUrl || "", paymentMethod: editingExpense.paymentMethod || "",
         tags: editingExpense.tags?.join(", ") || "", isRecurring: editingExpense.isRecurring, recurringFrequency: editingExpense.recurringFrequency || "MONTHLY",
+        projectId: editingExpense.projectId || "", contactId: editingExpense.contactId || "", serviceId: editingExpense.serviceId || "",
       };
     }
     return {
       description: "", amount: "", date: new Date().toISOString().split("T")[0],
       vendor: "", categoryId: "", notes: "", receiptUrl: "", paymentMethod: "",
       tags: "" as string, isRecurring: false, recurringFrequency: "MONTHLY",
+      projectId: "", contactId: "", serviceId: "",
     };
   });
 
@@ -46,6 +52,9 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, onClo
       paymentMethod: formData.paymentMethod || undefined,
       tags: formData.tags ? formData.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
       isRecurring: formData.isRecurring, recurringFrequency: formData.isRecurring ? formData.recurringFrequency : undefined,
+      projectId: formData.projectId || undefined,
+      contactId: formData.contactId || undefined,
+      serviceId: formData.serviceId || undefined,
     };
     try {
       if (editingExpense) {
@@ -90,6 +99,8 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, onClo
     !!formData.receiptUrl,
   ];
   const completionPct = Math.round((completionFields.filter(Boolean).length / completionFields.length) * 100);
+
+  const hasLinking = projects.length > 0 || contacts.length > 0 || services.length > 0;
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="expense-modal-title">
@@ -153,6 +164,44 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, onClo
               <input value={formData.tags} onChange={e => setFormData({ ...formData, tags: e.target.value })} placeholder="tag1, tag2, ..." className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
             </div>
           </div>
+
+          {hasLinking && (
+            <div className="space-y-3 p-3 rounded-lg bg-white/[0.02] border border-border/30">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                <FolderKanban className="w-3 h-3" /> Link to Business Entity
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {projects.length > 0 && (
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5"><FolderKanban className="w-3 h-3" /> Project</label>
+                    <select value={formData.projectId} onChange={e => setFormData({ ...formData, projectId: e.target.value })} className="w-full bg-transparent border border-border/60 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]">
+                      <option value="">None</option>
+                      {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {contacts.length > 0 && (
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5"><Users className="w-3 h-3" /> Client</label>
+                    <select value={formData.contactId} onChange={e => setFormData({ ...formData, contactId: e.target.value })} className="w-full bg-transparent border border-border/60 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]">
+                      <option value="">None</option>
+                      {contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {services.length > 0 && (
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5"><Briefcase className="w-3 h-3" /> Service</label>
+                    <select value={formData.serviceId} onChange={e => setFormData({ ...formData, serviceId: e.target.value })} className="w-full bg-transparent border border-border/60 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]">
+                      <option value="">None</option>
+                      {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Notes</label>
             <textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Additional notes..." rows={2} className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))] resize-none" />

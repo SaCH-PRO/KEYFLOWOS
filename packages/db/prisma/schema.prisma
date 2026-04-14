@@ -1355,6 +1355,10 @@ model Expense {
   categoryId String?          @map("category_id")
   category   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
+  projectId  String?  @map("project_id")
+  contactId  String?  @map("contact_id")
+  serviceId  String?  @map("service_id")
+
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -1365,6 +1369,9 @@ model Expense {
   @@index([businessId, date])
   @@index([businessId, categoryId])
   @@index([businessId, vendor])
+  @@index([businessId, projectId])
+  @@index([businessId, contactId])
+  @@index([businessId, serviceId])
   @@map("expenses")
 }
 

@@ -94,6 +94,9 @@ export class ExpensesService {
     isRecurring?: boolean;
     recurringFrequency?: string;
     categoryId?: string;
+    projectId?: string;
+    contactId?: string;
+    serviceId?: string;
   }) {
     const expense = await this.prisma.client.expense.create({
       data: {
@@ -110,6 +113,9 @@ export class ExpensesService {
         isRecurring: input.isRecurring ?? false,
         recurringFrequency: input.recurringFrequency ?? null,
         categoryId: input.categoryId ?? null,
+        projectId: input.projectId ?? null,
+        contactId: input.contactId ?? null,
+        serviceId: input.serviceId ?? null,
       },
       include: { category: true },
     });
@@ -137,6 +143,9 @@ export class ExpensesService {
     isRecurring?: boolean;
     recurringFrequency?: string;
     categoryId?: string | null;
+    projectId?: string | null;
+    contactId?: string | null;
+    serviceId?: string | null;
   }) {
     return this.prisma.client.expense.update({
       where: { id: input.expenseId, businessId: input.businessId },
@@ -153,6 +162,9 @@ export class ExpensesService {
         ...(input.isRecurring !== undefined && { isRecurring: input.isRecurring }),
         ...(input.recurringFrequency !== undefined && { recurringFrequency: input.recurringFrequency }),
         ...(input.categoryId !== undefined && { categoryId: input.categoryId }),
+        ...(input.projectId !== undefined && { projectId: input.projectId }),
+        ...(input.contactId !== undefined && { contactId: input.contactId }),
+        ...(input.serviceId !== undefined && { serviceId: input.serviceId }),
       },
       include: { category: true },
     });
@@ -307,9 +319,44 @@ export class ExpensesService {
     }
 
     const allTags = new Set<string>();
+    let uncategorizedCount = 0;
+    let missingReceiptCount = 0;
+    let recurringCount = 0;
+    const byProject: Record<string, { name: string; total: number; count: number }> = {};
+    const byContact: Record<string, { total: number; count: number }> = {};
+    const byService: Record<string, { total: number; count: number }> = {};
     for (const expense of expenses) {
       if (expense.tags) {
         for (const tag of expense.tags) allTags.add(tag);
+      }
+      if (!expense.categoryId) uncategorizedCount++;
+      if (!expense.receiptUrl) missingReceiptCount++;
+      if (expense.isRecurring) recurringCount++;
+      if (expense.projectId) {
+        if (!byProject[expense.projectId]) byProject[expense.projectId] = { name: '', total: 0, count: 0 };
+        byProject[expense.projectId].total += expense.amount;
+        byProject[expense.projectId].count += 1;
+      }
+      if (expense.contactId) {
+        if (!byContact[expense.contactId]) byContact[expense.contactId] = { total: 0, count: 0 };
+        byContact[expense.contactId].total += expense.amount;
+        byContact[expense.contactId].count += 1;
+      }
+      if (expense.serviceId) {
+        if (!byService[expense.serviceId]) byService[expense.serviceId] = { total: 0, count: 0 };
+        byService[expense.serviceId].total += expense.amount;
+        byService[expense.serviceId].count += 1;
+      }
+    }
+
+    const projectIds = Object.keys(byProject);
+    if (projectIds.length > 0) {
+      const projects = await this.prisma.client.project.findMany({
+        where: { id: { in: projectIds } },
+        select: { id: true, name: true },
+      });
+      for (const p of projects) {
+        if (byProject[p.id]) byProject[p.id].name = p.name;
       }
     }
 
@@ -320,6 +367,9 @@ export class ExpensesService {
       total,
       count,
       averageExpense,
+      uncategorizedCount,
+      missingReceiptCount,
+      recurringCount,
       largestExpense: largestExpense ? { id: largestExpense.id, description: largestExpense.description, amount: largestExpense.amount, date: largestExpense.date, vendor: largestExpense.vendor } : null,
       comparison: {
         prevTotal,
@@ -345,6 +395,9 @@ export class ExpensesService {
         total,
       })),
       tags: Array.from(allTags),
+      byProject: Object.entries(byProject).map(([id, data]) => ({ projectId: id, ...data })),
+      byContact: Object.entries(byContact).map(([id, data]) => ({ contactId: id, ...data })),
+      byService: Object.entries(byService).map(([id, data]) => ({ serviceId: id, ...data })),
     };
   }
 
@@ -380,6 +433,122 @@ export class ExpensesService {
         frequency: data.months.size,
       }))
       .sort((a, b) => b.total - a.total);
+  }
+
+  async getMarginAnalysis(businessId: string, period?: string, customStart?: string, customEnd?: string) {
+    const { start: startDate, end: endDate } = this.getDateRange(period, customStart, customEnd);
+
+    const [expenses, invoices] = await Promise.all([
+      this.prisma.client.expense.findMany({
+        where: { businessId, deletedAt: null, date: { gte: startDate, lte: endDate } },
+        select: { amount: true, projectId: true, contactId: true, serviceId: true, isRecurring: true, categoryId: true },
+      }),
+      this.prisma.client.invoice.findMany({
+        where: { businessId, deletedAt: null, status: { in: ['PAID', 'SENT', 'OVERDUE'] }, issueDate: { gte: startDate, lte: endDate } },
+        select: { total: true, status: true, contactId: true },
+      }),
+    ]);
+
+    const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+    const totalRevenue = invoices.reduce((s, i) => s + (typeof i.total === 'number' ? i.total : parseFloat(String(i.total)) || 0), 0);
+    const paidRevenue = invoices.filter(i => i.status === 'PAID').reduce((s, i) => s + (typeof i.total === 'number' ? i.total : parseFloat(String(i.total)) || 0), 0);
+    const grossProfit = totalRevenue - totalExpenses;
+    const grossMargin = totalRevenue > 0 ? Math.round((grossProfit / totalRevenue) * 1000) / 10 : 0;
+    const expenseToRevenueRatio = totalRevenue > 0 ? Math.round((totalExpenses / totalRevenue) * 1000) / 10 : 0;
+
+    const byProject: Record<string, { expenses: number; count: number }> = {};
+    for (const e of expenses) {
+      if (e.projectId) {
+        if (!byProject[e.projectId]) byProject[e.projectId] = { expenses: 0, count: 0 };
+        byProject[e.projectId].expenses += e.amount;
+        byProject[e.projectId].count += 1;
+      }
+    }
+
+    const byClient: Record<string, { expenses: number; revenue: number }> = {};
+    for (const e of expenses) {
+      if (e.contactId) {
+        if (!byClient[e.contactId]) byClient[e.contactId] = { expenses: 0, revenue: 0 };
+        byClient[e.contactId].expenses += e.amount;
+      }
+    }
+    for (const i of invoices) {
+      if (i.contactId) {
+        if (!byClient[i.contactId]) byClient[i.contactId] = { expenses: 0, revenue: 0 };
+        byClient[i.contactId].revenue += typeof i.total === 'number' ? i.total : parseFloat(String(i.total)) || 0;
+      }
+    }
+
+    const byService: Record<string, { expenses: number; count: number }> = {};
+    for (const e of expenses) {
+      if (e.serviceId) {
+        if (!byService[e.serviceId]) byService[e.serviceId] = { expenses: 0, count: 0 };
+        byService[e.serviceId].expenses += e.amount;
+        byService[e.serviceId].count += 1;
+      }
+    }
+
+    const clientIds = Object.keys(byClient);
+    let clientNames: Record<string, string> = {};
+    if (clientIds.length > 0) {
+      const contacts = await this.prisma.client.contact.findMany({
+        where: { id: { in: clientIds } },
+        select: { id: true, firstName: true, lastName: true, displayName: true },
+      });
+      for (const c of contacts) {
+        clientNames[c.id] = c.displayName || [c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unknown';
+      }
+    }
+
+    const projectIds = Object.keys(byProject);
+    let projectNames: Record<string, string> = {};
+    if (projectIds.length > 0) {
+      const projects = await this.prisma.client.project.findMany({
+        where: { id: { in: projectIds } },
+        select: { id: true, name: true },
+      });
+      for (const p of projects) {
+        projectNames[p.id] = p.name;
+      }
+    }
+
+    const serviceIds = Object.keys(byService);
+    let serviceNames: Record<string, string> = {};
+    if (serviceIds.length > 0) {
+      const services = await this.prisma.client.service.findMany({
+        where: { id: { in: serviceIds } },
+        select: { id: true, name: true },
+      });
+      for (const s of services) {
+        serviceNames[s.id] = s.name;
+      }
+    }
+
+    return {
+      totalRevenue,
+      paidRevenue,
+      totalExpenses,
+      grossProfit,
+      grossMargin,
+      expenseToRevenueRatio,
+      byProject: Object.entries(byProject).map(([id, data]) => ({
+        projectId: id,
+        name: projectNames[id] || 'Unknown Project',
+        ...data,
+      })),
+      byClient: Object.entries(byClient).map(([id, data]) => ({
+        contactId: id,
+        name: clientNames[id] || 'Unknown Client',
+        ...data,
+        profit: data.revenue - data.expenses,
+        margin: data.revenue > 0 ? Math.round(((data.revenue - data.expenses) / data.revenue) * 1000) / 10 : 0,
+      })),
+      byService: Object.entries(byService).map(([id, data]) => ({
+        serviceId: id,
+        name: serviceNames[id] || 'Unknown Service',
+        ...data,
+      })),
+    };
   }
 
   async exportExpensesCSV(businessId: string, filters?: { startDate?: string; endDate?: string; categoryId?: string }) {

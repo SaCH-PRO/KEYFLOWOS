@@ -3555,6 +3555,9 @@ export interface Expense {
   recurringFrequency?: string;
   categoryId?: string;
   category?: ExpenseCategory;
+  projectId?: string;
+  contactId?: string;
+  serviceId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -3565,6 +3568,9 @@ export interface ExpenseSummary {
   total: number;
   count: number;
   averageExpense: number;
+  uncategorizedCount?: number;
+  missingReceiptCount?: number;
+  recurringCount?: number;
   largestExpense: { id: string; description: string; amount: number; date: string; vendor?: string } | null;
   comparison: { prevTotal: number; prevCount: number; changePercent: number; direction: 'up' | 'down' | 'flat' };
   byCategory: { categoryId: string; name: string; color: string | null; total: number; count: number; prevTotal: number; percent: number }[];
@@ -3572,6 +3578,20 @@ export interface ExpenseSummary {
   monthlyTrend: { month: string; total: number }[];
   dailyTrend: { date: string; total: number }[];
   tags: string[];
+  byProject?: { projectId: string; name: string; total: number; count: number }[];
+  byContact?: { contactId: string; total: number; count: number }[];
+  byService?: { serviceId: string; total: number; count: number }[];
+}
+export interface MarginAnalysis {
+  totalRevenue: number;
+  paidRevenue: number;
+  totalExpenses: number;
+  grossProfit: number;
+  grossMargin: number;
+  expenseToRevenueRatio: number;
+  byProject: { projectId: string; name: string; expenses: number; count: number }[];
+  byClient: { contactId: string; name: string; expenses: number; revenue: number; profit: number; margin: number }[];
+  byService: { serviceId: string; name: string; expenses: number; count: number }[];
 }
 export interface VendorAnalytics {
   name: string;
@@ -3641,6 +3661,12 @@ export async function fetchExpenseSummary(businessId: string, period = '30d', st
   if (startDate) q.set('startDate', startDate);
   if (endDate) q.set('endDate', endDate);
   return apiGetSimple<ExpenseSummary>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/summary?${q}`);
+}
+export async function fetchMarginAnalysis(businessId: string, period = '30d', startDate?: string, endDate?: string): Promise<ApiResult<MarginAnalysis>> {
+  const q = new URLSearchParams({ period });
+  if (startDate) q.set('startDate', startDate);
+  if (endDate) q.set('endDate', endDate);
+  return apiGetSimple<MarginAnalysis>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/margin-analysis?${q}`);
 }
 export async function fetchVendorAnalytics(businessId: string, period = '30d', startDate?: string, endDate?: string): Promise<ApiResult<VendorAnalytics[]>> {
   const q = new URLSearchParams({ period });

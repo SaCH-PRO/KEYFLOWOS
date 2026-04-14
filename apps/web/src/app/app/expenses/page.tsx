@@ -242,7 +242,7 @@ export default function ExpensesPage() {
         {activeTab === "transactions" && (
           <div className="space-y-4">
             <ExpenseFilters period={d.period} setPeriod={d.setPeriod} customStart={d.customStart} setCustomStart={d.setCustomStart} customEnd={d.customEnd} setCustomEnd={d.setCustomEnd} searchQuery={d.searchQuery} setSearchQuery={d.setSearchQuery} />
-            <ExpenseList expenses={d.expenses} totalExpenses={d.totalExpenses} categories={d.categories} filterCategory={d.filterCategory} setFilterCategory={d.setFilterCategory} filterPayment={d.filterPayment} setFilterPayment={d.setFilterPayment} page={d.page} setPage={d.setPage} pageSize={d.pageSize} setPageSize={d.setPageSize} onEdit={openEditModal} onDelete={handleDelete} onViewDetail={setDetailExpense} onAdd={openAddModal} businessId={d.businessId} onReload={d.loadData} />
+            <ExpenseList expenses={d.expenses} totalExpenses={d.totalExpenses} categories={d.categories} filterCategory={d.filterCategory} setFilterCategory={d.setFilterCategory} filterPayment={d.filterPayment} setFilterPayment={d.setFilterPayment} page={d.page} setPage={d.setPage} pageSize={d.pageSize} setPageSize={d.setPageSize} onEdit={openEditModal} onDelete={handleDelete} onViewDetail={setDetailExpense} onAdd={openAddModal} businessId={d.businessId} onReload={d.loadData} projects={d.projects} contacts={d.contacts} services={d.services} />
             <ExpenseTaxCalc summary={d.summary} />
           </div>
         )}
@@ -263,6 +263,10 @@ export default function ExpensesPage() {
             summary={d.summary}
             vendors={d.vendors}
             budgets={d.budgets}
+            marginData={d.marginData}
+            projects={d.projects}
+            contacts={d.contacts}
+            services={d.services}
             onNavigate={setActiveTab}
             periodTotalCount={totalCount}
             periodUncategorizedCount={uncategorizedCount}
@@ -272,7 +276,7 @@ export default function ExpensesPage() {
         )}
       </div>
 
-      <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} onClose={() => setShowModal(false)} onSaved={() => { if (expenseTaskIdRef.current) { markTaskCompleted(expenseTaskIdRef.current); expenseTaskIdRef.current = null; } void d.loadData(); }} />}</AnimatePresence>
+      <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} projects={d.projects} contacts={d.contacts} services={d.services} onClose={() => setShowModal(false)} onSaved={() => { if (expenseTaskIdRef.current) { markTaskCompleted(expenseTaskIdRef.current); expenseTaskIdRef.current = null; } void d.loadData(); }} />}</AnimatePresence>
       <AnimatePresence>{detailExpense && <ExpenseDetailModal expense={detailExpense} onClose={() => setDetailExpense(null)} onEdit={openEditModal} />}</AnimatePresence>
 
       <PageGuide moduleKey="expenses" walkthroughSteps={EXPENSES_WALKTHROUGH} />
