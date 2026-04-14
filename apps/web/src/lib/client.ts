@@ -4139,6 +4139,150 @@ export async function summarizeAiPatterns(businessId: string): Promise<ApiResult
 }
 
 // ---
+// STRATEGIC INTELLIGENCE & FORECASTING
+// ---
+
+export interface StrategicDashboard {
+  momentumScore: number;
+  monthlyRevenue: number;
+  outstandingRevenue: number;
+  overdueInvoices: number;
+  overdueAmount: number;
+  activeProjects: number;
+  overdueTaskCount: number;
+  upcomingBookings: number;
+  staleLeads: number;
+  pendingQuotes: number;
+  pendingQuoteValue: number;
+  expensesThisMonth: number;
+  utilizationRate: number;
+}
+
+export interface RevenueForecastPeriod {
+  label: string;
+  projected: number;
+  low: number;
+  high: number;
+  confidence: number;
+}
+
+export interface RevenueForecast {
+  summary: string;
+  currentMonthlyRun: number;
+  projectedMonthlyAvg: number;
+  periods: RevenueForecastPeriod[];
+  confidenceLevel: string;
+  trend: string;
+  assumptions: string[];
+  risks: string[];
+  recurringRevenue: number;
+  recommendations: string[];
+}
+
+export interface ProfitabilityAnalysis {
+  summary: string;
+  grossMarginPct: number;
+  grossProfit: number;
+  totalRevenue: number;
+  totalExpenses: number;
+  netMarginEstimate: number;
+  clientBreakdown: Array<{ name: string; revenue: number; marginEstimate: string; recommendation: string }>;
+  serviceBreakdown: Array<{ name: string; effectiveHourlyRate: number; profitability: string; recommendation: string }>;
+  expenseInsights: string[];
+  recommendations: string[];
+  concentrationRisk: string;
+  concentrationDetail: string;
+}
+
+export interface PricingAdvisorResult {
+  summary: string;
+  overallStrategy: string;
+  serviceRecommendations: Array<{ name: string; currentPrice: number; suggestedPrice: number; reasoning: string; impact: string }>;
+  productRecommendations: Array<{ name: string; currentPrice: number; suggestedPrice: number; reasoning: string; impact: string }>;
+  quickWins: string[];
+  bundleOpportunities: string[];
+  pricingPrinciples: string[];
+}
+
+export interface SeasonalPatterns {
+  summary: string;
+  peakMonths: Array<{ month: string; reason: string; avgRevenueIndex: number }>;
+  slowMonths: Array<{ month: string; reason: string; avgRevenueIndex: number }>;
+  patterns: Array<{ pattern: string; confidence: string; actionable: boolean }>;
+  recommendations: Array<{ timing: string; action: string; expectedImpact: string }>;
+  dataQuality: string;
+  localFactors: string[];
+}
+
+export interface OpportunityScan {
+  summary: string;
+  priority: string;
+  totalPotentialValue: number;
+  opportunities: Array<{ type: string; title: string; description: string; estimatedValue: number; effort: string; priority: string }>;
+  quickWins: Array<{ action: string; expectedValue: number; timeframe: string }>;
+  neglectedLeads: number;
+  pendingQuoteValue: number;
+  reactivationTargets: string[];
+  recommendations: string[];
+}
+
+export interface RiskScan {
+  summary: string;
+  riskLevel: string;
+  riskScore: number;
+  risks: Array<{ category: string; title: string; severity: string; description: string; impact: string; mitigation: string }>;
+  urgentActions: Array<{ action: string; deadline: string; impact: string }>;
+  mitigations: string[];
+  overdueTotal: number;
+  overdueCount: number;
+  cashFlowHealth: string;
+}
+
+export interface WeeklyPlan {
+  summary: string;
+  weekOf: string;
+  topPriorities: Array<{ priority: string; reason: string; deadline: string }>;
+  dailyFocus: Array<{ day: string; theme: string; tasks: string[] }>;
+  revenueActions: Array<{ action: string; expectedValue: number; urgency: string }>;
+  clientActions: Array<{ action: string; client: string; type: string }>;
+  operationalTasks: string[];
+  weeklyGoal: string;
+}
+
+export async function fetchStrategicDashboard(businessId: string): Promise<ApiResult<StrategicDashboard>> {
+  return apiGetSimple<StrategicDashboard>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/dashboard`);
+}
+
+export async function fetchRevenueForecast(businessId: string, days?: number): Promise<ApiResult<RevenueForecast>> {
+  const qs = days ? `?days=${days}` : '';
+  return apiGetSimple<RevenueForecast>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/revenue-forecast${qs}`);
+}
+
+export async function fetchProfitabilityAnalysis(businessId: string): Promise<ApiResult<ProfitabilityAnalysis>> {
+  return apiGetSimple<ProfitabilityAnalysis>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/profitability`);
+}
+
+export async function fetchPricingAdvisor(businessId: string): Promise<ApiResult<PricingAdvisorResult>> {
+  return apiGetSimple<PricingAdvisorResult>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/pricing-advisor`);
+}
+
+export async function fetchSeasonalPatterns(businessId: string): Promise<ApiResult<SeasonalPatterns>> {
+  return apiGetSimple<SeasonalPatterns>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/seasonal-patterns`);
+}
+
+export async function fetchOpportunityScan(businessId: string): Promise<ApiResult<OpportunityScan>> {
+  return apiGetSimple<OpportunityScan>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/opportunities`);
+}
+
+export async function fetchRiskScan(businessId: string): Promise<ApiResult<RiskScan>> {
+  return apiGetSimple<RiskScan>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/risks`);
+}
+
+export async function fetchWeeklyPlan(businessId: string): Promise<ApiResult<WeeklyPlan>> {
+  return apiGetSimple<WeeklyPlan>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/weekly-plan`);
+}
+
+// ---
 // AI USAGE & BILLING
 // ---
 export interface AiUsageSummary {
