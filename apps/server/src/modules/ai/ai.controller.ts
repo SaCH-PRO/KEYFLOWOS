@@ -225,12 +225,14 @@ export class AiController {
   async createPlan(
     @Param('businessId') businessId: string,
     @Body() body: { input: string },
+    @Req() req: AuthenticatedRequest,
   ) {
+    const userId = req?.user?.id;
     const intent = await this.intentParser.parse(businessId, body.input);
     if (intent.clarificationNeeded) {
       return { intent, plan: null, clarificationNeeded: true };
     }
-    const plan = await this.planner.createPlan(businessId, intent);
+    const plan = await this.planner.createPlan(businessId, intent, userId);
     return { intent, plan, clarificationNeeded: false };
   }
 

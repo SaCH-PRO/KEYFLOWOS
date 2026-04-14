@@ -66,7 +66,7 @@ export class PlannerService {
     @Inject(GovernanceService) private readonly governance: GovernanceService,
   ) {}
 
-  async createPlan(businessId: string, intent: ParsedIntent): Promise<AiPlanResult> {
+  async createPlan(businessId: string, intent: ParsedIntent, userId?: string): Promise<AiPlanResult> {
     const snapshot = await this.businessGraph.getSnapshot(businessId);
     const contextString = this.businessGraph.buildContextString(snapshot);
 
@@ -150,6 +150,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
     const plan = await this.prisma.client.aiPlan.create({
       data: {
         businessId,
+        userId: userId ?? null,
         objective: intent.objective,
         rawInput: intent.rawInput,
         urgency: intent.urgency,
