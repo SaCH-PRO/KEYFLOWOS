@@ -51,9 +51,9 @@ const TOP_DOCUMENTS = [
 ];
 
 const AI_PROMPTS = [
-  { label: "Generate business plan", description: "Create a comprehensive plan using your profile data", tab: "intelligence" },
-  { label: "Draft service agreement", description: "AI-powered contract from your business context", tab: "intelligence" },
-  { label: "Write tagline & description", description: "AI generates your brand messaging", tab: "business" },
+  { label: "Generate business plan", description: "Create a comprehensive plan using your profile data", tab: "outputs" },
+  { label: "Draft service agreement", description: "AI-powered contract from your business context", tab: "outputs" },
+  { label: "Write tagline & description", description: "AI generates your brand messaging", tab: "identity" },
 ];
 
 export function OverviewTab({
@@ -74,16 +74,16 @@ export function OverviewTab({
 
   const missingFields = useMemo(() => {
     const checks = [
-      { field: "Business Name", missing: !businessData?.name, tab: "business" },
-      { field: "Industry", missing: !businessData?.industry, tab: "professional" },
-      { field: "Business Stage", missing: !businessData?.businessStage, tab: "professional" },
-      { field: "Team Size", missing: !businessData?.teamSize, tab: "business" },
-      { field: "Location", missing: !(businessData?.city || businessData?.country), tab: "professional" },
-      { field: "Business Description", missing: !businessData?.description, tab: "business" },
-      { field: "Tagline", missing: !businessData?.tagline, tab: "business" },
-      { field: "Professional Headline", missing: !businessData?.headline, tab: "professional" },
-      { field: "Bio", missing: !businessData?.bio, tab: "professional" },
-      { field: "Skills", missing: !(businessData?.skills?.length), tab: "professional" },
+      { field: "Business Name", missing: !businessData?.name, tab: "identity" },
+      { field: "Industry", missing: !businessData?.industry, tab: "identity" },
+      { field: "Business Stage", missing: !businessData?.businessStage, tab: "identity" },
+      { field: "Team Size", missing: !businessData?.teamSize, tab: "identity" },
+      { field: "Location", missing: !(businessData?.city || businessData?.country), tab: "identity" },
+      { field: "Business Description", missing: !businessData?.description, tab: "identity" },
+      { field: "Tagline", missing: !businessData?.tagline, tab: "identity" },
+      { field: "Professional Headline", missing: !businessData?.headline, tab: "identity" },
+      { field: "Bio", missing: !businessData?.bio, tab: "identity" },
+      { field: "Skills", missing: !(businessData?.skills?.length), tab: "identity" },
     ];
     return checks.filter((c) => c.missing);
   }, [businessData]);
@@ -95,7 +95,7 @@ export function OverviewTab({
       steps.push({
         label: "Add your business name",
         reason: "Powers invoices, storefront, and all customer-facing pages",
-        tab: "business",
+        tab: "identity",
         icon: Building2,
         priority: "high",
       });
@@ -104,7 +104,7 @@ export function OverviewTab({
       steps.push({
         label: "Set your industry",
         reason: "Powers templates, recommended documents, and strategy guidance",
-        tab: "professional",
+        tab: "identity",
         icon: Briefcase,
         priority: "high",
       });
@@ -113,7 +113,7 @@ export function OverviewTab({
       steps.push({
         label: "Define your business stage",
         reason: "Powers growth recommendations and intelligence package logic",
-        tab: "professional",
+        tab: "identity",
         icon: TrendingUp,
         priority: "high",
       });
@@ -122,7 +122,7 @@ export function OverviewTab({
       steps.push({
         label: "Write a business description",
         reason: "Improves AI-generated documents and public profile quality",
-        tab: "business",
+        tab: "identity",
         icon: FileText,
         priority: "medium",
       });
@@ -131,7 +131,7 @@ export function OverviewTab({
       steps.push({
         label: "Set your team size",
         reason: "Improves staffing, operations, and automation recommendations",
-        tab: "business",
+        tab: "identity",
         icon: Users,
         priority: "medium",
       });
@@ -140,7 +140,7 @@ export function OverviewTab({
       steps.push({
         label: "Add a professional headline",
         reason: "Shapes your public profile and marketplace presence",
-        tab: "professional",
+        tab: "identity",
         icon: Sparkles,
         priority: "medium",
       });
@@ -149,7 +149,7 @@ export function OverviewTab({
       steps.push({
         label: "Add your skills & expertise",
         reason: "Enables smarter project templates and service matching",
-        tab: "professional",
+        tab: "identity",
         icon: Zap,
         priority: "low",
       });
@@ -158,7 +158,7 @@ export function OverviewTab({
       steps.push({
         label: "Set operating hours",
         reason: "Controls booking availability and storefront display",
-        tab: "business",
+        tab: "identity",
         icon: Clock,
         priority: "low",
       });
@@ -331,11 +331,11 @@ export function OverviewTab({
             />
           </div>
           <button
-            onClick={() => onNavigateTab("intelligence")}
+            onClick={() => onNavigateTab("readiness")}
             className="text-[10px] mt-2 flex items-center gap-1 hover:underline"
             style={{ color: "hsl(var(--kf-accent1))" }}
           >
-            View full intelligence breakdown
+            View full readiness breakdown
             <ArrowRight className="w-3 h-3" />
           </button>
         </div>
@@ -386,7 +386,7 @@ export function OverviewTab({
               No business data yet. Start by completing your business profile.
             </p>
             <button
-              onClick={() => onNavigateTab("business")}
+              onClick={() => onNavigateTab("identity")}
               className="mt-2 inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
               style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}
             >
@@ -502,11 +502,11 @@ export function OverviewTab({
             })}
           </div>
           <button
-            onClick={() => onNavigateTab("intelligence")}
+            onClick={() => onNavigateTab("readiness")}
             className="mt-3 w-full flex items-center justify-center gap-1 text-xs font-medium py-2 rounded-lg transition-colors"
             style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-accent2))" }}
           >
-            View detailed intelligence
+            View detailed readiness
             <ArrowRight className="w-3 h-3" />
           </button>
         </div>
@@ -622,7 +622,7 @@ export function OverviewTab({
           {TOP_DOCUMENTS.map((doc, i) => (
             <button
               key={i}
-              onClick={() => onNavigateTab("intelligence")}
+              onClick={() => onNavigateTab("outputs")}
               className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors hover:bg-[hsl(var(--kf-muted)/0.06)]"
               style={{ background: "hsl(var(--kf-muted) / 0.03)" }}
             >
@@ -641,11 +641,11 @@ export function OverviewTab({
           ))}
         </div>
         <button
-          onClick={() => onNavigateTab("intelligence")}
+          onClick={() => onNavigateTab("outputs")}
           className="mt-3 w-full flex items-center justify-center gap-1 text-xs font-medium py-2 rounded-lg transition-colors"
           style={{ background: "hsl(var(--kf-muted) / 0.08)", color: "hsl(var(--kf-accent1))" }}
         >
-          View all documents & intelligence
+          View all documents & outputs
           <ArrowRight className="w-3 h-3" />
         </button>
       </div>

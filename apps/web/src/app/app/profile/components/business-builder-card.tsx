@@ -997,7 +997,7 @@ function ResultsPanel({ model, tab, version, businessId, saveError, onTabChange,
   };
 
   const handleDocumentClick = (slug: string) => {
-    router.push(`/app/profile?tab=intelligence&generate=${slug}`);
+    router.push(`/app/profile?tab=outputs&generate=${slug}`);
   };
 
   const exportActions = [
@@ -1116,7 +1116,7 @@ function ResultsPanel({ model, tab, version, businessId, saveError, onTabChange,
               })}
             </div>
             <button
-              onClick={() => router.push("/app/profile?tab=intelligence")}
+              onClick={() => router.push("/app/profile?tab=outputs")}
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-white transition-all min-h-[36px]"
               style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent2)), hsl(var(--kf-accent1)))" }}
             >

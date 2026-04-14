@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   User, CheckCircle2, AlertCircle, FileText,
   Building2, Briefcase, Globe, Brain,
-  LayoutDashboard, Shield, Sparkles,
+  LayoutDashboard, Shield, Sparkles, Target,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -15,14 +15,15 @@ import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { JourneyIndicator, type CompletenessItem } from "./components/journey-indicator";
 import { SkeletonProfile } from "./components/skeleton-profile";
 import { OverviewTab } from "./components/overview-tab";
-import { BusinessTab } from "./components/business-tab";
-import { ProfessionalTab } from "./components/professional-tab";
+import { IdentityTab } from "./components/identity-tab";
+import { ReadinessTab } from "./components/readiness-tab";
 import { IntelligenceTab } from "./components/intelligence-tab";
+import { OutputsTab } from "./components/outputs-tab";
 import SecuritySection from "./components/security-section";
 import { ProfileSectionErrorBoundary } from "./components/profile-section-error-boundary";
 import type { ProfileBusinessData, ProfileCompletenessField, StatusMessage, TabId } from "./components/profile-types";
 
-type ActiveTab = "overview" | "business" | "professional" | "intelligence" | "security";
+type ActiveTab = "overview" | "identity" | "readiness" | "intelligence" | "outputs" | "security";
 
 function checkFieldCompletion(key: string, bd: ProfileBusinessData | null): boolean {
   if (!bd) return false;
@@ -50,12 +51,13 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-const TAB_CONFIG: { id: ActiveTab; label: string; icon: React.ElementType; shortLabel: string }[] = [
-  { id: "overview", label: "Overview", shortLabel: "Overview", icon: LayoutDashboard },
-  { id: "business", label: "Business", shortLabel: "Business", icon: Building2 },
-  { id: "professional", label: "Professional", shortLabel: "Professional", icon: User },
-  { id: "intelligence", label: "Documents & Intelligence", shortLabel: "Intelligence", icon: Brain },
-  { id: "security", label: "Security & Preferences", shortLabel: "Security", icon: Shield },
+const TAB_CONFIG: { id: ActiveTab; label: string; icon: React.ElementType; shortLabel: string; description: string }[] = [
+  { id: "overview", label: "Overview", shortLabel: "Overview", icon: LayoutDashboard, description: "Dashboard summary" },
+  { id: "identity", label: "Identity", shortLabel: "Identity", icon: Building2, description: "Profile and branding" },
+  { id: "readiness", label: "Readiness", shortLabel: "Ready", icon: Target, description: "Capability maturity" },
+  { id: "intelligence", label: "Intelligence", shortLabel: "Intel", icon: Brain, description: "AI insights" },
+  { id: "outputs", label: "Outputs", shortLabel: "Docs", icon: FileText, description: "Documents and exports" },
+  { id: "security", label: "Security", shortLabel: "Security", icon: Shield, description: "Preferences" },
 ];
 
 const VALID_TABS = new Set<string>(TAB_CONFIG.map((t) => t.id));
@@ -63,8 +65,8 @@ const PROFESSIONAL_FIELD_KEYS = new Set(["headline", "bio", "industry", "skills"
 
 function mapLegacyTab(tab: string): ActiveTab {
   if (tab === "profile") return "overview";
-  if (tab === "brand") return "business";
-  if (tab === "documents") return "intelligence";
+  if (tab === "brand" || tab === "business" || tab === "professional") return "identity";
+  if (tab === "documents") return "outputs";
   if (VALID_TABS.has(tab)) return tab as ActiveTab;
   return "overview";
 }
@@ -158,20 +160,20 @@ export default function ProfileSettingsPage() {
       ? completenessFields.map((field) => ({
           label: field.label,
           done: checkFieldCompletion(field.key, businessData),
-          tab: (PROFESSIONAL_FIELD_KEYS.has(field.key) ? "professional" : "business") as TabId,
+          tab: "identity" as TabId,
           icon: PROFESSIONAL_FIELD_KEYS.has(field.key) ? Briefcase : Building2,
         }))
       : [
-          { label: "Set industry & business stage", done: !!(businessData?.industry && businessData?.businessStage), tab: "professional" as TabId, icon: Briefcase },
-          { label: "Complete professional profile", done: profileCompleteness >= 60, tab: "professional" as TabId, icon: Building2 },
+          { label: "Set industry & business stage", done: !!(businessData?.industry && businessData?.businessStage), tab: "identity" as TabId, icon: Briefcase },
+          { label: "Complete professional profile", done: profileCompleteness >= 60, tab: "identity" as TabId, icon: Building2 },
         ];
     return [
-      { label: "Add your name", done: hasPersonalName, tab: "professional" as TabId, icon: User },
-      { label: "Add phone number", done: hasPhone, tab: "professional" as TabId, icon: User },
+      { label: "Add your name", done: hasPersonalName, tab: "identity" as TabId, icon: User },
+      { label: "Add phone number", done: hasPhone, tab: "identity" as TabId, icon: User },
       ...bizItems,
-      { label: "Set up branding", done: hasBranding, tab: "business" as TabId, icon: Globe },
-      { label: "Connect social accounts", done: hasSocial, tab: "business" as TabId, icon: Globe },
-      { label: "Generate your first document", done: docCount > 0, tab: "intelligence" as TabId, icon: FileText },
+      { label: "Set up branding", done: hasBranding, tab: "identity" as TabId, icon: Globe },
+      { label: "Connect social accounts", done: hasSocial, tab: "identity" as TabId, icon: Globe },
+      { label: "Generate your first document", done: docCount > 0, tab: "outputs" as TabId, icon: FileText },
     ];
   }, [savedForm, businessData, profileCompleteness, docCount, bizBrandData, completenessFields]);
 
@@ -268,13 +270,23 @@ export default function ProfileSettingsPage() {
     </div>
   );
 
-  const maxWidth = activeTab === "intelligence" ? "max-w-4xl" : activeTab === "business" ? "max-w-3xl" : "max-w-3xl";
+  const maxWidth = activeTab === "intelligence" || activeTab === "outputs" ? "max-w-4xl" : "max-w-3xl";
 
   const tabBadge = (tabId: ActiveTab) => {
-    if (tabId === "intelligence" && docCount > 0) {
+    if (tabId === "outputs" && docCount > 0) {
       return (
         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.15)", color: "hsl(var(--kf-accent1))" }}>
           {docCount}
+        </span>
+      );
+    }
+    if (tabId === "readiness" && overallIntelligenceScore > 0 && overallIntelligenceScore < 100) {
+      return (
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{
+          background: overallIntelligenceScore >= 80 ? "hsl(var(--kf-success) / 0.15)" : "hsl(var(--kf-warning) / 0.15)",
+          color: overallIntelligenceScore >= 80 ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
+        }}>
+          {overallIntelligenceScore}%
         </span>
       );
     }
@@ -299,7 +311,7 @@ export default function ProfileSettingsPage() {
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">Profile & Intelligence</h1>
-          <p className="text-sm text-muted-foreground">Manage your identity, business foundation, intelligence, and system-ready documents.</p>
+          <p className="text-sm text-muted-foreground">Your business identity, readiness scoring, AI intelligence, and strategic outputs.</p>
         </div>
       </motion.div>
 
@@ -377,23 +389,9 @@ export default function ProfileSettingsPage() {
           </motion.div>
         )}
 
-        {activeTab === "business" && (
-          <motion.div key="business" id="tabpanel-business" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <BusinessTab
-              businessId={businessId}
-              businessData={businessData}
-              businessLoading={businessLoading}
-              onBizDirtyChange={handleBizInfoDirtyChange}
-              onBrandDirtyChange={handleBizInfoDirtyChange}
-              onStatus={setStatus}
-              onBusinessSaved={(saved) => setBusinessData((prev) => prev ? { ...prev, ...saved } : prev)}
-            />
-          </motion.div>
-        )}
-
-        {activeTab === "professional" && (
-          <motion.div key="professional" id="tabpanel-professional" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <ProfessionalTab
+        {activeTab === "identity" && (
+          <motion.div key="identity" id="tabpanel-identity" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <IdentityTab
               businessId={businessId}
               businessData={businessData}
               businessLoading={businessLoading}
@@ -401,6 +399,7 @@ export default function ProfileSettingsPage() {
               avatarUrl={avatarUrl}
               onPersonalDirtyChange={handlePersonalDirtyChange}
               onBizDirtyChange={handleBizDirtyChange}
+              onBrandDirtyChange={handleBizInfoDirtyChange}
               onStatus={setStatus}
               onPersonalSaved={(newForm, newAvatar) => {
                 setSavedForm({ ...newForm });
@@ -415,9 +414,26 @@ export default function ProfileSettingsPage() {
           </motion.div>
         )}
 
+        {activeTab === "readiness" && (
+          <motion.div key="readiness" id="tabpanel-readiness" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <ReadinessTab
+              businessId={businessId}
+              businessData={businessData}
+              profileCompleteness={profileCompleteness}
+              onNavigateTab={handleTabChange}
+            />
+          </motion.div>
+        )}
+
         {activeTab === "intelligence" && (
           <motion.div key="intelligence" id="tabpanel-intelligence" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
             <IntelligenceTab businessId={businessId} businessData={businessData} />
+          </motion.div>
+        )}
+
+        {activeTab === "outputs" && (
+          <motion.div key="outputs" id="tabpanel-outputs" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <OutputsTab businessId={businessId} businessData={businessData} profileCompleteness={profileCompleteness} />
           </motion.div>
         )}
 
