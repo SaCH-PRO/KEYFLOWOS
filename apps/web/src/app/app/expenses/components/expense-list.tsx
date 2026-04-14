@@ -5,13 +5,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Pencil, Trash2, ArrowUpDown, Repeat, FileText, Receipt,
   CreditCard, Banknote, Smartphone, CheckCircle, AlertCircle,
-  Tag, CheckSquare, Square, Layers,
+  Tag, CheckSquare, Square, Layers, FolderKanban, Users, Briefcase,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { Expense, ExpenseCategory, PAYMENT_METHODS, updateExpense } from "@/lib/client";
 import { formatCurrency, formatDate } from "./expense-utils";
 import { toast } from "sonner";
+import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 
 interface ExpenseListProps {
   expenses: Expense[];
@@ -31,6 +32,9 @@ interface ExpenseListProps {
   onAdd?: () => void;
   businessId?: string | null;
   onReload?: () => void;
+  projects?: ProjectOption[];
+  contacts?: ContactOption[];
+  services?: ServiceOption[];
 }
 
 const PAYMENT_ICONS: Record<string, typeof CreditCard> = {
@@ -55,6 +59,7 @@ export function ExpenseList({
   page, setPage, pageSize, setPageSize,
   onEdit, onDelete, onViewDetail, onAdd,
   businessId, onReload,
+  projects = [], contacts = [], services = [],
 }: ExpenseListProps) {
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -242,6 +247,30 @@ export function ExpenseList({
                           <Tag className="w-2.5 h-2.5" />
                         </span>
                       )}
+                      {exp.projectId && (() => {
+                        const proj = projects.find(p => p.id === exp.projectId);
+                        return proj ? (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400" title={`Project: ${proj.name}`}>
+                            <FolderKanban className="w-2.5 h-2.5" />
+                          </span>
+                        ) : null;
+                      })()}
+                      {exp.contactId && (() => {
+                        const ct = contacts.find(c => c.id === exp.contactId);
+                        return ct ? (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400" title={`Client: ${ct.name}`}>
+                            <Users className="w-2.5 h-2.5" />
+                          </span>
+                        ) : null;
+                      })()}
+                      {exp.serviceId && (() => {
+                        const svc = services.find(s => s.id === exp.serviceId);
+                        return svc ? (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400" title={`Service: ${svc.name}`}>
+                            <Briefcase className="w-2.5 h-2.5" />
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                   <span className="text-xs text-muted-foreground truncate">{exp.vendor || <span className="opacity-40">---</span>}</span>

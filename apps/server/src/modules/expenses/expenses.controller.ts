@@ -64,6 +64,17 @@ export class ExpensesController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/expenses/margin-analysis')
+  getMarginAnalysis(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.expenses.getMarginAnalysis(businessId, period, startDate, endDate);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/expenses/export')
   async exportCSV(
     @Param('businessId') businessId: string,
@@ -104,6 +115,9 @@ export class ExpensesController {
       isRecurring?: boolean;
       recurringFrequency?: string;
       categoryId?: string;
+      projectId?: string;
+      contactId?: string;
+      serviceId?: string;
     },
   ) {
     return this.expenses.createExpense({ businessId, ...body });
@@ -127,6 +141,9 @@ export class ExpensesController {
       isRecurring?: boolean;
       recurringFrequency?: string;
       categoryId?: string | null;
+      projectId?: string | null;
+      contactId?: string | null;
+      serviceId?: string | null;
     },
   ) {
     return this.expenses.updateExpense({ businessId, expenseId, ...body });

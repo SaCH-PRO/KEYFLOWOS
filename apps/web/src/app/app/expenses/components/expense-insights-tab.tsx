@@ -6,11 +6,12 @@ import {
   AlertTriangle, TrendingUp, TrendingDown, Store, FileQuestion, Receipt,
   Target, BarChart3, Lightbulb, ArrowRight, PieChart, ShieldAlert,
   Zap, DollarSign, FileText, Sparkles, Brain, Shield,
-  ChevronDown, ChevronUp, Users, Percent,
+  ChevronDown, ChevronUp, Users, Percent, FolderKanban, Briefcase,
 } from "lucide-react";
-import { Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget } from "@/lib/client";
+import { Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget, MarginAnalysis } from "@/lib/client";
 import { formatCurrency } from "./expense-utils";
 import { EmptyState } from "@/components/ui/empty-state";
+import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 
 type TabKey = "transactions" | "budgets" | "categories" | "insights";
 
@@ -34,6 +35,10 @@ interface ExpenseInsightsTabProps {
   summary: ExpenseSummary | null;
   vendors: VendorAnalytics[];
   budgets: ExpenseBudget[];
+  marginData?: MarginAnalysis | null;
+  projects?: ProjectOption[];
+  contacts?: ContactOption[];
+  services?: ServiceOption[];
   onNavigate: (tab: TabKey) => void;
   periodTotalCount?: number;
   periodUncategorizedCount?: number;
@@ -49,7 +54,9 @@ const TYPE_STYLES: Record<string, { border: string; bg: string; iconColor: strin
 };
 
 export function ExpenseInsightsTab({
-  expenses, categories, summary, vendors, budgets, onNavigate,
+  expenses, categories, summary, vendors, budgets, marginData,
+  projects = [], contacts = [], services = [],
+  onNavigate,
   periodTotalCount, periodUncategorizedCount, periodMissingReceiptCount, periodRecurringCount,
 }: ExpenseInsightsTabProps) {
   const [showAllInsights, setShowAllInsights] = useState(false);
@@ -259,7 +266,6 @@ export function ExpenseInsightsTab({
     if (totalSpend === 0) return null;
 
     const recurringTotal = expenses.filter(e => e.isRecurring).reduce((s, e) => s + e.amount, 0);
-    const oneTimeTotal = totalSpend - recurringTotal;
     const recurringPct = Math.round((recurringTotal / totalSpend) * 100);
 
     const costPerDay = summary?.dailyTrend?.length
@@ -279,7 +285,6 @@ export function ExpenseInsightsTab({
     return {
       totalSpend,
       recurringTotal,
-      oneTimeTotal,
       recurringPct,
       costPerDay,
       projectedMonthly,
@@ -456,39 +461,155 @@ export function ExpenseInsightsTab({
                 </span>
               )}
             </div>
-            <div className="bg-white/5 rounded-lg p-3">
-              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Recurring</span>
-              <span className="text-sm font-bold">{formatCurrency(marginAnalysis.recurringTotal)}</span>
-              <span className="text-[10px] text-muted-foreground block mt-0.5">{marginAnalysis.recurringPct}% of total</span>
-            </div>
-            <div className="bg-white/5 rounded-lg p-3">
-              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Daily Burn</span>
-              <span className="text-sm font-bold">{formatCurrency(marginAnalysis.costPerDay)}</span>
-              <span className="text-[10px] text-muted-foreground block mt-0.5">avg per day</span>
-            </div>
-            <div className="bg-white/5 rounded-lg p-3">
-              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Month Projection</span>
-              <span className="text-sm font-bold">{formatCurrency(marginAnalysis.projectedMonthly)}</span>
-              <span className="text-[10px] text-muted-foreground block mt-0.5">{formatCurrency(marginAnalysis.projectedRemaining)} remaining</span>
-            </div>
+            {marginData && marginData.totalRevenue > 0 ? (
+              <>
+                <div className="bg-white/5 rounded-lg p-3">
+                  <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Revenue</span>
+                  <span className="text-sm font-bold" style={{ color: "hsl(var(--kf-success))" }}>{formatCurrency(marginData.totalRevenue)}</span>
+                  <span className="text-[10px] text-muted-foreground block mt-0.5">{formatCurrency(marginData.paidRevenue)} collected</span>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3">
+                  <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Gross Profit</span>
+                  <span className="text-sm font-bold" style={{ color: marginData.grossProfit >= 0 ? "hsl(var(--kf-success))" : "hsl(var(--kf-error))" }}>{formatCurrency(marginData.grossProfit)}</span>
+                  <span className="text-[10px] text-muted-foreground block mt-0.5">{marginData.grossMargin}% margin</span>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3">
+                  <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Expense Ratio</span>
+                  <span className="text-sm font-bold" style={{ color: marginData.expenseToRevenueRatio > 80 ? "hsl(var(--kf-error))" : marginData.expenseToRevenueRatio > 60 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-success))" }}>{marginData.expenseToRevenueRatio}%</span>
+                  <span className="text-[10px] text-muted-foreground block mt-0.5">of revenue</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="bg-white/5 rounded-lg p-3">
+                  <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Recurring</span>
+                  <span className="text-sm font-bold">{formatCurrency(marginAnalysis.recurringTotal)}</span>
+                  <span className="text-[10px] text-muted-foreground block mt-0.5">{marginAnalysis.recurringPct}% of total</span>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3">
+                  <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Daily Burn</span>
+                  <span className="text-sm font-bold">{formatCurrency(marginAnalysis.costPerDay)}</span>
+                  <span className="text-[10px] text-muted-foreground block mt-0.5">avg per day</span>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3">
+                  <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Month Projection</span>
+                  <span className="text-sm font-bold">{formatCurrency(marginAnalysis.projectedMonthly)}</span>
+                  <span className="text-[10px] text-muted-foreground block mt-0.5">{formatCurrency(marginAnalysis.projectedRemaining)} remaining</span>
+                </div>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <div className="flex-1 h-3 rounded-full bg-muted/20 overflow-hidden flex">
-              <div
-                className="h-full rounded-l-full"
-                style={{ width: `${marginAnalysis.recurringPct}%`, background: "hsl(var(--kf-accent1))" }}
-                title="Recurring"
-              />
-              <div
-                className="h-full rounded-r-full"
-                style={{ width: `${100 - marginAnalysis.recurringPct}%`, background: "hsl(var(--kf-accent2))" }}
-                title="One-time"
-              />
+              {marginData && marginData.totalRevenue > 0 ? (
+                <>
+                  <div
+                    className="h-full rounded-l-full"
+                    style={{ width: `${Math.min(marginData.expenseToRevenueRatio, 100)}%`, background: marginData.expenseToRevenueRatio > 80 ? "hsl(var(--kf-error))" : "hsl(var(--kf-accent1))" }}
+                    title="Expenses"
+                  />
+                  <div
+                    className="h-full rounded-r-full"
+                    style={{ width: `${Math.max(100 - marginData.expenseToRevenueRatio, 0)}%`, background: "hsl(var(--kf-success))" }}
+                    title="Profit"
+                  />
+                </>
+              ) : (
+                <>
+                  <div className="h-full rounded-l-full" style={{ width: `${marginAnalysis.recurringPct}%`, background: "hsl(var(--kf-accent1))" }} title="Recurring" />
+                  <div className="h-full rounded-r-full" style={{ width: `${100 - marginAnalysis.recurringPct}%`, background: "hsl(var(--kf-accent2))" }} title="One-time" />
+                </>
+              )}
             </div>
             <div className="flex items-center gap-3 text-[10px] text-muted-foreground shrink-0">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent1))" }} /> Recurring</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent2))" }} /> Variable</span>
+              {marginData && marginData.totalRevenue > 0 ? (
+                <>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent1))" }} /> Expenses</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-success))" }} /> Profit</span>
+                </>
+              ) : (
+                <>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent1))" }} /> Recurring</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent2))" }} /> Variable</span>
+                </>
+              )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {marginData && marginData.byClient.length > 0 && (
+        <div className="kf-card rounded-xl p-4 space-y-4">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Users className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+            Client Profitability
+          </h3>
+          <div className="space-y-2">
+            {marginData.byClient.slice(0, 5).map((client) => (
+              <div key={client.contactId} className="flex items-center gap-3">
+                <span className="text-xs font-medium w-28 truncate">{client.name}</span>
+                <div className="flex-1 h-2 rounded-full bg-muted/20 overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${Math.max(Math.min(client.margin, 100), 0)}%` }}
+                    transition={{ duration: 0.5 }}
+                    className="h-full rounded-full"
+                    style={{ background: client.margin >= 30 ? "hsl(var(--kf-success))" : client.margin >= 0 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))" }}
+                  />
+                </div>
+                <span className="text-xs font-semibold w-20 text-right">{formatCurrency(client.profit)}</span>
+                <span className={`text-[10px] w-10 text-right font-medium ${client.margin >= 30 ? "text-green-400" : client.margin >= 0 ? "text-amber-400" : "text-red-400"}`}>{client.margin}%</span>
+              </div>
+            ))}
+          </div>
+          {marginData.byClient.some(c => c.margin < 10) && (
+            <div className="bg-white/[0.03] rounded-lg p-3 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "hsl(var(--kf-warning))" }} />
+              <div>
+                <p className="text-xs font-medium">Low-Margin Client Alert</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {marginData.byClient.filter(c => c.margin < 10).length} client{marginData.byClient.filter(c => c.margin < 10).length > 1 ? "s" : ""} with margins below 10%. Review pricing or reduce costs for these accounts.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {marginData && marginData.byProject.length > 0 && (
+        <div className="kf-card rounded-xl p-4 space-y-4">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+            Project Cost Panels
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {marginData.byProject.map((proj) => (
+              <div key={proj.projectId} className="bg-white/5 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold truncate">{proj.name}</span>
+                  <span className="text-[10px] text-muted-foreground">{proj.count} expense{proj.count !== 1 ? "s" : ""}</span>
+                </div>
+                <span className="text-sm font-bold text-red-400">{formatCurrency(proj.expenses)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {marginData && marginData.byService.length > 0 && (
+        <div className="kf-card rounded-xl p-4 space-y-4">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Sparkles className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+            Service Cost Impact
+          </h3>
+          <div className="space-y-2">
+            {marginData.byService.map((svc) => (
+              <div key={svc.serviceId} className="flex items-center gap-3 bg-white/5 rounded-lg p-2.5">
+                <span className="text-xs font-medium flex-1 truncate">{svc.name}</span>
+                <span className="text-xs text-muted-foreground">{svc.count} item{svc.count !== 1 ? "s" : ""}</span>
+                <span className="text-xs font-bold text-red-400">{formatCurrency(svc.expenses)}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -676,17 +797,17 @@ export function ExpenseInsightsTab({
       <div className="kf-card rounded-xl p-4 space-y-3">
         <h3 className="text-sm font-semibold flex items-center gap-2">
           <BarChart3 className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-          Cross-Module Connections
+          Cross-Module Data Propagation
         </h3>
-        <p className="text-xs text-muted-foreground">Expenses feed intelligence across your entire business platform.</p>
+        <p className="text-xs text-muted-foreground">Expense data flows into project cost panels, client profitability, and service pricing across your platform.</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
-            { label: "Revenue", icon: DollarSign, desc: "Margin & profitability", color: "hsl(var(--kf-success))" },
-            { label: "Reports", icon: BarChart3, desc: "Financial summaries", color: "hsl(var(--kf-info))" },
-            { label: "Documents", icon: FileText, desc: "Tax & compliance", color: "hsl(var(--kf-accent2))" },
-            { label: "Flows", icon: Zap, desc: "Budget alerts", color: "hsl(var(--kf-accent1))" },
+            { label: "Revenue", icon: DollarSign, desc: marginData && marginData.totalRevenue > 0 ? `${marginData.grossMargin}% margin` : "Margin & profitability", color: "hsl(var(--kf-success))", active: !!(marginData && marginData.totalRevenue > 0) },
+            { label: "Projects", icon: BarChart3, desc: marginData && marginData.byProject.length > 0 ? `${marginData.byProject.length} linked` : "Cost tracking", color: "hsl(var(--kf-info))", active: !!(marginData && marginData.byProject.length > 0) },
+            { label: "Clients", icon: Users, desc: marginData && marginData.byClient.length > 0 ? `${marginData.byClient.length} tracked` : "Profitability", color: "hsl(var(--kf-accent2))", active: !!(marginData && marginData.byClient.length > 0) },
+            { label: "Services", icon: Sparkles, desc: marginData && marginData.byService.length > 0 ? `${marginData.byService.length} costed` : "Pricing impact", color: "hsl(var(--kf-accent1))", active: !!(marginData && marginData.byService.length > 0) },
           ].map(mod => (
-            <div key={mod.label} className="bg-white/5 rounded-lg p-3 flex items-center gap-2.5">
+            <div key={mod.label} className={`bg-white/5 rounded-lg p-3 flex items-center gap-2.5 ${mod.active ? "ring-1 ring-white/10" : ""}`}>
               <div className="p-1.5 rounded-lg" style={{ background: `${mod.color.replace(")", " / 0.1)")}` }}>
                 <mod.icon className="w-3.5 h-3.5" style={{ color: mod.color }} />
               </div>
@@ -694,6 +815,7 @@ export function ExpenseInsightsTab({
                 <p className="text-xs font-medium">{mod.label}</p>
                 <p className="text-[10px] text-muted-foreground">{mod.desc}</p>
               </div>
+              {mod.active && <span className="w-1.5 h-1.5 rounded-full ml-auto shrink-0" style={{ background: "hsl(var(--kf-success))" }} />}
             </div>
           ))}
         </div>

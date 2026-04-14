@@ -3,9 +3,14 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   fetchExpenses, fetchExpenseCategories, fetchExpenseSummary, fetchVendorAnalytics, fetchExpenseBudgets,
-  Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget,
+  fetchMarginAnalysis, fetchProjects, fetchServices, fetchContacts,
+  Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget, MarginAnalysis,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+
+export interface ProjectOption { id: string; name: string }
+export interface ServiceOption { id: string; name: string }
+export interface ContactOption { id: string; name: string }
 
 export function useExpensesData() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -15,6 +20,10 @@ export function useExpensesData() {
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [vendors, setVendors] = useState<VendorAnalytics[]>([]);
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
+  const [marginData, setMarginData] = useState<MarginAnalysis | null>(null);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [services, setServices] = useState<ServiceOption[]>([]);
+  const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState("30d");
   const [customStart, setCustomStart] = useState("");
@@ -37,23 +46,47 @@ export function useExpensesData() {
 
   useEffect(() => { setPage(1); }, [period, filterCategory, filterPayment, debouncedSearch]);
 
+  useEffect(() => {
+    if (!businessId) return;
+    (async () => {
+      try {
+        const [projRes, svcRes, ctRes] = await Promise.all([
+          fetchProjects(businessId),
+          fetchServices(businessId),
+          fetchContacts(businessId),
+        ]);
+        if (projRes.data) setProjects(projRes.data.map((p: any) => ({ id: p.id, name: p.name })));
+        if (svcRes.data) setServices(svcRes.data.map((s: any) => ({ id: s.id, name: s.name })));
+        if (ctRes.data) {
+          const list = Array.isArray(ctRes.data) ? ctRes.data : (ctRes.data as any).data ?? [];
+          setContacts(list.map((c: any) => ({
+            id: c.id,
+            name: c.displayName || [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "Unknown",
+          })));
+        }
+      } catch {}
+    })();
+  }, [businessId]);
+
   const loadData = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
     try {
       const useCustom = period === "custom" && customStart && customEnd;
-      const [expRes, catRes, sumRes, venRes, budRes] = await Promise.all([
+      const [expRes, catRes, sumRes, venRes, budRes, margRes] = await Promise.all([
         fetchExpenses(businessId, { search: debouncedSearch || undefined, categoryId: filterCategory || undefined, paymentMethod: filterPayment || undefined, period: useCustom ? undefined : period, startDate: useCustom ? customStart : undefined, endDate: useCustom ? customEnd : undefined, page, limit: pageSize }),
         fetchExpenseCategories(businessId),
         fetchExpenseSummary(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchVendorAnalytics(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchExpenseBudgets(businessId),
+        fetchMarginAnalysis(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
       ]);
       if (expRes.data) { setExpenses(expRes.data.data); setTotalExpenses(expRes.data.total); }
       if (catRes.data) setCategories(catRes.data);
       if (sumRes.data) setSummary(sumRes.data);
       if (venRes.data) setVendors(venRes.data);
       if (budRes.data) setBudgets(budRes.data);
+      if (margRes.data) setMarginData(margRes.data);
     } catch {}
     setLoading(false);
   }, [businessId, period, debouncedSearch, filterCategory, filterPayment, customStart, customEnd, page, pageSize]);
@@ -65,7 +98,8 @@ export function useExpensesData() {
 
   return {
     businessId, expenses, totalExpenses, categories, setCategories,
-    summary, vendors, budgets, loading, loadData,
+    summary, vendors, budgets, marginData, loading, loadData,
+    projects, services, contacts,
     period, setPeriod, customStart, setCustomStart, customEnd, setCustomEnd,
     searchQuery, setSearchQuery,
     filterCategory, setFilterCategory, filterPayment, setFilterPayment,
