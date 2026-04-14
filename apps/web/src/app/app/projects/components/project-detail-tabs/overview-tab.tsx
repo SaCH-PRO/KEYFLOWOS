@@ -249,17 +249,18 @@ export function OverviewTab({ project, onStageChange, milestones = [], deliverab
               linked={!!project.bookingId}
             />
             <LinkedRecord
+              icon={FileText}
+              label="Quotes"
+              value={project.invoiceId ? "View related quotes" : "No quotes linked"}
+              linked={!!project.invoiceId}
+              href={project.invoiceId ? "/app/commerce?tab=quotes" : undefined}
+            />
+            <LinkedRecord
               icon={MessageSquare}
               label="Comms"
               value={project.contactId ? "View client messages" : "Link a client first"}
               linked={!!project.contactId}
               href={project.contactId ? `/app/crm/contacts/${project.contactId}?tab=communications` : undefined}
-            />
-            <LinkedRecord
-              icon={Zap}
-              label="Flows"
-              value="Configure automation flows"
-              linked={false}
             />
           </div>
         </div>
