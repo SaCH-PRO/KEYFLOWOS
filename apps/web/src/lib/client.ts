@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { API_BASE, apiPost, apiPatch, apiDelete, apiGet as apiGetSimple, getAuthHeaders, type PlanLimitError } from "./api";
+import { API_BASE, apiPost, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, type PlanLimitError } from "./api";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 
@@ -3847,6 +3847,214 @@ export async function clearFlowSession(businessId: string, sessionId: string): P
     path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions/${encodeURIComponent(sessionId)}/clear`,
     body: {},
   });
+}
+
+// ---
+// AI BUSINESS OFFICE — Copilot, Governance, Approvals, Execution Logs
+// ---
+
+export interface AiBusinessGraph {
+  businessName: string;
+  contactsCount: number;
+  recentContacts: Array<{ id: string; name: string }>;
+  activeInvoiceCount: number;
+  revenueThisMonth: number;
+  upcomingBookings: number;
+  activeCampaigns: number;
+  activeProjects: number;
+  recentExpenses: number;
+  activePlaybooks: number;
+  [key: string]: unknown;
+}
+
+export interface AiParsedIntent {
+  objective: string;
+  rawInput: string;
+  urgency: string;
+  scope: string[];
+  modules: string[];
+  toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>;
+  clarificationNeeded: boolean;
+  clarificationMessage?: string;
+}
+
+export interface AiPlanStep {
+  id: string;
+  order: number;
+  status: string;
+  toolName: string | null;
+  module: string | null;
+  action: string;
+  description: string | null;
+  riskTier: number;
+  requiresApproval: boolean;
+  dependsOn: string[];
+  inputPayload: Record<string, unknown> | null;
+  outputResult: Record<string, unknown> | null;
+  expectedBenefit: string | null;
+  errorMessage: string | null;
+  durationMs: number | null;
+}
+
+export interface AiPlan {
+  id: string;
+  businessId: string;
+  userId: string | null;
+  status: string;
+  objective: string;
+  rawInput: string | null;
+  urgency: string;
+  scope: string[];
+  modules: string[];
+  maxRiskTier: number;
+  steps: AiPlanStep[];
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface AiApprovalItem {
+  id: string;
+  businessId: string;
+  toolName: string;
+  title: string;
+  description: string | null;
+  rationale: string | null;
+  riskTier: number;
+  status: string;
+  inputPayload: Record<string, unknown> | null;
+  resolvedByUserId: string | null;
+  resolution: string | null;
+  resolvedAt: string | null;
+  planId: string | null;
+  planStepId: string | null;
+  createdAt: string;
+}
+
+export interface AiExecutionLogEntry {
+  id: string;
+  businessId: string;
+  userId: string | null;
+  action: string;
+  toolName: string | null;
+  module: string | null;
+  riskTier: number;
+  mode: string;
+  actor: string;
+  rationale: string | null;
+  inputSummary: unknown;
+  outputSummary: unknown;
+  success: boolean;
+  errorMessage: string | null;
+  durationMs: number | null;
+  planId: string | null;
+  planStepId: string | null;
+  createdAt: string;
+}
+
+export interface AiExecutionStats {
+  period: { days: number; since: string };
+  totalActions: number;
+  successRate: number;
+  byModule: Array<{ module: string; count: number }>;
+  byMode: Array<{ mode: string; count: number }>;
+}
+
+export interface AiAutonomySettings {
+  mode: 'advisory' | 'assisted' | 'pro_auto' | 'restricted';
+  maxAutoTier: number;
+  blockedTools: string[];
+  blockedModules: string[];
+}
+
+export async function fetchAiGraph(businessId: string): Promise<ApiResult<AiBusinessGraph>> {
+  return apiGetSimple<AiBusinessGraph>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/graph`);
+}
+
+export async function parseAiIntent(businessId: string, input: string): Promise<ApiResult<AiParsedIntent>> {
+  return apiPost<AiParsedIntent>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/intent`,
+    body: { input },
+  });
+}
+
+export async function createAiPlan(businessId: string, input: string): Promise<ApiResult<{ intent: AiParsedIntent; plan: AiPlan | null; clarificationNeeded: boolean }>> {
+  return apiPost<{ intent: AiParsedIntent; plan: AiPlan | null; clarificationNeeded: boolean }>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/plan`,
+    body: { input },
+  });
+}
+
+export async function fetchAiPlans(businessId: string): Promise<ApiResult<AiPlan[]>> {
+  return apiGetSimple<AiPlan[]>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/plans`);
+}
+
+export async function fetchAiPlan(businessId: string, planId: string): Promise<ApiResult<AiPlan>> {
+  return apiGetSimple<AiPlan>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/plans/${encodeURIComponent(planId)}`);
+}
+
+export async function approveAiPlan(businessId: string, planId: string): Promise<ApiResult<AiPlan>> {
+  return apiPost<AiPlan>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/plans/${encodeURIComponent(planId)}/approve`,
+    body: {},
+  });
+}
+
+export async function executeAiPlan(businessId: string, planId: string): Promise<ApiResult<{ planId: string; status: string; stepsExecuted: number; stepsFailed: number; stepsSkipped: number }>> {
+  return apiPost<{ planId: string; status: string; stepsExecuted: number; stepsFailed: number; stepsSkipped: number }>({
+    path: `/flow/businesses/${encodeURIComponent(businessId)}/flow/execute-plan/${encodeURIComponent(planId)}`,
+    body: {},
+  });
+}
+
+export async function fetchAiExecutionLogs(
+  businessId: string,
+  filters?: { module?: string; toolName?: string; limit?: number; offset?: number },
+): Promise<ApiResult<AiExecutionLogEntry[]>> {
+  const params = new URLSearchParams();
+  if (filters?.module) params.set('module', filters.module);
+  if (filters?.toolName) params.set('toolName', filters.toolName);
+  if (filters?.limit) params.set('limit', String(filters.limit));
+  if (filters?.offset) params.set('offset', String(filters.offset));
+  const qs = params.toString();
+  return apiGetSimple<AiExecutionLogEntry[]>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/execution-logs${qs ? `?${qs}` : ''}`);
+}
+
+export async function fetchAiExecutionStats(businessId: string, days?: number): Promise<ApiResult<AiExecutionStats>> {
+  const qs = days ? `?days=${days}` : '';
+  return apiGetSimple<AiExecutionStats>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/execution-stats${qs}`);
+}
+
+export async function fetchAiPendingApprovals(businessId: string): Promise<ApiResult<AiApprovalItem[]>> {
+  return apiGetSimple<AiApprovalItem[]>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/approvals`);
+}
+
+export async function fetchAiApprovalHistory(businessId: string, limit?: number): Promise<ApiResult<AiApprovalItem[]>> {
+  const qs = limit ? `?limit=${limit}` : '';
+  return apiGetSimple<AiApprovalItem[]>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/approvals/history${qs}`);
+}
+
+export async function resolveAiApproval(
+  businessId: string,
+  approvalId: string,
+  resolution: 'approved' | 'rejected' | 'deferred',
+): Promise<ApiResult<AiApprovalItem>> {
+  return apiPost<AiApprovalItem>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/approvals/${encodeURIComponent(approvalId)}/resolve`,
+    body: { resolution },
+  });
+}
+
+export async function fetchAiGovernance(businessId: string): Promise<ApiResult<AiAutonomySettings>> {
+  return apiGetSimple<AiAutonomySettings>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/governance`);
+}
+
+export async function updateAiGovernance(
+  businessId: string,
+  updates: Partial<AiAutonomySettings>,
+): Promise<ApiResult<AiAutonomySettings>> {
+  return apiPut<AiAutonomySettings>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/governance`, updates);
 }
 
 // ---

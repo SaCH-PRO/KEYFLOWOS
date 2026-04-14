@@ -49,9 +49,11 @@ import {
   ChevronRight,
   Users2,
   Shield,
+  Brain,
 } from "lucide-react";
 import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
 import { FlowChatPanel, FlowTriggerButton } from "./_command/flow-chat-panel";
+import { CopilotPanel } from "@/components/ai/copilot-panel";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
@@ -315,6 +317,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
   const [flowOpen, setFlowOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   useEffect(() => {
     setMobileDrawerOpen(false);
@@ -442,6 +445,10 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setCopilotOpen((v) => !v);
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
         setAddMenuOpen((v) => !v);
@@ -451,6 +458,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         setAddMenuOpen(false);
         setMobileDrawerOpen(false);
         setNotifOpen(false);
+        setCopilotOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -520,6 +528,19 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             })}
 
             <div className="mt-auto flex flex-col items-center gap-1">
+              <button
+                onClick={() => setCopilotOpen(true)}
+                className={cn(
+                  "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group",
+                  copilotOpen
+                    ? "text-foreground bg-muted/50"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                )}
+                title="AI Copilot (⌘J)"
+                aria-label="AI Copilot"
+              >
+                <Brain className="w-[18px] h-[18px]" />
+              </button>
               {isAdminUser && (
                 <Link
                   href="/admin"
@@ -999,6 +1020,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <KeyflowOSStoreDrawer open={kfStoreOpen} onClose={() => setKfStoreOpen(false)} />
       <FlowChatPanel open={flowOpen} onClose={() => setFlowOpen(false)} />
       {!flowOpen && <FlowTriggerButton onClick={() => setFlowOpen(true)} />}
+      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </div>
   );
 }
