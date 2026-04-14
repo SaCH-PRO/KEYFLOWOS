@@ -36,9 +36,58 @@ interface SeasonalBucket {
   dataPoints: number;
 }
 
+interface InvoiceRow {
+  id?: string;
+  total?: number | string;
+  status?: string;
+  createdAt?: Date;
+  paidAt?: Date | null;
+  contact?: { id: string; firstName?: string | null; lastName?: string | null } | null;
+  items?: Array<{ productId?: string | null; total: number | string; quantity: number; description?: string }>;
+  lineItems?: unknown;
+  frequency?: string;
+  name?: string;
+  nextRunDate?: Date;
+}
+
+interface ExpenseRow {
+  amount: number | string;
+  date?: Date;
+  contactId?: string | null;
+  category?: { name: string } | null;
+}
+
+interface BookingRow {
+  startTime: Date;
+  endTime?: Date;
+  status?: string;
+}
+
+interface ServiceRow {
+  id: string;
+  name: string;
+  price: number | string;
+  duration: number;
+  description?: string | null;
+}
+
 @Injectable()
 export class StrategicIntelligenceService {
   private readonly logger = new Logger(StrategicIntelligenceService.name);
+
+  private parseAiJson<T extends Record<string, unknown>>(content: string, fallback: T, label: string): T {
+    try {
+      const parsed = JSON.parse(content);
+      if (typeof parsed !== 'object' || parsed === null) {
+        this.logger.warn(`[${label}] AI returned non-object JSON: ${typeof parsed}`);
+        return { ...fallback, dataQuality: 'degraded' };
+      }
+      return parsed as T;
+    } catch {
+      this.logger.warn(`[${label}] Failed to parse AI JSON response (${content.length} chars). Raw start: ${content.slice(0, 200)}`);
+      return { ...fallback, dataQuality: 'degraded' };
+    }
+  }
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -99,22 +148,18 @@ export class StrategicIntelligenceService {
       responseMode: 'structured_json',
     });
 
-    try {
-      return JSON.parse(result.content);
-    } catch {
-      return {
-        summary: result.content,
-        currentMonthlyRun: 0,
-        projectedMonthlyAvg: 0,
-        periods: [],
-        confidenceLevel: 'low',
-        trend: 'stable',
-        assumptions: [],
-        risks: [],
-        recurringRevenue: recurringMonthly,
-        recommendations: [],
-      };
-    }
+    return this.parseAiJson(result.content, {
+      summary: result.content,
+      currentMonthlyRun: 0,
+      projectedMonthlyAvg: 0,
+      periods: [],
+      confidenceLevel: 'low',
+      trend: 'stable',
+      assumptions: [],
+      risks: [],
+      recurringRevenue: recurringMonthly,
+      recommendations: [],
+    }, 'forecastRevenue');
   }
 
   async analyzeProfitability(businessId: string) {
@@ -194,24 +239,20 @@ ${services.slice(0, 10).map(s => `  ${s.name} — listed at $${s.price}, ${s.dur
       responseMode: 'structured_json',
     });
 
-    try {
-      return JSON.parse(result.content);
-    } catch {
-      return {
-        summary: result.content,
-        grossMarginPct,
-        grossProfit,
-        totalRevenue,
-        totalExpenses,
-        netMarginEstimate: grossMarginPct,
-        clientBreakdown: [],
-        serviceBreakdown: [],
-        expenseInsights: [],
-        recommendations: [],
-        concentrationRisk: 'unknown',
-        concentrationDetail: '',
-      };
-    }
+    return this.parseAiJson(result.content, {
+      summary: result.content,
+      grossMarginPct,
+      grossProfit,
+      totalRevenue,
+      totalExpenses,
+      netMarginEstimate: grossMarginPct,
+      clientBreakdown: [],
+      serviceBreakdown: [],
+      expenseInsights: [],
+      recommendations: [],
+      concentrationRisk: 'unknown',
+      concentrationDetail: '',
+    }, 'analyzeProfitability');
   }
 
   async advisePricing(businessId: string) {
@@ -282,17 +323,13 @@ Total item revenue (3mo): $${invoiceItems.reduce((s, i) => s + Number(i.total), 
       responseMode: 'structured_json',
     });
 
-    try {
-      return JSON.parse(result.content);
-    } catch {
-      return {
-        summary: result.content,
-        serviceRecommendations: [],
-        productRecommendations: [],
-        overallStrategy: '',
-        quickWins: [],
-      };
-    }
+    return this.parseAiJson(result.content, {
+      summary: result.content,
+      serviceRecommendations: [],
+      productRecommendations: [],
+      overallStrategy: '',
+      quickWins: [],
+    }, 'advisePricing');
   }
 
   async detectSeasonalPatterns(businessId: string) {
@@ -349,18 +386,14 @@ Trinidad & Tobago seasonal factors: Carnival season (Feb-Mar), back-to-school (A
       responseMode: 'structured_json',
     });
 
-    try {
-      return JSON.parse(result.content);
-    } catch {
-      return {
-        summary: result.content,
-        peakMonths: [],
-        slowMonths: [],
-        patterns: [],
-        recommendations: [],
-        monthlyData: seasonalBuckets,
-      };
-    }
+    return this.parseAiJson(result.content, {
+      summary: result.content,
+      peakMonths: [],
+      slowMonths: [],
+      patterns: [],
+      recommendations: [],
+      monthlyData: seasonalBuckets,
+    }, 'detectSeasonalPatterns');
   }
 
   async scanOpportunities(businessId: string) {
@@ -461,18 +494,14 @@ Momentum Score: ${snapshot.momentumScore}/100`;
       responseMode: 'structured_json',
     });
 
-    try {
-      return JSON.parse(result.content);
-    } catch {
-      return {
-        summary: result.content,
-        opportunities: [],
-        quickWins: [],
-        neglectedLeads: staleLeads.length,
-        pendingQuoteValue: pendingQuotes.reduce((s, q) => s + Number(q.total), 0),
-        priority: 'medium',
-      };
-    }
+    return this.parseAiJson(result.content, {
+      summary: result.content,
+      opportunities: [],
+      quickWins: [],
+      neglectedLeads: staleLeads.length,
+      pendingQuoteValue: pendingQuotes.reduce((s, q) => s + Number(q.total), 0),
+      priority: 'medium',
+    }, 'scanOpportunities');
   }
 
   async scanRisks(businessId: string) {
@@ -559,19 +588,15 @@ Momentum: ${snapshot.momentumScore}/100`;
       responseMode: 'structured_json',
     });
 
-    try {
-      return JSON.parse(result.content);
-    } catch {
-      return {
-        summary: result.content,
-        riskLevel: 'medium',
-        risks: [],
-        mitigations: [],
-        overdueTotal,
-        overdueCount,
-        urgentActions: [],
-      };
-    }
+    return this.parseAiJson(result.content, {
+      summary: result.content,
+      riskLevel: 'medium',
+      risks: [],
+      mitigations: [],
+      overdueTotal,
+      overdueCount,
+      urgentActions: [],
+    }, 'scanRisks');
   }
 
   async generateWeeklyPlan(businessId: string) {
@@ -712,23 +737,19 @@ BUSINESS MOMENTUM: ${snapshot.momentumScore}/100`;
       responseMode: 'structured_json',
     });
 
-    try {
-      return JSON.parse(result.content);
-    } catch {
-      return {
-        summary: result.content,
-        weekOf: now.toISOString().split('T')[0],
-        topPriorities: [],
-        dailyFocus: [],
-        revenueActions: [],
-        clientActions: [],
-        contentPlan: [],
-        projectMilestones: [],
-        expenseReview: { monthToDate: monthlyExpSoFar, action: '' },
-        operationalTasks: [],
-        weeklyGoal: '',
-      };
-    }
+    return this.parseAiJson(result.content, {
+      summary: result.content,
+      weekOf: now.toISOString().split('T')[0],
+      topPriorities: [],
+      dailyFocus: [],
+      revenueActions: [],
+      clientActions: [],
+      contentPlan: [],
+      projectMilestones: [],
+      expenseReview: { monthToDate: monthlyExpSoFar, action: '' },
+      operationalTasks: [],
+      weeklyGoal: '',
+    }, 'generateWeeklyPlan');
   }
 
   async getStrategicActions(businessId: string): Promise<Array<{
@@ -853,13 +874,14 @@ BUSINESS MOMENTUM: ${snapshot.momentumScore}/100`;
   }
 
 
-  private buildMonthlyRevenue(invoices: any[], months: number): RevenueDataPoint[] {
+  private buildMonthlyRevenue(invoices: InvoiceRow[], months: number): RevenueDataPoint[] {
     const now = new Date();
     const data: RevenueDataPoint[] = [];
     for (let i = months - 1; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
       const monthInvoices = invoices.filter(inv => {
+        if (!inv.createdAt) return false;
         const created = new Date(inv.createdAt);
         return created >= d && created <= monthEnd;
       });
@@ -873,11 +895,11 @@ BUSINESS MOMENTUM: ${snapshot.momentumScore}/100`;
     return data;
   }
 
-  private estimateRecurringRevenue(recurring: any[]): number {
+  private estimateRecurringRevenue(recurring: InvoiceRow[]): number {
     let monthly = 0;
     for (const r of recurring) {
-      const items = Array.isArray(r.lineItems) ? r.lineItems : [];
-      const invoiceTotal = items.reduce((s: number, item: any) => s + (Number(item.total) || 0), 0);
+      const items: Array<Record<string, unknown>> = Array.isArray(r.lineItems) ? r.lineItems : [];
+      const invoiceTotal: number = items.reduce((s, item) => s + (Number(item.total) || 0), 0);
       switch (r.frequency) {
         case 'WEEKLY': monthly += invoiceTotal * 4.33; break;
         case 'BIWEEKLY': monthly += invoiceTotal * 2.17; break;
@@ -894,7 +916,7 @@ BUSINESS MOMENTUM: ${snapshot.momentumScore}/100`;
     monthlyData: RevenueDataPoint[],
     recurringMonthly: number,
     avgMonthlyExpenses: number,
-    snapshot: any,
+    snapshot: { revenue: { outstandingAmount: number; outstandingCount: number; overdueAmount: number; overdueCount: number; monthlyRevenue: number }; bookings: { upcomingCount: number } },
     horizonDays: number,
   ): string {
     return `REVENUE FORECAST DATA — Caribbean Service Business (TTD)
@@ -914,7 +936,7 @@ Upcoming bookings: ${snapshot.bookings.upcomingCount}
 FORECAST HORIZON: ${horizonDays} days`;
   }
 
-  private computeClientProfitability(invoices: any[], expenses: any[]): ClientProfitability[] {
+  private computeClientProfitability(invoices: InvoiceRow[], expenses: ExpenseRow[]): ClientProfitability[] {
     const clientMap = new Map<string, ClientProfitability>();
     for (const inv of invoices) {
       if (!inv.contact) continue;
@@ -951,7 +973,7 @@ FORECAST HORIZON: ${horizonDays} days`;
     return results;
   }
 
-  private computeServicePerformance(invoices: any[], services: any[]): ServicePerformance[] {
+  private computeServicePerformance(invoices: InvoiceRow[], services: ServiceRow[]): ServicePerformance[] {
     const serviceMap = new Map<string, { name: string; revenue: number; units: number; count: number; duration: number }>();
     for (const s of services) {
       serviceMap.set(s.id, { name: s.name, revenue: 0, units: 0, count: 0, duration: s.duration || 60 });
@@ -981,7 +1003,7 @@ FORECAST HORIZON: ${horizonDays} days`;
       .sort((a, b) => b.totalRevenue - a.totalRevenue);
   }
 
-  private summarizeExpenseCategories(expenses: any[]): string {
+  private summarizeExpenseCategories(expenses: ExpenseRow[]): string {
     const catMap = new Map<string, number>();
     for (const e of expenses) {
       const cat = e.category?.name || 'Uncategorized';
@@ -991,7 +1013,7 @@ FORECAST HORIZON: ${horizonDays} days`;
     return sorted.slice(0, 8).map(([name, amount]) => `  ${name}: $${amount.toFixed(0)}`).join('\n') || '  No expenses recorded';
   }
 
-  private buildSeasonalBuckets(invoices: any[], bookings: any[]): SeasonalBucket[] {
+  private buildSeasonalBuckets(invoices: InvoiceRow[], bookings: BookingRow[]): SeasonalBucket[] {
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
       'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -1005,7 +1027,7 @@ FORECAST HORIZON: ${horizonDays} days`;
 
     const yearMonthRev = new Map<string, number>();
     for (const inv of invoices) {
-      if (inv.status !== 'PAID') continue;
+      if (inv.status !== 'PAID' || !inv.createdAt) continue;
       const d = new Date(inv.createdAt);
       const key = `${d.getFullYear()}-${d.getMonth()}`;
       yearMonthRev.set(key, (yearMonthRev.get(key) || 0) + Number(inv.total));

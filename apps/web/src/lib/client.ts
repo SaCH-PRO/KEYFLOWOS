@@ -4177,6 +4177,7 @@ export interface RevenueForecast {
   risks: string[];
   recurringRevenue: number;
   recommendations: string[];
+  dataQuality?: string;
 }
 
 export interface ProfitabilityAnalysis {
@@ -4192,6 +4193,7 @@ export interface ProfitabilityAnalysis {
   recommendations: string[];
   concentrationRisk: string;
   concentrationDetail: string;
+  dataQuality?: string;
 }
 
 export interface PricingAdvisorResult {
@@ -4202,6 +4204,7 @@ export interface PricingAdvisorResult {
   quickWins: string[];
   bundleOpportunities: string[];
   pricingPrinciples: string[];
+  dataQuality?: string;
 }
 
 export interface SeasonalPatterns {
@@ -4224,6 +4227,7 @@ export interface OpportunityScan {
   pendingQuoteValue: number;
   reactivationTargets: string[];
   recommendations: string[];
+  dataQuality?: string;
 }
 
 export interface RiskScan {
@@ -4236,6 +4240,7 @@ export interface RiskScan {
   overdueTotal: number;
   overdueCount: number;
   cashFlowHealth: string;
+  dataQuality?: string;
 }
 
 export interface WeeklyPlan {
@@ -4250,6 +4255,7 @@ export interface WeeklyPlan {
   expenseReview: { monthToDate: number; action: string };
   operationalTasks: string[];
   weeklyGoal: string;
+  dataQuality?: string;
 }
 
 export async function fetchStrategicDashboard(businessId: string): Promise<ApiResult<StrategicDashboard>> {
