@@ -1,5 +1,6 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { AiExecutionLogService } from './ai-execution-log.service';
 import { getToolByName } from './flow-tool-registry';
 
 export type RiskTier = 1 | 2 | 3 | 4;
@@ -66,6 +67,7 @@ export class GovernanceService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => AiExecutionLogService)) private readonly logService: AiExecutionLogService,
   ) {}
 
   getToolTier(toolName: string): RiskTier {
@@ -179,17 +181,48 @@ export class GovernanceService {
     });
   }
 
-  async resolveApproval(approvalId: string, businessId: string, resolution: 'approved' | 'rejected' | 'deferred', resolvedBy: string) {
+  async resolveApproval(
+    approvalId: string,
+    businessId: string,
+    resolution: 'approved' | 'rejected' | 'deferred',
+    resolvedByUserId: string,
+  ) {
     const item = await this.prisma.client.aiApprovalItem.findFirst({
       where: { id: approvalId, businessId },
     });
     if (!item) throw new Error(`Approval item ${approvalId} not found for business ${businessId}`);
+
+    if (item.riskTier === 4) {
+      const user = await this.prisma.client.user.findUnique({ where: { id: resolvedByUserId } });
+      if (!user) throw new Error('User not found');
+      const membership = await this.prisma.client.membership.findFirst({
+        where: { userId: resolvedByUserId, businessId },
+      });
+      const isAdmin = user.role === 'SUPER_ADMIN' || membership?.role === 'OWNER' || membership?.role === 'ADMIN';
+      if (!isAdmin) {
+        throw new Error('Tier 4 approvals require admin-level authorization');
+      }
+    }
+
+    await this.logService.log({
+      businessId,
+      action: `approval:${resolution}`,
+      toolName: item.toolName,
+      module: this.inferModule(item.toolName) ?? undefined,
+      riskTier: item.riskTier,
+      mode: 'governance',
+      actor: 'user',
+      rationale: `Approval ${approvalId} ${resolution} by user ${resolvedByUserId}`,
+      success: true,
+    });
+
     return this.prisma.client.aiApprovalItem.update({
       where: { id: approvalId },
       data: {
         status: resolution,
         resolvedAt: new Date(),
-        resolvedBy,
+        resolvedBy: resolvedByUserId,
+        resolvedByUserId,
         resolution,
       },
     });

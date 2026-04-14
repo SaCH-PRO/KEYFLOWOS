@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import OpenAI from 'openai';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiAdvisorService } from './ai-advisor.service';
@@ -6,6 +6,7 @@ import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { GovernanceService } from './governance.service';
 import { BusinessGraphService } from './business-graph.service';
+import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel } from './flow-tool-registry';
 
 export interface FlowMessage {
@@ -94,6 +95,7 @@ export class FlowOrchestratorService {
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(GovernanceService) private readonly governance: GovernanceService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
+    @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -319,6 +321,7 @@ export class FlowOrchestratorService {
     toolName: string,
     args: Record<string, any>,
     toolCallId?: string,
+    planContext?: { planId: string; planStepId: string },
   ): Promise<FlowToolResult> {
     const id = toolCallId ?? `manual_${toolName}`;
     const startTime = Date.now();
@@ -326,13 +329,21 @@ export class FlowOrchestratorService {
       const result = await this.executeToolAction(businessId, toolName, args);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, result, true, durationMs, { riskTier: tier }).catch(() => {});
+      this.executionLog.logToolExecution(businessId, toolName, args, result, true, durationMs, {
+        riskTier: tier,
+        planId: planContext?.planId,
+        planStepId: planContext?.planStepId,
+      }).catch(() => {});
       this.businessGraph.invalidateCache(businessId);
       return { toolCallId: id, name: toolName, result, success: true };
     } catch (error) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, { riskTier: tier }).catch(() => {});
+      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+        riskTier: tier,
+        planId: planContext?.planId,
+        planStepId: planContext?.planStepId,
+      }).catch(() => {});
       return { toolCallId: id, name: toolName, result: null, success: false, error: (error as Error).message };
     }
   }
@@ -775,5 +786,136 @@ export class FlowOrchestratorService {
     await this.prisma.client.flowSession.deleteMany({
       where: { id: sessionId, businessId },
     });
+  }
+
+  async executePlan(businessId: string, planId: string): Promise<{
+    planId: string;
+    status: string;
+    stepsExecuted: number;
+    stepsFailed: number;
+    stepsSkipped: number;
+    results: Array<{ stepId: string; action: string; status: string; error?: string }>;
+  }> {
+    const plan = await this.prisma.client.aiPlan.findFirst({
+      where: { id: planId, businessId },
+      include: { steps: { orderBy: { order: 'asc' } } },
+    });
+    if (!plan) throw new Error(`Plan ${planId} not found`);
+    if (plan.status !== 'draft' && plan.status !== 'approved') {
+      throw new Error(`Plan is in "${plan.status}" state and cannot be executed`);
+    }
+
+    await this.planner.updatePlanStatus(planId, businessId, 'executing');
+
+    await this.executionLog.log({
+      businessId,
+      action: 'plan:start',
+      module: 'planner',
+      riskTier: plan.maxRiskTier,
+      mode: 'plan_execution',
+      actor: 'flow',
+      rationale: `Executing plan: ${plan.objective}`,
+      planId,
+      success: true,
+    });
+
+    const results: Array<{ stepId: string; action: string; status: string; error?: string }> = [];
+    let stepsExecuted = 0;
+    let stepsFailed = 0;
+    let stepsSkipped = 0;
+    const completedStepIds = new Set<string>();
+
+    for (const step of plan.steps) {
+      if (step.dependsOn.length > 0) {
+        const depsOk = step.dependsOn.every(depId => completedStepIds.has(depId));
+        if (!depsOk) {
+          await this.planner.updateStepStatus(step.id, 'skipped', null, 'Dependency not met');
+          stepsSkipped++;
+          results.push({ stepId: step.id, action: step.action, status: 'skipped', error: 'Dependency not met' });
+          continue;
+        }
+      }
+
+      if (step.requiresApproval) {
+        const decision = await this.governance.evaluate(businessId, step.toolName ?? step.action);
+        if (decision.requiresApproval) {
+          await this.governance.createApprovalItem(businessId, {
+            toolName: step.toolName ?? step.action,
+            title: step.action,
+            description: step.description ?? step.action,
+            rationale: decision.reason,
+            inputPayload: step.inputPayload as Record<string, any> | undefined,
+            planId,
+            planStepId: step.id,
+          });
+          await this.planner.updateStepStatus(step.id, 'awaiting_approval');
+          stepsSkipped++;
+          results.push({ stepId: step.id, action: step.action, status: 'awaiting_approval' });
+          continue;
+        }
+        if (!decision.allowed) {
+          await this.planner.updateStepStatus(step.id, 'blocked', null, decision.reason);
+          stepsSkipped++;
+          results.push({ stepId: step.id, action: step.action, status: 'blocked', error: decision.reason });
+          continue;
+        }
+      }
+
+      if (!step.toolName) {
+        await this.planner.updateStepStatus(step.id, 'completed', { note: 'No tool to execute — informational step' });
+        completedStepIds.add(step.id);
+        stepsExecuted++;
+        results.push({ stepId: step.id, action: step.action, status: 'completed' });
+        continue;
+      }
+
+      await this.planner.updateStepStatus(step.id, 'executing');
+      const startTime = Date.now();
+
+      try {
+        const toolResult = await this.executeTool(
+          businessId,
+          step.toolName,
+          (step.inputPayload as Record<string, any>) ?? {},
+          undefined,
+          { planId, planStepId: step.id },
+        );
+        const durationMs = Date.now() - startTime;
+
+        if (toolResult.success) {
+          await this.planner.updateStepStatus(step.id, 'completed', toolResult.result, undefined, durationMs);
+          completedStepIds.add(step.id);
+          stepsExecuted++;
+          results.push({ stepId: step.id, action: step.action, status: 'completed' });
+        } else {
+          await this.planner.updateStepStatus(step.id, 'failed', null, toolResult.error, durationMs);
+          stepsFailed++;
+          results.push({ stepId: step.id, action: step.action, status: 'failed', error: toolResult.error });
+        }
+      } catch (err: any) {
+        const durationMs = Date.now() - startTime;
+        await this.planner.updateStepStatus(step.id, 'failed', null, err.message, durationMs);
+        stepsFailed++;
+        results.push({ stepId: step.id, action: step.action, status: 'failed', error: err.message });
+      }
+    }
+
+    const finalStatus = stepsFailed > 0 ? 'partial' : stepsSkipped > 0 ? 'partial' : 'completed';
+    await this.planner.updatePlanStatus(planId, businessId, finalStatus);
+
+    await this.executionLog.log({
+      businessId,
+      action: 'plan:complete',
+      module: 'planner',
+      mode: 'plan_execution',
+      actor: 'flow',
+      rationale: `Plan finished: ${stepsExecuted} executed, ${stepsFailed} failed, ${stepsSkipped} skipped`,
+      planId,
+      success: stepsFailed === 0,
+    });
+
+    this.businessGraph.invalidateCache(businessId);
+
+    return { planId, status: finalStatus, stepsExecuted, stepsFailed, stepsSkipped, results };
   }
 }

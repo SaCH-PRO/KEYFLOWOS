@@ -86,4 +86,13 @@ export class FlowController {
     );
     return result;
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/flow/execute-plan/:planId')
+  async executePlan(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+  ) {
+    return this.flow.executePlan(businessId, planId);
+  }
 }
