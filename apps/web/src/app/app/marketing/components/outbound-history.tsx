@@ -251,7 +251,7 @@ export function OutboundHistory({ businessId, refreshTrigger }: OutboundHistoryP
   }, [businessId, statusFilter]);
 
   useEffect(() => { void load(); }, [load, refreshTrigger]);
-  useEffect(() => { if (statusFilter) void loadAll(); }, [statusFilter, loadAll]);
+  useEffect(() => { if (statusFilter) void loadAll(); }, [statusFilter, loadAll, refreshTrigger]);
 
   const statuses = ["Sent", "Scheduled", "Queued", "Sending", "Failed", "PartiallyFailed", "Cancelled"];
 
