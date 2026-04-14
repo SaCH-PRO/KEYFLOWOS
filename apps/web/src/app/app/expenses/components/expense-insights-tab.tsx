@@ -5,8 +5,8 @@ import { motion } from "framer-motion";
 import {
   AlertTriangle, TrendingUp, TrendingDown, Store, FileQuestion, Receipt,
   Target, BarChart3, Lightbulb, ArrowRight, PieChart, ShieldAlert,
-  Zap, DollarSign, FileText, Sparkles, Brain, Shield,
-  ChevronDown, ChevronUp, Users, Percent, FolderKanban, Briefcase,
+  Zap, DollarSign, Sparkles, Brain, Shield,
+  ChevronDown, ChevronUp, Users, Percent,
 } from "lucide-react";
 import { Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget, MarginAnalysis } from "@/lib/client";
 import { formatCurrency } from "./expense-utils";
@@ -55,7 +55,7 @@ const TYPE_STYLES: Record<string, { border: string; bg: string; iconColor: strin
 
 export function ExpenseInsightsTab({
   expenses, categories, summary, vendors, budgets, marginData,
-  projects = [], contacts = [], services = [],
+  projects: _projects = [], contacts: _contacts = [], services: _services = [],
   onNavigate,
   periodTotalCount, periodUncategorizedCount, periodMissingReceiptCount, periodRecurringCount,
 }: ExpenseInsightsTabProps) {

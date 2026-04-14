@@ -120,7 +120,7 @@ export function ExpenseList({
   const handleInlineCategory = async (expenseId: string, categoryId: string) => {
     if (!businessId) return;
     try {
-      await updateExpense(businessId, expenseId, { categoryId: categoryId || undefined });
+      await updateExpense(businessId, expenseId, { categoryId: categoryId || null });
       toast.success("Category updated");
       setInlineCatExpId(null);
       onReload?.();
