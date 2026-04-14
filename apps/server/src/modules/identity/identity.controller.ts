@@ -16,6 +16,7 @@ import { IdentityService } from './identity.service';
 import { BusinessContextService } from './business-context.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import { UpdateBusinessDto } from './dto/update-business.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -306,7 +307,8 @@ export class IdentityController {
     return this.identity.listTeamMembers(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('team', 'write')
   @Post('businesses/:businessId/team')
   inviteTeamMember(
     @Param('businessId') businessId: string,
@@ -317,7 +319,8 @@ export class IdentityController {
     return this.identity.inviteTeamMember(businessId, body.email, body.role, user.id, body.scopes, body.maxApprovalTier);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('team', 'write')
   @Patch('businesses/:businessId/team/:membershipId')
   updateMemberRole(
     @Param('businessId') businessId: string,
@@ -328,7 +331,8 @@ export class IdentityController {
     return this.identity.updateMemberRole(businessId, membershipId, body.role, user?.id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('team', 'admin')
   @Patch('businesses/:businessId/team/:membershipId/permissions')
   updateMemberPermissions(
     @Param('businessId') businessId: string,
@@ -340,7 +344,8 @@ export class IdentityController {
     return this.identity.updateMemberPermissions(businessId, membershipId, body.scopes, body.maxApprovalTier, user.id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('team', 'write')
   @Delete('businesses/:businessId/team/:membershipId')
   removeTeamMember(
     @Param('businessId') businessId: string,
@@ -351,13 +356,15 @@ export class IdentityController {
     return this.identity.removeTeamMember(businessId, membershipId, user.id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('team', 'read')
   @Get('businesses/:businessId/team/dashboard')
   getTeamDashboard(@Param('businessId') businessId: string) {
     return this.identity.getTeamDashboard(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('team', 'read')
   @Get('businesses/:businessId/team/activity')
   getTeamActivity(
     @Param('businessId') businessId: string,
