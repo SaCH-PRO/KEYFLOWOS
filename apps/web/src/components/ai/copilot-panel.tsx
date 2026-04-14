@@ -19,10 +19,12 @@ import {
   fetchProAutoInsights,
   fetchProfileStatus,
   sendProfileChat,
+  confirmProfileExtractions,
   type AiApprovalItem,
   type AiExecutionStats,
   type ProAutoInsight,
   type ProfileStatus,
+  type ProfileExtraction,
 } from "@/lib/client";
 import { VerificationCardCompact } from "./verification-card";
 
@@ -133,6 +135,8 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
   const [profileMode, setProfileMode] = useState(false);
   const [profileSending, setProfileSending] = useState(false);
   const [profileMessages, setProfileMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [pendingExtractions, setPendingExtractions] = useState<ProfileExtraction[]>([]);
+  const [confirmingExtractions, setConfirmingExtractions] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -195,12 +199,33 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
       const res = await sendProfileChat(biz, msg);
       if (res.data) {
         setProfileMessages(prev => [...prev, { role: "assistant", content: res.data!.reply }]);
+        if (res.data.pendingExtractions?.length > 0) {
+          setPendingExtractions(res.data.pendingExtractions);
+        }
         loadProfileStatus();
       }
     } catch {
       toast.error("Failed to process response");
     } finally {
       setProfileSending(false);
+    }
+  }, [loadProfileStatus]);
+
+  const handleConfirmExtractions = useCallback(async (keys?: string[]) => {
+    const biz = getStoredBusinessId();
+    if (!biz) return;
+    setConfirmingExtractions(true);
+    try {
+      const res = await confirmProfileExtractions(biz, keys);
+      if (res.data) {
+        setPendingExtractions([]);
+        loadProfileStatus();
+        toast.success(`Saved ${res.data.saved} insight${res.data.saved !== 1 ? "s" : ""} to your profile`);
+      }
+    } catch {
+      toast.error("Failed to save profile data");
+    } finally {
+      setConfirmingExtractions(false);
     }
   }, [loadProfileStatus]);
 
@@ -412,6 +437,43 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                             <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--kf-accent2))]" />
                             <span className="text-xs text-muted-foreground/60">Learning...</span>
                           </div>
+                        </div>
+                      </div>
+                    )}
+                    {pendingExtractions.length > 0 && !profileSending && (
+                      <div className="mx-1 p-3 rounded-xl border border-[hsl(var(--kf-accent2)_/_0.3)] bg-[hsl(var(--kf-accent2)_/_0.08)]">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
+                          <span className="text-[11px] font-semibold text-[hsl(var(--kf-accent2))]">Confirm what I learned</span>
+                        </div>
+                        <div className="space-y-1.5 mb-2.5">
+                          {pendingExtractions.map((ext, i) => (
+                            <div key={i} className="flex items-start gap-2 text-[12px] text-foreground/75">
+                              <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))]" />
+                              <div>
+                                <span className="font-medium text-foreground/85">{ext.key.replace(/_/g, " ")}:</span>{" "}
+                                <span>{ext.value}</span>
+                                <span className="ml-1 text-[10px] text-muted-foreground/50">({Math.round(ext.confidence * 100)}%)</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleConfirmExtractions()}
+                            disabled={confirmingExtractions}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-[hsl(var(--kf-accent2))] text-white text-[11px] font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                          >
+                            {confirmingExtractions ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                            Save All
+                          </button>
+                          <button
+                            onClick={() => setPendingExtractions([])}
+                            disabled={confirmingExtractions}
+                            className="px-3 py-1.5 rounded-lg border border-border/30 text-[11px] text-muted-foreground/60 hover:text-foreground/70 transition-colors disabled:opacity-50"
+                          >
+                            Skip
+                          </button>
                         </div>
                       </div>
                     )}

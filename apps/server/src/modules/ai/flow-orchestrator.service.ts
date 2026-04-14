@@ -1828,7 +1828,12 @@ export class FlowOrchestratorService {
     businessId: string,
     toolName: string,
     args: Record<string, any>,
-  ): Promise<{ success: boolean; result?: any; error?: string }> {
+  ): Promise<{ success: boolean; result?: any; error?: string; blocked?: boolean }> {
+    const decision = await this.governance.evaluate(businessId, toolName, 'pro_auto');
+    if (!decision.allowed) {
+      return { success: false, error: decision.reason || `Tool ${toolName} blocked by governance`, blocked: true };
+    }
+
     const startTime = Date.now();
     try {
       this.validateToolInput(toolName, args);
@@ -1839,7 +1844,7 @@ export class FlowOrchestratorService {
       this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
         riskTier: tier,
         mode: 'pro_auto',
-        rationale: 'Auto-executed by Pro Auto monitoring engine',
+        rationale: 'Auto-executed by Pro Auto monitoring engine (governance approved)',
       }).catch((e: unknown) => {
         this.logger.error(`Failed to log auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });

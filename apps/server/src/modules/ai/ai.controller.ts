@@ -519,6 +519,15 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/profile/confirm')
+  async profileConfirm(
+    @Param('businessId') businessId: string,
+    @Body() body: { confirmedKeys?: string[] },
+  ) {
+    return this.profileIntelligence.confirmExtractions(businessId, body.confirmedKeys);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai/profile/reset')
   async profileReset(@Param('businessId') businessId: string) {
     this.profileIntelligence.resetSession(businessId);
