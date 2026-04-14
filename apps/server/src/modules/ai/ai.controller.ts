@@ -9,6 +9,7 @@ import { PlannerService } from './planner.service';
 import { AiMemoryService, MemoryCategory } from './ai-memory.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
+import { ProfileIntelligenceService } from './profile-intelligence.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -53,6 +54,7 @@ export class AiController {
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(StrategicIntelligenceService) private readonly strategic: StrategicIntelligenceService,
     @Inject(ProAutoMonitorService) private readonly proAutoMonitor: ProAutoMonitorService,
+    @Inject(ProfileIntelligenceService) private readonly profileIntelligence: ProfileIntelligenceService,
   ) {}
 
   @Get('health')
@@ -498,5 +500,28 @@ export class AiController {
   async monitoringInsights(@Param('businessId') businessId: string) {
     const insights = await this.proAutoMonitor.scanInsights(businessId);
     return { insights };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/profile/chat')
+  async profileChat(
+    @Param('businessId') businessId: string,
+    @Body() body: { message: string },
+  ) {
+    if (!body.message?.trim()) throw new BadRequestException('Message is required');
+    return this.profileIntelligence.chat(businessId, body.message.trim());
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/profile/status')
+  async profileStatus(@Param('businessId') businessId: string) {
+    return this.profileIntelligence.getCompletionSummary(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/profile/reset')
+  async profileReset(@Param('businessId') businessId: string) {
+    this.profileIntelligence.resetSession(businessId);
+    return { success: true };
   }
 }

@@ -1823,4 +1823,39 @@ export class FlowOrchestratorService {
 
     return { planId, status: finalStatus, stepsExecuted, stepsFailed, stepsSkipped, results };
   }
+
+  async autoExecuteToolForMonitoring(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+  ): Promise<{ success: boolean; result?: any; error?: string }> {
+    const startTime = Date.now();
+    try {
+      this.validateToolInput(toolName, args);
+      const rawResult = await this.executeToolAction(businessId, toolName, args);
+      const envelope = wrapToolResult(toolName, rawResult);
+      const durationMs = Date.now() - startTime;
+      const tier = this.governance.getToolTier(toolName);
+      this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
+        riskTier: tier,
+        mode: 'pro_auto',
+        rationale: 'Auto-executed by Pro Auto monitoring engine',
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      this.businessGraph.invalidateCache(businessId);
+      return { success: true, result: envelope.result };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      const tier = this.governance.getToolTier(toolName);
+      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+        riskTier: tier,
+        mode: 'pro_auto',
+        rationale: 'Auto-execution attempt by Pro Auto monitoring engine',
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log auto-execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      return { success: false, error: (error as Error).message };
+    }
+  }
 }

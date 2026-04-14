@@ -1,7 +1,9 @@
-import { Injectable, Logger, Inject, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, Inject, OnModuleInit, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BusinessGraphService, BusinessGraphSnapshot } from './business-graph.service';
 import { GovernanceService, type AutonomySettings } from './governance.service';
+import { AiExecutionLogService } from './ai-execution-log.service';
+import { FlowOrchestratorService } from './flow-orchestrator.service';
 
 export type InsightSeverity = 'critical' | 'warning' | 'info' | 'opportunity';
 export type InsightCategory =
@@ -29,21 +31,37 @@ export interface ProAutoInsight {
   module: string;
   timestamp: string;
   escalated?: boolean;
+  autoExecuteResult?: { success: boolean; error?: string };
 }
 
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 const INSIGHT_CACHE_TTL_MS = 10 * 60 * 1000;
+const BATCH_SIZE = 50;
+
+const TOOL_DEFAULT_ARGS: Record<string, (businessId: string) => Record<string, any>> = {
+  draft_followup_message: (bId) => ({ businessId: bId }),
+  draft_payment_reminder: (bId) => ({ businessId: bId }),
+  fetch_business_summary: (bId) => ({ businessId: bId }),
+  fetch_storefront_quality: (bId) => ({ businessId: bId }),
+  fetch_project_status: (bId) => ({ businessId: bId }),
+  fetch_expense_pressure: (bId) => ({ businessId: bId }),
+  fetch_schedule_health: (bId) => ({ businessId: bId }),
+  enable_flow: (bId) => ({ businessId: bId }),
+};
 
 @Injectable()
 export class ProAutoMonitorService implements OnModuleInit {
   private readonly logger = new Logger(ProAutoMonitorService.name);
   private intervalRef: ReturnType<typeof setInterval> | null = null;
   private readonly insightCache = new Map<string, { insights: ProAutoInsight[]; expiresAt: number }>();
+  private lastCursorId: string | null = null;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
+    @Inject(forwardRef(() => FlowOrchestratorService)) private readonly orchestrator: FlowOrchestratorService,
   ) {}
 
   onModuleInit() {
@@ -56,11 +74,28 @@ export class ProAutoMonitorService implements OnModuleInit {
   }
 
   private async runPeriodicScan() {
+    const whereClause: any = { deletedAt: null };
+    if (this.lastCursorId) {
+      whereClause.id = { gt: this.lastCursorId };
+    }
+
     const businesses = await this.prisma.client.business.findMany({
-      where: { deletedAt: null },
+      where: whereClause,
       select: { id: true },
-      take: 50,
+      take: BATCH_SIZE,
+      orderBy: { id: 'asc' },
     });
+
+    if (businesses.length === 0) {
+      this.lastCursorId = null;
+      return;
+    }
+
+    this.lastCursorId = businesses[businesses.length - 1].id;
+
+    if (businesses.length < BATCH_SIZE) {
+      this.lastCursorId = null;
+    }
 
     for (const biz of businesses) {
       try {
@@ -134,7 +169,26 @@ export class ProAutoMonitorService implements OnModuleInit {
       if (existingTools.has(toolKey)) continue;
 
       if (insight.riskTier <= settings.maxAutoTier && settings.mode === 'pro_auto') {
-        insight.escalated = true;
+        if (insight.suggestedTool) {
+          const argBuilder = TOOL_DEFAULT_ARGS[insight.suggestedTool];
+          const args = argBuilder ? argBuilder(businessId) : { businessId };
+          try {
+            const result = await this.orchestrator.autoExecuteToolForMonitoring(businessId, insight.suggestedTool, args);
+            insight.escalated = true;
+            insight.autoExecuteResult = result;
+            this.logger.log(`Auto-executed ${insight.suggestedTool} for ${businessId}: ${result.success ? 'success' : result.error}`);
+          } catch (err) {
+            this.logger.warn(`Auto-execution of ${insight.suggestedTool} failed for ${businessId}: ${(err as Error).message}`);
+            insight.escalated = false;
+          }
+        } else {
+          insight.escalated = true;
+          this.executionLog.logToolExecution(businessId, toolKey, {}, { acknowledged: true }, true, 0, {
+            riskTier: insight.riskTier,
+            mode: 'pro_auto',
+            rationale: `Monitoring insight acknowledged: ${insight.title}`,
+          }).catch(() => {});
+        }
         continue;
       }
 
