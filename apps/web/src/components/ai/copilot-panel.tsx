@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Brain, X, Send, Loader2, Sparkles, ArrowRight,
   Activity, Shield, CheckCircle2,
   ChevronRight, Settings, TrendingUp, Calendar, AlertCircle,
+  AlertTriangle, Zap, Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -15,8 +16,10 @@ import {
   fetchAiPendingApprovals,
   fetchAiExecutionStats,
   resolveAiApproval,
+  fetchProAutoInsights,
   type AiApprovalItem,
   type AiExecutionStats,
+  type ProAutoInsight,
 } from "@/lib/client";
 import { VerificationCardCompact } from "./verification-card";
 
@@ -28,28 +31,113 @@ interface CopilotMessage {
   timestamp: number;
 }
 
+export type CopilotModule =
+  | "cockpit"
+  | "crm"
+  | "revenue"
+  | "calendar"
+  | "content"
+  | "projects"
+  | "expenses"
+  | "flows"
+  | "settings"
+  | "store"
+  | "profile"
+  | null;
+
 interface CopilotPanelProps {
   open: boolean;
   onClose: () => void;
+  currentModule?: CopilotModule;
 }
 
-const QUICK_PROMPTS = [
+interface QuickPrompt {
+  label: string;
+  prompt: string;
+}
+
+const GLOBAL_PROMPTS: QuickPrompt[] = [
   { label: "Business overview", prompt: "Give me a quick business overview" },
   { label: "Today's priorities", prompt: "What should I focus on today?" },
   { label: "Revenue summary", prompt: "How is my revenue performing?" },
   { label: "Pending tasks", prompt: "Show me what needs my attention" },
 ];
 
-export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
+const MODULE_PROMPTS: Record<string, QuickPrompt[]> = {
+  crm: [
+    { label: "Follow up stale leads", prompt: "Which leads need follow-up and what should I say?" },
+    { label: "Client health check", prompt: "How are my top clients doing? Any at risk?" },
+    { label: "Segment contacts", prompt: "Help me segment my contacts for targeted outreach" },
+    { label: "Draft outreach", prompt: "Draft a follow-up message for my most promising lead" },
+  ],
+  revenue: [
+    { label: "Overdue invoices", prompt: "Show me all overdue invoices and suggest collection actions" },
+    { label: "Revenue forecast", prompt: "What's my revenue forecast for the next 30 days?" },
+    { label: "Payment reminders", prompt: "Draft payment reminders for overdue clients" },
+    { label: "Pricing advice", prompt: "Should I adjust my pricing? Analyze my current rates" },
+  ],
+  calendar: [
+    { label: "Schedule health", prompt: "How is my calendar utilization this month?" },
+    { label: "Booking gaps", prompt: "Where are the gaps in my schedule I should fill?" },
+    { label: "Client reminders", prompt: "Send reminders for upcoming appointments" },
+    { label: "Optimize hours", prompt: "Suggest better availability hours based on booking patterns" },
+  ],
+  content: [
+    { label: "Content ideas", prompt: "Suggest social media content ideas for this week" },
+    { label: "Draft a post", prompt: "Help me write a social media post about my latest service" },
+    { label: "Campaign strategy", prompt: "What email campaign should I run next?" },
+    { label: "Content calendar", prompt: "Plan my content for the next 2 weeks" },
+  ],
+  projects: [
+    { label: "Project status", prompt: "Give me a status update on all active projects" },
+    { label: "Overdue tasks", prompt: "What project tasks are overdue and need attention?" },
+    { label: "Risk assessment", prompt: "Which projects are at risk of missing deadlines?" },
+    { label: "Bottleneck analysis", prompt: "Where are the bottlenecks in my project delivery?" },
+  ],
+  expenses: [
+    { label: "Spending analysis", prompt: "Analyze my spending patterns this month" },
+    { label: "Cost savings", prompt: "Where can I cut costs without impacting quality?" },
+    { label: "Budget status", prompt: "How am I tracking against my budget?" },
+    { label: "Profit margins", prompt: "What are my profit margins by client and service?" },
+  ],
+  flows: [
+    { label: "Automation health", prompt: "How are my automations performing?" },
+    { label: "New flow ideas", prompt: "Suggest automations I should set up for my business" },
+    { label: "Flow coverage", prompt: "What business processes am I not automating yet?" },
+    { label: "Fix failing flows", prompt: "Are any of my automations failing? Help me fix them" },
+  ],
+  cockpit: GLOBAL_PROMPTS,
+};
+
+const SEVERITY_CONFIG: Record<ProAutoInsight["severity"], { icon: typeof AlertCircle; color: string; bg: string; border: string }> = {
+  critical: { icon: AlertTriangle, color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20" },
+  warning: { icon: AlertCircle, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
+  opportunity: { icon: Zap, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
+  info: { icon: Info, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20" },
+};
+
+export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps) {
   const [tab, setTab] = useState<Tab>("chat");
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<AiApprovalItem[]>([]);
   const [stats, setStats] = useState<AiExecutionStats | null>(null);
+  const [insights, setInsights] = useState<ProAutoInsight[]>([]);
+  const [insightsLoading, setInsightsLoading] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const quickPrompts = useMemo(() => {
+    const module = currentModule || "cockpit";
+    return MODULE_PROMPTS[module] || GLOBAL_PROMPTS;
+  }, [currentModule]);
+
+  const moduleInsights = useMemo(() => {
+    if (!currentModule || currentModule === "cockpit") return insights;
+    return insights.filter(i => i.module === currentModule);
+  }, [insights, currentModule]);
 
   const loadSidebarData = useCallback(async () => {
     const biz = getStoredBusinessId();
@@ -62,7 +150,19 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
       if (approvalRes.data) setPendingApprovals(approvalRes.data.filter(a => a.status === "pending"));
       if (statsRes.data) setStats(statsRes.data);
     } catch {
-      /* silently fail on sidebar data load */
+    }
+  }, []);
+
+  const loadInsights = useCallback(async () => {
+    const biz = getStoredBusinessId();
+    if (!biz) return;
+    setInsightsLoading(true);
+    try {
+      const res = await fetchProAutoInsights(biz);
+      if (res.data?.insights) setInsights(res.data.insights);
+    } catch {
+    } finally {
+      setInsightsLoading(false);
     }
   }, []);
 
@@ -70,8 +170,9 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 300);
       loadSidebarData();
+      loadInsights();
     }
-  }, [open, loadSidebarData]);
+  }, [open, loadSidebarData, loadInsights]);
 
   useEffect(() => {
     const handler = () => { loadSidebarData(); };
@@ -147,6 +248,8 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
     }
   }, []);
 
+  const displayInsights = currentModule && currentModule !== "cockpit" ? moduleInsights : insights.slice(0, 5);
+
   return (
     <AnimatePresence>
       {open && (
@@ -179,7 +282,11 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
                 </div>
                 <div>
                   <h2 className="text-sm font-semibold text-foreground/90">AI Copilot</h2>
-                  <p className="text-[10px] text-muted-foreground/50">Your business assistant</p>
+                  <p className="text-[10px] text-muted-foreground/50">
+                    {currentModule && currentModule !== "cockpit"
+                      ? `Context: ${currentModule.charAt(0).toUpperCase() + currentModule.slice(1)}`
+                      : "Your business assistant"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-1">
@@ -274,10 +381,53 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
                           )}
                         </div>
 
+                        {displayInsights.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-2">
+                              {currentModule && currentModule !== "cockpit" ? `${currentModule.charAt(0).toUpperCase() + currentModule.slice(1)} Insights` : "Pro Auto Insights"}
+                            </p>
+                            <div className="space-y-1.5">
+                              {displayInsights.map(insight => {
+                                const config = SEVERITY_CONFIG[insight.severity];
+                                const SevIcon = config.icon;
+                                return (
+                                  <button
+                                    key={insight.id}
+                                    onClick={() => {
+                                      if (insight.suggestedAction) {
+                                        handleSend(insight.suggestedAction);
+                                      }
+                                    }}
+                                    className={`w-full flex items-start gap-2 p-2.5 rounded-xl text-left text-xs border transition-all hover:bg-muted/20 ${config.border} ${config.bg}`}
+                                  >
+                                    <SevIcon className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${config.color}`} />
+                                    <div className="flex-1 min-w-0">
+                                      <p className={`font-medium ${config.color} leading-snug`}>{insight.title}</p>
+                                      {insight.metric && (
+                                        <span className="text-[10px] text-muted-foreground/50">{insight.metric}</span>
+                                      )}
+                                    </div>
+                                    <ChevronRight className="w-3 h-3 shrink-0 text-muted-foreground/30 mt-0.5" />
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {insightsLoading && displayInsights.length === 0 && (
+                          <div className="flex items-center justify-center py-3 gap-2">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--kf-accent1))]" />
+                            <span className="text-[10px] text-muted-foreground/40">Scanning business health...</span>
+                          </div>
+                        )}
+
                         <div>
-                          <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-2">Suggested Actions</p>
+                          <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-2">
+                            {currentModule && currentModule !== "cockpit" ? `${currentModule.charAt(0).toUpperCase() + currentModule.slice(1)} Actions` : "Suggested Actions"}
+                          </p>
                           <div className="grid grid-cols-2 gap-2">
-                            {QUICK_PROMPTS.map(qp => (
+                            {quickPrompts.map(qp => (
                               <button
                                 key={qp.label}
                                 onClick={() => handleSend(qp.prompt)}
@@ -395,7 +545,7 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                    placeholder="Ask anything..."
+                    placeholder={currentModule && currentModule !== "cockpit" ? `Ask about ${currentModule}...` : "Ask anything..."}
                     className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none py-2"
                     disabled={sending}
                   />

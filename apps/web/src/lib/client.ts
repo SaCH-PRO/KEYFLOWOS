@@ -4052,6 +4052,23 @@ export async function resolveAiApproval(
   });
 }
 
+export interface ProAutoInsight {
+  id: string;
+  category: string;
+  severity: 'critical' | 'warning' | 'info' | 'opportunity';
+  title: string;
+  description: string;
+  metric?: string;
+  suggestedAction?: string;
+  suggestedTool?: string;
+  module: string;
+  timestamp: string;
+}
+
+export async function fetchProAutoInsights(businessId: string): Promise<ApiResult<{ insights: ProAutoInsight[] }>> {
+  return apiGetSimple<{ insights: ProAutoInsight[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/monitoring/insights`);
+}
+
 export async function fetchAiGovernance(businessId: string): Promise<ApiResult<AiAutonomySettings>> {
   return apiGetSimple<AiAutonomySettings>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/governance`);
 }
