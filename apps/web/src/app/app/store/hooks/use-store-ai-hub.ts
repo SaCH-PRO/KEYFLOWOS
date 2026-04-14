@@ -249,7 +249,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
         title: `${productsWithoutImages} Items Missing Images`,
         description: "Products with images convert 2× better. Add images to improve click-through and conversions.",
         priority: "medium",
-        actionLabel: "Go to Commerce",
+        actionLabel: "Add images",
         actionKey: "switch_tab:catalog",
       });
     }

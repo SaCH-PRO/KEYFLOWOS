@@ -4,13 +4,14 @@ import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Power, Pause, Play, Truck, Clock, Phone,
-  Package, RefreshCw,
+  Package, RefreshCw, Shield,
   Loader2, MessageCircle, Mail, Save, Monitor,
-  MapPin, Eye, Loader,
+  MapPin, Eye, Loader, CheckCircle2, AlertTriangle,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
+import { SectionCard } from "@/components/ui/section-card";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { DeliveryConfigPanel } from "./delivery-config-panel";
 import { ShippingZonesPanel } from "./shipping-zones-panel";
@@ -383,6 +384,62 @@ function OrdersSnapshot({ businessId }: { businessId: string }) {
   );
 }
 
+function SupplierHealthCard({
+  deliveryOptions,
+  hasContact,
+  hoursActive,
+  storeStatus,
+}: {
+  deliveryOptions: DeliveryMethod[];
+  hasContact: boolean;
+  hoursActive: number;
+  storeStatus: StoreStatus;
+}) {
+  const checks = [
+    { label: "Fulfillment channel", ok: deliveryOptions.length > 0, detail: deliveryOptions.length > 0 ? `${deliveryOptions.length} method${deliveryOptions.length > 1 ? "s" : ""} active` : "No delivery method configured" },
+    { label: "Customer reachability", ok: hasContact, detail: hasContact ? "Contact info set" : "No contact method" },
+    { label: "Business hours", ok: hoursActive > 0, detail: hoursActive > 0 ? `${hoursActive}/7 days scheduled` : "No hours set" },
+    { label: "Store accepting orders", ok: storeStatus === "active", detail: storeStatus === "active" ? "Live & accepting" : "Not accepting orders" },
+  ];
+
+  const score = checks.filter((c) => c.ok).length;
+  const totalChecks = checks.length;
+  const pct = Math.round((score / totalChecks) * 100);
+  const statusColor = pct >= 75 ? "hsl(var(--kf-success))" : pct >= 50 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${statusColor}15` }}>
+          <Shield className="w-5 h-5" style={{ color: statusColor }} />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-semibold" style={{ color: "hsl(var(--kf-foreground))" }}>Supply Chain Readiness</span>
+            <span className="text-xs font-bold" style={{ color: statusColor }}>{pct}%</span>
+          </div>
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted)/0.2)" }}>
+            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: statusColor }} />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        {checks.map((check) => (
+          <div key={check.label} className="flex items-center gap-2 text-[11px]">
+            {check.ok ? (
+              <CheckCircle2 className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
+            ) : (
+              <AlertTriangle className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(var(--kf-warning))" }} />
+            )}
+            <span className="flex-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{check.label}</span>
+            <span className="font-medium" style={{ color: check.ok ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))" }}>{check.detail}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function OperationsMode({
   businessId,
   storeEnabled,
@@ -518,7 +575,18 @@ export function OperationsMode({
         </motion.div>
       )}
 
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
+        <SectionCard title="Supplier & Fulfillment Health" subtitle="Supply chain readiness assessment" icon={Shield}>
+          <SupplierHealthCard
+            deliveryOptions={deliveryOptions}
+            hasContact={hasContact}
+            hoursActive={hoursActive}
+            storeStatus={storeStatus}
+          />
+        </SectionCard>
+      </motion.div>
+
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
         <AccordionGroup title="Store Operations" brandColor="hsl(var(--kf-accent1))">
           <AccordionSection title="Store Status" subtitle="How your storefront appears to customers" icon={Power} accentColor={successColor} defaultOpen>
             <StoreStatusControl storeStatus={storeStatus} onStatusChange={handleStatusChange} />

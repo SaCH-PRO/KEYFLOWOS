@@ -131,8 +131,6 @@ export function LaunchMode({
   const hasLogo = !!businessData?.logoUrl;
   const hasSlug = !!businessData?.slug;
   const itemCount = services.length + commerceProducts.length;
-  const testimonialCount = socialProof?.testimonials?.length ?? 0;
-
   const completedChecks = [storeEnabled, hasSlug, itemCount > 0, hasHeroImage, hasHeroHeadline, hasLogo, hoursConfigured, hasTestimonials, hasMetaTitle, activeDeliveryMethodsCount > 0].filter(Boolean).length;
   const totalChecks = 10;
   const readinessPercent = Math.round((completedChecks / totalChecks) * 100);
