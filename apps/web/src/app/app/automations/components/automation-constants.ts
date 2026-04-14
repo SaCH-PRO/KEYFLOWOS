@@ -554,6 +554,7 @@ export const COVERAGE_MODULES = [
   { key: "revenue", label: "Revenue", triggers: ["invoice.paid", "invoice.sent", "invoice.overdue", "quote.sent", "quote.accepted", "quote.viewed", "quote.not_accepted_xdays", "payment.received", "recurring.failed"], actions: ["create_invoice", "send_quote_reminder", "update_status"] },
   { key: "bookings", label: "Bookings", triggers: ["booking.created", "booking.confirmed", "booking.completed", "booking.cancelled", "booking.scheduled", "booking.reminder"], actions: ["create_booking_followup", "schedule_reengagement", "schedule_followup"] },
   { key: "content", label: "Content", triggers: ["campaign.sent", "campaign.opened", "campaign.not_opened_14d", "post.published", "form.submitted", "subscriber.joined", "segment.changed"], actions: ["send_email", "send_email_campaign", "send_whatsapp", "send_sms", "send_notification", "notify_staff", "create_content_draft"] },
+  { key: "store", label: "Store", triggers: ["payment.received", "recurring.failed"], actions: ["create_invoice", "update_status"] },
   { key: "staff", label: "Staff & Ops", triggers: ["staff.assignment_missing"], actions: ["create_task", "assign_staff"] },
   { key: "scheduled", label: "Scheduled", triggers: ["schedule.daily", "schedule.weekly", "schedule.monthly"], actions: ["delay"] },
 ];

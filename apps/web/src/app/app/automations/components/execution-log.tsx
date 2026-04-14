@@ -372,7 +372,7 @@ export function ExecutionLog({ businessId, onExecutionStatsChange }: ExecutionLo
                             disabled={retryingId === item.id}
                           >
                             <RotateCcw className={`w-3 h-3 ${retryingId === item.id ? "animate-spin" : ""}`} />
-                            {retryingId === item.id ? "Retrying..." : "Retry Flow"}
+                            {retryingId === item.id ? "Running..." : "Test Run"}
                           </button>
                         )}
                         {item.entityId && (
