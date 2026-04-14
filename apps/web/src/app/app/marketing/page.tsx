@@ -343,7 +343,7 @@ function BusinessPulseStrip({
 }
 
 export default function ContentPage() {
-  const { getReturnLabel, navigateBack, getOriginWorkspace } = useReturnNavigation({});
+  const { getReturnLabel, navigateBack, getOriginWorkspace } = useReturnNavigation({ skipScrollListener: true });
   const searchParams = useSearchParams();
   const mk = useMarketing();
   const marketingAi = useMarketingAiHub();

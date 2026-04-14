@@ -9,6 +9,7 @@ export type TargetStatus = "available" | "deleted" | "unavailable" | "unknown";
 interface ReturnNavigationOptions {
   fallback?: string;
   restoreScrollOnMount?: boolean;
+  skipScrollListener?: boolean;
 }
 
 const SCROLL_STORAGE_PREFIX = "kf-scroll-";
@@ -81,7 +82,7 @@ export function useReturnNavigation(options: ReturnNavigationOptions = {}) {
   }, [pathname, options.restoreScrollOnMount]);
 
   useEffect(() => {
-    if (!pathname) return;
+    if (!pathname || options.skipScrollListener) return;
     const el = getAppScrollContainer();
     const scrollTarget = el ?? window;
 
@@ -94,7 +95,7 @@ export function useReturnNavigation(options: ReturnNavigationOptions = {}) {
       scrollTarget.removeEventListener("scroll", onScroll);
       saveScrollPosition(pathnameRef.current ?? "", readContainerScroll());
     };
-  }, [pathname]);
+  }, [pathname, options.skipScrollListener]);
 
   const getReturnLabel = useCallback(
     (overrideLabel?: string): string => {
