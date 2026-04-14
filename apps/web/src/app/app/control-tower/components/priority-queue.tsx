@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import {
-  AlertTriangle, ShieldAlert, Zap, TrendingUp, ChevronDown, ChevronUp, ArrowRight,
+  AlertTriangle, ShieldAlert, Zap, TrendingUp, ChevronDown, ChevronUp, ArrowRight, Pin, PinOff,
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import type { ControlTowerPriority } from "@/lib/client";
@@ -23,11 +23,54 @@ const SEVERITY_DOT: Record<string, string> = {
   opportunity: "hsl(var(--kf-success))",
 };
 
+const PIN_STORAGE_KEY = "kf-tower-pinned-priorities";
+
+function getPinnedIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(PIN_STORAGE_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function savePinnedIds(ids: Set<string>) {
+  try {
+    localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify([...ids]));
+  } catch {}
+}
+
 export function PriorityQueue({ priorities }: { priorities: ControlTowerPriority[] }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? priorities : priorities.slice(0, 5);
-  const hasMore = priorities.length > 5;
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setPinnedIds(getPinnedIds());
+  }, []);
+
+  const togglePin = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      savePinnedIds(next);
+      return next;
+    });
+  }, []);
+
+  const sorted = [...priorities].sort((a, b) => {
+    const aPinned = pinnedIds.has(a.id) ? 1 : 0;
+    const bPinned = pinnedIds.has(b.id) ? 1 : 0;
+    if (aPinned !== bPinned) return bPinned - aPinned;
+    return b.urgency - a.urgency;
+  });
+
+  const visible = expanded ? sorted : sorted.slice(0, 5);
+  const hasMore = sorted.length > 5;
+  const pinnedCount = sorted.filter((p) => pinnedIds.has(p.id)).length;
 
   if (priorities.length === 0) {
     return (
@@ -43,13 +86,18 @@ export function PriorityQueue({ priorities }: { priorities: ControlTowerPriority
   }
 
   return (
-    <SectionCard title="Daily Priorities" subtitle={`${priorities.length} items ranked by urgency`} icon={Zap}>
+    <SectionCard
+      title="Daily Priorities"
+      subtitle={`${priorities.length} items${pinnedCount > 0 ? ` · ${pinnedCount} pinned` : ""} · ranked by urgency`}
+      icon={Zap}
+    >
       <div className="space-y-1.5">
         <AnimatePresence initial={false}>
           {visible.map((p, i) => {
             const cfg = TYPE_CONFIG[p.type] ?? TYPE_CONFIG.action;
             const Icon = cfg.icon;
             const dotColor = SEVERITY_DOT[p.severity] ?? "hsl(var(--kf-muted-foreground))";
+            const isPinned = pinnedIds.has(p.id);
 
             return (
               <motion.div
@@ -59,10 +107,26 @@ export function PriorityQueue({ priorities }: { priorities: ControlTowerPriority
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ delay: i * 0.03 }}
                 className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all group cursor-pointer hover:scale-[1.005]"
-                style={{ background: cfg.bg, border: `1px solid ${cfg.color}15` }}
+                style={{
+                  background: cfg.bg,
+                  border: isPinned ? `1px solid ${cfg.color}40` : `1px solid ${cfg.color}15`,
+                  boxShadow: isPinned ? `0 0 0 1px ${cfg.color}20` : undefined,
+                }}
                 onClick={() => p.actionRoute && router.push(p.actionRoute)}
                 role={p.actionRoute ? "link" : undefined}
               >
+                <button
+                  onClick={(e) => togglePin(p.id, e)}
+                  className="w-5 h-5 flex items-center justify-center flex-shrink-0 rounded transition-colors hover:bg-white/10 min-w-[20px] min-h-[20px]"
+                  aria-label={isPinned ? "Unpin priority" : "Pin priority"}
+                  title={isPinned ? "Unpin" : "Pin to top"}
+                >
+                  {isPinned ? (
+                    <PinOff className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  ) : (
+                    <Pin className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
+                  )}
+                </button>
                 <div
                   className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
                   style={{ background: `${cfg.color}15` }}

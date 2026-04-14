@@ -505,7 +505,7 @@ export class AiController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/control-tower')
   async controlTower(@Param('businessId') businessId: string) {
-    const [snapshot, dashboard, insightsRes, approvals] = await Promise.all([
+    const [snapshot, dashboard, insightsRes, approvals, totalPendingApprovals] = await Promise.all([
       this.businessGraph.getSnapshot(businessId),
       this.strategic.getStrategicDashboard(businessId),
       this.proAutoMonitor.scanInsights(businessId),
@@ -514,8 +514,10 @@ export class AiController {
         orderBy: { createdAt: 'desc' },
         take: 20,
       }),
+      this.prisma.client.aiApprovalItem.count({
+        where: { businessId, status: 'pending' },
+      }),
     ]);
-
     const insights = insightsRes ?? [];
     const healthIndicators = snapshot.healthIndicators ?? [];
 
@@ -623,7 +625,7 @@ export class AiController {
       },
       dashboard,
       priorities: priorities.slice(0, 25),
-      pendingApprovals: approvals.length,
+      pendingApprovals: totalPendingApprovals,
       modules: {
         contacts: snapshot.contacts,
         revenue: snapshot.revenue,
