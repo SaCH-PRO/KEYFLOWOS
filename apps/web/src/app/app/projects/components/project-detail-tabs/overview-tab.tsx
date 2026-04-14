@@ -3,24 +3,30 @@
 import { useEffect, useState, useMemo } from "react";
 import {
   Calendar, CheckCircle, Clock, AlertTriangle, User,
-  FileText, DollarSign, Zap, Target, TrendingUp,
-  ExternalLink, HeartPulse,
+  DollarSign, Zap, Target, TrendingUp,
+  ExternalLink, HeartPulse, Flag, ShieldAlert,
+  MessageSquare, FileText,
 } from "lucide-react";
-import { Project, fetchContactDetail, type Contact } from "@/lib/client";
+import { Project, fetchContactDetail, fetchExpensesByProject, type Expense } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   getStageInfo, getProjectProgress, getProjectRisk, RISK_STYLES,
   normalizeStatus, isOverdue, formatDate, isDueSoon,
 } from "../project-constants";
+import type { Milestone } from "./milestones-tab";
+import type { Deliverable } from "./deliverables-tab";
 
 interface OverviewTabProps {
   project: Project;
   onStageChange: (stage: string) => void;
+  milestones?: Milestone[];
+  deliverables?: Deliverable[];
 }
 
-export function OverviewTab({ project, onStageChange }: OverviewTabProps) {
+export function OverviewTab({ project, onStageChange, milestones = [], deliverables = [] }: OverviewTabProps) {
   const [clientName, setClientName] = useState<string | null>(null);
   const [clientEmail, setClientEmail] = useState<string | null>(null);
+  const [projectExpenses, setProjectExpenses] = useState<Expense[]>([]);
 
   useEffect(() => {
     if (!project.contactId) return;
@@ -38,6 +44,18 @@ export function OverviewTab({ project, onStageChange }: OverviewTabProps) {
     return () => ctrl.abort();
   }, [project.contactId]);
 
+  useEffect(() => {
+    const businessId = getStoredBusinessId();
+    if (!businessId || !project.id) return;
+    let cancelled = false;
+    fetchExpensesByProject(businessId, project.id).then((res) => {
+      if (!cancelled && res.data) {
+        setProjectExpenses(res.data.expenses);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [project.id]);
+
   const stageInfo = getStageInfo(project.status);
   const progress = getProjectProgress(project.tasks ?? []);
   const risk = getProjectRisk(project);
@@ -46,6 +64,7 @@ export function OverviewTab({ project, onStageChange }: OverviewTabProps) {
   const completedTasks = project.tasks?.filter((t) => t.isCompleted).length ?? 0;
   const overdueTasks = (project.tasks ?? []).filter((t) => !t.isCompleted && isOverdue(t.dueDate)).length;
   const upcomingTasks = (project.tasks ?? []).filter((t) => !t.isCompleted && isDueSoon(t.dueDate, 3)).length;
+  const totalCost = projectExpenses.reduce((s, e) => s + e.amount, 0);
 
   const daysUntilDue = useMemo(() => {
     if (!project.dueDate) return null;
@@ -53,7 +72,34 @@ export function OverviewTab({ project, onStageChange }: OverviewTabProps) {
     return Math.ceil((new Date(project.dueDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
   }, [project.dueDate]);
 
-  const recommendations = [];
+  const milestonesCompleted = milestones.filter((m) => m.completed).length;
+  const missingDeliverables = deliverables.filter((d) => !d.completed).length;
+
+  const warnings: { icon: React.ElementType; text: string; color: string; severity: "critical" | "warning" }[] = [];
+  if (overdueTasks > 0) {
+    warnings.push({ icon: Clock, text: `${overdueTasks} overdue task${overdueTasks > 1 ? "s" : ""} need attention`, color: "hsl(var(--kf-error))", severity: "critical" });
+  }
+  if (project.dueDate && isOverdue(project.dueDate) && normalizeStatus(project.status) !== "COMPLETED") {
+    warnings.push({ icon: AlertTriangle, text: "Project deadline has passed", color: "hsl(var(--kf-error))", severity: "critical" });
+  }
+  if (normalizeStatus(project.status) === "BLOCKED") {
+    warnings.push({ icon: ShieldAlert, text: "Project is blocked — resolve blockers to continue", color: "hsl(var(--kf-error))", severity: "critical" });
+  }
+  if (normalizeStatus(project.status) === "WAITING_ON_CLIENT") {
+    warnings.push({ icon: User, text: "Waiting on client response — follow up to unblock", color: "hsl(var(--kf-warning))", severity: "warning" });
+  }
+  if (milestones.length > 0 && milestones.some((m) => !m.completed && isOverdue(m.dueDate))) {
+    const overdueMs = milestones.filter((m) => !m.completed && isOverdue(m.dueDate)).length;
+    warnings.push({ icon: Flag, text: `${overdueMs} milestone${overdueMs > 1 ? "s" : ""} overdue`, color: "hsl(var(--kf-error))", severity: "critical" });
+  }
+  if (daysUntilDue !== null && daysUntilDue > 0 && daysUntilDue <= 3 && progress < 70) {
+    warnings.push({ icon: Clock, text: `Due in ${daysUntilDue} day${daysUntilDue > 1 ? "s" : ""} with only ${progress}% progress`, color: "hsl(var(--kf-warning))", severity: "warning" });
+  }
+  if (missingDeliverables > 0 && normalizeStatus(project.status) === "REVIEW") {
+    warnings.push({ icon: FileText, text: `${missingDeliverables} deliverable${missingDeliverables > 1 ? "s" : ""} incomplete before review`, color: "hsl(var(--kf-warning))", severity: "warning" });
+  }
+
+  const recommendations: { icon: React.ElementType; text: string; color: string }[] = [];
   if (normalizeStatus(project.status) === "NOT_STARTED" && totalTasks === 0) {
     recommendations.push({ icon: Target, text: "Add tasks to define the scope of this project", color: "hsl(var(--kf-accent1))" });
   }
@@ -63,18 +109,36 @@ export function OverviewTab({ project, onStageChange }: OverviewTabProps) {
   if (!project.dueDate) {
     recommendations.push({ icon: Calendar, text: "Set a due date to enable delivery tracking and risk detection", color: "hsl(var(--kf-warning))" });
   }
-  if (overdueTasks > 0) {
-    recommendations.push({ icon: AlertTriangle, text: `${overdueTasks} task${overdueTasks > 1 ? "s are" : " is"} overdue — review and reschedule`, color: "hsl(var(--kf-error))" });
-  }
   if (normalizeStatus(project.status) === "IN_PROGRESS" && progress === 100) {
     recommendations.push({ icon: CheckCircle, text: "All tasks are complete — consider moving this project to Review or Completed", color: "hsl(var(--kf-success))" });
   }
-  if (risk === "at-risk" && daysUntilDue !== null && daysUntilDue > 0 && daysUntilDue <= 3) {
-    recommendations.push({ icon: Clock, text: `Due in ${daysUntilDue} day${daysUntilDue > 1 ? "s" : ""} with low progress — consider re-scoping or extending`, color: "hsl(var(--kf-warning))" });
+  if (milestones.length === 0 && totalTasks > 3) {
+    recommendations.push({ icon: Flag, text: "Add milestones to track key delivery phases", color: "hsl(var(--kf-accent2))" });
+  }
+  if (!project.invoiceId && normalizeStatus(project.status) === "IN_PROGRESS") {
+    recommendations.push({ icon: DollarSign, text: "Link an invoice to track revenue against this project", color: "hsl(var(--kf-success))" });
   }
 
   return (
     <div className="space-y-5">
+      {warnings.length > 0 && (
+        <div className="space-y-2">
+          {warnings.map((w, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-3 py-2.5 px-4 rounded-xl border"
+              style={{
+                borderColor: w.severity === "critical" ? "hsl(var(--kf-error) / 0.3)" : "hsl(var(--kf-warning) / 0.3)",
+                background: w.severity === "critical" ? "hsl(var(--kf-error) / 0.06)" : "hsl(var(--kf-warning) / 0.06)",
+              }}
+            >
+              <w.icon className="w-4 h-4 shrink-0" style={{ color: w.color }} />
+              <span className="text-sm font-medium" style={{ color: w.color }}>{w.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <MetricCard
           label="Health"
@@ -128,6 +192,28 @@ export function OverviewTab({ project, onStageChange }: OverviewTabProps) {
         />
       </div>
 
+      {totalCost > 0 && (
+        <div className="rounded-xl border border-border/40 bg-card p-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <DollarSign className="w-3 h-3" />
+              Project Budget
+            </h4>
+            <span className="text-sm font-bold" style={{ color: "hsl(var(--kf-error))" }}>
+              TTD ${totalCost.toLocaleString("en-TT", { minimumFractionDigits: 2 })} spent
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-2 text-[10px] text-muted-foreground">
+            <span>{projectExpenses.length} expense{projectExpenses.length !== 1 ? "s" : ""} linked</span>
+            <span>·</span>
+            <a href="/app/expenses" className="inline-flex items-center gap-0.5 transition-colors" style={{ color: "hsl(var(--kf-accent1))" }}>
+              <ExternalLink className="w-2.5 h-2.5" />
+              View in Expenses
+            </a>
+          </div>
+        </div>
+      )}
+
       {project.description && (
         <div className="rounded-xl border border-border/40 bg-card p-4">
           <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Description</h4>
@@ -161,6 +247,13 @@ export function OverviewTab({ project, onStageChange }: OverviewTabProps) {
               linked={!!project.bookingId}
             />
             <LinkedRecord
+              icon={MessageSquare}
+              label="Comms"
+              value={project.contactId ? "View client messages" : "Link a client first"}
+              linked={!!project.contactId}
+              href={project.contactId ? `/app/clients?id=${project.contactId}&tab=communications` : undefined}
+            />
+            <LinkedRecord
               icon={Zap}
               label="Flows"
               value="Configure automation flows"
@@ -169,41 +262,60 @@ export function OverviewTab({ project, onStageChange }: OverviewTabProps) {
           </div>
         </div>
 
-        <div className="rounded-xl border border-border/40 bg-card p-4 space-y-3">
-          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Task Snapshot</h4>
-          {totalTasks === 0 ? (
-            <div className="text-center py-4">
-              <CheckCircle className="w-5 h-5 mx-auto mb-2 text-muted-foreground/40" />
-              <p className="text-xs text-muted-foreground">No tasks added yet.</p>
-              <p className="text-[10px] text-muted-foreground/60 mt-1">Add tasks to start tracking progress.</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Completed</span>
-                <span className="font-medium" style={{ color: "hsl(var(--kf-success))" }}>{completedTasks}</span>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-border/40 bg-card p-4 space-y-3">
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Task Snapshot</h4>
+            {totalTasks === 0 ? (
+              <div className="text-center py-4">
+                <CheckCircle className="w-5 h-5 mx-auto mb-2 text-muted-foreground/40" />
+                <p className="text-xs text-muted-foreground">No tasks added yet.</p>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Remaining</span>
-                <span className="font-medium">{totalTasks - completedTasks}</span>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Completed</span>
+                  <span className="font-medium" style={{ color: "hsl(var(--kf-success))" }}>{completedTasks}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Remaining</span>
+                  <span className="font-medium">{totalTasks - completedTasks}</span>
+                </div>
+                {overdueTasks > 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Overdue</span>
+                    <span className="font-medium" style={{ color: "hsl(var(--kf-error))" }}>{overdueTasks}</span>
+                  </div>
+                )}
+                {upcomingTasks > 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Due in 3 days</span>
+                    <span className="font-medium" style={{ color: "hsl(var(--kf-warning))" }}>{upcomingTasks}</span>
+                  </div>
+                )}
+                <div className="mt-2 h-2 rounded-full overflow-hidden bg-muted/30">
+                  <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: stageInfo.color }} />
+                </div>
               </div>
-              {overdueTasks > 0 && (
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Overdue</span>
-                  <span className="font-medium" style={{ color: "hsl(var(--kf-error))" }}>{overdueTasks}</span>
-                </div>
-              )}
-              {upcomingTasks > 0 && (
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Due in 3 days</span>
-                  <span className="font-medium" style={{ color: "hsl(var(--kf-warning))" }}>{upcomingTasks}</span>
-                </div>
-              )}
-              <div className="mt-2 h-2 rounded-full overflow-hidden bg-muted/30">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{ width: `${progress}%`, background: stageInfo.color }}
-                />
+            )}
+          </div>
+
+          {milestones.length > 0 && (
+            <div className="rounded-xl border border-border/40 bg-card p-4 space-y-2">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Flag className="w-3 h-3" style={{ color: "hsl(var(--kf-accent2))" }} />
+                Milestones
+              </h4>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">{milestonesCompleted}/{milestones.length} completed</span>
+                <span className="font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>
+                  {milestones.length > 0 ? Math.round((milestonesCompleted / milestones.length) * 100) : 0}%
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full overflow-hidden bg-muted/30">
+                <div className="h-full rounded-full transition-all" style={{
+                  width: `${milestones.length > 0 ? Math.round((milestonesCompleted / milestones.length) * 100) : 0}%`,
+                  background: "hsl(var(--kf-accent2))",
+                }} />
               </div>
             </div>
           )}

@@ -6,7 +6,6 @@ import {
   ArrowLeft, MoreHorizontal, Trash2, Archive, Edit3, Save, X,
   LayoutDashboard, ListTodo, Flag, Clock, MessageSquare,
   User, DollarSign, Calendar, Zap, FileText,
-  HeartPulse,
 } from "lucide-react";
 import {
   Project, ProjectTask,
@@ -340,7 +339,7 @@ export function ProjectDetail({
 
       <div className="min-h-[300px]">
         {activeTab === "overview" && (
-          <OverviewTab project={project} onStageChange={handleStageChange} />
+          <OverviewTab project={project} onStageChange={handleStageChange} milestones={milestones} deliverables={deliverables} />
         )}
         {activeTab === "tasks" && (
           <TasksTab

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DollarSign, FileText, ExternalLink, CreditCard, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { DollarSign, FileText, ExternalLink, CreditCard, TrendingDown, Wallet } from "lucide-react";
 import { fetchExpensesByProject, type Expense } from "@/lib/client";
 
 interface RevenueTabProps {
