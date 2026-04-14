@@ -144,8 +144,9 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
               <img src={coverUrl} alt="" className="w-full h-full object-cover" loading="eager" />
             )}
           </div>
-          <div className="absolute inset-0" style={{ background: `linear-gradient(to bottom, ${ts.pageBg}88, ${ts.pageBg}bb 40%, ${ts.pageBg}ee 70%, ${ts.pageBg})` }} />
-          <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${primaryColor}12, transparent 50%, ${secondaryColor}08)` }} />
+          <div className="absolute inset-0" style={{ background: `linear-gradient(to bottom, ${ts.pageBg}60, ${ts.pageBg}95 35%, ${ts.pageBg}dd 60%, ${ts.pageBg})` }} />
+          <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${primaryColor}18, transparent 50%, ${secondaryColor}10)` }} />
+          <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 50% 80%, ${ts.pageBg}cc, transparent 70%)` }} />
         </div>
       )}
 
@@ -253,7 +254,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
             </h1>
 
             {subheadline && (
-              <p className={`text-base sm:text-lg text-gray-500 leading-relaxed max-w-xl ${isLeftAligned ? "" : "mx-auto"} ${ts.bodyWeight}`}>
+              <p className={`text-base sm:text-lg text-gray-600 leading-relaxed max-w-xl ${isLeftAligned ? "" : "mx-auto"} ${ts.bodyWeight}`}>
                 {subheadline}
               </p>
             )}
@@ -270,11 +271,11 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
               {displayProofChips.map((chip: ProofChip, i: number) => (
                 <div
                   key={i}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-medium backdrop-blur-sm transition-all duration-300 hover:scale-105"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-semibold backdrop-blur-md transition-all duration-300 hover:scale-105 hover:shadow-sm"
                   style={{
-                    backgroundColor: "rgba(0,0,0,0.04)",
-                    border: "1px solid rgba(0,0,0,0.08)",
-                    color: "rgba(0,0,0,0.55)",
+                    backgroundColor: `${primaryColor}08`,
+                    border: `1px solid ${primaryColor}15`,
+                    color: "rgba(0,0,0,0.65)",
                     animationDelay: `${i * 80}ms`,
                   }}
                 >
@@ -296,11 +297,11 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
               {builtInProofChips.slice(0, 4).map((badge, i) => (
                 <div
                   key={i}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-medium backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:shadow-sm"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-semibold backdrop-blur-md transition-all duration-300 hover:scale-105 hover:shadow-sm"
                   style={{
-                    backgroundColor: "rgba(0,0,0,0.03)",
-                    border: "1px solid rgba(0,0,0,0.07)",
-                    color: "rgba(0,0,0,0.55)",
+                    backgroundColor: `${badge.iconColor ?? primaryColor}08`,
+                    border: `1px solid ${badge.iconColor ?? primaryColor}15`,
+                    color: "rgba(0,0,0,0.65)",
                     opacity: entered ? 1 : 0,
                     transform: entered ? "translateY(0)" : "translateY(8px)",
                     transition: `opacity 0.4s ${0.45 + i * 0.08}s, transform 0.4s ${0.45 + i * 0.08}s`,
@@ -397,7 +398,8 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                 <a
                   href={business.facebook.startsWith("http") ? business.facebook : `https://facebook.com/${business.facebook}`}
                   target="_blank" rel="noopener noreferrer"
-                  className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-50 border border-gray-200 hover:bg-gray-100 hover:border-gray-300 transition-all hover:scale-105 min-h-[44px]"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center border transition-all hover:scale-110 hover:shadow-md min-h-[44px]"
+                  style={{ backgroundColor: `${primaryColor}06`, borderColor: `${primaryColor}15` }}
                   aria-label="Facebook"
                 >
                   <Facebook className="w-4 h-4 text-gray-500" />
@@ -407,7 +409,8 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                 <a
                   href={business.instagram.startsWith("http") ? business.instagram : `https://instagram.com/${business.instagram}`}
                   target="_blank" rel="noopener noreferrer"
-                  className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-50 border border-gray-200 hover:bg-gray-100 hover:border-gray-300 transition-all hover:scale-105 min-h-[44px]"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center border transition-all hover:scale-110 hover:shadow-md min-h-[44px]"
+                  style={{ backgroundColor: `${primaryColor}06`, borderColor: `${primaryColor}15` }}
                   aria-label="Instagram"
                 >
                   <Instagram className="w-4 h-4 text-gray-500" />
@@ -417,7 +420,8 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                 <a
                   href={business.twitter.startsWith("http") ? business.twitter : `https://twitter.com/${business.twitter}`}
                   target="_blank" rel="noopener noreferrer"
-                  className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-50 border border-gray-200 hover:bg-gray-100 hover:border-gray-300 transition-all hover:scale-105 min-h-[44px]"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center border transition-all hover:scale-110 hover:shadow-md min-h-[44px]"
+                  style={{ backgroundColor: `${primaryColor}06`, borderColor: `${primaryColor}15` }}
                   aria-label="Twitter"
                 >
                   <Twitter className="w-4 h-4 text-gray-500" />
@@ -427,10 +431,11 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                 <a
                   href={`https://wa.me/${business.whatsapp.replace(/\D/g, "")}`}
                   target="_blank" rel="noopener noreferrer"
-                  className="w-10 h-10 rounded-xl flex items-center justify-center bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 transition-all hover:scale-105 min-h-[44px]"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center border transition-all hover:scale-110 hover:shadow-md min-h-[44px]"
+                  style={{ backgroundColor: "rgba(16,185,129,0.06)", borderColor: "rgba(16,185,129,0.18)" }}
                   aria-label="WhatsApp"
                 >
-                  <MessageCircle className="w-4 h-4 text-emerald-600" />
+                  <MessageCircle className="w-4 h-4 text-emerald-500" />
                 </a>
               )}
             </div>

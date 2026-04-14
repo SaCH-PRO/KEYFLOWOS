@@ -289,7 +289,7 @@ export function CatalogGrid({
           </div>
 
           {item.description && (
-            <p className={`${ts.descSize} text-gray-900/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>
+            <p className={`${ts.descSize} text-gray-600/80 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>
               {item.description}
             </p>
           )}
@@ -300,8 +300,8 @@ export function CatalogGrid({
 
           <div className="flex items-center justify-between pt-1">
             {showDuration && item.duration ? (
-              <span className={`flex items-center gap-1.5 ${ts.descSize} text-gray-900/35 bg-gray-50 px-2 py-1 rounded-lg`}>
-                <Clock className="w-3 h-3" /> {item.duration} min
+              <span className={`flex items-center gap-1.5 ${ts.descSize} text-gray-500 px-2.5 py-1 rounded-lg`} style={{ backgroundColor: `${itemColor}06` }}>
+                <Clock className="w-3 h-3" style={{ color: `${itemColor}90` }} /> {item.duration} min
               </span>
             ) : (
               <span />
@@ -310,7 +310,7 @@ export function CatalogGrid({
               item.itemType === "service" ? (
                 <button
                   onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
-                  className={`flex items-center gap-1.5 px-3.5 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all duration-200 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20`}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all duration-200 text-emerald-600 bg-emerald-500/10 border border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20`}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" /> Added
                 </button>
@@ -440,15 +440,15 @@ export function CatalogGrid({
             </div>
           </div>
           {item.description && (
-            <p className={`${ts.descSize} text-gray-900/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
+            <p className={`${ts.descSize} text-gray-600/80 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
           )}
           {reviewAgg && reviewAgg.reviewCount > 0 && (
             <StarRatingDisplay rating={reviewAgg.averageRating} count={reviewAgg.reviewCount} />
           )}
           <div className="flex items-center justify-between pt-0.5">
             {showDuration && item.duration ? (
-              <span className={`flex items-center gap-1.5 ${ts.descSize} text-gray-900/35 bg-gray-50 px-2 py-1 rounded-lg`}>
-                <Clock className="w-3 h-3" /> {item.duration} min
+              <span className={`flex items-center gap-1.5 ${ts.descSize} text-gray-500 px-2.5 py-1 rounded-lg`} style={{ backgroundColor: `${itemColor}06` }}>
+                <Clock className="w-3 h-3" style={{ color: `${itemColor}90` }} /> {item.duration} min
               </span>
             ) : (
               <span />
