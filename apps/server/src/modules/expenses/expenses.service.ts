@@ -104,15 +104,18 @@ export class ExpensesService {
 
     if (input.projectId) {
       const proj = await this.prisma.client.project.findFirst({ where: { id: input.projectId, businessId: input.businessId } });
-      if (proj) validProjectId = input.projectId;
+      if (!proj) throw new Error(`Project not found or does not belong to this business`);
+      validProjectId = input.projectId;
     }
     if (input.contactId) {
       const ct = await this.prisma.client.contact.findFirst({ where: { id: input.contactId, businessId: input.businessId } });
-      if (ct) validContactId = input.contactId;
+      if (!ct) throw new Error(`Contact not found or does not belong to this business`);
+      validContactId = input.contactId;
     }
     if (input.serviceId) {
       const svc = await this.prisma.client.service.findFirst({ where: { id: input.serviceId, businessId: input.businessId } });
-      if (svc) validServiceId = input.serviceId;
+      if (!svc) throw new Error(`Service not found or does not belong to this business`);
+      validServiceId = input.serviceId;
     }
 
     const expense = await this.prisma.client.expense.create({
@@ -183,7 +186,8 @@ export class ExpensesService {
         updateData.projectId = null;
       } else {
         const proj = await this.prisma.client.project.findFirst({ where: { id: input.projectId, businessId: input.businessId } });
-        if (proj) updateData.projectId = input.projectId;
+        if (!proj) throw new Error(`Project not found or does not belong to this business`);
+        updateData.projectId = input.projectId;
       }
     }
     if (input.contactId !== undefined) {
@@ -191,7 +195,8 @@ export class ExpensesService {
         updateData.contactId = null;
       } else {
         const ct = await this.prisma.client.contact.findFirst({ where: { id: input.contactId, businessId: input.businessId } });
-        if (ct) updateData.contactId = input.contactId;
+        if (!ct) throw new Error(`Contact not found or does not belong to this business`);
+        updateData.contactId = input.contactId;
       }
     }
     if (input.serviceId !== undefined) {
@@ -199,7 +204,8 @@ export class ExpensesService {
         updateData.serviceId = null;
       } else {
         const svc = await this.prisma.client.service.findFirst({ where: { id: input.serviceId, businessId: input.businessId } });
-        if (svc) updateData.serviceId = input.serviceId;
+        if (!svc) throw new Error(`Service not found or does not belong to this business`);
+        updateData.serviceId = input.serviceId;
       }
     }
 
@@ -816,14 +822,14 @@ export class ExpensesService {
 
       if (stdDev > avgGap * 0.5) continue;
 
-      let frequency = 'irregular';
-      if (avgGap >= 25 && avgGap <= 35) frequency = 'monthly';
-      else if (avgGap >= 12 && avgGap <= 16) frequency = 'biweekly';
-      else if (avgGap >= 6 && avgGap <= 8) frequency = 'weekly';
-      else if (avgGap >= 85 && avgGap <= 95) frequency = 'quarterly';
-      else if (avgGap >= 350 && avgGap <= 380) frequency = 'yearly';
+      let frequency = 'IRREGULAR';
+      if (avgGap >= 25 && avgGap <= 35) frequency = 'MONTHLY';
+      else if (avgGap >= 12 && avgGap <= 16) frequency = 'BIWEEKLY';
+      else if (avgGap >= 6 && avgGap <= 8) frequency = 'WEEKLY';
+      else if (avgGap >= 85 && avgGap <= 95) frequency = 'QUARTERLY';
+      else if (avgGap >= 350 && avgGap <= 380) frequency = 'YEARLY';
 
-      if (frequency === 'irregular') continue;
+      if (frequency === 'IRREGULAR') continue;
 
       candidates.push({
         vendor: group.vendor,
