@@ -121,6 +121,10 @@ export class GovernanceService {
 
     const auto = { allowed: true, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier };
 
+    if (tier === 4) {
+      return { ...auto, requiresAdminApproval: true, requiresFormalApproval: true, reason: 'Tier 4 action always requires admin-level approval — cannot be auto-approved' };
+    }
+
     if (tier <= settings.maxAutoTier) {
       return { ...auto, reason: `Tier ${tier} auto-approved (max auto tier: ${settings.maxAutoTier})` };
     }
@@ -131,10 +135,6 @@ export class GovernanceService {
 
     if (tier === 3) {
       return { ...auto, requiresFormalApproval: true, reason: 'Tier 3 action requires explicit approval before execution' };
-    }
-
-    if (tier === 4) {
-      return { ...auto, requiresAdminApproval: true, requiresFormalApproval: true, reason: 'Tier 4 action requires admin-level approval before execution' };
     }
 
     return { ...auto, requiresQuickConfirm: true, reason: `Tier ${tier} exceeds auto-execute threshold (${settings.maxAutoTier}), requires confirmation` };
@@ -154,9 +154,24 @@ export class GovernanceService {
     return { ...DEFAULT_AUTONOMY };
   }
 
-  async updateAutonomySettings(businessId: string, updates: Partial<AutonomySettings>): Promise<AutonomySettings> {
+  async updateAutonomySettings(businessId: string, updates: Partial<AutonomySettings>, userId?: string): Promise<AutonomySettings> {
+    if (userId) {
+      const user = await this.prisma.client.user.findUnique({ where: { id: userId } });
+      const membership = await this.prisma.client.membership.findFirst({
+        where: { userId, businessId },
+      });
+      const isAdmin = user?.role === 'SUPER_ADMIN' || membership?.role === 'OWNER' || membership?.role === 'ADMIN';
+      if (!isAdmin) {
+        throw new Error('Only admins can update AI governance settings');
+      }
+    }
+
     const current = await this.getAutonomySettings(businessId);
     const merged = { ...current, ...updates };
+
+    if (typeof merged.maxAutoTier !== 'number' || merged.maxAutoTier < 1 || merged.maxAutoTier > 3) {
+      merged.maxAutoTier = Math.max(1, Math.min(3, Number(merged.maxAutoTier) || 1)) as RiskTier;
+    }
     await this.prisma.client.aiMemory.upsert({
       where: { businessId_category_key: { businessId, category: 'settings', key: 'autonomy' } },
       create: { businessId, category: 'settings', key: 'autonomy', value: JSON.stringify(merged), source: 'user' },

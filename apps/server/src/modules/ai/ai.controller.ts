@@ -330,7 +330,10 @@ export class AiController {
   async updateGovernanceSettings(
     @Param('businessId') businessId: string,
     @Body() body: { mode?: 'advisory' | 'assisted' | 'pro_auto' | 'restricted'; maxAutoTier?: RiskTier; blockedTools?: string[]; blockedModules?: string[] },
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.governance.updateAutonomySettings(businessId, body);
+    const userId = req?.user?.id;
+    if (!userId) throw new UnauthorizedException('Authenticated user required to update governance settings');
+    return this.governance.updateAutonomySettings(businessId, body, userId);
   }
 }
