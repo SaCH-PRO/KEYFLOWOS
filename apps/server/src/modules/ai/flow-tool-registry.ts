@@ -359,7 +359,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'social_publish_post',
     description: 'Publish a social media post immediately.',
     riskLevel: 'high',
-    riskTier: 3 as RiskTier,
+    riskTier: 4 as RiskTier,
     parameters: {
       type: 'object',
       properties: {

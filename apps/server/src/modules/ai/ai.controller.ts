@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
@@ -8,6 +8,11 @@ import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { Request } from 'express';
+
+interface AuthenticatedRequest extends Request {
+  user?: { id: string; email?: string; role?: string };
+}
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 function safeInt(val: string | undefined, fallback: number): number {
@@ -253,10 +258,10 @@ export class AiController {
   async approvePlan(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     const userId = req?.user?.id;
-    if (!userId) throw new Error('Authenticated user required to approve plans');
+    if (!userId) throw new UnauthorizedException('Authenticated user required to approve plans');
     return this.planner.approvePlan(planId, businessId, userId);
   }
 
@@ -307,10 +312,10 @@ export class AiController {
     @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
     @Body() body: { resolution: 'approved' | 'rejected' | 'deferred' },
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     const userId = req?.user?.id;
-    if (!userId) throw new Error('Authenticated user required to resolve approvals');
+    if (!userId) throw new UnauthorizedException('Authenticated user required to resolve approvals');
     return this.governance.resolveApproval(approvalId, businessId, body.resolution, userId);
   }
 

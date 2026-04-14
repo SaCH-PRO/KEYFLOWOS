@@ -6,6 +6,19 @@ import { BusinessGraphService } from './business-graph.service';
 import { GovernanceService } from './governance.service';
 import { ParsedIntent } from './intent-parser.service';
 
+interface RawAiStep {
+  order?: number;
+  toolName?: string;
+  module?: string;
+  action?: string;
+  description?: string;
+  riskTier?: number;
+  dependsOnOrders?: number[];
+  dependsOn?: string[];
+  inputPayload?: Record<string, unknown>;
+  expectedBenefit?: string;
+}
+
 export interface PlanStep {
   order: number;
   toolName: string | null;
@@ -99,7 +112,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
       const parsed = JSON.parse(result.content);
       const rawSteps = Array.isArray(parsed.steps) ? parsed.steps : Array.isArray(parsed) ? parsed : [];
 
-      steps = rawSteps.map((s: any, idx: number) => {
+      steps = rawSteps.map((s: RawAiStep, idx: number) => {
         const tierFromGov = s.toolName ? this.governance.getToolTier(s.toolName) : (s.riskTier || 1);
         const depOrders = Array.isArray(s.dependsOnOrders) ? s.dependsOnOrders
           : Array.isArray(s.dependsOn) ? s.dependsOn : [];
@@ -111,8 +124,8 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
           description: s.description || '',
           riskTier: tierFromGov,
           requiresApproval: tierFromGov >= 2,
-          dependsOnOrders: depOrders.map((v: any) => typeof v === 'number' ? v : parseInt(v, 10)).filter((n: number) => !isNaN(n)),
-          inputPayload: s.inputPayload || null,
+          dependsOnOrders: depOrders.map((v: string | number) => typeof v === 'number' ? v : parseInt(String(v), 10)).filter((n: number) => !isNaN(n)),
+          inputPayload: (s.inputPayload as Record<string, unknown> | null) || null,
           expectedBenefit: s.expectedBenefit || null,
         };
       });
@@ -163,25 +176,35 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
       include: { steps: { orderBy: { order: 'asc' } } },
     });
 
-    const orderToIdMap = new Map<number, string>();
-    for (const s of plan.steps) {
-      orderToIdMap.set(s.order, s.id);
-    }
+    const hasDeps = steps.some(s => s.dependsOnOrders.length > 0);
+    if (hasDeps) {
+      const orderToIdMap = new Map<number, string>();
+      for (const s of plan.steps) {
+        orderToIdMap.set(s.order, s.id);
+      }
 
-    for (const rawStep of steps) {
-      if (rawStep.dependsOnOrders.length > 0) {
-        const dbStep = plan.steps.find(s => s.order === rawStep.order);
-        if (!dbStep) continue;
-        const resolvedIds = rawStep.dependsOnOrders
-          .map((depOrder: number) => orderToIdMap.get(depOrder))
-          .filter((id): id is string => !!id);
-        if (resolvedIds.length > 0) {
-          await this.prisma.client.aiPlanStep.update({
-            where: { id: dbStep.id },
-            data: { dependsOn: resolvedIds },
-          });
-          (dbStep as any).dependsOn = resolvedIds;
+      for (const rawStep of steps) {
+        if (rawStep.dependsOnOrders.length > 0) {
+          const dbStep = plan.steps.find(s => s.order === rawStep.order);
+          if (!dbStep) continue;
+          const resolvedIds = rawStep.dependsOnOrders
+            .map((depOrder: number) => orderToIdMap.get(depOrder))
+            .filter((id): id is string => !!id);
+          if (resolvedIds.length > 0) {
+            await this.prisma.client.aiPlanStep.update({
+              where: { id: dbStep.id },
+              data: { dependsOn: resolvedIds },
+            });
+          }
         }
+      }
+
+      const updatedPlan = await this.prisma.client.aiPlan.findUnique({
+        where: { id: plan.id },
+        include: { steps: { orderBy: { order: 'asc' } } },
+      });
+      if (updatedPlan) {
+        plan.steps.splice(0, plan.steps.length, ...updatedPlan.steps);
       }
     }
 
@@ -237,7 +260,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
   }
 
   async listPlans(businessId: string, status?: string, limit = 20) {
-    const where: any = { businessId };
+    const where: { businessId: string; status?: string } = { businessId };
     if (status) where.status = status;
 
     return this.prisma.client.aiPlan.findMany({
@@ -279,7 +302,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
   }
 
   async updatePlanStatus(planId: string, businessId: string, status: string) {
-    const updateData: any = { status };
+    const updateData: Record<string, unknown> = { status };
     if (status === 'executing') updateData.startedAt = new Date();
     if (status === 'completed' || status === 'failed') updateData.completedAt = new Date();
 
@@ -293,8 +316,8 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
     });
   }
 
-  async updateStepStatus(stepId: string, status: string, result?: any, errorMessage?: string, durationMs?: number) {
-    const updateData: any = { status };
+  async updateStepStatus(stepId: string, status: string, result?: Record<string, unknown> | null, errorMessage?: string, durationMs?: number) {
+    const updateData: Record<string, unknown> = { status };
     if (status === 'executing') updateData.startedAt = new Date();
     if (status === 'completed' || status === 'failed') updateData.completedAt = new Date();
     if (result !== undefined) updateData.outputResult = result;
