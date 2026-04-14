@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Plus, Palette, X, TrendingUp, TrendingDown, Minus, Receipt, Target, FileText } from "lucide-react";
+import { Plus, Palette, X, TrendingUp, TrendingDown, Minus, Receipt, Target, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { ExpenseCategory, ExpenseBudget, ExpenseSummary, createExpenseCategory, deleteExpenseCategory } from "@/lib/client";
 import { CATEGORY_COLORS, formatCurrency } from "./expense-utils";
@@ -23,9 +23,18 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
     return categories.map(cat => {
       const catSummary = summary?.byCategory?.find(c => c.categoryId === cat.id);
       const budget = budgets.find(b => b.category?.id === cat.id || b.categoryId === cat.id);
+      const total = catSummary?.total ?? 0;
+      const prevTotal = catSummary?.prevTotal ?? 0;
+      const changePct = prevTotal > 0 ? ((total - prevTotal) / prevTotal) * 100 : total > 0 ? 100 : 0;
+      const isAnomaly = changePct > 50 && total > 100;
+      const isSaving = changePct < -20 && prevTotal > 100;
       return {
         ...cat,
-        total: catSummary?.total ?? 0,
+        total,
+        prevTotal,
+        changePct,
+        isAnomaly,
+        isSaving,
         percent: catSummary?.percent ?? 0,
         txCount: cat._count?.expenses ?? 0,
         budget: budget ?? null,
@@ -33,7 +42,9 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
     }).sort((a, b) => b.total - a.total);
   }, [categories, summary, budgets]);
 
-  const maxTotal = categoryData.length > 0 ? Math.max(...categoryData.map(c => c.total), 1) : 1;
+  const maxTotal = categoryData.length > 0 ? Math.max(...categoryData.map(c => Math.max(c.total, c.prevTotal)), 1) : 1;
+  const anomalyCount = categoryData.filter(c => c.isAnomaly).length;
+  const savingCount = categoryData.filter(c => c.isSaving).length;
 
   const handleAddCategory = async () => {
     if (!newCatName.trim()) return;
@@ -51,6 +62,23 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
 
   return (
     <div className="space-y-6">
+      {(anomalyCount > 0 || savingCount > 0) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {anomalyCount > 0 && (
+            <span className="text-[10px] px-2 py-1 rounded-full font-medium flex items-center gap-1" style={{ background: "hsl(var(--kf-warning) / 0.12)", color: "hsl(var(--kf-warning))" }}>
+              <AlertTriangle className="w-3 h-3" />
+              {anomalyCount} spending spike{anomalyCount > 1 ? "s" : ""} detected
+            </span>
+          )}
+          {savingCount > 0 && (
+            <span className="text-[10px] px-2 py-1 rounded-full font-medium flex items-center gap-1" style={{ background: "hsl(var(--kf-success) / 0.12)", color: "hsl(var(--kf-success))" }}>
+              <TrendingDown className="w-3 h-3" />
+              {savingCount} categor{savingCount > 1 ? "ies" : "y"} trending down
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="kf-card rounded-xl p-4 space-y-4">
         <h3 className="text-sm font-semibold flex items-center gap-2"><Palette className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />Create Category</h3>
         <div className="flex items-center gap-2 flex-wrap">
@@ -72,6 +100,7 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
               Category Breakdown
               <span className="text-xs text-muted-foreground font-normal">({categories.length})</span>
             </h3>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Current vs previous period comparison</p>
           </div>
           <div className="divide-y divide-border/30">
             {categoryData.map((cat, i) => (
@@ -85,7 +114,7 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
                 <div className="flex items-center gap-3">
                   <div className="w-3.5 h-3.5 rounded-full shrink-0" style={{ background: cat.color || "#6366f1" }} />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="text-sm font-medium">{cat.name}</span>
                       <span className="text-[10px] text-muted-foreground">{cat.txCount} txn{cat.txCount !== 1 ? "s" : ""}</span>
                       {cat.budget && (
@@ -94,19 +123,48 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
                           {cat.budget.percentUsed}% of {formatCurrency(cat.budget.amount)}
                         </span>
                       )}
+                      {cat.isAnomaly && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-0.5 font-medium" style={{ background: "hsl(var(--kf-warning) / 0.12)", color: "hsl(var(--kf-warning))" }}>
+                          <AlertTriangle className="w-2.5 h-2.5" />
+                          Spike +{cat.changePct.toFixed(0)}%
+                        </span>
+                      )}
+                      {cat.isSaving && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-0.5 font-medium" style={{ background: "hsl(var(--kf-success) / 0.12)", color: "hsl(var(--kf-success))" }}>
+                          <TrendingDown className="w-2.5 h-2.5" />
+                          {Math.abs(cat.changePct).toFixed(0)}% saved
+                        </span>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-2 rounded-full bg-muted/30 overflow-hidden">
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${(cat.total / maxTotal) * 100}%` }}
-                          transition={{ duration: 0.5, delay: i * 0.05 }}
-                          className="h-full rounded-full"
-                          style={{ background: cat.color || "#6366f1" }}
-                        />
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-2 rounded-full bg-muted/30 overflow-hidden relative">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${(cat.total / maxTotal) * 100}%` }}
+                            transition={{ duration: 0.5, delay: i * 0.05 }}
+                            className="h-full rounded-full"
+                            style={{ background: cat.color || "#6366f1" }}
+                          />
+                        </div>
+                        <span className="text-xs font-semibold w-28 text-right">{formatCurrency(cat.total)}</span>
+                        <span className="text-[10px] text-muted-foreground w-10 text-right">{cat.percent}%</span>
                       </div>
-                      <span className="text-xs font-semibold w-28 text-right">{formatCurrency(cat.total)}</span>
-                      <span className="text-[10px] text-muted-foreground w-10 text-right">{cat.percent}%</span>
+                      {cat.prevTotal > 0 && (
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1.5 rounded-full bg-muted/15 overflow-hidden relative">
+                            <div
+                              className="h-full rounded-full opacity-40"
+                              style={{ width: `${(cat.prevTotal / maxTotal) * 100}%`, background: cat.color || "#6366f1" }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-muted-foreground w-28 text-right">prev: {formatCurrency(cat.prevTotal)}</span>
+                          <span className="text-[10px] w-10 text-right flex items-center justify-end gap-0.5" style={{ color: cat.changePct > 0 ? "hsl(var(--kf-error))" : cat.changePct < 0 ? "hsl(var(--kf-success))" : undefined }}>
+                            {cat.changePct > 0 ? <TrendingUp className="w-2.5 h-2.5" /> : cat.changePct < 0 ? <TrendingDown className="w-2.5 h-2.5" /> : <Minus className="w-2.5 h-2.5" />}
+                            {Math.abs(cat.changePct).toFixed(0)}%
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <button onClick={() => handleDeleteCategory(cat.id)} className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-all"><X className="w-3.5 h-3.5" /></button>
@@ -132,6 +190,7 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {summary.byCategory.slice(0, 6).map(cat => {
               const budget = budgets.find(b => b.category?.id === cat.categoryId || b.categoryId === cat.categoryId);
+              const changePct = cat.prevTotal > 0 ? ((cat.total - cat.prevTotal) / cat.prevTotal) * 100 : 0;
               return (
                 <div key={cat.categoryId} className="bg-white/5 rounded-lg p-3 space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -149,6 +208,12 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
                       <span className="text-muted-foreground/50">No budget</span>
                     )}
                   </div>
+                  {changePct !== 0 && (
+                    <div className="flex items-center gap-1 text-[10px]" style={{ color: changePct > 0 ? "hsl(var(--kf-error))" : "hsl(var(--kf-success))" }}>
+                      {changePct > 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                      {changePct > 0 ? "+" : ""}{changePct.toFixed(0)}% vs prev period
+                    </div>
+                  )}
                 </div>
               );
             })}

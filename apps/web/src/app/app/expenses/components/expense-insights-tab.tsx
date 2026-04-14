@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle, TrendingUp, TrendingDown, Store, FileQuestion, Receipt,
   Target, BarChart3, Lightbulb, ArrowRight, PieChart, ShieldAlert,
-  Zap, DollarSign, FileText,
+  Zap, DollarSign, FileText, Sparkles, Brain, Shield,
+  ChevronDown, ChevronUp, Users, Percent,
 } from "lucide-react";
 import { Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget } from "@/lib/client";
 import { formatCurrency } from "./expense-utils";
@@ -34,6 +35,10 @@ interface ExpenseInsightsTabProps {
   vendors: VendorAnalytics[];
   budgets: ExpenseBudget[];
   onNavigate: (tab: TabKey) => void;
+  periodTotalCount?: number;
+  periodUncategorizedCount?: number;
+  periodMissingReceiptCount?: number;
+  periodRecurringCount?: number;
 }
 
 const TYPE_STYLES: Record<string, { border: string; bg: string; iconColor: string; badge: string; badgeLabel: string }> = {
@@ -43,7 +48,17 @@ const TYPE_STYLES: Record<string, { border: string; bg: string; iconColor: strin
   info: { border: "border-blue-500/30", bg: "hsl(var(--kf-info) / 0.05)", iconColor: "hsl(var(--kf-info))", badge: "hsl(var(--kf-info) / 0.15)", badgeLabel: "Insight" },
 };
 
-export function ExpenseInsightsTab({ expenses, categories, summary, vendors, budgets, onNavigate }: ExpenseInsightsTabProps) {
+export function ExpenseInsightsTab({
+  expenses, categories, summary, vendors, budgets, onNavigate,
+  periodTotalCount, periodUncategorizedCount, periodMissingReceiptCount, periodRecurringCount,
+}: ExpenseInsightsTabProps) {
+  const [showAllInsights, setShowAllInsights] = useState(false);
+
+  const totalExpenseCount = periodTotalCount ?? summary?.count ?? expenses.length;
+  const uncategorizedExpenseCount = periodUncategorizedCount ?? expenses.filter(e => !e.categoryId).length;
+  const missingReceiptExpenseCount = periodMissingReceiptCount ?? expenses.filter(e => !e.receiptUrl).length;
+  const recurringExpenseCount = periodRecurringCount ?? expenses.filter(e => e.isRecurring).length;
+
   const insights = useMemo(() => {
     const cards: InsightCard[] = [];
     const overBudget = budgets.filter(b => b.isOverBudget);
@@ -128,30 +143,27 @@ export function ExpenseInsightsTab({ expenses, categories, summary, vendors, bud
       }
     }
 
-    const uncategorized = expenses.filter(e => !e.categoryId);
-    if (uncategorized.length > 0) {
+    if (uncategorizedExpenseCount > 0) {
       cards.push({
         id: "uncategorized",
-        type: uncategorized.length > 5 ? "warning" : "risk",
+        type: uncategorizedExpenseCount > 5 ? "warning" : "risk",
         icon: FileQuestion,
-        title: `${uncategorized.length} Uncategorized Expense${uncategorized.length > 1 ? "s" : ""}`,
+        title: `${uncategorizedExpenseCount} Uncategorized Expense${uncategorizedExpenseCount > 1 ? "s" : ""}`,
         description: `Uncategorized expenses reduce budget tracking accuracy and weaken financial reports.`,
-        detail: `${formatCurrency(uncategorized.reduce((s, e) => s + e.amount, 0))} in spend has no category assignment.`,
         modules: ["Reports", "Documents"],
         actionLabel: "Review & Categorize",
         actionTab: "transactions",
-        priority: uncategorized.length > 5 ? 9 : 5,
+        priority: uncategorizedExpenseCount > 5 ? 9 : 5,
       });
     }
 
-    const missingReceipts = expenses.filter(e => !e.receiptUrl);
-    if (missingReceipts.length > 3 && expenses.length > 0) {
-      const missingPct = Math.round((missingReceipts.length / expenses.length) * 100);
+    if (missingReceiptExpenseCount > 3 && totalExpenseCount > 0) {
+      const missingPct = Math.round((missingReceiptExpenseCount / totalExpenseCount) * 100);
       cards.push({
         id: "missing-receipts",
         type: "info",
         icon: Receipt,
-        title: `${missingReceipts.length} Expenses Missing Receipts (${missingPct}%)`,
+        title: `${missingReceiptExpenseCount} Expenses Missing Receipts (${missingPct}%)`,
         description: "Attaching receipts improves tax compliance, audit readiness, and financial document accuracy.",
         modules: ["Documents", "Reports"],
         actionLabel: "View Expenses",
@@ -160,7 +172,7 @@ export function ExpenseInsightsTab({ expenses, categories, summary, vendors, bud
       });
     }
 
-    if (budgets.length === 0 && expenses.length > 5) {
+    if (budgets.length === 0 && totalExpenseCount > 5) {
       cards.push({
         id: "no-budgets",
         type: "opportunity",
@@ -174,7 +186,7 @@ export function ExpenseInsightsTab({ expenses, categories, summary, vendors, bud
       });
     }
 
-    if (categories.length === 0 && expenses.length > 0) {
+    if (categories.length === 0 && totalExpenseCount > 0) {
       cards.push({
         id: "no-categories",
         type: "opportunity",
@@ -201,16 +213,35 @@ export function ExpenseInsightsTab({ expenses, categories, summary, vendors, bud
           priority: 4,
         });
       }
+
+      const spikeCategories = summary.byCategory.filter(c => {
+        if (!c.prevTotal || c.prevTotal < 50) return false;
+        const change = ((c.total - c.prevTotal) / c.prevTotal) * 100;
+        return change > 50;
+      });
+      if (spikeCategories.length > 0) {
+        cards.push({
+          id: "category-anomaly",
+          type: "warning",
+          icon: AlertTriangle,
+          title: `${spikeCategories.length} Category Spending Anomal${spikeCategories.length > 1 ? "ies" : "y"}`,
+          description: `${spikeCategories.map(c => c.name).join(", ")} show${spikeCategories.length === 1 ? "s" : ""} unusually high spending compared to the prior period.`,
+          detail: `Largest spike: ${spikeCategories[0].name} at ${formatCurrency(spikeCategories[0].total)} vs ${formatCurrency(spikeCategories[0].prevTotal)} previously.`,
+          modules: ["Revenue", "Reports"],
+          actionLabel: "View Categories",
+          actionTab: "categories",
+          priority: 8,
+        });
+      }
     }
 
-    const recurring = expenses.filter(e => e.isRecurring);
-    if (recurring.length > 3) {
-      const recurringTotal = recurring.reduce((s, e) => s + e.amount, 0);
+    if (recurringExpenseCount > 3) {
+      const recurringTotal = expenses.filter(e => e.isRecurring).reduce((s, e) => s + e.amount, 0);
       cards.push({
         id: "recurring-cost",
         type: "info",
         icon: Zap,
-        title: `${recurring.length} Recurring Expenses (${formatCurrency(recurringTotal)})`,
+        title: `${recurringExpenseCount} Recurring Expenses`,
         description: "Recurring costs are predictable but can drift upward over time. Review them periodically.",
         modules: ["Revenue", "Flows"],
         actionLabel: "Review Recurring",
@@ -221,13 +252,161 @@ export function ExpenseInsightsTab({ expenses, categories, summary, vendors, bud
 
     cards.sort((a, b) => b.priority - a.priority);
     return cards;
-  }, [expenses, categories, summary, vendors, budgets]);
+  }, [expenses, categories, summary, vendors, budgets, totalExpenseCount, uncategorizedExpenseCount, missingReceiptExpenseCount, recurringExpenseCount]);
+
+  const marginAnalysis = useMemo(() => {
+    const totalSpend = summary?.total ?? 0;
+    if (totalSpend === 0) return null;
+
+    const recurringTotal = expenses.filter(e => e.isRecurring).reduce((s, e) => s + e.amount, 0);
+    const oneTimeTotal = totalSpend - recurringTotal;
+    const recurringPct = Math.round((recurringTotal / totalSpend) * 100);
+
+    const costPerDay = summary?.dailyTrend?.length
+      ? totalSpend / summary.dailyTrend.length
+      : totalSpend / 30;
+
+    const dayOfMonth = new Date().getDate();
+    const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+    const projectedMonthly = costPerDay * daysInMonth;
+    const projectedRemaining = costPerDay * (daysInMonth - dayOfMonth);
+
+    const prevTotal = summary?.comparison?.prevTotal ?? 0;
+    const marginTrend = prevTotal > 0
+      ? ((totalSpend - prevTotal) / prevTotal) * 100
+      : 0;
+
+    return {
+      totalSpend,
+      recurringTotal,
+      oneTimeTotal,
+      recurringPct,
+      costPerDay,
+      projectedMonthly,
+      projectedRemaining,
+      marginTrend,
+      prevTotal,
+    };
+  }, [summary, expenses]);
+
+  const vendorDistribution = useMemo(() => {
+    if (vendors.length === 0) return null;
+    const totalSpend = summary?.total ?? 0;
+    if (totalSpend === 0) return null;
+
+    const topVendors = vendors.slice(0, 5).map(v => ({
+      ...v,
+      percent: Math.round((v.total / totalSpend) * 100),
+    }));
+
+    const top3Pct = topVendors.slice(0, 3).reduce((s, v) => s + v.percent, 0);
+    const concentrationLevel = top3Pct > 70 ? "high" : top3Pct > 50 ? "moderate" : "healthy";
+
+    return { topVendors, top3Pct, concentrationLevel, totalSpend };
+  }, [vendors, summary]);
+
+  const costControlGuidance = useMemo(() => {
+    const tips: { id: string; icon: typeof Lightbulb; title: string; description: string; impact: "high" | "medium" | "low" }[] = [];
+    const totalSpend = summary?.total ?? 0;
+
+    if (recurringExpenseCount > 2) {
+      tips.push({
+        id: "audit-recurring",
+        icon: Zap,
+        title: "Audit Recurring Subscriptions",
+        description: `${recurringExpenseCount} recurring expenses detected. Review for unused or duplicate services to reduce fixed costs.`,
+        impact: "high",
+      });
+    }
+
+    if (vendors.length > 0) {
+      const topVendor = vendors[0];
+      const vendorPct = totalSpend > 0 ? Math.round((topVendor.total / totalSpend) * 100) : 0;
+      if (vendorPct > 30) {
+        tips.push({
+          id: "negotiate-vendor",
+          icon: Users,
+          title: `Negotiate with ${topVendor.name}`,
+          description: `${topVendor.name} gets ${vendorPct}% of your spend (${formatCurrency(topVendor.total)}). High volume gives you leverage to negotiate 5-15% discounts.`,
+          impact: "high",
+        });
+      }
+      if (vendors.length >= 3) {
+        const smallVendors = vendors.filter(v => v.count === 1);
+        if (smallVendors.length > 3) {
+          tips.push({
+            id: "consolidate-vendors",
+            icon: Store,
+            title: "Consolidate Small Vendors",
+            description: `${smallVendors.length} vendors used only once. Consolidating purchases can reduce fees and simplify bookkeeping.`,
+            impact: "medium",
+          });
+        }
+      }
+    }
+
+    if (uncategorizedExpenseCount > 5) {
+      tips.push({
+        id: "categorize-expenses",
+        icon: PieChart,
+        title: "Complete Expense Categorization",
+        description: `${uncategorizedExpenseCount} uncategorized expenses. Categorization enables budget alerts and anomaly detection.`,
+        impact: "medium",
+      });
+    }
+
+    if (budgets.length > 0) {
+      const wellManaged = budgets.filter(b => !b.isOverBudget && b.percentUsed < 80);
+      if (wellManaged.length === budgets.length && budgets.length > 2) {
+        tips.push({
+          id: "tighten-budgets",
+          icon: Target,
+          title: "Tighten Budget Limits",
+          description: `All ${budgets.length} budgets under 80%. Consider lowering limits to build a buffer and redirect savings.`,
+          impact: "low",
+        });
+      }
+    }
+
+    const changePct = summary?.comparison?.changePercent ?? 0;
+    if (changePct > 15) {
+      tips.push({
+        id: "spending-trend",
+        icon: TrendingUp,
+        title: "Address Rising Spend Trend",
+        description: `Spending is up ${changePct.toFixed(0)}% vs prior period. Identify the top 2-3 categories driving the increase and set targeted budgets.`,
+        impact: "high",
+      });
+    }
+
+    if (summary?.byCategory && summary.byCategory.length > 0) {
+      const spikeCats = summary.byCategory.filter(c => {
+        if (!c.prevTotal || c.prevTotal < 50) return false;
+        return ((c.total - c.prevTotal) / c.prevTotal) * 100 > 40;
+      });
+      if (spikeCats.length > 0) {
+        tips.push({
+          id: "investigate-spikes",
+          icon: AlertTriangle,
+          title: "Investigate Category Spikes",
+          description: `${spikeCats.map(c => c.name).join(", ")} spiked this period. Determine if these are one-time costs or emerging patterns that need budget controls.`,
+          impact: "high",
+        });
+      }
+    }
+
+    tips.sort((a, b) => {
+      const order = { high: 0, medium: 1, low: 2 };
+      return order[a.impact] - order[b.impact];
+    });
+    return tips;
+  }, [summary, vendors, budgets, uncategorizedExpenseCount, recurringExpenseCount]);
 
   const warningCount = insights.filter(i => i.type === "warning").length;
   const riskCount = insights.filter(i => i.type === "risk").length;
   const opportunityCount = insights.filter(i => i.type === "opportunity").length;
 
-  if (expenses.length === 0 && budgets.length === 0) {
+  if (totalExpenseCount === 0 && budgets.length === 0) {
     return (
       <EmptyState
         icon={Lightbulb}
@@ -239,6 +418,8 @@ export function ExpenseInsightsTab({ expenses, categories, summary, vendors, bud
       />
     );
   }
+
+  const visibleInsights = showAllInsights ? insights : insights.slice(0, 4);
 
   return (
     <div className="space-y-6">
@@ -258,6 +439,161 @@ export function ExpenseInsightsTab({ expenses, categories, summary, vendors, bud
         )}
       </div>
 
+      {marginAnalysis && (
+        <div className="kf-card rounded-xl p-4 space-y-4">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Percent className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+            Margin & Cost Analysis
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="bg-white/5 rounded-lg p-3">
+              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Total Spend</span>
+              <span className="text-sm font-bold">{formatCurrency(marginAnalysis.totalSpend)}</span>
+              {marginAnalysis.marginTrend !== 0 && (
+                <span className="text-[10px] flex items-center gap-0.5 mt-0.5" style={{ color: marginAnalysis.marginTrend > 0 ? "hsl(var(--kf-error))" : "hsl(var(--kf-success))" }}>
+                  {marginAnalysis.marginTrend > 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                  {marginAnalysis.marginTrend > 0 ? "+" : ""}{marginAnalysis.marginTrend.toFixed(0)}% vs prev
+                </span>
+              )}
+            </div>
+            <div className="bg-white/5 rounded-lg p-3">
+              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Recurring</span>
+              <span className="text-sm font-bold">{formatCurrency(marginAnalysis.recurringTotal)}</span>
+              <span className="text-[10px] text-muted-foreground block mt-0.5">{marginAnalysis.recurringPct}% of total</span>
+            </div>
+            <div className="bg-white/5 rounded-lg p-3">
+              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Daily Burn</span>
+              <span className="text-sm font-bold">{formatCurrency(marginAnalysis.costPerDay)}</span>
+              <span className="text-[10px] text-muted-foreground block mt-0.5">avg per day</span>
+            </div>
+            <div className="bg-white/5 rounded-lg p-3">
+              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Month Projection</span>
+              <span className="text-sm font-bold">{formatCurrency(marginAnalysis.projectedMonthly)}</span>
+              <span className="text-[10px] text-muted-foreground block mt-0.5">{formatCurrency(marginAnalysis.projectedRemaining)} remaining</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-3 rounded-full bg-muted/20 overflow-hidden flex">
+              <div
+                className="h-full rounded-l-full"
+                style={{ width: `${marginAnalysis.recurringPct}%`, background: "hsl(var(--kf-accent1))" }}
+                title="Recurring"
+              />
+              <div
+                className="h-full rounded-r-full"
+                style={{ width: `${100 - marginAnalysis.recurringPct}%`, background: "hsl(var(--kf-accent2))" }}
+                title="One-time"
+              />
+            </div>
+            <div className="flex items-center gap-3 text-[10px] text-muted-foreground shrink-0">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent1))" }} /> Recurring</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent2))" }} /> Variable</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {vendorDistribution && (
+        <div className="kf-card rounded-xl p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <Store className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+              Vendor Distribution
+            </h3>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+              vendorDistribution.concentrationLevel === "high"
+                ? "bg-red-500/10 text-red-400"
+                : vendorDistribution.concentrationLevel === "moderate"
+                  ? "bg-amber-500/10 text-amber-400"
+                  : "bg-green-500/10 text-green-400"
+            }`}>
+              {vendorDistribution.concentrationLevel === "high" ? "High concentration" : vendorDistribution.concentrationLevel === "moderate" ? "Moderate concentration" : "Healthy distribution"}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {vendorDistribution.topVendors.map((v, i) => (
+              <div key={v.name} className="flex items-center gap-3">
+                <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">{i + 1}</span>
+                <span className="text-xs font-medium w-28 truncate">{v.name}</span>
+                <div className="flex-1 h-2 rounded-full bg-muted/20 overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${v.percent}%` }}
+                    transition={{ duration: 0.5, delay: i * 0.08 }}
+                    className="h-full rounded-full"
+                    style={{ background: v.percent > 35 ? "hsl(var(--kf-error))" : v.percent > 20 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-accent2))" }}
+                  />
+                </div>
+                <span className="text-xs font-semibold w-24 text-right">{formatCurrency(v.total)}</span>
+                <span className="text-[10px] text-muted-foreground w-8 text-right">{v.percent}%</span>
+              </div>
+            ))}
+          </div>
+          {vendorDistribution.concentrationLevel !== "healthy" && (
+            <div className="bg-white/[0.03] rounded-lg p-3 flex items-start gap-2.5">
+              <Shield className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "hsl(var(--kf-warning))" }} />
+              <div>
+                <p className="text-xs font-medium">Diversification Recommendation</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Top 3 vendors account for {vendorDistribution.top3Pct}% of total spend.
+                  {vendorDistribution.concentrationLevel === "high"
+                    ? " Consider sourcing alternatives for your largest vendor to reduce supply-chain risk and create negotiation leverage."
+                    : " Monitor vendor share and establish backup suppliers for critical categories."
+                  }
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {costControlGuidance.length > 0 && (
+        <div className="kf-card rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border/40" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.06), hsl(var(--kf-accent2) / 0.06))" }}>
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <Brain className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+              AI Cost-Control Guidance
+            </h3>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Smart recommendations based on your spending patterns</p>
+          </div>
+          <div className="divide-y divide-border/20">
+            {costControlGuidance.map((tip, i) => {
+              const TipIcon = tip.icon;
+              return (
+                <motion.div
+                  key={tip.id}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className="px-4 py-3 hover:bg-white/[0.02] transition-colors"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="p-1.5 rounded-lg shrink-0 mt-0.5" style={{
+                      background: tip.impact === "high" ? "hsl(var(--kf-error) / 0.1)" : tip.impact === "medium" ? "hsl(var(--kf-warning) / 0.1)" : "hsl(var(--kf-info) / 0.1)",
+                    }}>
+                      <TipIcon className="w-3.5 h-3.5" style={{
+                        color: tip.impact === "high" ? "hsl(var(--kf-error))" : tip.impact === "medium" ? "hsl(var(--kf-warning))" : "hsl(var(--kf-info))",
+                      }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-xs font-semibold">{tip.title}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wider ${
+                          tip.impact === "high" ? "bg-red-500/10 text-red-400" :
+                          tip.impact === "medium" ? "bg-amber-500/10 text-amber-400" :
+                          "bg-blue-500/10 text-blue-400"
+                        }`}>{tip.impact}</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">{tip.description}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {insights.length === 0 ? (
         <div className="kf-card rounded-xl p-8 text-center">
           <div className="w-12 h-12 rounded-xl mx-auto mb-3 flex items-center justify-center" style={{ background: "hsl(var(--kf-success) / 0.1)" }}>
@@ -267,60 +603,74 @@ export function ExpenseInsightsTab({ expenses, categories, summary, vendors, bud
           <p className="text-xs text-muted-foreground">No spending warnings or actionable insights at this time. Keep tracking to stay informed.</p>
         </div>
       ) : (
-        <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
-          {insights.map((insight, i) => {
-            const style = TYPE_STYLES[insight.type];
-            const Icon = insight.icon;
-            return (
-              <motion.div
-                key={insight.id}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-                className={`kf-card rounded-xl border ${style.border} overflow-hidden`}
-              >
-                <div className="p-4 space-y-3" style={{ background: style.bg }}>
-                  <div className="flex items-start gap-3">
-                    <div className="p-1.5 rounded-lg shrink-0 mt-0.5" style={{ background: `${style.iconColor.replace(")", " / 0.15)")}` }}>
-                      <Icon className="w-4 h-4" style={{ color: style.iconColor }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: style.badge, color: style.iconColor }}>{style.badgeLabel}</span>
+        <>
+          <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
+            {visibleInsights.map((insight, i) => {
+              const style = TYPE_STYLES[insight.type];
+              const Icon = insight.icon;
+              return (
+                <motion.div
+                  key={insight.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className={`kf-card rounded-xl border ${style.border} overflow-hidden`}
+                >
+                  <div className="p-4 space-y-3" style={{ background: style.bg }}>
+                    <div className="flex items-start gap-3">
+                      <div className="p-1.5 rounded-lg shrink-0 mt-0.5" style={{ background: `${style.iconColor.replace(")", " / 0.15)")}` }}>
+                        <Icon className="w-4 h-4" style={{ color: style.iconColor }} />
                       </div>
-                      <h4 className="text-sm font-semibold mb-1">{insight.title}</h4>
-                      <p className="text-xs text-muted-foreground leading-relaxed">{insight.description}</p>
-                      {insight.detail && (
-                        <p className="text-[11px] text-muted-foreground/70 mt-1.5 italic">{insight.detail}</p>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: style.badge, color: style.iconColor }}>{style.badgeLabel}</span>
+                        </div>
+                        <h4 className="text-sm font-semibold mb-1">{insight.title}</h4>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{insight.description}</p>
+                        {insight.detail && (
+                          <p className="text-[11px] text-muted-foreground/70 mt-1.5 italic">{insight.detail}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      {insight.modules && insight.modules.length > 0 && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-muted-foreground/50">Affects:</span>
+                          {insight.modules.map(mod => (
+                            <span key={mod} className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-muted-foreground">{mod}</span>
+                          ))}
+                        </div>
+                      )}
+                      {insight.actionLabel && insight.actionTab && (
+                        <button
+                          onClick={() => onNavigate(insight.actionTab!)}
+                          className="flex items-center gap-1 text-[11px] font-medium transition-colors"
+                          style={{ color: style.iconColor }}
+                        >
+                          {insight.actionLabel}
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
                       )}
                     </div>
                   </div>
-
-                  <div className="flex items-center justify-between pt-1">
-                    {insight.modules && insight.modules.length > 0 && (
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-muted-foreground/50">Affects:</span>
-                        {insight.modules.map(mod => (
-                          <span key={mod} className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-muted-foreground">{mod}</span>
-                        ))}
-                      </div>
-                    )}
-                    {insight.actionLabel && insight.actionTab && (
-                      <button
-                        onClick={() => onNavigate(insight.actionTab!)}
-                        className="flex items-center gap-1 text-[11px] font-medium transition-colors"
-                        style={{ color: style.iconColor }}
-                      >
-                        {insight.actionLabel}
-                        <ArrowRight className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
+                </motion.div>
+              );
+            })}
+          </div>
+          {insights.length > 4 && (
+            <button
+              onClick={() => setShowAllInsights(!showAllInsights)}
+              className="w-full py-2 text-xs text-muted-foreground hover:text-white transition-colors flex items-center justify-center gap-1"
+            >
+              {showAllInsights ? (
+                <><ChevronUp className="w-3.5 h-3.5" /> Show less</>
+              ) : (
+                <><ChevronDown className="w-3.5 h-3.5" /> Show {insights.length - 4} more insight{insights.length - 4 > 1 ? "s" : ""}</>
+              )}
+            </button>
+          )}
+        </>
       )}
 
       <div className="kf-card rounded-xl p-4 space-y-3">

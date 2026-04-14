@@ -5,12 +5,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Pencil, Trash2, ArrowUpDown, Repeat, FileText, Receipt,
   CreditCard, Banknote, Smartphone, CheckCircle, AlertCircle,
-  Tag,
+  Tag, CheckSquare, Square, Layers,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoBadge } from "@/components/ui/info-badge";
-import { Expense, ExpenseCategory, PAYMENT_METHODS } from "@/lib/client";
+import { Expense, ExpenseCategory, PAYMENT_METHODS, updateExpense } from "@/lib/client";
 import { formatCurrency, formatDate } from "./expense-utils";
+import { toast } from "sonner";
 
 interface ExpenseListProps {
   expenses: Expense[];
@@ -28,6 +29,8 @@ interface ExpenseListProps {
   onDelete: (expenseId: string) => void;
   onViewDetail: (exp: Expense) => void;
   onAdd?: () => void;
+  businessId?: string | null;
+  onReload?: () => void;
 }
 
 const PAYMENT_ICONS: Record<string, typeof CreditCard> = {
@@ -51,9 +54,13 @@ export function ExpenseList({
   filterCategory, setFilterCategory, filterPayment, setFilterPayment,
   page, setPage, pageSize, setPageSize,
   onEdit, onDelete, onViewDetail, onAdd,
+  businessId, onReload,
 }: ExpenseListProps) {
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [inlineCatExpId, setInlineCatExpId] = useState<string | null>(null);
 
   const filteredExpenses = useMemo(() =>
     [...expenses].sort((a, b) => {
@@ -71,10 +78,65 @@ export function ExpenseList({
 
   const totalPages = Math.max(1, Math.ceil(totalExpenses / pageSize));
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === filteredExpenses.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredExpenses.map(e => e.id)));
+    }
+  };
+
+  const handleBulkCategorize = async () => {
+    if (!businessId || !bulkCategoryId || selectedIds.size === 0) return;
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map(id =>
+          updateExpense(businessId, id, { categoryId: bulkCategoryId })
+        )
+      );
+      toast.success(`${selectedIds.size} expense${selectedIds.size > 1 ? "s" : ""} categorized`);
+      setSelectedIds(new Set());
+      setBulkCategoryId("");
+      onReload?.();
+    } catch {
+      toast.error("Failed to bulk categorize");
+    }
+  };
+
+  const handleInlineCategory = async (expenseId: string, categoryId: string) => {
+    if (!businessId) return;
+    try {
+      await updateExpense(businessId, expenseId, { categoryId: categoryId || undefined });
+      toast.success("Category updated");
+      setInlineCatExpId(null);
+      onReload?.();
+    } catch {
+      toast.error("Failed to update category");
+    }
+  };
+
+  const uncategorizedInView = filteredExpenses.filter(e => !e.categoryId).length;
+
   return (
     <div className="kf-card rounded-xl overflow-hidden">
       <div className="p-4 border-b border-border/40 flex items-center justify-between flex-wrap gap-3">
-        <h3 className="text-sm font-semibold inline-flex items-center gap-1.5">All Expenses <span className="text-muted-foreground font-normal">({totalExpenses})</span> <InfoBadge title="Expense Tracking" body="Track all business expenses by category and payment method. Use filters to drill into specific types. Recurring expenses are marked with a repeat icon." side="right" iconSize={11} /></h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-semibold inline-flex items-center gap-1.5">All Expenses <span className="text-muted-foreground font-normal">({totalExpenses})</span> <InfoBadge title="Expense Tracking" body="Track all business expenses by category and payment method. Use filters to drill into specific types. Recurring expenses are marked with a repeat icon." side="right" iconSize={11} /></h3>
+          {uncategorizedInView > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: "hsl(var(--kf-warning) / 0.12)", color: "hsl(var(--kf-warning))" }}>
+              {uncategorizedInView} uncategorized
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="appearance-none bg-white/5 border border-white/10 rounded-lg pl-7 pr-8 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]">
             <option value="">All Categories</option>
@@ -88,6 +150,28 @@ export function ExpenseList({
           <button onClick={() => toggleSort("amount")} className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg border transition-colors ${sortField === "amount" ? "border-[hsl(var(--kf-accent1))] text-[hsl(var(--kf-accent1))]" : "border-white/10 text-muted-foreground hover:text-white"}`}>Amount <ArrowUpDown className="w-3 h-3" /></button>
         </div>
       </div>
+
+      {selectedIds.size > 0 && businessId && (
+        <div className="px-4 py-2.5 border-b border-border/40 flex items-center gap-3" style={{ background: "hsl(var(--kf-accent1) / 0.06)" }}>
+          <span className="text-xs font-medium" style={{ color: "hsl(var(--kf-accent1))" }}>{selectedIds.size} selected</span>
+          <select
+            value={bulkCategoryId}
+            onChange={e => setBulkCategoryId(e.target.value)}
+            className="bg-transparent border border-border/60 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
+          >
+            <option value="">Assign category...</option>
+            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button
+            onClick={handleBulkCategorize}
+            disabled={!bulkCategoryId}
+            className="kf-btn-primary px-3 py-1 rounded-lg text-xs font-medium disabled:opacity-40 flex items-center gap-1"
+          >
+            <Layers className="w-3 h-3" /> Apply
+          </button>
+          <button onClick={() => setSelectedIds(new Set())} className="text-xs text-muted-foreground hover:text-white ml-auto">Clear</button>
+        </div>
+      )}
 
       {filteredExpenses.length === 0 ? (
         expenses.length === 0 ? (
@@ -104,7 +188,15 @@ export function ExpenseList({
         )
       ) : (
         <div className="divide-y divide-border/30" role="table" aria-label="Expenses list">
-          <div className="hidden md:grid grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-3 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider" role="row">
+          <div className="hidden md:grid grid-cols-[auto_0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-3 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider" role="row">
+            <span className="w-6 flex items-center">
+              <button onClick={toggleAll} className="text-muted-foreground hover:text-white transition-colors">
+                {selectedIds.size === filteredExpenses.length && filteredExpenses.length > 0
+                  ? <CheckSquare className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  : <Square className="w-3.5 h-3.5" />
+                }
+              </button>
+            </span>
             <span role="columnheader">Date</span><span role="columnheader">Description</span><span role="columnheader">Vendor</span><span role="columnheader">Category</span><span role="columnheader">Method</span><span role="columnheader" className="text-right">Amount</span><span className="w-20" />
           </div>
           <AnimatePresence>
@@ -114,8 +206,18 @@ export function ExpenseList({
               const PayIcon = PAYMENT_ICONS[exp.paymentMethod || ""] || CreditCard;
               const hasReceipt = !!exp.receiptUrl;
               const hasTags = exp.tags && exp.tags.length > 0;
+              const isSelected = selectedIds.has(exp.id);
+              const showInlineCat = inlineCatExpId === exp.id;
               return (
-                <motion.div key={exp.id} role="row" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} className="grid grid-cols-1 md:grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-1 md:gap-3 px-4 py-2.5 hover:bg-white/[0.02] transition-colors group items-center cursor-pointer" onClick={() => onViewDetail(exp)}>
+                <motion.div key={exp.id} role="row" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} className={`grid grid-cols-1 md:grid-cols-[auto_0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-1 md:gap-3 px-4 py-2.5 hover:bg-white/[0.02] transition-colors group items-center cursor-pointer ${isSelected ? "bg-white/[0.03]" : ""}`} onClick={() => onViewDetail(exp)}>
+                  <span className="w-6 flex items-center">
+                    <button onClick={e => { e.stopPropagation(); toggleSelect(exp.id); }} className="text-muted-foreground hover:text-white transition-colors">
+                      {isSelected
+                        ? <CheckSquare className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                        : <Square className="w-3.5 h-3.5" />
+                      }
+                    </button>
+                  </span>
                   <span className="text-xs text-muted-foreground">{formatDate(exp.date)}</span>
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium truncate">{exp.description}</span>
@@ -144,13 +246,35 @@ export function ExpenseList({
                   </div>
                   <span className="text-xs text-muted-foreground truncate">{exp.vendor || <span className="opacity-40">---</span>}</span>
                   <span className="flex items-center gap-1.5 text-xs">
-                    {cat ? (
-                      <>
+                    {showInlineCat ? (
+                      <select
+                        autoFocus
+                        value={exp.categoryId || ""}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => { e.stopPropagation(); handleInlineCategory(exp.id, e.target.value); }}
+                        onBlur={() => setInlineCatExpId(null)}
+                        className="bg-card border border-border/60 rounded px-1 py-0.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))] w-full"
+                      >
+                        <option value="">None</option>
+                        {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    ) : cat ? (
+                      <button
+                        onClick={e => { e.stopPropagation(); setInlineCatExpId(exp.id); }}
+                        className="flex items-center gap-1.5 hover:opacity-70 transition-opacity"
+                        title="Click to change category"
+                      >
                         <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: cat.color || "#6366f1" }} />
                         <span className="truncate">{cat.name}</span>
-                      </>
+                      </button>
                     ) : (
-                      <span className="text-amber-400/60 text-[10px]">Uncategorized</span>
+                      <button
+                        onClick={e => { e.stopPropagation(); setInlineCatExpId(exp.id); }}
+                        className="text-amber-400/60 text-[10px] hover:text-amber-300 transition-colors"
+                        title="Click to assign category"
+                      >
+                        Uncategorized
+                      </button>
                     )}
                   </span>
                   <span className="flex items-center gap-1 text-xs text-muted-foreground">
