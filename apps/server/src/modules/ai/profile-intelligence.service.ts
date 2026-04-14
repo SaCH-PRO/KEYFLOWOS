@@ -221,7 +221,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
       this.logger.error(`Profile intelligence chat failed: ${(err as Error).message}`);
       const fallbackReply = "I'm having trouble processing that right now. Could you tell me a bit about what your business does?";
       state.messages.push({ role: 'assistant', content: fallbackReply });
-      return { reply: fallbackReply, state };
+      return { reply: fallbackReply, state, pendingExtractions: [], currentTopicUnlocks: null };
     }
   }
 
