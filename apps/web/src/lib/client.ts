@@ -1926,6 +1926,22 @@ export async function updatePlaybook(input: { businessId?: string; playbookId: s
   }
 }
 
+export async function testRunPlaybook(input: { businessId?: string; playbookId: string }): Promise<ApiResult<{ success: boolean; message?: string; error?: string }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ success: boolean; message?: string; error?: string }>({
+    path: `/automation/businesses/${encodeURIComponent(businessId)}/playbooks/${encodeURIComponent(input.playbookId)}/test-run`,
+    body: {},
+  });
+}
+
+export async function aiGenerateFlow(input: { businessId?: string; prompt: string }): Promise<ApiResult<{ success: boolean; flow?: { name: string; triggerEvent: string; actions: { type: string; config?: Record<string, string> }[]; conditions: string[]; reasoning: string }; error?: string }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ success: boolean; flow?: { name: string; triggerEvent: string; actions: { type: string; config?: Record<string, string> }[]; conditions: string[]; reasoning: string }; error?: string }>({
+    path: `/automation/businesses/${encodeURIComponent(businessId)}/ai/generate-flow`,
+    body: { prompt: input.prompt },
+  });
+}
+
 export async function getCalendarAuthUrl(businessId?: string) {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(

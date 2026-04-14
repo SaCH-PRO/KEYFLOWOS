@@ -4,9 +4,9 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   Clock, Zap, RefreshCw, AlertTriangle, CheckCircle, Info, Search,
   SkipForward, ChevronDown, ChevronRight, FileText, ExternalLink,
-  Workflow,
+  Workflow, RotateCcw,
 } from "lucide-react";
-import { fetchActivityFeed, ActivityItem } from "@/lib/client";
+import { fetchActivityFeed, testRunPlaybook, ActivityItem } from "@/lib/client";
 
 const TONE_STYLES: Record<string, { icon: typeof Zap; color: string; bg: string; label: string }> = {
   success: { icon: CheckCircle, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Success" },
@@ -36,9 +36,10 @@ const AUTOMATION_MODULES = ["automation", "agent"];
 
 interface ExecutionLogProps {
   businessId: string | null;
+  onExecutionStatsChange?: (stats: { total: number; success: number; failed: number; skipped: number; successRate: number }) => void;
 }
 
-export function ExecutionLog({ businessId }: ExecutionLogProps) {
+export function ExecutionLog({ businessId, onExecutionStatsChange }: ExecutionLogProps) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,6 +47,7 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all");
   const [timeFilter, setTimeFilter] = useState<TimeFilterKey>("all");
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -82,8 +84,25 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
     const success = items.filter((i) => i.tone === "success" || i.action === "executed").length;
     const failed = items.filter((i) => i.tone === "error" || i.action === "failed").length;
     const skipped = items.filter((i) => i.action === "skipped").length;
-    return { total, success, failed, skipped };
+    const successRate = total > 0 ? Math.round((success / total) * 100) : 0;
+    return { total, success, failed, skipped, successRate };
   }, [items]);
+
+  useEffect(() => {
+    if (!loading && onExecutionStatsChange) {
+      onExecutionStatsChange(stats);
+    }
+  }, [stats, loading, onExecutionStatsChange]);
+
+  async function handleRetry(item: ActivityItem) {
+    if (!businessId || !item.entityId) return;
+    setRetryingId(item.id);
+    const res = await testRunPlaybook({ businessId, playbookId: item.entityId });
+    setRetryingId(null);
+    if (res.data?.success) {
+      await load();
+    }
+  }
 
   const filteredItems = useMemo(() => {
     let result = items;
@@ -137,11 +156,12 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
       </div>
 
       {!loading && items.length > 0 && (
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-5 gap-2">
           <MiniStat label="Total Runs" value={stats.total} color="hsl(var(--foreground))" />
           <MiniStat label="Success" value={stats.success} color="hsl(var(--kf-success))" />
           <MiniStat label="Failed" value={stats.failed} color="hsl(var(--kf-error))" />
           <MiniStat label="Skipped" value={stats.skipped} color="hsl(var(--kf-warning))" />
+          <MiniStat label="Success Rate" value={`${stats.successRate}%`} color={stats.successRate >= 80 ? "hsl(var(--kf-success))" : stats.successRate >= 50 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))"} />
         </div>
       )}
 
@@ -343,8 +363,19 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                         </div>
                       )}
 
-                      {item.entityId && (
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {(item.tone === "error" || item.action === "failed") && item.entityId && (
+                          <button
+                            className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[32px]"
+                            style={{ background: "hsl(var(--kf-accent1) / 0.15)", color: "hsl(var(--kf-accent1))" }}
+                            onClick={() => handleRetry(item)}
+                            disabled={retryingId === item.id}
+                          >
+                            <RotateCcw className={`w-3 h-3 ${retryingId === item.id ? "animate-spin" : ""}`} />
+                            {retryingId === item.id ? "Retrying..." : "Retry Flow"}
+                          </button>
+                        )}
+                        {item.entityId && (
                           <button
                             className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[32px]"
                             style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}
@@ -364,19 +395,19 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                             <ExternalLink className="w-3 h-3" />
                             Open Related Record
                           </button>
-                          <button
-                            className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[32px]"
-                            style={{ background: "hsl(var(--muted) / 0.5)", color: "hsl(var(--muted-foreground))" }}
-                            onClick={() => {
-                              navigator.clipboard.writeText(item.id).catch(() => {});
-                            }}
-                            title="Copy execution run ID for debugging"
-                          >
-                            <FileText className="w-3 h-3" />
-                            Copy Run ID
-                          </button>
-                        </div>
-                      )}
+                        )}
+                        <button
+                          className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[32px]"
+                          style={{ background: "hsl(var(--muted) / 0.5)", color: "hsl(var(--muted-foreground))" }}
+                          onClick={() => {
+                            navigator.clipboard.writeText(item.id).catch(() => {});
+                          }}
+                          title="Copy execution run ID for debugging"
+                        >
+                          <FileText className="w-3 h-3" />
+                          Copy Run ID
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -389,7 +420,7 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
   );
 }
 
-function MiniStat({ label, value, color }: { label: string; value: number; color: string }) {
+function MiniStat({ label, value, color }: { label: string; value: number | string; color: string }) {
   return (
     <div className="rounded-lg px-3 py-2 text-center" style={{ background: `${color}08`, border: `1px solid ${color}15` }}>
       <div className="text-lg font-bold" style={{ color }}>{value}</div>
