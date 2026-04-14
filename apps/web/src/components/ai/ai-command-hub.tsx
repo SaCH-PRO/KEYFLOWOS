@@ -94,7 +94,9 @@ function SuggestionCard({
   const Icon = SUGGESTION_ICON_MAP[suggestion.type] || Sparkles;
 
   const handleAction = () => {
-    if (suggestion.actionKey && onAction) {
+    if (suggestion.actionKey?.startsWith("tool:")) {
+      onExecute();
+    } else if (suggestion.actionKey && onAction) {
       onAction(suggestion.actionKey);
       onDismiss();
     } else {
