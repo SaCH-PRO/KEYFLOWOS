@@ -141,7 +141,7 @@ export class StrategicIntelligenceService {
       }),
       this.db.project.findMany({
         where: { businessId, deletedAt: null },
-        select: { id: true, name: true, budget: true, status: true, contactId: true },
+        select: { id: true, name: true, status: true, priority: true, contactId: true, dueDate: true },
         take: 50,
       }),
       this.db.service.findMany({
@@ -176,7 +176,7 @@ EXPENSE CATEGORIES:
 ${this.summarizeExpenseCategories(expenses)}
 
 PROJECTS (${projects.length}):
-${projects.slice(0, 10).map(p => `  ${p.name} — status: ${p.status}, budget: $${p.budget ?? 0}`).join('\n')}
+${projects.slice(0, 10).map(p => `  ${p.name} — status: ${p.status}, priority: ${p.priority ?? 'NORMAL'}, due: ${p.dueDate ? new Date(p.dueDate).toISOString().split('T')[0] : 'no date'}`).join('\n')}
 
 SERVICES CATALOG (${services.length}):
 ${services.slice(0, 10).map(s => `  ${s.name} — listed at $${s.price}, ${s.duration}min`).join('\n')}`;
@@ -222,7 +222,7 @@ ${services.slice(0, 10).map(s => `  ${s.name} — listed at $${s.price}, ${s.dur
     const [services, products, invoiceItems, bookings] = await Promise.all([
       this.db.service.findMany({
         where: { businessId, deletedAt: null },
-        select: { id: true, name: true, price: true, duration: true, category: true },
+        select: { id: true, name: true, price: true, duration: true, description: true },
       }),
       this.db.product.findMany({
         where: { businessId, deletedAt: null, isActive: true },
@@ -255,7 +255,7 @@ ${services.slice(0, 10).map(s => `  ${s.name} — listed at $${s.price}, ${s.dur
 SERVICES (${services.length}):
 ${services.map(s => {
   const hourlyRate = s.duration > 0 ? (Number(s.price) / (s.duration / 60)).toFixed(0) : 'N/A';
-  return `  ${s.name} | $${s.price} | ${s.duration}min | Effective hourly: $${hourlyRate}`;
+  return `  ${s.name} | $${s.price} | ${s.duration}min | Effective hourly: $${hourlyRate}${s.description ? ` | ${s.description.slice(0, 50)}` : ''}`;
 }).join('\n')}
 
 PRODUCTS (${products.length}):
@@ -729,6 +729,94 @@ BUSINESS MOMENTUM: ${snapshot.momentumScore}/100`;
         weeklyGoal: '',
       };
     }
+  }
+
+  async getStrategicActions(businessId: string): Promise<Array<{
+    type: string;
+    title: string;
+    description: string;
+    priority: 'high' | 'medium' | 'low';
+    category: 'revenue' | 'risk' | 'opportunity' | 'operational';
+    estimatedValue?: number;
+  }>> {
+    const dashboard = await this.getStrategicDashboard(businessId);
+    const actions: Array<{
+      type: string;
+      title: string;
+      description: string;
+      priority: 'high' | 'medium' | 'low';
+      category: 'revenue' | 'risk' | 'opportunity' | 'operational';
+      estimatedValue?: number;
+    }> = [];
+
+    if (dashboard.overdueInvoices > 0) {
+      actions.push({
+        type: 'collect_overdue',
+        title: `Collect ${dashboard.overdueInvoices} overdue invoices`,
+        description: `$${dashboard.overdueAmount.toFixed(0)} TTD at risk across ${dashboard.overdueInvoices} overdue invoices. Follow up today.`,
+        priority: 'high',
+        category: 'revenue',
+        estimatedValue: dashboard.overdueAmount,
+      });
+    }
+
+    if (dashboard.pendingQuotes > 0) {
+      actions.push({
+        type: 'convert_quotes',
+        title: `Follow up on ${dashboard.pendingQuotes} pending quotes`,
+        description: `$${dashboard.pendingQuoteValue.toFixed(0)} TTD in pending quotes. Convert to revenue.`,
+        priority: dashboard.pendingQuoteValue > dashboard.monthlyRevenue * 0.2 ? 'high' : 'medium',
+        category: 'opportunity',
+        estimatedValue: dashboard.pendingQuoteValue,
+      });
+    }
+
+    if (dashboard.staleLeads > 0) {
+      actions.push({
+        type: 're_engage_leads',
+        title: `Re-engage ${dashboard.staleLeads} stale leads`,
+        description: `${dashboard.staleLeads} leads have gone cold (30+ days). Send a check-in message.`,
+        priority: dashboard.staleLeads > 10 ? 'high' : 'medium',
+        category: 'opportunity',
+      });
+    }
+
+    if (dashboard.overdueTaskCount > 0) {
+      actions.push({
+        type: 'clear_overdue_tasks',
+        title: `Clear ${dashboard.overdueTaskCount} overdue project tasks`,
+        description: `${dashboard.overdueTaskCount} tasks across ${dashboard.activeProjects} projects are overdue. Review and update.`,
+        priority: dashboard.overdueTaskCount > 5 ? 'high' : 'medium',
+        category: 'operational',
+      });
+    }
+
+    if (dashboard.momentumScore < 40) {
+      actions.push({
+        type: 'boost_momentum',
+        title: 'Business momentum is low',
+        description: `Momentum score: ${dashboard.momentumScore}/100. Focus on revenue-generating activities and client engagement.`,
+        priority: 'high',
+        category: 'risk',
+      });
+    }
+
+    if (dashboard.utilizationRate < 0.3 && dashboard.upcomingBookings < 3) {
+      actions.push({
+        type: 'fill_schedule',
+        title: 'Schedule is underutilized',
+        description: `Utilization at ${(dashboard.utilizationRate * 100).toFixed(0)}% with only ${dashboard.upcomingBookings} upcoming bookings. Promote availability.`,
+        priority: 'medium',
+        category: 'opportunity',
+      });
+    }
+
+    actions.sort((a, b) => {
+      const prio = { high: 0, medium: 1, low: 2 };
+      return prio[a.priority] - prio[b.priority];
+    });
+
+    return actions;
   }
 
   async getStrategicDashboard(businessId: string) {

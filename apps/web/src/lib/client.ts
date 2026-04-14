@@ -4285,6 +4285,19 @@ export async function fetchWeeklyPlan(businessId: string): Promise<ApiResult<Wee
   return apiGetSimple<WeeklyPlan>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/weekly-plan`);
 }
 
+export interface StrategicAction {
+  type: string;
+  title: string;
+  description: string;
+  priority: 'high' | 'medium' | 'low';
+  category: 'revenue' | 'risk' | 'opportunity' | 'operational';
+  estimatedValue?: number;
+}
+
+export async function fetchStrategicActions(businessId: string): Promise<ApiResult<{ actions: StrategicAction[] }>> {
+  return apiGetSimple<{ actions: StrategicAction[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/actions`);
+}
+
 // ---
 // AI USAGE & BILLING
 // ---
