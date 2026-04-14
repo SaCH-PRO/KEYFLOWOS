@@ -301,7 +301,8 @@ export class IdentityController {
     return { subProfile: subProfile, data };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('team', 'read')
   @Get('businesses/:businessId/team')
   listTeamMembers(@Param('businessId') businessId: string) {
     return this.identity.listTeamMembers(businessId);
