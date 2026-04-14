@@ -40,6 +40,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
       type: "warning",
       title: `${overdueTasks.length} Overdue Task${overdueTasks.length > 1 ? "s" : ""}`,
       description: "Review and reschedule overdue tasks to keep delivery on track.",
+      explanation: "Tasks past their due date increase project risk and may delay dependent work.",
       priority: "high",
       actionLabel: "Review tasks",
       actionKey: "switch_tab:projects",
@@ -56,6 +57,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
       type: "warning",
       title: `${blockedProjects.length} Blocked/Waiting Project${blockedProjects.length > 1 ? "s" : ""}`,
       description: "Projects are stalled. Review blockers or follow up with clients to unblock progress.",
+      explanation: "Blocked projects consume resources without advancing. Clearing blockers early prevents cascading delays.",
       priority: "high",
       actionLabel: "Review projects",
       actionKey: "switch_tab:projects",
@@ -85,6 +87,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
       type: "insight",
       title: "Low-Progress Projects Detected",
       description: `${stuckProjects.length} project${stuckProjects.length > 1 ? "s have" : " has"} less than 30% progress. Consider breaking work into smaller tasks or reassessing scope.`,
+      explanation: "Projects below 30% completion may need scope re-evaluation or additional task decomposition.",
       priority: "medium",
       actionLabel: "Review",
       actionKey: "switch_tab:projects",
@@ -99,7 +102,7 @@ const projectTools: AiTool[] = [
     id: "project-plan",
     name: "Generate Project Plan",
     description: "AI creates a task breakdown, milestones, and timeline for a new project",
-    icon: "📋",
+    icon: "plan",
     category: "generate",
     requiresSelection: false,
     creditCost: 2,
@@ -109,7 +112,7 @@ const projectTools: AiTool[] = [
     id: "task-prioritize",
     name: "Prioritize Tasks",
     description: "AI analyzes dependencies and urgency to recommend task priority order",
-    icon: "🎯",
+    icon: "prioritize",
     category: "optimize",
     requiresSelection: false,
     creditCost: 1,
@@ -119,7 +122,7 @@ const projectTools: AiTool[] = [
     id: "risk-assess",
     name: "Assess Project Risk",
     description: "Evaluate delivery risk across all projects based on blockers, overdue tasks, and timelines",
-    icon: "⚠️",
+    icon: "risk",
     category: "detect",
     requiresSelection: false,
     creditCost: 1,
@@ -129,7 +132,7 @@ const projectTools: AiTool[] = [
     id: "bottleneck-detect",
     name: "Detect Bottlenecks",
     description: "Identify workflow bottlenecks and resource constraints across active projects",
-    icon: "🔍",
+    icon: "bottleneck",
     category: "detect",
     requiresSelection: false,
     creditCost: 1,
@@ -139,7 +142,7 @@ const projectTools: AiTool[] = [
     id: "client-update",
     name: "Draft Client Update",
     description: "Generate a client-facing progress update based on project status and completed tasks",
-    icon: "📧",
+    icon: "update",
     category: "generate",
     requiresSelection: false,
     creditCost: 2,
@@ -149,7 +152,7 @@ const projectTools: AiTool[] = [
     id: "automation-suggest",
     name: "Suggest Project Flows",
     description: "Recommend automation flows based on your project patterns and delivery stages",
-    icon: "⚡",
+    icon: "automate",
     category: "automate",
     requiresSelection: false,
     creditCost: 1,
@@ -157,27 +160,48 @@ const projectTools: AiTool[] = [
   },
 ];
 
-export function useProjectsAiHub(
-  businessId: string | null,
-  customData?: ProjectCustomData,
-) {
-  const context: ModuleContext = useMemo(() => ({
-    businessId: businessId ?? "",
-    customData: customData as Record<string, unknown>,
-  }), [businessId, customData]);
+export function useProjectsAiHub() {
+  const tools = useMemo(() => projectTools, []);
 
-  const config = useMemo(() => ({
+  const ai = useModuleAi({
     moduleId: "projects",
     moduleName: "Projects",
     generateSuggestions: generateProjectSuggestions,
-    tools: projectTools,
-  }), []);
+    tools,
+    executeAction: async (actionKey, context) => {
+      if (actionKey.startsWith("tool:")) {
+        const toolId = actionKey.replace("tool:", "");
+        const tool = tools.find((t) => t.id === toolId);
+        if (tool) await tool.execute(context);
+      }
+    },
+  });
 
-  const ai = useModuleAi(config);
+  const updateProjectsContext = useCallback((params: {
+    businessId: string;
+    activeView?: string;
+    selectedItemId?: string;
+    projects?: unknown[];
+    tasks?: unknown[];
+    automations?: unknown[];
+  }) => {
+    ai.updateContext({
+      businessId: params.businessId,
+      activeView: params.activeView,
+      selectedItemId: params.selectedItemId,
+      customData: {
+        projects: params.projects,
+        tasks: params.tasks,
+        automations: params.automations,
+      },
+    });
+  }, [ai.updateContext]);
 
   const handleAction = useCallback((actionKey: string) => {
     console.log("[ProjectsAI] action:", actionKey);
   }, []);
 
-  return { ai, handleAction };
+  return { ...ai, updateProjectsContext, handleAction };
 }
+
+export type UseProjectsAiHubReturn = ReturnType<typeof useProjectsAiHub>;

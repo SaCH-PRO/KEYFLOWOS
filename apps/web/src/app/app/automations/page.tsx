@@ -21,6 +21,7 @@ import type { AutomationTemplate } from "./components/automation-constants";
 import { COVERAGE_MODULES } from "./components/automation-constants";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { Playbook, CrossModuleWorkflow, fetchPlaybooks, fetchCrossModuleWorkflows, fetchActivityFeed } from "@/lib/client";
+import { useAutomationsAiHub } from "./hooks/use-automations-ai-hub";
 
 const TABS = [
   { key: "flows", label: "My Flows", icon: Workflow, tooltip: "Active flows and playbooks running in your business." },
@@ -38,6 +39,7 @@ export default function FlowsPage() {
   const [loading, setLoading] = useState(true);
   const [showUpgradeBanner, setShowUpgradeBanner] = useState(true);
   const [executionStats, setExecutionStats] = useState({ total: 0, success: 0, failed: 0, skipped: 0, successRate: 0 });
+  const { updateAutomationsContext } = useAutomationsAiHub();
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -75,6 +77,24 @@ export default function FlowsPage() {
     };
     void load();
   }, [businessId]);
+
+  useEffect(() => {
+    if (businessId && !loading) {
+      const active = playbooks.filter((p) => p.enabled).length + workflows.filter((w) => w.enabled).length;
+      const paused = playbooks.filter((p) => !p.enabled).length + workflows.filter((w) => !w.enabled).length;
+      const totalRuns = playbooks.reduce((s, p) => s + (p.runCount ?? 0), 0) + workflows.reduce((s, w) => s + w.runCount, 0);
+      updateAutomationsContext({
+        businessId,
+        activeView: activeTab,
+        playbooks,
+        workflows,
+        activeCount: active,
+        pausedCount: paused,
+        totalRuns,
+        successRate: executionStats.successRate,
+      });
+    }
+  }, [businessId, loading, activeTab, playbooks, workflows, executionStats.successRate, updateAutomationsContext]);
 
   function handleTemplateSelect(template: AutomationTemplate) {
     setSelectedTemplate(template);

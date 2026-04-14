@@ -93,15 +93,21 @@ export default function ExpensesPage() {
     }
   }, [showModal, editingExpense]);
 
-  const aiCustomData = useMemo(() => ({
-    expenses: d.expenses,
-    totalExpenses: d.totalExpenses,
-    categories: d.categories,
-    summary: d.summary as Record<string, unknown> | null,
-    budgets: d.budgets,
-    vendors: d.vendors,
-  }), [d.expenses, d.totalExpenses, d.categories, d.summary, d.budgets, d.vendors]);
-  useExpensesAiHub(d.businessId, aiCustomData);
+  const { updateExpensesContext } = useExpensesAiHub();
+
+  useEffect(() => {
+    if (d.businessId) {
+      updateExpensesContext({
+        businessId: d.businessId,
+        activeView: activeTab,
+        expenses: d.expenses,
+        categories: d.categories,
+        budgets: d.budgets,
+        vendors: d.vendors,
+        summary: d.summary as Record<string, unknown> | null,
+      });
+    }
+  }, [d.businessId, activeTab, d.expenses, d.categories, d.budgets, d.vendors, d.summary, updateExpensesContext]);
 
   const openEditModal = (exp: Expense) => { setEditingExpense(exp); setShowModal(true); };
   const openAddModal = () => { setEditingExpense(null); setShowModal(true); };

@@ -38,7 +38,7 @@ export default function ProjectsPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [prefillContactId, setPrefillContactId] = useState<string | undefined>(undefined);
   const projectTaskIdRef = useRef<string | null>(null);
-  useProjectsAiHub(businessId);
+  const { updateProjectsContext } = useProjectsAiHub();
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -93,6 +93,17 @@ export default function ProjectsPage() {
   }, [businessId]);
 
   useEffect(() => { void loadProjects(); }, [loadProjects]);
+
+  useEffect(() => {
+    if (businessId) {
+      updateProjectsContext({
+        businessId,
+        activeView: activeTab,
+        selectedItemId: selectedProjectId ?? undefined,
+        projects,
+      });
+    }
+  }, [businessId, activeTab, selectedProjectId, projects, updateProjectsContext]);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId) ?? null,
