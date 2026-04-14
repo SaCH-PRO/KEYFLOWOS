@@ -12,6 +12,7 @@ import { WorkspaceError } from "@/components/ui/workspace-error";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { STORE_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
+import { AiHubTrigger, AiCommandHub } from "@/components/ai/ai-command-hub";
 import { useStoreData } from "./hooks/use-store-data";
 import { StoreSkeleton } from "./components/store-skeleton";
 import { StoreHeaderActions } from "./components/store-header-actions";
@@ -340,6 +341,13 @@ export default function StorePage() {
       </div>
 
       <PageGuide moduleKey="store" walkthroughSteps={STORE_WALKTHROUGH} />
+
+      <AiHubTrigger ai={ai.aiHook} moduleName="Store" />
+      <AnimatePresence>
+        {ai.aiHook.panelOpen && (
+          <AiCommandHub ai={ai.aiHook} moduleName="Store" />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

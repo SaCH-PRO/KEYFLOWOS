@@ -93,7 +93,7 @@ export default function ExpensesPage() {
     }
   }, [showModal, editingExpense]);
 
-  const { updateExpensesContext } = useExpensesAiHub();
+  const { aiHook: expensesAi, updateExpensesContext, handleAction: handleExpensesAiAction } = useExpensesAiHub();
 
   useEffect(() => {
     if (d.businessId) {
@@ -221,6 +221,7 @@ export default function ExpensesPage() {
       actionLabel="Add Expense"
       onAction={openAddModal}
       actionDataAttr="expenses-add"
+      ai={{ hook: expensesAi, moduleName: "Expenses", onAction: handleExpensesAiAction }}
       headerRight={
         <button onClick={handleExport} className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors">
           <Download className="w-4 h-4" /> Export CSV

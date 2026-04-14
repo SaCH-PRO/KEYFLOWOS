@@ -31,6 +31,7 @@ import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
+import { AiHubTrigger, AiCommandHub } from "@/components/ai/ai-command-hub";
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -252,6 +253,13 @@ export default function ContactsPage() {
         moduleKey="crm"
         walkthroughSteps={CRM_WALKTHROUGH}
       />
+
+      <AiHubTrigger ai={crmAi.aiHook} moduleName="Clients" />
+      <AnimatePresence>
+        {crmAi.aiHook.panelOpen && (
+          <AiCommandHub ai={crmAi.aiHook} moduleName="Clients" />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

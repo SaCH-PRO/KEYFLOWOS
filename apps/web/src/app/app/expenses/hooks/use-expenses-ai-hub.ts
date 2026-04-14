@@ -245,7 +245,7 @@ export function useExpensesAiHub() {
     console.log("[ExpensesAI] action:", actionKey);
   }, []);
 
-  return { ...ai, updateExpensesContext, handleAction };
+  return { aiHook: ai, updateExpensesContext, handleAction };
 }
 
 export type UseExpensesAiHubReturn = ReturnType<typeof useExpensesAiHub>;

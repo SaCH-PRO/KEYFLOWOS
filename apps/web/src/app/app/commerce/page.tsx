@@ -352,6 +352,7 @@ export default function CommercePage() {
       activeTab={mode}
       onTabChange={(key) => setMode(key as RevenueMode)}
       tabLayoutId="commerce-mode-tabs"
+      ai={{ hook: commerceAi.aiHook, moduleName: "Revenue" }}
       actionLabel="+ New"
       actionIcon={Plus}
       onAction={composer.handleNewItem}

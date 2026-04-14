@@ -471,6 +471,7 @@ export default function BookingsPage() {
         activeTab={tab}
         onTabChange={handleTabChange}
         tabLayoutId="bookings-tab"
+        ai={{ hook: ai.aiHook, moduleName: "Bookings" }}
       >
         <BookingsSkeleton />
       </WorkspaceShell>
@@ -486,6 +487,7 @@ export default function BookingsPage() {
       activeTab={tab}
       onTabChange={handleTabChange}
       tabLayoutId="bookings-tab"
+      ai={{ hook: ai.aiHook, moduleName: "Bookings" }}
       enableSwipe
       enableSlideAnimation
       headerRight={

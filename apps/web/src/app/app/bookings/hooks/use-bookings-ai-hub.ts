@@ -167,5 +167,5 @@ export function useBookingsAiHub() {
     },
   });
 
-  return ai;
+  return { ...ai, aiHook: ai };
 }

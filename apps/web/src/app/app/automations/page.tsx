@@ -39,7 +39,7 @@ export default function FlowsPage() {
   const [loading, setLoading] = useState(true);
   const [showUpgradeBanner, setShowUpgradeBanner] = useState(true);
   const [executionStats, setExecutionStats] = useState({ total: 0, success: 0, failed: 0, skipped: 0, successRate: 0 });
-  const { updateAutomationsContext } = useAutomationsAiHub();
+  const { aiHook: automationsAi, updateAutomationsContext } = useAutomationsAiHub();
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -230,6 +230,7 @@ export default function FlowsPage() {
       activeTab={activeTab}
       onTabChange={setActiveTab}
       tabLayoutId="flows-tab"
+      ai={{ hook: automationsAi, moduleName: "Flows" }}
       banners={
         <>
           <ResumePrompt module="automations" />

@@ -201,7 +201,7 @@ export function useProjectsAiHub() {
     console.log("[ProjectsAI] action:", actionKey);
   }, []);
 
-  return { ...ai, updateProjectsContext, handleAction };
+  return { aiHook: ai, updateProjectsContext, handleAction };
 }
 
 export type UseProjectsAiHubReturn = ReturnType<typeof useProjectsAiHub>;

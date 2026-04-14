@@ -25,6 +25,7 @@ export function NotesTab({ notes, onNotesChange }: NotesTabProps) {
     <div className="space-y-4">
       <div className="rounded-xl border border-primary/30 bg-card p-3 space-y-2">
         <textarea
+          data-note-input
           placeholder="Add a project note..."
           value={newNote}
           onChange={(e) => setNewNote(e.target.value)}
@@ -48,6 +49,16 @@ export function NotesTab({ notes, onNotesChange }: NotesTabProps) {
           <MessageSquare className="w-5 h-5 mx-auto mb-2 text-muted-foreground" />
           <p className="text-sm font-medium">No notes yet</p>
           <p className="text-xs text-muted-foreground mt-1">Add meeting notes, client feedback, or internal reminders.</p>
+          <button
+            onClick={() => {
+              const input = document.querySelector<HTMLTextAreaElement>('[data-note-input]');
+              if (input) input.focus();
+            }}
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
+          >
+            <Plus className="w-3 h-3" />
+            Add a note
+          </button>
         </div>
       )}
 

@@ -109,10 +109,10 @@ export function TimelineTab({ project, notes, milestones = [] }: TimelineTabProp
 
   if (events.length === 0 && milestones.length === 0) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-8 rounded-xl border border-dashed border-border/40">
         <Calendar className="w-5 h-5 mx-auto mb-2 text-muted-foreground" />
         <p className="text-sm font-medium">No activity yet</p>
-        <p className="text-xs text-muted-foreground mt-1">Events will appear here as the project progresses.</p>
+        <p className="text-xs text-muted-foreground mt-1">Events will appear here as the project progresses — milestones, stage changes, and tasks completed.</p>
       </div>
     );
   }

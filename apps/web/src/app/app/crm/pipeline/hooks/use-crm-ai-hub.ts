@@ -326,6 +326,7 @@ export function useCrmAiHub() {
 
   return {
     ...ai,
+    aiHook: ai,
     updateCrmContext,
     parseActionKey,
   };
