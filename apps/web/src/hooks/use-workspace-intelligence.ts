@@ -45,7 +45,7 @@ export function useWorkspaceIntelligence({ businessId, module, enabled = true }:
 
   useEffect(() => {
     fetchedRef.current = false;
-  }, [module]);
+  }, [module, businessId]);
 
   const dismiss = useCallback((id: string) => {
     setDismissed((prev) => new Set(prev).add(id));
