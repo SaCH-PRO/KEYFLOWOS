@@ -457,19 +457,18 @@ export class IdentityService {
 
   async logTeamActivity(businessId: string, userId: string, module: string, action: string, entityType?: string, entityId?: string, title?: string, detail?: string, meta?: Record<string, unknown>) {
     try {
-      await this.prisma.client.teamActivityLog.create({
-        data: {
-          businessId,
-          userId,
-          module,
-          action,
-          entityType: entityType ?? null,
-          entityId: entityId ?? null,
-          title: title ?? action,
-          detail: detail ?? null,
-          meta: meta ?? null,
-        },
-      });
+      const data: Record<string, unknown> = {
+        businessId,
+        userId,
+        module,
+        action,
+        title: title ?? action,
+      };
+      if (entityType !== undefined) data.entityType = entityType;
+      if (entityId !== undefined) data.entityId = entityId;
+      if (detail !== undefined) data.detail = detail;
+      if (meta !== undefined) data.meta = meta;
+      await this.prisma.client.teamActivityLog.create({ data: data as any });
     } catch (e) {
       this.logger.warn(`Failed to log team activity: ${e instanceof Error ? e.message : e}`);
     }

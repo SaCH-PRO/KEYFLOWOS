@@ -6,6 +6,7 @@ import { RecurringInvoiceService } from './recurring-invoice.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CreateProductDto } from './dto/create-product.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
@@ -52,7 +53,8 @@ export class CommerceController {
     return this.commerce.listPublicProducts(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/products')
   listProducts(
     @Param('businessId') businessId: string,
@@ -66,7 +68,8 @@ export class CommerceController {
     );
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
+  @RequireModuleScope('revenue', 'write')
   @RequirePlanLimit('products')
   @Post('businesses/:businessId/products')
   createProduct(
@@ -76,7 +79,8 @@ export class CommerceController {
     return this.commerce.createProduct({ businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/products/bulk')
   bulkUpdateProducts(
     @Param('businessId') businessId: string,
@@ -85,7 +89,8 @@ export class CommerceController {
     return this.commerce.bulkUpdateProducts(businessId, body.ids, body.action);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/products/:productId')
   updateProduct(
     @Param('businessId') businessId: string,
@@ -95,7 +100,8 @@ export class CommerceController {
     return this.commerce.updateProduct({ businessId, productId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/products/:productId')
   deleteProduct(
     @Param('businessId') businessId: string,
