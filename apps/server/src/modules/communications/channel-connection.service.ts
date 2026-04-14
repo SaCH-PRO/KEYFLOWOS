@@ -132,7 +132,7 @@ export class ChannelConnectionService {
           displayName: data.displayName ?? existing.displayName,
           avatarUrl: data.avatarUrl ?? existing.avatarUrl,
           capabilities: data.capabilities ?? existing.capabilities,
-          destinationMeta: data.destinationMeta ?? existing.destinationMeta,
+          destinationMeta: (data.destinationMeta ?? existing.destinationMeta) ?? undefined,
         },
       });
     }

@@ -223,11 +223,12 @@ export class FlowOrchestratorService {
       }
 
       const toolCalls: FlowToolCall[] = assistantMessage.tool_calls.map((tc) => {
-        const tool = getToolByName(tc.function.name);
+        const fn = (tc as any).function;
+        const tool = getToolByName(fn.name);
         return {
           id: tc.id,
-          name: tc.function.name,
-          arguments: JSON.parse(tc.function.arguments || '{}'),
+          name: fn.name,
+          arguments: JSON.parse(fn.arguments || '{}'),
           riskLevel: tool?.riskLevel ?? 'low',
         };
       });
@@ -428,13 +429,16 @@ export class FlowOrchestratorService {
       case 'commerce_create_invoice': {
         const items = args.items ?? [];
         const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0);
+        const invoiceCount = await this.prisma.client.invoice.count({ where: { businessId } });
+        const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, '0')}`;
         const invoice = await this.prisma.client.invoice.create({
           data: {
             businessId,
             contactId: args.contactId ?? null,
             items: items,
+            invoiceNumber,
             subtotal,
-            tax: 0,
+            taxAmount: 0,
             total: subtotal,
             currency: args.currency ?? 'TTD',
             dueDate: args.dueDate ? new Date(args.dueDate) : null,
@@ -471,13 +475,16 @@ export class FlowOrchestratorService {
       case 'commerce_create_quote': {
         const items = args.items ?? [];
         const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0);
+        const quoteCount = await this.prisma.client.quote.count({ where: { businessId } });
+        const quoteNumber = `QT-${String(quoteCount + 1).padStart(4, '0')}`;
         const quote = await this.prisma.client.quote.create({
           data: {
             businessId,
             contactId: args.contactId,
             items,
+            quoteNumber,
             subtotal,
-            tax: 0,
+            taxAmount: 0,
             total: subtotal,
             currency: args.currency ?? 'TTD',
             expiryDate: args.expiryDate ? new Date(args.expiryDate) : null,
@@ -622,7 +629,7 @@ export class FlowOrchestratorService {
         if (!post) throw new Error('Post not found');
         const updated = await this.prisma.client.socialPost.update({
           where: { id: args.postId },
-          data: { status: 'PUBLISHED', publishedAt: new Date() },
+          data: { status: 'PUBLISHED', postedAt: new Date() },
         });
         return { post: updated, id: updated.id };
       }

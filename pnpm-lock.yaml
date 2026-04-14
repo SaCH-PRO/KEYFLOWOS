@@ -284,6 +284,9 @@ importers:
       '@keyflow/db':
         specifier: workspace:*
         version: link:../db
+      '@prisma/client':
+        specifier: ^6.19.2
+        version: 6.19.2(prisma@6.19.2(typescript@5.9.3))(typescript@5.9.3)
       '@trpc/server':
         specifier: ^10.45.2
         version: 10.45.4
