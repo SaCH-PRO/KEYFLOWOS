@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigationContext } from "@/lib/navigation-context";
-import { WorkspaceShell, useWorkspaceReturnNav } from "@/components/ui/workspace-shell";
+import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
 import {
   CreditCard,
   FileText,
@@ -72,7 +73,7 @@ const OPS_SECTIONS: { key: string; label: string; icon: React.ElementType }[] = 
 
 export default function CommercePage() {
   const { getOriginContext } = useNavigationContext();
-  const { getReturnLabel, navigateBack } = useWorkspaceReturnNav();
+  const { getReturnLabel, navigateBack } = useReturnNavigation({});
   const shell = useCommerceShell();
   const billing = useBillingWorkspace();
   const { checkLimit } = usePlan();
@@ -126,6 +127,9 @@ export default function CommercePage() {
     }
     overview.handleTabChange(t);
     setOpsSection(t);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", t);
+    window.history.replaceState({}, "", url.toString());
   }, [overview.handleTabChange]);
 
   useModuleEvent("commerce:create_quote_for_contact", useCallback((event: any) => {
