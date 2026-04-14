@@ -61,7 +61,7 @@ export function CrossModuleEntityLinks({ businessId, entityType, entityId, class
               primary: `#${inv.number}`,
               secondary: `TTD ${inv.amount.toLocaleString()}`,
               status: inv.status,
-              onClick: () => router.push(`/app/commerce?tab=invoices&id=${inv.id}`),
+              onClick: () => router.push(`/app/commerce?tab=invoices&invoiceId=${inv.id}`),
             }))}
           />
         )}
@@ -74,7 +74,7 @@ export function CrossModuleEntityLinks({ businessId, entityType, entityId, class
               primary: b.service,
               secondary: b.date ? new Date(b.date).toLocaleDateString() : "",
               status: b.status,
-              onClick: () => router.push("/app/bookings"),
+              onClick: () => router.push(`/app/bookings?bookingId=${b.id}`),
             }))}
           />
         )}
@@ -87,7 +87,7 @@ export function CrossModuleEntityLinks({ businessId, entityType, entityId, class
               primary: p.name,
               secondary: "",
               status: p.status,
-              onClick: () => router.push("/app/projects"),
+              onClick: () => router.push(`/app/projects?projectId=${p.id}`),
             }))}
           />
         )}
