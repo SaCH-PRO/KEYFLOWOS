@@ -2,7 +2,7 @@ import { Body, Controller, Get, Inject, Param, Post, Put, Query, UseGuards } fro
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
-import { GovernanceService } from './governance.service';
+import { GovernanceService, RiskTier } from './governance.service';
 import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
@@ -309,8 +309,8 @@ export class AiController {
   @Put('businesses/:businessId/ai/governance')
   async updateGovernanceSettings(
     @Param('businessId') businessId: string,
-    @Body() body: { mode?: string; maxAutoTier?: number; blockedTools?: string[]; blockedModules?: string[] },
+    @Body() body: { mode?: 'advisory' | 'assisted' | 'pro_auto' | 'restricted'; maxAutoTier?: RiskTier; blockedTools?: string[]; blockedModules?: string[] },
   ) {
-    return this.governance.updateAutonomySettings(businessId, body as any);
+    return this.governance.updateAutonomySettings(businessId, body);
   }
 }

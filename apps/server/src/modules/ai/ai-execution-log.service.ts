@@ -78,7 +78,7 @@ export class AiExecutionLogService {
       businessId,
       action: `tool:${toolName}`,
       toolName,
-      module,
+      module: module ?? undefined,
       riskTier: opts?.riskTier ?? 1,
       mode: opts?.mode ?? 'assisted',
       actor: 'flow',
