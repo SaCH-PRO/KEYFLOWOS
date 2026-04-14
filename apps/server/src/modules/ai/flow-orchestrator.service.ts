@@ -174,6 +174,29 @@ export class FlowOrchestratorService {
             usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
           };
         }
+        if (confirmDecision.requiresApproval) {
+          await this.governance.createApprovalItem(businessId, {
+            toolName: pendingConfirmation.toolName,
+            title: `Chat action: ${pendingConfirmation.toolName}`,
+            description: `User confirmed action via chat. Governance requires formal approval (Tier ${confirmDecision.tier}).`,
+            rationale: confirmDecision.reason,
+            inputPayload: pendingConfirmation.toolArgs as Record<string, any>,
+          });
+          await this.executionLog.log({
+            businessId,
+            action: `approval_queued_chat`,
+            toolName: pendingConfirmation.toolName,
+            riskTier: confirmDecision.tier,
+            mode: 'assisted',
+            actor: 'system',
+            rationale: `Chat confirmation routed to approval queue — Tier ${confirmDecision.tier} requires formal approval`,
+            success: true,
+          });
+          return {
+            reply: `This action requires formal approval before it can be executed (risk tier ${confirmDecision.tier}). It has been added to your approval queue — an admin can review and approve it from the AI Approvals panel.`,
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+          };
+        }
         const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs);
         return {
           reply: result.success
