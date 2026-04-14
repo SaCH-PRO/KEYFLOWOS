@@ -22,7 +22,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Tiered navigation with Primary Rail + Secondary Panel, featuring four master surfaces: Cockpit, Workspaces, Studio, and Public.
 
 **Technical Implementations & Features:**
-- **AI-Powered Automation:** Business Autopilot System for archetype inference, revenue model detection, task orchestration, and legal/compliance, including a global AI entry point with route-aware context detection, chat drawer, and suggestion nudges.
+- **AI-Powered Automation:** Business Autopilot System for archetype inference, revenue model detection, task orchestration, and legal/compliance, including a global AI entry point with route-aware context detection, chat drawer, and suggestion nudges. AI Business Office Foundations layer with Intent → Plan → Execute → Log pipeline, 4-tier governance engine (auto/confirm/approve/admin), BusinessGraphService (cached cross-module snapshot), AiExecutionLogService (full audit trail), IntentParserService (OpenAI function-calling intent extraction), PlannerService (intent → ordered AiPlan with steps), and 12 new API endpoints for graph/intent/plans/logs/approvals/governance.
 - **Business Intelligence Context System:** Gathers comprehensive business context from 16 guidance sub-profiles, organized into labeled domain sections, with a 5-tier weighted completeness system, progressive deepening prompts, capability unlock mapping, and a Business Builder intake wizard.
 - **Workspaces:**
     - **Revenue Workspace:** Restructured into 3-mode tabbed layout (Operations, Catalog, Setup) with a 6-metric revenue command strip, triage-driven action queue, and product segmentation.

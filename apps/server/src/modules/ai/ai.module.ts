@@ -7,13 +7,39 @@ import { OutputTemplateService } from './output-template.service';
 import { OutputTemplateController } from './output-template.controller';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { FlowController } from './flow.controller';
+import { BusinessGraphService } from './business-graph.service';
+import { GovernanceService } from './governance.service';
+import { AiExecutionLogService } from './ai-execution-log.service';
+import { IntentParserService } from './intent-parser.service';
+import { PlannerService } from './planner.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
   imports: [PrismaModule, SubscriptionsModule],
   controllers: [AiController, OutputTemplateController, FlowController],
-  providers: [AiListener, AiAdvisorService, AiUsageService, OutputTemplateService, FlowOrchestratorService],
-  exports: [AiAdvisorService, AiUsageService, OutputTemplateService, FlowOrchestratorService],
+  providers: [
+    AiListener,
+    AiAdvisorService,
+    AiUsageService,
+    OutputTemplateService,
+    FlowOrchestratorService,
+    BusinessGraphService,
+    GovernanceService,
+    AiExecutionLogService,
+    IntentParserService,
+    PlannerService,
+  ],
+  exports: [
+    AiAdvisorService,
+    AiUsageService,
+    OutputTemplateService,
+    FlowOrchestratorService,
+    BusinessGraphService,
+    GovernanceService,
+    AiExecutionLogService,
+    IntentParserService,
+    PlannerService,
+  ],
 })
 export class AiModule {}

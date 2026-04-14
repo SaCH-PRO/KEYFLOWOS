@@ -3,6 +3,9 @@ import OpenAI from 'openai';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
+import { AiExecutionLogService } from './ai-execution-log.service';
+import { GovernanceService } from './governance.service';
+import { BusinessGraphService } from './business-graph.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel } from './flow-tool-registry';
 
 export interface FlowMessage {
@@ -88,6 +91,9 @@ export class FlowOrchestratorService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiAdvisorService) private readonly advisor: AiAdvisorService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
+    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -110,19 +116,9 @@ export class FlowOrchestratorService {
       };
     }
 
-    const context = await this.advisor.getBusinessContext(businessId);
-    const businessName = context.business?.name ?? 'your business';
-
-    const contextSnapshot = [
-      `Business: ${businessName}`,
-      context.business?.industry ? `Industry: ${context.business.industry}` : null,
-      context.business?.currency ? `Currency: ${context.business.currency}` : 'Currency: TTD',
-      `Contacts: ${context.contacts.total} total`,
-      `Revenue collected: $${context.invoices.totalRevenue.toLocaleString()} TTD`,
-      `Outstanding invoices: ${context.invoices.outstandingCount} ($${context.invoices.outstandingAmount.toLocaleString()} TTD)`,
-      `Upcoming bookings: ${context.bookings.upcoming.length}`,
-      `Momentum Score: ${context.momentumScore}/100`,
-    ].filter(Boolean).join('\n');
+    const snapshot = await this.businessGraph.getSnapshot(businessId);
+    const businessName = snapshot.business.name || 'your business';
+    const contextSnapshot = this.businessGraph.buildContextString(snapshot);
 
     const systemPrompt = FLOW_SYSTEM_PROMPT
       .replace('{{CURRENT_DATE}}', new Date().toISOString())
@@ -233,15 +229,41 @@ export class FlowOrchestratorService {
         };
       });
 
-      const highRiskCalls = toolCalls.filter((tc) => tc.riskLevel === 'high');
-      if (highRiskCalls.length > 0) {
-        const pendingConfirmations: PendingConfirmation[] = highRiskCalls.map((tc) => ({
+      const governanceChecks = await Promise.all(
+        toolCalls.map(async (tc) => {
+          const decision = await this.governance.evaluate(businessId, tc.name);
+          return { tc, decision };
+        }),
+      );
+
+      const needsApproval = governanceChecks.filter(({ decision }) => decision.requiresApproval);
+      const blocked = governanceChecks.filter(({ decision }) => !decision.allowed);
+
+      if (blocked.length > 0) {
+        return {
+          reply: `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`,
+          usage,
+        };
+      }
+
+      if (needsApproval.length > 0) {
+        const pendingConfirmations: PendingConfirmation[] = needsApproval.map(({ tc, decision }) => ({
           toolCallId: tc.id,
           name: tc.name,
           arguments: tc.arguments,
           description: this.describeToolCall(tc.name, tc.arguments),
           riskLevel: tc.riskLevel,
         }));
+
+        for (const { tc, decision } of needsApproval) {
+          this.governance.createApprovalItem(businessId, {
+            toolName: tc.name,
+            title: this.describeToolCall(tc.name, tc.arguments),
+            description: `Tier ${decision.tier} action requested via Flow chat`,
+            rationale: decision.reason,
+            inputPayload: tc.arguments,
+          }).catch(() => {});
+        }
 
         return {
           reply: assistantMessage.content || 'I need your confirmation before proceeding with this action.',
@@ -299,10 +321,18 @@ export class FlowOrchestratorService {
     toolCallId?: string,
   ): Promise<FlowToolResult> {
     const id = toolCallId ?? `manual_${toolName}`;
+    const startTime = Date.now();
     try {
       const result = await this.executeToolAction(businessId, toolName, args);
+      const durationMs = Date.now() - startTime;
+      const tier = this.governance.getToolTier(toolName);
+      this.executionLog.logToolExecution(businessId, toolName, args, result, true, durationMs, { riskTier: tier }).catch(() => {});
+      this.businessGraph.invalidateCache(businessId);
       return { toolCallId: id, name: toolName, result, success: true };
     } catch (error) {
+      const durationMs = Date.now() - startTime;
+      const tier = this.governance.getToolTier(toolName);
+      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, { riskTier: tier }).catch(() => {});
       return { toolCallId: id, name: toolName, result: null, success: false, error: (error as Error).message };
     }
   }
