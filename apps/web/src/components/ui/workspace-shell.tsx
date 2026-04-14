@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -65,12 +66,38 @@ export function WorkspaceShell({
   className = "",
   children,
 }: WorkspaceShellProps) {
-  const { setCurrentMeta } = useNavigationContext();
-  useReturnNavigation({ restoreScrollOnMount: !skipReturnNavigation });
+  const { setCurrentMeta, current } = useNavigationContext();
+  const searchParams = useSearchParams();
+  const tabRestored = useRef(false);
+
+  if (!skipReturnNavigation) {
+    useReturnNavigation({ restoreScrollOnMount: true });
+  }
 
   useEffect(() => {
     setCurrentMeta({ selectedEntityLabel: title });
   }, [setCurrentMeta, title]);
+
+  useEffect(() => {
+    if (tabRestored.current || !tabs || !onTabChange) return;
+    const tabKeys = tabs.map((t) => t.key);
+
+    const urlTab = searchParams.get("tab");
+    if (urlTab && tabKeys.includes(urlTab) && urlTab !== activeTab) {
+      onTabChange(urlTab);
+      tabRestored.current = true;
+      return;
+    }
+
+    const navTab = current?.tab;
+    if (navTab && tabKeys.includes(navTab) && navTab !== activeTab) {
+      onTabChange(navTab);
+      tabRestored.current = true;
+      return;
+    }
+
+    tabRestored.current = true;
+  }, [tabs, onTabChange, searchParams, current, activeTab]);
 
   useEffect(() => {
     if (activeTab) {
