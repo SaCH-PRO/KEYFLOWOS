@@ -1,13 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { ShoppingBag, Star, HelpCircle, Search, Globe, Wand2 } from "lucide-react";
+import { motion } from "framer-motion";
+import {
+  ShoppingBag, Star, HelpCircle, Search, Wand2,
+  DollarSign, TrendingUp, ArrowUpRight, ArrowDownRight, Target, BarChart3,
+} from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { MerchandisingPanel } from "./merchandising-panel";
 import { SocialProofPanel } from "./social-proof-panel";
 import { FaqManager } from "./faq-manager";
 import { PolicyEditor } from "./policy-editor";
 import { AiContentPanel } from "./ai-content-panel";
+import { SectionCard } from "@/components/ui/section-card";
+import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
+import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
+import { formatPrice } from "@/lib/format";
 import type { Service, Product, StorefrontConfig, FaqEntry } from "@/lib/client";
 
 type SeoProps = {
@@ -137,6 +145,62 @@ type Props = {
   activeDeliveryMethodsCount?: number;
 };
 
+function PricingSignals({ products, services }: { products: Product[]; services: Service[] }) {
+  const liveProducts = products.filter((p) => services.some((s) => s.name === p.name));
+  if (liveProducts.length === 0) return null;
+
+  const prices = liveProducts.map((p) => p.price).filter((p) => p > 0);
+  if (prices.length === 0) return null;
+
+  const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const priceSpread = maxPrice - minPrice;
+  const hasFreeItems = liveProducts.some((p) => p.price === 0);
+  const withImages = liveProducts.filter((p) => p.imageUrl).length;
+  const withDescriptions = liveProducts.filter((p) => p.description && p.description.length > 20).length;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted)/0.06)", border: "1px solid hsl(var(--kf-border)/0.25)" }}>
+          <p className="text-[10px] font-medium" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Avg Price</p>
+          <p className="text-sm font-bold mt-0.5">{formatPrice(avgPrice)}</p>
+        </div>
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted)/0.06)", border: "1px solid hsl(var(--kf-border)/0.25)" }}>
+          <p className="text-[10px] font-medium" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Price Range</p>
+          <p className="text-sm font-bold mt-0.5">{formatPrice(minPrice)} – {formatPrice(maxPrice)}</p>
+        </div>
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted)/0.06)", border: "1px solid hsl(var(--kf-border)/0.25)" }}>
+          <p className="text-[10px] font-medium" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Spread</p>
+          <p className="text-sm font-bold mt-0.5">{formatPrice(priceSpread)}</p>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        {hasFreeItems && (
+          <div className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded-lg" style={{ background: "hsl(var(--kf-warning)/0.08)", color: "hsl(var(--kf-warning))" }}>
+            <DollarSign className="w-3 h-3 flex-shrink-0" />
+            Some items have $0 pricing — consider adding prices for better revenue.
+          </div>
+        )}
+        {withImages < liveProducts.length && (
+          <div className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded-lg" style={{ background: "hsl(var(--kf-accent1)/0.08)", color: "hsl(var(--kf-accent1))" }}>
+            <Target className="w-3 h-3 flex-shrink-0" />
+            {liveProducts.length - withImages} of {liveProducts.length} items missing images — products with images convert 2× better.
+          </div>
+        )}
+        {withDescriptions < liveProducts.length && (
+          <div className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded-lg" style={{ background: "hsl(var(--kf-muted)/0.08)", color: "hsl(var(--kf-muted-foreground))" }}>
+            <BarChart3 className="w-3 h-3 flex-shrink-0" />
+            {liveProducts.length - withDescriptions} items need longer descriptions to improve discoverability.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MerchandisingMode({
   businessData,
   services,
@@ -154,6 +218,40 @@ export function MerchandisingMode({
   const ac = "#a78bfa";
 
   const testimonials = (storefrontConfig.socialProof as any)?.testimonials ?? [];
+  const faqEntries = storefrontConfig.faqEntries ?? [];
+  const seo = storefrontConfig.seo as { metaTitle?: string; metaDescription?: string } | undefined;
+  const liveItems = commerceProducts.filter((p) => services.some((s) => s.name === p.name));
+  const withImages = liveItems.filter((p) => p.imageUrl).length;
+
+  const metrics: MetricStripItem[] = [
+    {
+      label: "Catalog Items",
+      value: liveItems.length,
+      icon: ShoppingBag,
+      iconColor: pc,
+      threshold: { status: liveItems.length >= 3 ? "good" : liveItems.length > 0 ? "warn" : "critical" },
+    },
+    {
+      label: "Testimonials",
+      value: testimonials.length,
+      icon: Star,
+      iconColor: "#eab308",
+      threshold: { status: testimonials.length >= 3 ? "good" : testimonials.length > 0 ? "warn" : "critical" },
+    },
+    {
+      label: "FAQ Entries",
+      value: faqEntries.length,
+      icon: HelpCircle,
+      iconColor: "#14B8A6",
+    },
+    {
+      label: "SEO Score",
+      value: seo?.metaTitle && seo?.metaDescription ? "Complete" : seo?.metaTitle ? "Partial" : "Missing",
+      icon: Search,
+      iconColor: ac,
+      threshold: { status: seo?.metaTitle && seo?.metaDescription ? "good" : seo?.metaTitle ? "warn" : "critical" },
+    },
+  ];
 
   function handleApplyFaq(faqs: { question: string; answer: string; category: string }[]) {
     const existing: FaqEntry[] = storefrontConfig.faqEntries ?? [];
@@ -181,58 +279,72 @@ export function MerchandisingMode({
   ) : undefined;
 
   return (
-    <div className="space-y-5">
-      <AccordionGroup title="Merchandising" brandColor={pc}>
-        <AccordionSection title="Featured Items" subtitle="Featured products & display" icon={ShoppingBag} accentColor={pc} badge={merchandisingBadge} defaultOpen>
-          <MerchandisingPanel
-            config={storefrontConfig}
-            products={commerceProducts}
-            services={services}
-            onConfigChange={onConfigChange}
-            onSave={onSaveConfig}
-            saving={configSaving}
-          />
-        </AccordionSection>
-        <AccordionSection title="Social Proof" subtitle="Testimonials & reviews" icon={Star} accentColor={pc} badge={socialBadge}>
-          <SocialProofPanel
-            storefrontConfig={storefrontConfig}
-            configSaving={configSaving}
-            onConfigChange={onConfigChange}
-            onSaveConfig={onSaveConfig}
-          />
-        </AccordionSection>
-        <AccordionSection title="AI Content Intelligence" subtitle="Generate FAQ, SEO, trust copy & launch posts" icon={Wand2} accentColor="hsl(var(--kf-accent1))">
-          <AiContentPanel
-            storeName={businessData?.name}
-            businessDescription={businessData?.description ?? undefined}
-            businessTagline={businessData?.tagline ?? undefined}
-            productsCount={commerceProducts.length}
-            servicesCount={services.length}
-            hasDelivery={activeDeliveryMethodsCount > 0}
-            testimonialCount={testimonials.length}
-            onApplyFaq={handleApplyFaq}
-            onApplySeo={handleApplySeo}
-          />
-        </AccordionSection>
-        <AccordionSection title="FAQ & Policies" subtitle="Questions, refund policy & terms" icon={HelpCircle} accentColor={pc}>
-          <div className="space-y-4">
-            <FaqManager config={storefrontConfig} onConfigChange={onConfigChange} onSave={onSaveConfig} saving={configSaving} />
-            <div className="pt-2" style={{ borderTop: "1px solid hsl(var(--kf-border)/0.2)" }}>
-              <PolicyEditor config={storefrontConfig} onConfigChange={onConfigChange} onSave={onSaveConfig} saving={configSaving} />
+    <div className="space-y-4">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+        <WorkspaceMetricStrip items={metrics} columns={4} compact />
+      </motion.div>
+
+      {liveItems.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+          <SectionCard title="Pricing Intelligence" subtitle="Price distribution and catalog quality signals" icon={DollarSign}>
+            <PricingSignals products={commerceProducts} services={services} />
+          </SectionCard>
+        </motion.div>
+      )}
+
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+        <AccordionGroup title="Merchandising" brandColor={pc}>
+          <AccordionSection title="Featured Items" subtitle="Featured products & display" icon={ShoppingBag} accentColor={pc} badge={merchandisingBadge} defaultOpen>
+            <MerchandisingPanel
+              config={storefrontConfig}
+              products={commerceProducts}
+              services={services}
+              onConfigChange={onConfigChange}
+              onSave={onSaveConfig}
+              saving={configSaving}
+            />
+          </AccordionSection>
+          <AccordionSection title="Social Proof" subtitle="Testimonials & reviews" icon={Star} accentColor={pc} badge={socialBadge}>
+            <SocialProofPanel
+              storefrontConfig={storefrontConfig}
+              configSaving={configSaving}
+              onConfigChange={onConfigChange}
+              onSaveConfig={onSaveConfig}
+            />
+          </AccordionSection>
+          <AccordionSection title="AI Content Intelligence" subtitle="Generate FAQ, SEO, trust copy & launch posts" icon={Wand2} accentColor="hsl(var(--kf-accent1))">
+            <AiContentPanel
+              storeName={businessData?.name}
+              businessDescription={businessData?.description ?? undefined}
+              businessTagline={businessData?.tagline ?? undefined}
+              productsCount={commerceProducts.length}
+              servicesCount={services.length}
+              hasDelivery={activeDeliveryMethodsCount > 0}
+              testimonialCount={testimonials.length}
+              onApplyFaq={handleApplyFaq}
+              onApplySeo={handleApplySeo}
+            />
+          </AccordionSection>
+          <AccordionSection title="FAQ & Policies" subtitle="Questions, refund policy & terms" icon={HelpCircle} accentColor={pc}>
+            <div className="space-y-4">
+              <FaqManager config={storefrontConfig} onConfigChange={onConfigChange} onSave={onSaveConfig} saving={configSaving} />
+              <div className="pt-2" style={{ borderTop: "1px solid hsl(var(--kf-border)/0.2)" }}>
+                <PolicyEditor config={storefrontConfig} onConfigChange={onConfigChange} onSave={onSaveConfig} saving={configSaving} />
+              </div>
             </div>
-          </div>
-        </AccordionSection>
-        <AccordionSection title="SEO" subtitle="Search engine & social previews" icon={Search} accentColor={ac}>
-          <SeoSettingsInline
-            storefrontConfig={storefrontConfig}
-            onConfigChange={onConfigChange}
-            onSaveConfig={onSaveConfig}
-            configSaving={configSaving}
-            publicUrl={publicUrl}
-            businessName={businessData?.name}
-          />
-        </AccordionSection>
-      </AccordionGroup>
+          </AccordionSection>
+          <AccordionSection title="SEO" subtitle="Search engine & social previews" icon={Search} accentColor={ac}>
+            <SeoSettingsInline
+              storefrontConfig={storefrontConfig}
+              onConfigChange={onConfigChange}
+              onSaveConfig={onSaveConfig}
+              configSaving={configSaving}
+              publicUrl={publicUrl}
+              businessName={businessData?.name}
+            />
+          </AccordionSection>
+        </AccordionGroup>
+      </motion.div>
     </div>
   );
 }

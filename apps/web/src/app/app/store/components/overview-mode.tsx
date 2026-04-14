@@ -7,9 +7,13 @@ import {
   TrendingUp, AlertTriangle, CheckCircle2, ArrowRight,
   Image as ImageIcon, Shield, Search, ShoppingCart,
   Zap, ArrowUpRight, Clock, BarChart3, Users, RefreshCw, Loader2,
+  Sparkles, Eye, Target,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import { apiGet } from "@/lib/api";
+import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
+import { SectionCard } from "@/components/ui/section-card";
+import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
 import type { StoreAnalytics, Product, Service, StorefrontConfig, StorefrontPolicies } from "@/lib/client";
 
 type SocialProofSection = { testimonials?: unknown[] };
@@ -40,17 +44,17 @@ type Props = {
   activeDeliveryMethodsCount: number;
 };
 
-function ScoreRing({ score, label, color }: { score: number; label: string; color: string }) {
-  const r = 28;
+function ScoreRing({ score, label, color, size = 72 }: { score: number; label: string; color: string; size?: number }) {
+  const r = size * 0.39;
   const circ = 2 * Math.PI * r;
   const offset = circ - (score / 100) * circ;
   return (
     <div className="flex flex-col items-center gap-1.5">
-      <div className="relative w-[72px] h-[72px]">
-        <svg width="72" height="72" className="-rotate-90">
-          <circle cx="36" cy="36" r={r} fill="none" stroke="hsl(var(--kf-muted)/0.2)" strokeWidth="5" />
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg width={size} height={size} className="-rotate-90">
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="hsl(var(--kf-muted)/0.2)" strokeWidth="5" />
           <motion.circle
-            cx="36" cy="36" r={r} fill="none" stroke={color} strokeWidth="5"
+            cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="5"
             strokeLinecap="round"
             strokeDasharray={circ}
             initial={{ strokeDashoffset: circ }}
@@ -63,18 +67,6 @@ function ScoreRing({ score, label, color }: { score: number; label: string; colo
         </div>
       </div>
       <span className="text-[10px] font-medium text-center leading-tight" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{label}</span>
-    </div>
-  );
-}
-
-function KpiChip({ label, value, icon: Icon, color }: { label: string; value: string | number; icon: React.ElementType; color: string }) {
-  return (
-    <div className="flex flex-col gap-1.5 rounded-xl px-3 py-3 relative overflow-hidden" style={{ background: `${color}0a`, border: `1px solid ${color}18` }}>
-      <div className="flex items-center gap-1.5">
-        <Icon className="w-3.5 h-3.5 flex-shrink-0" style={{ color }} />
-        <span className="text-[10px] font-medium" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{label}</span>
-      </div>
-      <span className="text-lg font-bold tabular-nums leading-none" style={{ color: "hsl(var(--kf-foreground))" }}>{value}</span>
     </div>
   );
 }
@@ -119,15 +111,6 @@ function StatusCard({ card, onAction }: { card: QuickCard; onAction?: (mode: str
     </button>
   );
 }
-
-type RecommendedAction = {
-  title: string;
-  description: string;
-  icon: React.ElementType;
-  color: string;
-  mode: string;
-  priority: "high" | "medium" | "low";
-};
 
 const ORDER_STATUS_COLORS: Record<string, string> = {
   PENDING: "hsl(40 90% 50%)",
@@ -219,6 +202,36 @@ function RecentOrdersList({ businessId, onViewAll }: { businessId: string; onVie
       >
         View all in Operations →
       </button>
+    </div>
+  );
+}
+
+function TopProductsGrid({ products, services }: { products: Product[]; services: Service[] }) {
+  const liveProducts = products.filter((p) => services.some((s) => s.name === p.name));
+  const sorted = [...liveProducts].sort((a, b) => (b.price ?? 0) - (a.price ?? 0)).slice(0, 4);
+  if (sorted.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {sorted.map((p) => (
+        <div
+          key={p.id}
+          className="rounded-xl p-3 flex flex-col gap-1.5"
+          style={{ background: "hsl(var(--kf-muted)/0.06)", border: "1px solid hsl(var(--kf-border)/0.25)" }}
+        >
+          {p.imageUrl ? (
+            <div className="w-full h-16 rounded-lg overflow-hidden">
+              <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" />
+            </div>
+          ) : (
+            <div className="w-full h-16 rounded-lg flex items-center justify-center" style={{ background: "hsl(var(--kf-muted)/0.15)" }}>
+              <Package className="w-5 h-5" style={{ color: "hsl(var(--kf-muted-foreground)/0.3)" }} />
+            </div>
+          )}
+          <p className="text-xs font-medium truncate" style={{ color: "hsl(var(--kf-foreground))" }}>{p.name}</p>
+          <p className="text-[10px] font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>{formatPrice(p.price)}</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -338,157 +351,187 @@ export function OverviewMode({
     },
   ];
 
-  const recommendedActions: RecommendedAction[] = [];
-  if (!hasHeroImage) recommendedActions.push({ title: "Add Hero Image", description: "A strong visual doubles engagement", icon: ImageIcon, color: pc, mode: "design", priority: "high" });
-  if (!hasTestimonials) recommendedActions.push({ title: "Add Trust Section", description: "Testimonials increase conversion by 12%", icon: Star, color: sc, mode: "merchandising", priority: "high" });
-  if (totalCatalog < 3) recommendedActions.push({ title: "Grow Your Catalog", description: "Add high-margin offers to the store", icon: ShoppingBag, color: pc, mode: "catalog", priority: "high" });
-  if (!hoursConfigured) recommendedActions.push({ title: "Complete Delivery Setup", description: "Let customers know how to receive orders", icon: Truck, color: sc, mode: "operations", priority: "medium" });
-  if (!hasMetaSeo) recommendedActions.push({ title: "Set SEO Metadata", description: "Meta title and description help customers find you", icon: Search, color: sc, mode: "merchandising", priority: "medium" });
-  if (policyCompleteness < 100) recommendedActions.push({ title: "Add Store Policies", description: "Return, privacy & terms policies build first-time buyer trust", icon: FileText, color: pc, mode: "merchandising", priority: "medium" });
-  if (!storeEnabled) recommendedActions.push({ title: "Launch Your Store", description: "Go live and start taking orders", icon: Zap, color: sc, mode: "launch", priority: "high" });
-
-  const topActions = recommendedActions.slice(0, 4);
-
   const recentOrders = analytics?.bookings?.inPeriod ?? 0;
   const revenue = analytics?.revenue?.inPeriod ?? null;
   const pageViews = analytics?.storefrontEvents?.page_view ?? null;
 
+  const metricItems: MetricStripItem[] = [
+    {
+      label: "Live Products",
+      value: liveProducts,
+      icon: Package,
+      iconColor: pc,
+      threshold: { status: liveProducts > 0 ? "good" : "critical" },
+    },
+    {
+      label: "Live Services",
+      value: liveServices,
+      icon: ShoppingBag,
+      iconColor: sc,
+      threshold: { status: liveServices > 0 ? "good" : "warn" },
+    },
+    {
+      label: "Orders (30d)",
+      value: recentOrders,
+      icon: ShoppingCart,
+      iconColor: pc,
+    },
+    revenue != null ? {
+      label: "Revenue (30d)",
+      value: formatPrice(revenue),
+      icon: TrendingUp,
+      iconColor: sc,
+    } : {
+      label: "Trust Score",
+      value: `${Math.min(trustAssetsCount * 33, 100)}%`,
+      icon: Shield,
+      iconColor: "#a78bfa",
+      threshold: { status: trustAssetsCount >= 2 ? "good" : trustAssetsCount >= 1 ? "warn" : "critical" },
+    },
+    pageViews != null ? {
+      label: "Store Views",
+      value: pageViews.toLocaleString(),
+      icon: Eye,
+      iconColor: sc,
+    } : {
+      label: "Delivery Methods",
+      value: deliveryMethodsCount,
+      icon: Truck,
+      iconColor: sc,
+      threshold: { status: deliveryMethodsCount > 0 ? "good" : "warn" },
+    },
+    {
+      label: "Policy Score",
+      value: `${policyCompleteness}%`,
+      icon: FileText,
+      iconColor: "#a78bfa",
+      threshold: { status: policyCompleteness >= 66 ? "good" : policyCompleteness >= 33 ? "warn" : "critical" },
+    },
+  ];
+
+  const aiRecommendations: { type: "action" | "insight" | "warning" | "tip"; priority: "high" | "medium" | "low"; title: string; description: string; explanation?: string; actionLabel: string; mode: string }[] = [];
+  if (!storeEnabled) aiRecommendations.push({ type: "warning", priority: "high", title: "Store is Offline", description: "Your storefront is in draft mode. Customers can't see or order from it.", explanation: "Publishing your store is the most impactful step you can take right now.", actionLabel: "Go to Launch", mode: "launch" });
+  if (!hasHeroImage) aiRecommendations.push({ type: "action", priority: "high", title: "Add a Hero Image", description: "Stores with hero banners see up to 40% higher engagement.", explanation: "Visual first impressions drive whether visitors stay or leave within 3 seconds.", actionLabel: "Customize Design", mode: "design" });
+  if (totalCatalog === 0) aiRecommendations.push({ type: "warning", priority: "high", title: "Empty Catalog", description: "Your store has no products. Add items so visitors have something to browse.", actionLabel: "Add Items", mode: "catalog" });
+  if (!hasTestimonials) aiRecommendations.push({ type: "insight", priority: "medium", title: "Add Social Proof", description: "92% of consumers read reviews before purchasing. Aim for 3+ testimonials.", actionLabel: "Add Testimonials", mode: "merchandising" });
+  if (!hasMetaSeo) aiRecommendations.push({ type: "tip", priority: "medium", title: "Improve SEO", description: "Missing meta title and description hurts search visibility. AI can generate them.", actionLabel: "Configure SEO", mode: "merchandising" });
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="rounded-2xl p-5"
-        style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.4)" }}
       >
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-sm font-bold" style={{ color: "hsl(var(--kf-foreground))" }}>Storefront Health</h2>
-            <p className="text-[11px] mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Overall readiness and quality scores</p>
+        <SectionCard title="Storefront Health" subtitle="Overall readiness and quality scores" icon={Target}>
+          <div className="flex items-center justify-around gap-4">
+            <ScoreRing score={healthScore} label="Health Score" color={pc} />
+            <div className="h-12 w-px" style={{ background: "hsl(var(--kf-border)/0.3)" }} />
+            <ScoreRing score={readinessScore} label="Launch Ready" color={sc} />
+            <div className="h-12 w-px" style={{ background: "hsl(var(--kf-border)/0.3)" }} />
+            <ScoreRing score={Math.min(trustAssetsCount * 33, 100)} label="Trust Score" color="#a78bfa" />
           </div>
-          <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded-lg" style={{ background: `${pc}12`, color: pc }}>
-            Live Score
-          </span>
-        </div>
-        <div className="flex items-center justify-around gap-4">
-          <ScoreRing score={healthScore} label="Health Score" color={pc} />
-          <div className="h-12 w-px" style={{ background: "hsl(var(--kf-border)/0.3)" }} />
-          <ScoreRing score={readinessScore} label="Launch Ready" color={sc} />
-          <div className="h-12 w-px" style={{ background: "hsl(var(--kf-border)/0.3)" }} />
-          <ScoreRing score={Math.min(trustAssetsCount * 33, 100)} label="Trust Score" color="#a78bfa" />
-        </div>
+        </SectionCard>
       </motion.div>
 
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
-        className="grid grid-cols-3 gap-2"
       >
-        <KpiChip label="Live Products" value={liveProducts} icon={Package} color={pc} />
-        <KpiChip label="Live Services" value={liveServices} icon={ShoppingBag} color={sc} />
-        <KpiChip label="Trust Assets" value={trustAssetsCount} icon={Shield} color="#a78bfa" />
-        <KpiChip label="Delivery Methods" value={deliveryMethodsCount} icon={Truck} color={sc} />
-        <KpiChip label="Orders (30d)" value={recentOrders} icon={ShoppingCart} color={pc} />
-        {revenue != null ? (
-          <KpiChip label="Revenue (30d)" value={formatPrice(revenue)} icon={TrendingUp} color={sc} />
-        ) : pageViews != null ? (
-          <KpiChip label="Store Views" value={pageViews} icon={BarChart3} color={sc} />
-        ) : (
-          <KpiChip label="Policy Score" value={`${policyCompleteness}%`} icon={FileText} color={sc} />
-        )}
+        <WorkspaceMetricStrip items={metricItems} columns={3} compact />
       </motion.div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="rounded-2xl p-4"
-        style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.4)" }}
-      >
-        <h3 className="text-xs font-bold mb-3 uppercase tracking-wider" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Storefront Status</h3>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {quickCards.map((card) => (
-            <StatusCard key={card.title} card={card} onAction={onModeChange} />
-          ))}
-        </div>
-      </motion.div>
-
-      {topActions.length > 0 && (
+      {aiRecommendations.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="rounded-2xl p-4"
-          style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.4)" }}
+          transition={{ delay: 0.1 }}
+          className="space-y-2"
         >
-          <div className="flex items-center gap-2 mb-3">
-            <Zap className="w-4 h-4" style={{ color: pc }} />
-            <h3 className="text-xs font-bold" style={{ color: "hsl(var(--kf-foreground))" }}>Recommended Actions</h3>
+          <div className="flex items-center gap-2 px-1">
+            <Sparkles className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "hsl(var(--kf-muted-foreground)/0.6)" }}>AI Advisor</span>
           </div>
-          <div className="space-y-2">
-            {topActions.map((action, i) => {
-              const Icon = action.icon;
-              return (
-                <motion.button
-                  key={action.title}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.1 + i * 0.05 }}
-                  onClick={() => onModeChange(action.mode)}
-                  className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left group transition-all hover:scale-[1.005] min-h-[44px]"
-                  style={{ background: `${action.color}08`, border: `1px solid ${action.color}18` }}
-                >
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${action.color}15` }}>
-                    <Icon className="w-3.5 h-3.5" style={{ color: action.color }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold leading-tight" style={{ color: "hsl(var(--kf-foreground))" }}>{action.title}</p>
-                    <p className="text-[10px] mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{action.description}</p>
-                  </div>
-                  <ArrowUpRight className="w-3.5 h-3.5 flex-shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
-                </motion.button>
-              );
-            })}
-          </div>
+          {aiRecommendations.slice(0, 3).map((rec) => (
+            <AiRecommendationCard
+              key={rec.title}
+              type={rec.type}
+              priority={rec.priority}
+              title={rec.title}
+              description={rec.description}
+              explanation={rec.explanation}
+              actionLabel={rec.actionLabel}
+              onAction={() => onModeChange(rec.mode)}
+            />
+          ))}
         </motion.div>
       )}
 
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="rounded-2xl p-4"
-        style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.4)" }}
+        transition={{ delay: 0.15 }}
       >
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
-            <h3 className="text-xs font-bold" style={{ color: "hsl(var(--kf-foreground))" }}>Recent Orders</h3>
+        <SectionCard title="Storefront Status" subtitle="Health checks across all dimensions" icon={CheckCircle2}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {quickCards.map((card) => (
+              <StatusCard key={card.title} card={card} onAction={onModeChange} />
+            ))}
           </div>
-          <div className="flex items-center gap-3">
-            {recentOrders > 0 && (
-              <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-                {recentOrders} in 30d{revenue != null ? ` · ${formatPrice(revenue)}` : ""}
-              </span>
-            )}
-            <button
-              onClick={() => onModeChange("operations")}
-              className="text-[10px] font-medium flex items-center gap-1 transition-opacity hover:opacity-70"
-              style={{ color: pc }}
-            >
-              View All <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-        <RecentOrdersList businessId={businessId} onViewAll={() => onModeChange("operations")} />
+        </SectionCard>
+      </motion.div>
+
+      {liveProducts > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <SectionCard
+            title="Top Products"
+            subtitle="Highest-value items in your store"
+            icon={Star}
+            action={{ label: "Manage Catalog", onClick: () => onModeChange("catalog") }}
+          >
+            <TopProductsGrid products={commerceProducts} services={services} />
+          </SectionCard>
+        </motion.div>
+      )}
+
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.25 }}
+      >
+        <SectionCard
+          title="Recent Orders"
+          icon={Clock}
+          headerRight={
+            <div className="flex items-center gap-3">
+              {recentOrders > 0 && (
+                <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                  {recentOrders} in 30d{revenue != null ? ` · ${formatPrice(revenue)}` : ""}
+                </span>
+              )}
+              <button
+                onClick={() => onModeChange("operations")}
+                className="text-[10px] font-medium flex items-center gap-1 transition-opacity hover:opacity-70"
+                style={{ color: "hsl(var(--kf-accent1))" }}
+              >
+                View All <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+          }
+        >
+          <RecentOrdersList businessId={businessId} onViewAll={() => onModeChange("operations")} />
+        </SectionCard>
       </motion.div>
 
       {pageViews != null && pageViews > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
+          transition={{ delay: 0.3 }}
           className="rounded-2xl px-4 py-3 flex items-center gap-3"
           style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.4)" }}
         >
