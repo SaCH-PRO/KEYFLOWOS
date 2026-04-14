@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
 
@@ -285,14 +285,64 @@ export class IdentityService {
     return business;
   }
 
-  async listTeamMembers(businessId: string) {
-    return this.prisma.client.membership.findMany({
-      where: { businessId },
-      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true } } },
-    });
+  static readonly PERMISSION_MODULES = [
+    'crm', 'revenue', 'bookings', 'projects', 'content', 'expenses', 'automations', 'storefront', 'settings', 'ai', 'team',
+  ] as const;
+
+  static readonly DEFAULT_SCOPES: Record<string, Record<string, string>> = {
+    OWNER: Object.fromEntries(IdentityService.PERMISSION_MODULES.map((m) => [m, 'admin'])),
+    ADMIN: Object.fromEntries(IdentityService.PERMISSION_MODULES.map((m) => [m, m === 'team' ? 'write' : 'admin'])),
+    STAFF: Object.fromEntries(IdentityService.PERMISSION_MODULES.map((m) => [m, ['settings', 'team', 'ai'].includes(m) ? 'none' : 'read'])),
+  };
+
+  static readonly DEFAULT_APPROVAL_TIERS: Record<string, number> = {
+    OWNER: 4,
+    ADMIN: 3,
+    STAFF: 0,
+  };
+
+  private resolveScopes(membership: { role: string; permissionScopes: unknown }): Record<string, string> {
+    if (membership.permissionScopes && typeof membership.permissionScopes === 'object') {
+      return membership.permissionScopes as Record<string, string>;
+    }
+    return IdentityService.DEFAULT_SCOPES[membership.role] ?? IdentityService.DEFAULT_SCOPES.STAFF;
   }
 
-  async inviteTeamMember(businessId: string, email: string, role: string, inviterId: string) {
+  private resolveApprovalTier(membership: { role: string; maxApprovalTier: number | null }): number {
+    if (membership.maxApprovalTier !== null && membership.maxApprovalTier !== undefined && membership.maxApprovalTier > 0) {
+      return membership.maxApprovalTier;
+    }
+    return IdentityService.DEFAULT_APPROVAL_TIERS[membership.role] ?? 0;
+  }
+
+  private async assertTeamAdmin(businessId: string, requesterId: string): Promise<void> {
+    const requester = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: requesterId, businessId } },
+    });
+    if (!requester) throw new ForbiddenException('You are not a member of this business');
+    if (requester.role !== 'OWNER' && requester.role !== 'ADMIN') {
+      const scopes = this.resolveScopes(requester);
+      if (scopes.team !== 'admin' && scopes.team !== 'write') {
+        throw new ForbiddenException('You do not have permission to manage team members');
+      }
+    }
+  }
+
+  async listTeamMembers(businessId: string) {
+    const members = await this.prisma.client.membership.findMany({
+      where: { businessId },
+      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return members.map((m) => ({
+      ...m,
+      permissionScopes: this.resolveScopes(m),
+      maxApprovalTier: this.resolveApprovalTier(m),
+    }));
+  }
+
+  async inviteTeamMember(businessId: string, email: string, role: string, inviterId: string, scopes?: Record<string, string>, maxApprovalTier?: number) {
+    await this.assertTeamAdmin(businessId, inviterId);
     let user = await this.prisma.client.user.findUnique({ where: { email } });
     if (!user) {
       user = await this.prisma.client.user.create({
@@ -303,15 +353,25 @@ export class IdentityService {
       where: { userId_businessId: { userId: user.id, businessId } },
     });
     if (existing) throw new BadRequestException('User is already a team member');
-    return this.prisma.client.membership.create({
-      data: { userId: user.id, businessId, role },
-      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true } } },
+    const membership = await this.prisma.client.membership.create({
+      data: {
+        userId: user.id,
+        businessId,
+        role,
+        permissionScopes: scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF),
+        maxApprovalTier: maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0),
+      },
+      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
     });
+    await this.logTeamActivity(businessId, inviterId, 'team', 'member_invited', 'membership', membership.id, `Invited ${email} as ${role}`, undefined, { invitedEmail: email, role });
+    return membership;
   }
 
   async removeTeamMember(businessId: string, membershipId: string, requesterId: string) {
+    await this.assertTeamAdmin(businessId, requesterId);
     const membership = await this.prisma.client.membership.findUnique({
       where: { id: membershipId },
+      include: { user: { select: { email: true } } },
     });
     if (!membership || membership.businessId !== businessId) {
       throw new NotFoundException('Membership not found');
@@ -320,10 +380,12 @@ export class IdentityService {
       throw new BadRequestException('Cannot remove the owner');
     }
     await this.prisma.client.membership.delete({ where: { id: membershipId } });
+    await this.logTeamActivity(businessId, requesterId, 'team', 'member_removed', 'membership', membershipId, `Removed ${membership.user.email} from team`, undefined, { removedEmail: membership.user.email });
     return { success: true };
   }
 
-  async updateMemberRole(businessId: string, membershipId: string, role: string) {
+  async updateMemberRole(businessId: string, membershipId: string, role: string, requesterId?: string) {
+    if (requesterId) await this.assertTeamAdmin(businessId, requesterId);
     const membership = await this.prisma.client.membership.findUnique({
       where: { id: membershipId },
     });
@@ -333,11 +395,125 @@ export class IdentityService {
     if (membership.role === 'OWNER') {
       throw new BadRequestException('Cannot change owner role');
     }
-    return this.prisma.client.membership.update({
+    const updated = await this.prisma.client.membership.update({
       where: { id: membershipId },
-      data: { role },
-      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true } } },
+      data: {
+        role,
+        permissionScopes: IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF,
+        maxApprovalTier: IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0,
+      },
+      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
     });
+    if (requesterId) {
+      await this.logTeamActivity(businessId, requesterId, 'team', 'role_changed', 'membership', membershipId, `Changed ${updated.user.email} role to ${role}`, undefined, { newRole: role });
+    }
+    return updated;
+  }
+
+  async updateMemberPermissions(businessId: string, membershipId: string, scopes: Record<string, string>, maxApprovalTier: number, requesterId: string) {
+    await this.assertTeamAdmin(businessId, requesterId);
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { id: membershipId },
+    });
+    if (!membership || membership.businessId !== businessId) {
+      throw new NotFoundException('Membership not found');
+    }
+    if (membership.role === 'OWNER') {
+      throw new BadRequestException('Cannot modify owner permissions');
+    }
+    const updated = await this.prisma.client.membership.update({
+      where: { id: membershipId },
+      data: { permissionScopes: scopes, maxApprovalTier },
+      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
+    });
+    await this.logTeamActivity(businessId, requesterId, 'team', 'permissions_updated', 'membership', membershipId, `Updated permissions for ${updated.user.email}`, undefined, { scopes, maxApprovalTier });
+    return {
+      ...updated,
+      permissionScopes: scopes,
+    };
+  }
+
+  async logTeamActivity(businessId: string, userId: string, module: string, action: string, entityType?: string, entityId?: string, title?: string, detail?: string, meta?: Record<string, unknown>) {
+    try {
+      await this.prisma.client.teamActivityLog.create({
+        data: {
+          businessId,
+          userId,
+          module,
+          action,
+          entityType: entityType ?? null,
+          entityId: entityId ?? null,
+          title: title ?? action,
+          detail: detail ?? null,
+          meta: meta ?? null,
+        },
+      });
+    } catch (e) {
+      this.logger.warn(`Failed to log team activity: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  async getTeamActivityFeed(businessId: string, opts: { limit?: number; offset?: number; module?: string; userId?: string }) {
+    const where: Record<string, unknown> = { businessId };
+    if (opts.module) where.module = opts.module;
+    if (opts.userId) where.userId = opts.userId;
+    const [items, total] = await Promise.all([
+      this.prisma.client.teamActivityLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: opts.limit || 50,
+        skip: opts.offset || 0,
+      }),
+      this.prisma.client.teamActivityLog.count({ where }),
+    ]);
+    return { items, total };
+  }
+
+  async getTeamDashboard(businessId: string) {
+    const members = await this.listTeamMembers(businessId);
+    const [recentActivity, taskCounts] = await Promise.all([
+      this.prisma.client.teamActivityLog.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+      this.prisma.client.contactTask.groupBy({
+        by: ['assigneeId'],
+        where: { businessId, status: 'OPEN', deletedAt: null, assigneeId: { not: null } },
+        _count: true,
+      }).catch(() => []),
+    ]);
+
+    const taskCountMap = new Map<string, number>();
+    for (const t of taskCounts) {
+      if (t.assigneeId) taskCountMap.set(t.assigneeId, t._count);
+    }
+
+    const memberSummaries = members.map((m) => ({
+      id: m.id,
+      userId: m.userId,
+      role: m.role,
+      user: m.user,
+      permissionScopes: m.permissionScopes,
+      maxApprovalTier: m.maxApprovalTier,
+      activeTasks: taskCountMap.get(m.userId) ?? 0,
+      recentActions: recentActivity.filter((a) => a.userId === m.userId).slice(0, 3),
+    }));
+
+    return {
+      members: memberSummaries,
+      totalMembers: members.length,
+      recentActivity: recentActivity.slice(0, 10),
+      permissionModules: IdentityService.PERMISSION_MODULES,
+    };
+  }
+
+  async getMemberApprovalTier(businessId: string, userId: string): Promise<number> {
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId, businessId } },
+    });
+    if (!membership) return 0;
+    return this.resolveApprovalTier(membership);
   }
 
   async getUser(userId: string) {

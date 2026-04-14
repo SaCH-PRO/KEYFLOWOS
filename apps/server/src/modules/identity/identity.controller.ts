@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
@@ -309,11 +310,11 @@ export class IdentityController {
   @Post('businesses/:businessId/team')
   inviteTeamMember(
     @Param('businessId') businessId: string,
-    @Body() body: { email: string; role: string },
+    @Body() body: { email: string; role: string; scopes?: Record<string, string>; maxApprovalTier?: number },
     @CurrentUser() user: AuthenticatedUser,
   ) {
     if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
-    return this.identity.inviteTeamMember(businessId, body.email, body.role, user.id);
+    return this.identity.inviteTeamMember(businessId, body.email, body.role, user.id, body.scopes, body.maxApprovalTier);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -322,8 +323,21 @@ export class IdentityController {
     @Param('businessId') businessId: string,
     @Param('membershipId') membershipId: string,
     @Body() body: { role: string },
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.identity.updateMemberRole(businessId, membershipId, body.role);
+    return this.identity.updateMemberRole(businessId, membershipId, body.role, user?.id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/team/:membershipId/permissions')
+  updateMemberPermissions(
+    @Param('businessId') businessId: string,
+    @Param('membershipId') membershipId: string,
+    @Body() body: { scopes: Record<string, string>; maxApprovalTier: number },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    return this.identity.updateMemberPermissions(businessId, membershipId, body.scopes, body.maxApprovalTier, user.id);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -335,6 +349,29 @@ export class IdentityController {
   ) {
     if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
     return this.identity.removeTeamMember(businessId, membershipId, user.id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/team/dashboard')
+  getTeamDashboard(@Param('businessId') businessId: string) {
+    return this.identity.getTeamDashboard(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/team/activity')
+  getTeamActivity(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('module') module?: string,
+    @Query('userId') userId?: string,
+  ) {
+    return this.identity.getTeamActivityFeed(businessId, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+      module,
+      userId,
+    });
   }
 
   @UseGuards(AuthGuard)

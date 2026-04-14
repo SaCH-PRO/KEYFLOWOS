@@ -193,16 +193,17 @@ export class GovernanceService {
       throw new BadRequestException(`Approval item is already resolved (status: "${item.status}") — cannot re-resolve`);
     }
 
-    if (item.riskTier === 4) {
-      const user = await this.prisma.client.user.findUnique({ where: { id: resolvedByUserId } });
-      if (!user) throw new NotFoundException('User not found');
-      const membership = await this.prisma.client.membership.findFirst({
-        where: { userId: resolvedByUserId, businessId },
-      });
-      const isAdmin = user.role === 'SUPER_ADMIN' || membership?.role === 'OWNER' || membership?.role === 'ADMIN';
-      if (!isAdmin) {
-        throw new ForbiddenException('Tier 4 approvals require admin-level authorization');
-      }
+    const membership = await this.prisma.client.membership.findFirst({
+      where: { userId: resolvedByUserId, businessId },
+    });
+    if (!membership) throw new NotFoundException('User is not a member of this business');
+
+    const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };
+    const memberTier = (membership.maxApprovalTier !== null && membership.maxApprovalTier !== undefined && membership.maxApprovalTier > 0)
+      ? membership.maxApprovalTier
+      : (DEFAULT_TIERS[membership.role] ?? 0);
+    if (item.riskTier > memberTier) {
+      throw new ForbiddenException(`Tier ${item.riskTier} approvals require approval tier ${item.riskTier} or higher (you have tier ${memberTier})`);
     }
 
     await this.logService.log({
