@@ -8,6 +8,7 @@ export type AiSuggestion = {
   type: "action" | "insight" | "warning" | "tip";
   title: string;
   description: string;
+  explanation?: string;
   priority: "high" | "medium" | "low";
   actionLabel?: string;
   actionKey?: string;

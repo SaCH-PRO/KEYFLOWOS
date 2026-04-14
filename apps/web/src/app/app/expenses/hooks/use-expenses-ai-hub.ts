@@ -68,6 +68,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       type: "warning",
       title: `${uncategorized.length} Uncategorized Expenses`,
       description: "Categorize these expenses to improve budget tracking, reporting accuracy, and financial intelligence.",
+      explanation: "Uncategorized expenses reduce the accuracy of spending analysis and budget forecasts.",
       priority: "high",
       actionLabel: "Review expenses",
       actionKey: "switch_tab:transactions",
@@ -83,6 +84,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
         type: "warning",
         title: "Spending Increase Detected",
         description: `Spending is up ${changePercent.toFixed(0)}% compared to the previous period. Check Insights for a detailed breakdown.`,
+        explanation: "A sustained increase above 20% may indicate scope creep or unplanned costs worth reviewing.",
         priority: "high",
         actionLabel: "View insights",
         actionKey: "switch_tab:insights",
@@ -108,6 +110,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       type: "warning",
       title: `${overBudget.length} Budget${overBudget.length > 1 ? "s" : ""} Exceeded`,
       description: "Review your budget allocations and recent spending to get costs back under control.",
+      explanation: "Exceeded budgets signal potential overspending that may impact profitability if left unchecked.",
       priority: "high",
       actionLabel: "Review budgets",
       actionKey: "switch_tab:budgets",
@@ -125,6 +128,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
         type: "insight",
         title: `High Vendor Concentration: ${vendorPct}%`,
         description: `${topVendor.name} accounts for ${vendorPct}% of all spending. Consider diversifying or negotiating terms.`,
+        explanation: "Heavy reliance on a single vendor increases supply risk and reduces negotiating leverage.",
         priority: "medium",
         actionLabel: "View insights",
         actionKey: "switch_tab:insights",
@@ -140,7 +144,7 @@ const expenseTools: AiTool[] = [
     id: "expense-categorize",
     name: "Auto-Categorize Expenses",
     description: "Use AI to suggest categories for uncategorized expenses",
-    icon: "📂",
+    icon: "categorize",
     category: "automate",
     requiresSelection: false,
     creditCost: 1,
@@ -150,7 +154,7 @@ const expenseTools: AiTool[] = [
     id: "expense-anomaly",
     name: "Detect Anomalies",
     description: "Scan for unusual spending patterns, duplicates, or cost spikes",
-    icon: "🔍",
+    icon: "anomaly",
     category: "detect",
     requiresSelection: false,
     creditCost: 1,
@@ -160,7 +164,7 @@ const expenseTools: AiTool[] = [
     id: "expense-forecast",
     name: "Forecast Monthly Spending",
     description: "Predict next month's expenses based on historical patterns and trends",
-    icon: "📊",
+    icon: "forecast",
     category: "analyze",
     requiresSelection: false,
     creditCost: 1,
@@ -170,7 +174,7 @@ const expenseTools: AiTool[] = [
     id: "expense-optimize",
     name: "Cost Optimization Tips",
     description: "Get AI recommendations to reduce costs, optimize vendor mix, and improve margins",
-    icon: "💡",
+    icon: "optimize",
     category: "optimize",
     requiresSelection: false,
     creditCost: 1,
@@ -180,7 +184,7 @@ const expenseTools: AiTool[] = [
     id: "expense-margin",
     name: "Margin Impact Analysis",
     description: "Analyze how expense categories affect your service and project profitability",
-    icon: "📈",
+    icon: "margin",
     category: "analyze",
     requiresSelection: false,
     creditCost: 1,
@@ -190,7 +194,7 @@ const expenseTools: AiTool[] = [
     id: "expense-vendor-review",
     name: "Vendor Rationalization",
     description: "Identify vendor overlaps, concentration risks, and negotiation opportunities",
-    icon: "🏪",
+    icon: "vendor",
     category: "optimize",
     requiresSelection: false,
     creditCost: 1,
@@ -198,27 +202,50 @@ const expenseTools: AiTool[] = [
   },
 ];
 
-export function useExpensesAiHub(
-  businessId: string | null,
-  customData?: ExpenseCustomData,
-) {
-  const context: ModuleContext = useMemo(() => ({
-    businessId: businessId ?? "",
-    customData: customData as Record<string, unknown>,
-  }), [businessId, customData]);
+export function useExpensesAiHub() {
+  const tools = useMemo(() => expenseTools, []);
 
-  const config = useMemo(() => ({
+  const ai = useModuleAi({
     moduleId: "expenses",
     moduleName: "Expenses",
     generateSuggestions: generateExpenseSuggestions,
-    tools: expenseTools,
-  }), []);
+    tools,
+    executeAction: async (actionKey, context) => {
+      if (actionKey.startsWith("tool:")) {
+        const toolId = actionKey.replace("tool:", "");
+        const tool = tools.find((t) => t.id === toolId);
+        if (tool) await tool.execute(context);
+      }
+    },
+  });
 
-  const ai = useModuleAi(config);
+  const updateExpensesContext = useCallback((params: {
+    businessId: string;
+    activeView?: string;
+    expenses?: unknown[];
+    categories?: unknown[];
+    budgets?: unknown[];
+    vendors?: unknown[];
+    summary?: Record<string, unknown> | null;
+  }) => {
+    ai.updateContext({
+      businessId: params.businessId,
+      activeView: params.activeView,
+      customData: {
+        expenses: params.expenses,
+        categories: params.categories,
+        budgets: params.budgets,
+        vendors: params.vendors,
+        summary: params.summary,
+      },
+    });
+  }, [ai.updateContext]);
 
   const handleAction = useCallback((actionKey: string) => {
     console.log("[ExpensesAI] action:", actionKey);
   }, []);
 
-  return { ai, handleAction };
+  return { ...ai, updateExpensesContext, handleAction };
 }
+
+export type UseExpensesAiHubReturn = ReturnType<typeof useExpensesAiHub>;

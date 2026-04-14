@@ -8,7 +8,8 @@ import {
   Shield, Clock, ChevronLeft, Search, BarChart3,
   Wand2, Radar, Settings2, ArrowRight,
   FileText, Tags, ShieldAlert, MessageSquare,
-  Target, Activity,
+  Target, Activity, DollarSign, GitBranch, Bell,
+  Terminal,
 } from "lucide-react";
 import type { UseModuleAiReturn, AiSuggestion, AiTool, AiToolCategory } from "@/hooks/use-module-ai";
 
@@ -41,6 +42,37 @@ const TOOL_ICON_MAP: Record<string, typeof Sparkles> = {
   churn: ShieldAlert,
   analysis: BarChart3,
   notes: Lightbulb,
+  generate: Wand2,
+  detect: Radar,
+  revenue: TrendingUp,
+  calendar: Clock,
+  search: Search,
+  "alert-triangle": AlertTriangle,
+  "trending-up": TrendingUp,
+  quality: Shield,
+  duplicates: Search,
+  reengage: MessageSquare,
+  followup: MessageSquare,
+  plan: FileText,
+  prioritize: Target,
+  risk: ShieldAlert,
+  bottleneck: Radar,
+  update: MessageSquare,
+  automate: Zap,
+  categorize: Tags,
+  anomaly: Radar,
+  forecast: BarChart3,
+  optimize: Settings2,
+  margin: TrendingUp,
+  vendor: Activity,
+  cashflow: DollarSign,
+  pipeline: GitBranch,
+  reminder: Bell,
+  pricing: DollarSign,
+  overdue: AlertTriangle,
+  terminal: Terminal,
+  lightbulb: Lightbulb,
+  sparkles: Sparkles,
   default: Sparkles,
 };
 
@@ -104,11 +136,14 @@ function SuggestionCard({
               <X className="w-3 h-3 text-muted-foreground/50" />
             </button>
           </div>
-          <p className="text-[11px] text-muted-foreground/70 leading-relaxed mb-2">{suggestion.description}</p>
+          <p className="text-[11px] text-muted-foreground/70 leading-relaxed mb-1.5">{suggestion.description}</p>
+          {suggestion.explanation && (
+            <p className="text-[10px] text-muted-foreground/50 leading-relaxed mb-1.5 italic">{suggestion.explanation}</p>
+          )}
           {suggestion.actionLabel && (
             <button
               onClick={handleAction}
-              className="flex items-center gap-1 text-[11px] font-medium text-[hsl(var(--kf-accent1))] hover:text-[hsl(var(--kf-accent1))]/80 transition-colors"
+              className="flex items-center gap-1 text-[11px] font-medium text-[hsl(var(--kf-accent1))] hover:text-[hsl(var(--kf-accent1))]/80 transition-colors mt-1"
             >
               {suggestion.actionLabel}
               <ChevronRight className="w-3 h-3" />
@@ -450,10 +485,11 @@ export function AiCommandHub({
               {!ai.loading && ai.activeSuggestions.length === 0 && !ai.error && (
                 <div className="flex flex-col items-center py-6 gap-2">
                   <Sparkles className="w-5 h-5 text-[hsl(var(--kf-accent1))]/30" />
-                  <span className="text-xs text-muted-foreground/50">No insights right now</span>
+                  <span className="text-xs text-muted-foreground/50">All clear — no insights right now</span>
+                  <p className="text-[10px] text-muted-foreground/40 text-center max-w-[200px]">AI will analyze your {moduleName.toLowerCase()} data and surface actionable insights.</p>
                   <button
                     onClick={ai.refreshSuggestions}
-                    className="text-[11px] text-[hsl(var(--kf-accent1))] hover:underline"
+                    className="text-[11px] text-[hsl(var(--kf-accent1))] hover:underline mt-1"
                   >
                     Run analysis
                   </button>

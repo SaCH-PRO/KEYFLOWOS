@@ -86,11 +86,14 @@ function SuggestionCard({
               <X className="w-3 h-3 text-muted-foreground/50" />
             </button>
           </div>
-          <p className="text-[11px] text-muted-foreground/70 leading-relaxed mb-2">{suggestion.description}</p>
+          <p className="text-[11px] text-muted-foreground/70 leading-relaxed mb-1.5">{suggestion.description}</p>
+          {suggestion.explanation && (
+            <p className="text-[10px] text-muted-foreground/50 leading-relaxed mb-1.5 italic">{suggestion.explanation}</p>
+          )}
           {suggestion.actionLabel && (
             <button
               onClick={handleAction}
-              className="flex items-center gap-1 text-[11px] font-medium text-[hsl(var(--kf-accent1))] hover:text-[hsl(var(--kf-accent1))]/80 transition-colors"
+              className="flex items-center gap-1 text-[11px] font-medium text-[hsl(var(--kf-accent1))] hover:text-[hsl(var(--kf-accent1))]/80 transition-colors mt-1"
             >
               {suggestion.actionLabel}
               <ChevronRight className="w-3 h-3" />
@@ -154,13 +157,13 @@ export function ModuleAiAssistant({
           <button
             onClick={ai.refreshSuggestions}
             disabled={ai.loading}
-            className="p-1 rounded-lg hover:bg-white/[0.04] disabled:opacity-30 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-white/[0.04] disabled:opacity-30 transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-muted-foreground/50 ${ai.loading ? "animate-spin" : ""}`} />
           </button>
           <button
             onClick={ai.togglePanel}
-            className="p-1 rounded-lg hover:bg-white/[0.04] transition-colors"
+            className="p-1.5 rounded-lg hover:bg-white/[0.04] transition-colors"
           >
             <X className="w-3.5 h-3.5 text-muted-foreground/50" />
           </button>
@@ -199,12 +202,13 @@ export function ModuleAiAssistant({
         {!ai.loading && ai.activeSuggestions.length === 0 && !ai.error && (
           <div className="flex flex-col items-center py-6 gap-2">
             <Sparkles className="w-5 h-5 text-[hsl(var(--kf-accent1))]/30" />
-            <span className="text-xs text-muted-foreground/50">No suggestions right now</span>
+            <span className="text-xs text-muted-foreground/50">All clear — no suggestions right now</span>
+            <p className="text-[10px] text-muted-foreground/40 text-center max-w-[200px]">AI will analyze your {moduleName.toLowerCase()} data and surface actionable insights.</p>
             <button
               onClick={ai.refreshSuggestions}
-              className="text-[11px] text-[hsl(var(--kf-accent1))] hover:underline"
+              className="text-[11px] text-[hsl(var(--kf-accent1))] hover:underline mt-1"
             >
-              Refresh analysis
+              Run analysis
             </button>
           </div>
         )}
