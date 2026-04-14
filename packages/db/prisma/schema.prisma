@@ -169,6 +169,12 @@ model Business {
   // Flow AI Bot Sessions
   flowSessions         FlowSession[]
 
+  // AI Business Office
+  aiExecutionLogs      AiExecutionLog[]
+  aiApprovalItems      AiApprovalItem[]
+  aiMemories           AiMemory[]
+  aiPlans              AiPlan[]
+
   // Unified Communications Engine
   channelConnections   ChannelConnection[]
   outboundContent      OutboundContent[]
@@ -3423,5 +3429,144 @@ model MarginSnapshot {
   @@index([productId])
   @@index([productId, createdAt])
   @@map("margin_snapshots")
+}
+
+// ---
+// AI BUSINESS OFFICE — Foundations
+// ---
+
+model AiExecutionLog {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  action       String
+  toolName     String?   @map("tool_name")
+  module       String?
+  riskTier     Int       @default(1) @map("risk_tier")
+  mode         String    @default("assisted")
+  actor        String    @default("user")
+  rationale    String?
+  inputSummary Json?     @map("input_summary")
+  outputSummary Json?    @map("output_summary")
+  success      Boolean   @default(true)
+  errorMessage String?   @map("error_message")
+  durationMs   Int?      @map("duration_ms")
+  planId       String?   @map("plan_id")
+  planStepId   String?   @map("plan_step_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, createdAt])
+  @@index([businessId, module])
+  @@index([businessId, toolName])
+  @@index([planId])
+  @@map("ai_execution_logs")
+}
+
+model AiApprovalItem {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  status       String   @default("pending")
+  riskTier     Int      @default(2) @map("risk_tier")
+  toolName     String   @map("tool_name")
+  module       String?
+  title        String
+  description  String?
+  rationale    String?
+  expectedBenefit String? @map("expected_benefit")
+  risks        String?
+  inputPayload Json?    @map("input_payload")
+  affectedEntities Json? @map("affected_entities")
+  planId       String?  @map("plan_id")
+  planStepId   String?  @map("plan_step_id")
+  resolvedAt   DateTime? @map("resolved_at")
+  resolvedBy   String?   @map("resolved_by")
+  resolution   String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@index([planId])
+  @@map("ai_approval_items")
+}
+
+model AiMemory {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  category     String
+  key          String
+  value        String
+  confidence   Float    @default(1.0)
+  source       String   @default("user")
+  expiresAt    DateTime? @map("expires_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, category, key])
+  @@index([businessId, category])
+  @@map("ai_memories")
+}
+
+model AiPlan {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  status       String   @default("draft")
+  objective    String
+  rawInput     String?  @map("raw_input")
+  urgency      String   @default("normal")
+  scope        String[] @default([])
+  modules      String[] @default([])
+  maxRiskTier  Int      @default(1) @map("max_risk_tier")
+
+  steps        AiPlanStep[]
+
+  startedAt    DateTime? @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("ai_plans")
+}
+
+model AiPlanStep {
+  id      String @id @default(cuid())
+  planId  String @map("plan_id")
+  plan    AiPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  order        Int       @default(0)
+  status       String    @default("pending")
+  toolName     String?   @map("tool_name")
+  module       String?
+  action       String
+  description  String?
+  riskTier     Int       @default(1) @map("risk_tier")
+  requiresApproval Boolean @default(false) @map("requires_approval")
+  dependsOn    String[]  @default([]) @map("depends_on")
+  inputPayload Json?     @map("input_payload")
+  outputResult Json?     @map("output_result")
+  expectedBenefit String? @map("expected_benefit")
+  errorMessage String?   @map("error_message")
+  durationMs   Int?      @map("duration_ms")
+
+  startedAt    DateTime? @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([planId, order])
+  @@map("ai_plan_steps")
 }
 

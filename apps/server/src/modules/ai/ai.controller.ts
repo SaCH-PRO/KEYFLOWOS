@@ -1,9 +1,20 @@
 import { Body, Controller, Get, Inject, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
+import { AiExecutionLogService } from './ai-execution-log.service';
+import { GovernanceService } from './governance.service';
+import { BusinessGraphService } from './business-graph.service';
+import { IntentParserService } from './intent-parser.service';
+import { PlannerService } from './planner.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+
+function safeInt(val: string | undefined, fallback: number): number {
+  if (!val) return fallback;
+  const n = parseInt(val, 10);
+  return Number.isNaN(n) || n < 0 ? fallback : n;
+}
 
 @Controller('ai')
 export class AiController {
@@ -11,6 +22,11 @@ export class AiController {
     @Inject(AiAdvisorService) private readonly advisor: AiAdvisorService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
+    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
+    @Inject(IntentParserService) private readonly intentParser: IntentParserService,
+    @Inject(PlannerService) private readonly planner: PlannerService,
   ) {}
 
   @Get('health')
@@ -182,5 +198,119 @@ export class AiController {
   @Get('businesses/:businessId/ai/billing')
   async getBilling(@Param('businessId') businessId: string) {
     return this.aiUsage.getBillingSummary(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/graph')
+  async getBusinessGraph(@Param('businessId') businessId: string) {
+    return this.businessGraph.getSnapshot(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/intent')
+  async parseIntent(
+    @Param('businessId') businessId: string,
+    @Body() body: { input: string },
+  ) {
+    return this.intentParser.parse(businessId, body.input);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/plan')
+  async createPlan(
+    @Param('businessId') businessId: string,
+    @Body() body: { input: string },
+  ) {
+    const intent = await this.intentParser.parse(businessId, body.input);
+    if (intent.clarificationNeeded) {
+      return { intent, plan: null, clarificationNeeded: true };
+    }
+    const plan = await this.planner.createPlan(businessId, intent);
+    return { intent, plan, clarificationNeeded: false };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/plans')
+  async listPlans(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.planner.listPlans(businessId, status, safeInt(limit, 20));
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/plans/:planId')
+  async getPlan(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+  ) {
+    return this.planner.getPlan(planId, businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/execution-logs')
+  async getExecutionLogs(
+    @Param('businessId') businessId: string,
+    @Query('module') module?: string,
+    @Query('toolName') toolName?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.executionLog.getHistory(
+      businessId,
+      { module, toolName },
+      safeInt(limit, 50),
+      safeInt(offset, 0),
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/execution-stats')
+  async getExecutionStats(
+    @Param('businessId') businessId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.executionLog.getStats(businessId, safeInt(days, 30));
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/approvals')
+  async getPendingApprovals(@Param('businessId') businessId: string) {
+    return this.governance.getPendingApprovals(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/approvals/history')
+  async getApprovalHistory(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.governance.getApprovalHistory(businessId, safeInt(limit, 50));
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/approvals/:approvalId/resolve')
+  async resolveApproval(
+    @Param('businessId') businessId: string,
+    @Param('approvalId') approvalId: string,
+    @Body() body: { resolution: 'approved' | 'rejected' | 'deferred'; resolvedBy: string },
+  ) {
+    return this.governance.resolveApproval(approvalId, businessId, body.resolution, body.resolvedBy);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/governance')
+  async getGovernanceSettings(@Param('businessId') businessId: string) {
+    return this.governance.getAutonomySettings(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/ai/governance')
+  async updateGovernanceSettings(
+    @Param('businessId') businessId: string,
+    @Body() body: { mode?: string; maxAutoTier?: number; blockedTools?: string[]; blockedModules?: string[] },
+  ) {
+    return this.governance.updateAutonomySettings(businessId, body as any);
   }
 }
