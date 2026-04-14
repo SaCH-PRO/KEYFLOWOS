@@ -304,7 +304,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
   async updatePlanStatus(planId: string, businessId: string, status: string) {
     const updateData: Record<string, unknown> = { status };
     if (status === 'executing') updateData.startedAt = new Date();
-    if (status === 'completed' || status === 'failed') updateData.completedAt = new Date();
+    if (status === 'completed' || status === 'failed' || status === 'partial') updateData.completedAt = new Date();
 
     const plan = await this.prisma.client.aiPlan.findFirst({
       where: { id: planId, businessId },

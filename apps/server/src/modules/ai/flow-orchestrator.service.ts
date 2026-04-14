@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
 import OpenAI from 'openai';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiAdvisorService } from './ai-advisor.service';
@@ -849,9 +849,9 @@ export class FlowOrchestratorService {
       where: { id: planId, businessId },
       include: { steps: { orderBy: { order: 'asc' } } },
     });
-    if (!plan) throw new Error(`Plan ${planId} not found`);
+    if (!plan) throw new NotFoundException(`Plan ${planId} not found`);
     if (plan.status !== 'approved') {
-      throw new Error(`Plan must be in "approved" state to execute (current: "${plan.status}"). Approve the plan first.`);
+      throw new BadRequestException(`Plan must be in "approved" state to execute (current: "${plan.status}"). Approve the plan first.`);
     }
 
     await this.planner.updatePlanStatus(planId, businessId, 'executing');
