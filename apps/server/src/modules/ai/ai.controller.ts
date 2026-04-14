@@ -756,11 +756,14 @@ export class AiController {
     @Param('businessId') businessId: string,
     @Query('module') module: string,
   ) {
-    const validModules = ['crm', 'revenue', 'bookings', 'marketing', 'projects', 'expenses', 'automations'];
+    const validModules: readonly string[] = ['crm', 'revenue', 'bookings', 'marketing', 'projects', 'expenses', 'automations'];
     if (!module || !validModules.includes(module)) {
       throw new BadRequestException(`Invalid module. Must be one of: ${validModules.join(', ')}`);
     }
-    return this.workspaceRecs.getRecommendations(businessId, module as any);
+    return this.workspaceRecs.getRecommendations(
+      businessId,
+      module as 'crm' | 'revenue' | 'bookings' | 'marketing' | 'projects' | 'expenses' | 'automations',
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
