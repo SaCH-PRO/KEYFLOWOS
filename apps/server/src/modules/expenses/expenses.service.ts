@@ -767,4 +767,75 @@ export class ExpensesService {
       where: { id: budgetId, businessId },
     });
   }
+
+  async getExpensesByEntity(businessId: string, field: 'projectId' | 'serviceId' | 'contactId', entityId: string) {
+    const expenses = await this.prisma.client.expense.findMany({
+      where: { businessId, deletedAt: null, [field]: entityId },
+      include: { category: true },
+      orderBy: { date: 'desc' },
+      take: 200,
+    });
+    const total = expenses.reduce((s, e) => s + e.amount, 0);
+    return { expenses, total, count: expenses.length };
+  }
+
+  async detectRecurringCandidates(businessId: string) {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const expenses = await this.prisma.client.expense.findMany({
+      where: { businessId, deletedAt: null, isRecurring: false, date: { gte: sixMonthsAgo } },
+      select: { id: true, vendor: true, amount: true, date: true, description: true },
+      orderBy: { date: 'asc' },
+    });
+
+    const byVendorAmount: Record<string, { dates: Date[]; amount: number; vendor: string; description: string; ids: string[] }> = {};
+    for (const e of expenses) {
+      if (!e.vendor) continue;
+      const key = `${e.vendor}__${Math.round(e.amount * 100)}`;
+      if (!byVendorAmount[key]) {
+        byVendorAmount[key] = { dates: [], amount: e.amount, vendor: e.vendor, description: e.description, ids: [] };
+      }
+      byVendorAmount[key].dates.push(e.date);
+      byVendorAmount[key].ids.push(e.id);
+    }
+
+    const candidates: { vendor: string; amount: number; description: string; occurrences: number; avgDaysBetween: number; frequency: string; expenseIds: string[] }[] = [];
+
+    for (const [, group] of Object.entries(byVendorAmount)) {
+      if (group.dates.length < 2) continue;
+
+      const sorted = group.dates.sort((a, b) => a.getTime() - b.getTime());
+      const gaps: number[] = [];
+      for (let i = 1; i < sorted.length; i++) {
+        gaps.push((sorted[i].getTime() - sorted[i - 1].getTime()) / (1000 * 60 * 60 * 24));
+      }
+      const avgGap = gaps.reduce((s, g) => s + g, 0) / gaps.length;
+      const variance = gaps.reduce((s, g) => s + Math.pow(g - avgGap, 2), 0) / gaps.length;
+      const stdDev = Math.sqrt(variance);
+
+      if (stdDev > avgGap * 0.5) continue;
+
+      let frequency = 'irregular';
+      if (avgGap >= 25 && avgGap <= 35) frequency = 'monthly';
+      else if (avgGap >= 12 && avgGap <= 16) frequency = 'biweekly';
+      else if (avgGap >= 6 && avgGap <= 8) frequency = 'weekly';
+      else if (avgGap >= 85 && avgGap <= 95) frequency = 'quarterly';
+      else if (avgGap >= 350 && avgGap <= 380) frequency = 'yearly';
+
+      if (frequency === 'irregular') continue;
+
+      candidates.push({
+        vendor: group.vendor,
+        amount: group.amount,
+        description: group.description,
+        occurrences: group.dates.length,
+        avgDaysBetween: Math.round(avgGap),
+        frequency,
+        expenseIds: group.ids,
+      });
+    }
+
+    return { candidates: candidates.sort((a, b) => b.occurrences - a.occurrences) };
+  }
 }

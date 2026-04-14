@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DollarSign, FileText, ExternalLink, CreditCard, TrendingDown } from "lucide-react";
-import { fetchExpenses, type Expense } from "@/lib/client";
+import { fetchExpensesByProject, type Expense } from "@/lib/client";
 
 interface RevenueTabProps {
   invoiceId?: string;
@@ -17,11 +17,10 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
   useEffect(() => {
     if (!businessId || !projectId) return;
     setLoadingExpenses(true);
-    fetchExpenses(businessId, { period: "all" })
+    fetchExpensesByProject(businessId, projectId)
       .then((res) => {
         if (res.data) {
-          const linked = res.data.data.filter((e) => e.projectId === projectId);
-          setProjectExpenses(linked);
+          setProjectExpenses(res.data.expenses);
         }
       })
       .finally(() => setLoadingExpenses(false));
