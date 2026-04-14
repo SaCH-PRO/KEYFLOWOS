@@ -142,6 +142,23 @@ export class GovernanceService {
       create: { businessId, category: 'settings', key: 'autonomy', value: JSON.stringify(merged), source: 'user' },
       update: { value: JSON.stringify(merged) },
     });
+
+    if (userId) {
+      this.prisma.client.teamActivityLog.create({
+        data: {
+          businessId,
+          userId,
+          module: 'settings',
+          action: 'ai_governance_updated',
+          entityType: 'aiSettings',
+          title: `Updated AI governance settings (mode: ${merged.mode}, max tier: ${merged.maxAutoTier})`,
+          meta: { mode: merged.mode, maxAutoTier: merged.maxAutoTier },
+        },
+      }).catch((e: unknown) => {
+        this.logger.warn(`Failed to log governance settings change: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }
+
     return merged;
   }
 
@@ -223,6 +240,22 @@ export class GovernanceService {
       inputPayload: (item.inputPayload as Record<string, unknown>) ?? undefined,
     }).catch((e: unknown) => {
       this.logger.error(`Failed to record approval signal: ${e instanceof Error ? e.message : String(e)}`);
+    });
+
+    this.prisma.client.teamActivityLog.create({
+      data: {
+        businessId,
+        userId: resolvedByUserId,
+        module: 'ai',
+        action: `approval_${resolution}`,
+        entityType: 'aiApprovalItem',
+        entityId: approvalId,
+        title: `${resolution.charAt(0).toUpperCase() + resolution.slice(1)} AI approval: ${item.toolName} (tier ${item.riskTier})`,
+        detail: item.rationale ?? null,
+        meta: { toolName: item.toolName, riskTier: item.riskTier, resolution },
+      },
+    }).catch((e: unknown) => {
+      this.logger.warn(`Failed to log team activity for approval: ${e instanceof Error ? e.message : String(e)}`);
     });
 
     return this.prisma.client.aiApprovalItem.update({
