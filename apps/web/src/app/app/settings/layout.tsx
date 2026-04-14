@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard } from "lucide-react";
+import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain } from "lucide-react";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 
@@ -16,6 +16,7 @@ const navItems = [
   { href: "/app/settings/templates", label: "Templates", icon: Palette, description: "Gallery" },
   { href: "/app/settings/output-templates", label: "AI Output", icon: Sparkles, description: "AI style" },
   { href: "/app/settings/developers", label: "Developers", icon: Code2, description: "API & extensions" },
+  { href: "/app/settings/ai-control", label: "AI Control", icon: Brain, description: "AI governance" },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
