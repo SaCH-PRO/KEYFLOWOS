@@ -4,7 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface WorkspaceRecommendation {
   id: string;
-  type: 'action' | 'insight' | 'warning' | 'tip';
+  type: 'action' | 'insight' | 'risk' | 'opportunity';
   priority: 'high' | 'medium' | 'low';
   title: string;
   description: string;
@@ -172,7 +172,7 @@ export class WorkspaceRecommendationsService {
     if (s.projects.overdueTaskCount > 0) {
       recs.push({
         id: 'cross-project-overdue',
-        type: 'warning',
+        type: 'risk',
         priority: 'high',
         title: 'Overdue project tasks',
         description: `${s.projects.overdueTaskCount} task${s.projects.overdueTaskCount > 1 ? 's are' : ' is'} overdue across active projects — this may delay client deliverables.`,
@@ -204,7 +204,7 @@ export class WorkspaceRecommendationsService {
     if (s.content.draftCampaignCount > 2) {
       recs.push({
         id: 'cross-draft-send',
-        type: 'tip',
+        type: 'opportunity',
         priority: 'low',
         title: 'Draft campaigns waiting to send',
         description: `${s.content.draftCampaignCount} draft campaign${s.content.draftCampaignCount > 1 ? 's are' : ' is'} ready — schedule or send them to engage your audience.`,
@@ -219,7 +219,7 @@ export class WorkspaceRecommendationsService {
     if (s.expenses.budgetUtilization > 90) {
       recs.push({
         id: 'cross-budget-alert',
-        type: 'warning',
+        type: 'risk',
         priority: 'high',
         title: 'Budget nearly exhausted',
         description: `Budget utilization is at ${Math.round(s.expenses.budgetUtilization)}% — review spending to avoid overshoot.`,
@@ -235,7 +235,7 @@ export class WorkspaceRecommendationsService {
     if (s.automations.activeCount === 0 && s.contacts.total > 5) {
       recs.push({
         id: 'cross-no-automations',
-        type: 'tip',
+        type: 'opportunity',
         priority: 'medium',
         title: 'No active automations',
         description: 'You have no active automations — set up flows to automatically follow up with new leads, send reminders, or trigger tasks.',
@@ -275,7 +275,7 @@ export class WorkspaceRecommendationsService {
           const topClient = s.contacts.topClients[0];
           recs.push({
             id: 'crm-top-client',
-            type: 'tip',
+            type: 'opportunity',
             priority: 'low',
             title: `Top client: ${topClient.name}`,
             description: `${topClient.name} has generated TTD ${topClient.revenue.toLocaleString()} — consider an upsell or loyalty gesture.`,
@@ -290,7 +290,7 @@ export class WorkspaceRecommendationsService {
         if (s.revenue.averageInvoiceValue > 0 && s.revenue.monthlyRevenue < s.revenue.averageInvoiceValue * 3) {
           recs.push({
             id: 'revenue-low-monthly',
-            type: 'warning',
+            type: 'risk',
             priority: 'medium',
             title: 'Monthly revenue below target',
             description: `Monthly revenue (TTD ${s.revenue.monthlyRevenue.toLocaleString()}) is below expected — focus on closing pending quotes.`,
@@ -321,7 +321,7 @@ export class WorkspaceRecommendationsService {
         if (s.bookings.cancelledThisMonth > 2) {
           recs.push({
             id: 'bookings-cancellations',
-            type: 'warning',
+            type: 'risk',
             priority: 'medium',
             title: 'Rising cancellations',
             description: `${s.bookings.cancelledThisMonth} booking${s.bookings.cancelledThisMonth > 1 ? 's' : ''} cancelled this month — review reasons and consider a deposit policy.`,
@@ -353,7 +353,7 @@ export class WorkspaceRecommendationsService {
         if (s.projects.activeCount > 0 && s.projects.completionRate < 50) {
           recs.push({
             id: 'projects-low-completion',
-            type: 'warning',
+            type: 'risk',
             priority: 'medium',
             title: 'Low task completion rate',
             description: `Only ${Math.round(s.projects.completionRate)}% of tasks completed across active projects — review task assignments and deadlines.`,
@@ -385,7 +385,7 @@ export class WorkspaceRecommendationsService {
         if (s.revenue.monthlyRevenue > 0 && s.expenses.totalThisMonth > s.revenue.monthlyRevenue * 0.7) {
           recs.push({
             id: 'expenses-margin-pressure',
-            type: 'warning',
+            type: 'risk',
             priority: 'high',
             title: 'Margin pressure detected',
             description: `Expenses (TTD ${s.expenses.totalThisMonth.toLocaleString()}) are ${Math.round((s.expenses.totalThisMonth / s.revenue.monthlyRevenue) * 100)}% of revenue — margins may be too thin.`,

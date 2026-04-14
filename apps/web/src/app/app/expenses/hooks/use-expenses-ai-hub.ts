@@ -27,7 +27,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
   if (expenses.length === 0) {
     suggestions.push({
       id: `no-expenses-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Start Tracking Expenses",
       description: "Add your first expense to begin tracking spending patterns, margins, budgets, and tax-ready records.",
       explanation: "Expense tracking unlocks profitability analysis, budget monitoring, and AI-powered cost optimization.",
@@ -68,7 +68,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
   if (uncategorized.length > 3) {
     suggestions.push({
       id: `uncategorized-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: `${uncategorized.length} Uncategorized Expenses`,
       description: "Categorize these expenses to improve budget tracking, reporting accuracy, and financial intelligence.",
       explanation: "Uncategorized expenses reduce the accuracy of spending analysis and budget forecasts.",
@@ -84,7 +84,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
     if (changePercent > 20) {
       suggestions.push({
         id: `spending-spike-${Date.now()}`,
-        type: "warning",
+        type: "risk",
         title: "Spending Increase Detected",
         description: `Spending is up ${changePercent.toFixed(0)}% compared to the previous period. Check Insights for a detailed breakdown.`,
         explanation: "A sustained increase above 20% may indicate scope creep or unplanned costs worth reviewing.",
@@ -99,7 +99,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
   if (expenses.length > 5 && hasReceipts.length < expenses.length * 0.3) {
     suggestions.push({
       id: `missing-receipts-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Attach Receipts",
       description: "Less than 30% of your expenses have receipts. Attaching receipts improves tax compliance and audit readiness.",
       explanation: "Receipt documentation protects you during tax audits and helps verify deductible business expenses.",
@@ -111,7 +111,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
   if (overBudget.length > 0) {
     suggestions.push({
       id: `over-budget-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: `${overBudget.length} Budget${overBudget.length > 1 ? "s" : ""} Exceeded`,
       description: "Review your budget allocations and recent spending to get costs back under control.",
       explanation: "Exceeded budgets signal potential overspending that may impact profitability if left unchecked.",

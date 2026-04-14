@@ -508,11 +508,11 @@ export function OperationsMode({
     },
   ];
 
-  const aiRecs: { type: "action" | "insight" | "warning" | "tip"; priority: "high" | "medium" | "low"; title: string; description: string; actionLabel?: string; onAction?: () => void }[] = [];
-  if (!storeEnabled) aiRecs.push({ type: "warning", priority: "high", title: "Store is Offline", description: "Your storefront is not accepting orders. Toggle it to Active to start receiving customers.", actionLabel: "Go Live", onAction: () => handleStatusChange("active") });
+  const aiRecs: { type: "action" | "insight" | "risk" | "opportunity"; priority: "high" | "medium" | "low"; title: string; description: string; actionLabel?: string; onAction?: () => void }[] = [];
+  if (!storeEnabled) aiRecs.push({ type: "risk", priority: "high", title: "Store is Offline", description: "Your storefront is not accepting orders. Toggle it to Active to start receiving customers.", actionLabel: "Go Live", onAction: () => handleStatusChange("active") });
   if (deliveryOptions.length === 0) aiRecs.push({ type: "action", priority: "high", title: "No Delivery Methods", description: "Customers can't complete purchases without a delivery method. Add shipping, pickup, or digital delivery." });
   if (!hasContact) aiRecs.push({ type: "insight", priority: "medium", title: "No Contact Info", description: "Add WhatsApp, email, or phone so customers can reach you. This builds trust and reduces abandoned carts." });
-  if (hoursActive === 0) aiRecs.push({ type: "tip", priority: "medium", title: "Set Business Hours", description: "Let customers know when you're available. Stores with hours configured receive more bookings." });
+  if (hoursActive === 0) aiRecs.push({ type: "opportunity", priority: "medium", title: "Set Business Hours", description: "Let customers know when you're available. Stores with hours configured receive more bookings." });
 
   return (
     <div className="space-y-4">

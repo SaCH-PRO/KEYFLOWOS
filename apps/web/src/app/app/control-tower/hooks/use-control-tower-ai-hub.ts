@@ -26,7 +26,7 @@ async function generateTowerSuggestions(context: ModuleContext): Promise<AiSugge
   if ((data.overdueInvoices ?? 0) > 0) {
     suggestions.push({
       id: `overdue-invoices-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: "Overdue Invoices Need Attention",
       description: `You have ${data.overdueInvoices} overdue invoices. Follow up today to protect cash flow.`,
       priority: "high",
@@ -62,7 +62,7 @@ async function generateTowerSuggestions(context: ModuleContext): Promise<AiSugge
   if ((data.momentumScore ?? 100) < 50) {
     suggestions.push({
       id: `low-momentum-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Momentum Score is Low",
       description: "Your business momentum is below 50. Focus on clearing overdue items and engaging leads.",
       priority: "medium",

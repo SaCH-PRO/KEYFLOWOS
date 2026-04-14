@@ -108,7 +108,7 @@ export function FlowsTab({ businessId: propBusinessId }: FlowsTabProps) {
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium">Flows & Automations</p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {loading ? "Loading..." : `${activeFlows.length} active flow${activeFlows.length !== 1 ? "s" : ""} for projects`}
+              {loading ? "Loading..." : `${activeFlows.length} active project module automation${activeFlows.length !== 1 ? "s" : ""}`}
             </p>
           </div>
           <a
@@ -124,7 +124,7 @@ export function FlowsTab({ businessId: propBusinessId }: FlowsTabProps) {
 
       {!loading && activeFlows.length > 0 && (
         <div className="rounded-xl border border-border/40 bg-card p-4 space-y-3">
-          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Active Project Flows</h4>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Active Project Module Automations</h4>
           <div className="space-y-2">
             {activeFlows.map((flow) => (
               <div key={flow.key} className="flex items-center gap-3 py-2 px-3 rounded-lg" style={{ background: "hsl(var(--kf-success) / 0.04)" }}>
@@ -146,7 +146,7 @@ export function FlowsTab({ businessId: propBusinessId }: FlowsTabProps) {
 
       {!loading && inactiveFlows.length > 0 && (
         <div className="rounded-xl border border-border/40 bg-card p-4 space-y-3">
-          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inactive Flows</h4>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inactive Module Automations</h4>
           <div className="space-y-2">
             {inactiveFlows.map((flow) => (
               <div key={flow.key} className="flex items-center gap-3 py-2 px-3 rounded-lg" style={{ background: "hsl(var(--muted) / 0.1)" }}>

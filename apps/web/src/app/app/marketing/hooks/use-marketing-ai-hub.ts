@@ -31,7 +31,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
   if (draftCampaigns.length > 3) {
     suggestions.push({
       id: `drafts-pile-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: "Unsent Drafts Piling Up",
       description: `You have ${draftCampaigns.length} draft campaigns waiting. Review and send them to keep your audience engaged.`,
       explanation: "Stale drafts represent missed engagement opportunities and indicate workflow bottlenecks.",
@@ -60,7 +60,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     if (highPerformers.length > 0) {
       suggestions.push({
         id: `high-open-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: "Top Performing Campaigns",
         description: `${highPerformers.length} campaign${highPerformers.length > 1 ? "s have" : " has"} open rates above 30%. Analyze what works and replicate the pattern.`,
         explanation: "High-performing campaigns reveal winning patterns you can replicate across future sends.",
@@ -74,7 +74,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
   if (scheduledCampaigns.length > 0) {
     suggestions.push({
       id: `scheduled-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Scheduled Campaigns",
       description: `${scheduledCampaigns.length} campaign${scheduledCampaigns.length > 1 ? "s are" : " is"} scheduled to send. Review timing for optimal engagement.`,
       explanation: "Reviewing scheduled sends ensures they align with audience time zones and avoid conflicts.",
@@ -117,7 +117,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
   if (socialPosts.length > 0 && socialPosts.length < 5) {
     suggestions.push({
       id: `posting-freq-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Increase Posting Frequency",
       description: "You have fewer than 5 social posts. Consistent posting helps build audience engagement and brand awareness.",
       explanation: "Regular posting cadence trains algorithms to favor your content and keeps your brand top-of-mind.",
@@ -134,7 +134,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     if (contactsGoingCold && contactsGoingCold > 0) {
       suggestions.push({
         id: `cold-contacts-${Date.now()}`,
-        type: "warning",
+        type: "risk",
         title: "Contacts Going Cold",
         description: `${contactsGoingCold} contact${contactsGoingCold > 1 ? "s are" : " is"} going cold. Create a re-engagement email campaign to win them back before they're lost.`,
         explanation: "Re-engaging cold contacts is 5–25× cheaper than acquiring new ones.",
@@ -174,7 +174,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     if (topServices && topServices.length > 0) {
       suggestions.push({
         id: `promote-service-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: `Promote "${topServices[0].name}"`,
         description: `Your top-earning service deserves spotlight content. Create a social post or campaign highlighting what makes it special.`,
         explanation: "Promoting proven services amplifies what already works and attracts similar high-value clients.",
@@ -186,7 +186,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     if (revenueAtRisk && revenueAtRisk > 0) {
       suggestions.push({
         id: `revenue-risk-${Date.now()}`,
-        type: "warning",
+        type: "risk",
         title: "Revenue at Risk",
         description: `You have revenue at risk from overdue payments. Send a friendly payment reminder campaign to recover outstanding amounts.`,
         explanation: "Combining marketing reach with payment recovery increases collection rates significantly.",
@@ -198,7 +198,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     if (revenueGrowthPct !== undefined && revenueGrowthPct > 10) {
       suggestions.push({
         id: `growth-story-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: "Share Your Growth Story",
         description: `Revenue is up ${Math.round(revenueGrowthPct)}%. Share a milestone post to build trust and attract new clients.`,
         explanation: "Sharing success milestones builds social proof and attracts clients who value growth.",
@@ -225,7 +225,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     } else if (signal.type === "invoice_paid") {
       suggestions.push({
         id: `signal-paid-${signal.id}`,
-        type: "tip",
+        type: "opportunity",
         title: "Revenue Opportunity",
         description: "A client just paid an invoice. Consider sending a thank-you email or upsell campaign.",
         explanation: "Post-purchase follow-up increases repeat business and lifetime value.",
@@ -236,7 +236,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     } else if (signal.type === "booking_created") {
       suggestions.push({
         id: `signal-booking-${signal.id}`,
-        type: "tip",
+        type: "opportunity",
         title: "New Booking Received",
         description: "A new booking was made. Send a confirmation or pre-service info campaign.",
         explanation: "Pre-service communication reduces no-shows and improves client satisfaction.",
@@ -250,7 +250,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
   if ((activeView === "campaigns" || activeView === "create") && suggestions.filter((s) => s.actionKey?.includes("campaign")).length === 0) {
     suggestions.push({
       id: `content-tip-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "AI Content Generator",
       description: "Use the AI Content Generator to create compelling email copy, subject lines, and CTAs for your next campaign.",
       explanation: "AI-generated content saves hours of writing and optimizes for engagement metrics.",
@@ -263,7 +263,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
   if ((activeView === "forms" || activeView === "audiences" || activeView === "audience") && suggestions.filter((s) => s.actionKey?.includes("form")).length === 0) {
     suggestions.push({
       id: `form-optimize-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Optimize Your Forms",
       description: "AI can analyze your lead form fields and suggest improvements to boost conversion rates.",
       explanation: "Form field optimization can increase conversion rates by 20–50% with minimal effort.",
@@ -289,7 +289,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
   if (activeView === "social" || activeView === "create") {
     suggestions.push({
       id: `social-advisor-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Social Content Advisor",
       description: "Get AI recommendations for content types, posting times, and platform strategies.",
       explanation: "Strategic content advice based on your data ensures every post maximizes reach and engagement.",
@@ -302,7 +302,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
   if (suggestions.length === 0) {
     suggestions.push({
       id: `healthy-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Marketing Health",
       description: `${campaigns.length} campaigns, ${forms.length} lead forms, ${socialPosts.length} posts. Keep growing your audience with targeted campaigns.`,
       explanation: "Your marketing foundation is solid — focus on consistency and data-driven optimization.",

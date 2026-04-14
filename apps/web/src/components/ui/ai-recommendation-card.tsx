@@ -6,7 +6,7 @@ import {
   X, ChevronRight,
 } from "lucide-react";
 
-type RecommendationType = "action" | "insight" | "warning" | "tip";
+type RecommendationType = "action" | "insight" | "warning" | "tip" | "risk" | "opportunity";
 type RecommendationPriority = "high" | "medium" | "low";
 
 interface AiRecommendationCardProps {
@@ -29,6 +29,8 @@ const ICON_MAP: Record<RecommendationType, React.ElementType> = {
   insight: Lightbulb,
   warning: AlertTriangle,
   tip: TrendingUp,
+  risk: AlertTriangle,
+  opportunity: TrendingUp,
 };
 
 const TYPE_COLORS: Record<RecommendationType, { bg: string; text: string }> = {
@@ -36,6 +38,8 @@ const TYPE_COLORS: Record<RecommendationType, { bg: string; text: string }> = {
   insight: { bg: "hsl(var(--kf-accent1) / 0.1)", text: "hsl(var(--kf-accent1))" },
   warning: { bg: "hsl(var(--kf-warning) / 0.1)", text: "hsl(var(--kf-warning))" },
   tip: { bg: "hsl(var(--kf-success) / 0.1)", text: "hsl(var(--kf-success))" },
+  risk: { bg: "hsl(var(--kf-error) / 0.1)", text: "hsl(var(--kf-error))" },
+  opportunity: { bg: "hsl(var(--kf-success) / 0.1)", text: "hsl(var(--kf-success))" },
 };
 
 const PRIORITY_BORDER: Record<RecommendationPriority, string> = {

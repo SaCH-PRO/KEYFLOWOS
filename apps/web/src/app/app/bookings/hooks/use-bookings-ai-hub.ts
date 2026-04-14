@@ -24,7 +24,7 @@ async function generateBookingsSuggestions(context: ModuleContext): Promise<AiSu
     if ((stats.pendingCount ?? 0) > 5) {
       suggestions.push({
         id: `pending-high-${Date.now()}`,
-        type: "warning",
+        type: "risk",
         title: "Many Pending Bookings",
         description: `You have ${stats.pendingCount} pending bookings that need confirmation. Review and confirm to reduce no-shows.`,
         explanation: "Unconfirmed bookings increase no-show risk and prevent accurate schedule planning.",
@@ -50,7 +50,7 @@ async function generateBookingsSuggestions(context: ModuleContext): Promise<AiSu
     if (activeView === "schedule") {
       suggestions.push({
         id: `optimize-schedule-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: "Optimize Your Schedule",
         description: "AI can analyze your booking patterns and suggest ways to maximize utilization and revenue.",
         explanation: "Schedule optimization identifies gaps and peak patterns to improve utilization rates.",
@@ -76,7 +76,7 @@ async function generateBookingsSuggestions(context: ModuleContext): Promise<AiSu
     if (activeView === "catalog") {
       suggestions.push({
         id: `pricing-review-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: "Service Pricing Review",
         description: "AI can help you optimize service pricing based on demand patterns and market analysis.",
         explanation: "Data-driven pricing adjustments can increase revenue without reducing booking volume.",

@@ -57,7 +57,7 @@ async function generateCrmSuggestions(context: ModuleContext): Promise<AiSuggest
       result.data.guidelines.slice(0, 2).forEach((g: string, i: number) => {
         suggestions.push({
           id: `tip-${Date.now()}-${i}`,
-          type: "tip",
+          type: "opportunity",
           title: "Best Practice",
           description: g,
           priority: "low",
@@ -69,7 +69,7 @@ async function generateCrmSuggestions(context: ModuleContext): Promise<AiSuggest
   } catch {
     return [{
       id: `error-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: "Analysis Unavailable",
       description: "Could not complete AI analysis. Try again in a moment.",
       priority: "low",

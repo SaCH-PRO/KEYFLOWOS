@@ -50,7 +50,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   if (!storeEnabled) {
     suggestions.push({
       id: `store-offline-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: "Store is Offline",
       description: "Your storefront is in draft mode. Customers cannot find or access it. Go to Launch to publish.",
       explanation: "An offline store generates zero revenue — publishing is the most impactful action you can take.",
@@ -63,7 +63,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   if (products.length === 0 && services.length === 0) {
     suggestions.push({
       id: `no-catalog-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: "Empty Catalog",
       description: "Your store has no products or services. Add items so visitors have something to browse and purchase.",
       explanation: "An empty catalog means visitors have nothing to buy — this is your store's core content.",
@@ -76,7 +76,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   if (!hasHeroHeadline || !hasHeroCta) {
     suggestions.push({
       id: `weak-hero-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: "Weak Hero Section",
       description: "Missing headline or CTA in your hero. AI can generate compelling copy for you in the Design tab.",
       explanation: "The hero section is the first thing visitors see — strong copy increases time on site and conversions.",
@@ -167,7 +167,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   if (activeDeliveryCount === 0 && (products.length + services.length) > 0) {
     suggestions.push({
       id: `no-delivery-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: "No Delivery Method Configured",
       description: "Customers can't complete purchases without knowing how orders are fulfilled.",
       explanation: "Missing delivery options block checkout completion and cause cart abandonment.",
@@ -180,7 +180,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   if (activeView === "design") {
     suggestions.push({
       id: `ai-hero-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "AI Hero Copy",
       description: "Let AI write your headline, subheadline, offer ribbon, and CTA based on your business.",
       explanation: "AI-generated hero copy is tailored to your business type and optimized for conversions.",
@@ -190,7 +190,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     });
     suggestions.push({
       id: `storefront-model-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Storefront Model Advisor",
       description: "Get a personalized recommendation for the best storefront theme and layout for your business type.",
       explanation: "The right theme and layout can significantly improve user experience and conversion rates.",
@@ -203,7 +203,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   if (activeView === "merchandising") {
     suggestions.push({
       id: `faq-gen-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Generate FAQ Content",
       description: "AI can generate relevant FAQ entries based on your products, services, and business type.",
       explanation: "FAQ content reduces support inquiries and improves SEO with long-tail keyword coverage.",
@@ -213,7 +213,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     });
     suggestions.push({
       id: `seo-gen-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Generate SEO Metadata",
       description: "AI will craft an optimized meta title, description, and keyword strategy for your store.",
       explanation: "Optimized metadata improves click-through rates from search engine results pages.",
@@ -223,7 +223,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     });
     suggestions.push({
       id: `featured-gen-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Featured Products Advisor",
       description: "AI will recommend which products to feature based on demand signals and launch goals.",
       explanation: "Strategic featuring drives attention to high-margin or high-demand items.",
@@ -237,7 +237,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     if (products.length > 0) {
       suggestions.push({
         id: `catalog-reorder-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: "Optimize Display Order",
         description: "Drag items to reorder. Place your best-selling or highest-margin items first for maximum visibility.",
         explanation: "Items displayed first get disproportionately more clicks and purchases.",
@@ -249,7 +249,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     if (products.length >= 5) {
       suggestions.push({
         id: `catalog-emphasis-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: "Category Emphasis",
         description: "Set emphasis levels per category to control which types of items get more visual prominence in your storefront.",
         explanation: "Category emphasis directs visitor attention to your most profitable or strategic categories.",
@@ -277,7 +277,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     if (activeDeliveryCount === 0) {
       suggestions.push({
         id: `ops-delivery-${Date.now()}`,
-        type: "warning",
+        type: "risk",
         title: "No Delivery Methods Active",
         description: "Customers cannot complete orders without a fulfillment method. Add shipping, pickup, or digital delivery.",
         explanation: "No delivery method means 100% cart abandonment at checkout.",
@@ -300,7 +300,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     }
     suggestions.push({
       id: `ops-zones-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Shipping Zones",
       description: "Configure delivery zones with different rates for local, regional, and international customers.",
       explanation: "Zone-based shipping provides accurate costs and prevents under or overcharging customers.",
@@ -313,7 +313,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   if (activeView === "launch") {
     suggestions.push({
       id: `launch-campaign-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Launch Campaign Generator",
       description: "Generate social posts, WhatsApp messages, and email copy to announce your store launch.",
       explanation: "A coordinated multi-channel launch drives initial traffic and builds early momentum.",
@@ -324,7 +324,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     if (storeEnabled) {
       suggestions.push({
         id: `launch-share-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: "Share Your Store",
         description: "Your store is live! Share the URL on social media, WhatsApp groups, and email newsletters.",
         explanation: "Word-of-mouth sharing is the most cost-effective way to drive early store traffic.",
@@ -336,7 +336,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   if (suggestions.length === 0) {
     suggestions.push({
       id: `healthy-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Store Health",
       description: `${products.length + services.length} catalog items, ${testimonials.length} testimonials. Your store is looking good!`,
       explanation: "Your store has a solid foundation — continue optimizing for conversion and traffic growth.",

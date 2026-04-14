@@ -28,7 +28,7 @@ async function generateAutomationSuggestions(context: ModuleContext): Promise<Ai
   if (total === 0) {
     suggestions.push({
       id: `no-flows-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Create Your First Flow",
       description: "Automate repetitive tasks like follow-up emails, booking confirmations, or invoice reminders with a pre-built template.",
       explanation: "Automation reduces manual work and ensures consistent execution of routine business processes.",
@@ -42,7 +42,7 @@ async function generateAutomationSuggestions(context: ModuleContext): Promise<Ai
   if (pausedCount > 0 && pausedCount >= activeCount) {
     suggestions.push({
       id: `paused-flows-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: `${pausedCount} Paused Flow${pausedCount > 1 ? "s" : ""}`,
       description: "Most of your flows are paused. Review and reactivate them to keep automations running.",
       explanation: "Paused flows stop executing, which means tasks they handle will require manual work.",
@@ -73,7 +73,7 @@ async function generateAutomationSuggestions(context: ModuleContext): Promise<Ai
   if (successRate > 0 && successRate < 80) {
     suggestions.push({
       id: `low-success-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: `Flow Success Rate: ${successRate}%`,
       description: "Your flow success rate is below 80%. Check the activity log for errors and fix failing flows.",
       explanation: "Low success rates indicate execution errors that may cause missed automations or duplicate actions.",
@@ -86,7 +86,7 @@ async function generateAutomationSuggestions(context: ModuleContext): Promise<Ai
   if (activeCount > 0 && activeCount < 3) {
     suggestions.push({
       id: `expand-automation-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Expand Your Automation",
       description: "You have fewer than 3 active flows. Explore templates to automate more of your business operations.",
       explanation: "Adding more flows increases the percentage of your operations running on autopilot.",
