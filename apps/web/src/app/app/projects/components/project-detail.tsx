@@ -6,6 +6,7 @@ import {
   ArrowLeft, MoreHorizontal, Trash2, Archive, Edit3, Save, X,
   LayoutDashboard, ListTodo, Flag, Clock, MessageSquare,
   User, DollarSign, Calendar, Zap, FileText,
+  HeartPulse,
 } from "lucide-react";
 import {
   Project, ProjectTask,
@@ -18,6 +19,7 @@ import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 import {
   PROJECT_STAGES, normalizeStatus, getStageInfo, PROJECT_COLORS,
+  getProjectProgress, getProjectRisk, RISK_STYLES,
 } from "./project-constants";
 import { OverviewTab } from "./project-detail-tabs/overview-tab";
 import { TasksTab } from "./project-detail-tabs/tasks-tab";
@@ -81,6 +83,9 @@ export function ProjectDetail({
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
 
   const stageInfo = getStageInfo(project.status);
+  const progress = getProjectProgress(project.tasks ?? []);
+  const risk = getProjectRisk(project);
+  const riskStyle = RISK_STYLES[risk];
 
   const handleSaveEdit = async () => {
     if (!businessId) return;
@@ -233,13 +238,39 @@ export function ProjectDetail({
           </div>
         ) : (
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <div className="w-3 h-3 rounded-sm" style={{ background: project.color || stageInfo.color }} />
               <h1 className="text-xl font-bold truncate">{project.name}</h1>
+              <span
+                className="text-[9px] px-1.5 py-0.5 rounded-md font-semibold shrink-0"
+                style={{ background: riskStyle.bg, color: riskStyle.color }}
+              >
+                {riskStyle.label}
+              </span>
+              {(project.priority || "").toUpperCase() === "HIGH" && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded-md font-semibold shrink-0" style={{ background: "hsl(var(--kf-error) / 0.1)", color: "hsl(var(--kf-error))" }}>
+                  High Priority
+                </span>
+              )}
+              {(project.priority || "").toUpperCase() === "URGENT" && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded-md font-semibold shrink-0" style={{ background: "hsl(var(--kf-error) / 0.15)", color: "hsl(var(--kf-error))" }}>
+                  Urgent
+                </span>
+              )}
             </div>
-            {project.description && (
-              <p className="text-sm text-muted-foreground mt-0.5 truncate">{project.description}</p>
-            )}
+            <div className="flex items-center gap-3 mt-1">
+              {project.description && (
+                <p className="text-sm text-muted-foreground truncate">{project.description}</p>
+              )}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-20 h-1.5 rounded-full overflow-hidden bg-muted/30">
+                    <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: stageInfo.color }} />
+                  </div>
+                  <span className="text-[10px] text-muted-foreground tabular-nums">{progress}%</span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
