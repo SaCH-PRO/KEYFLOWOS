@@ -73,7 +73,7 @@ const OPS_SECTIONS: { key: string; label: string; icon: React.ElementType }[] = 
 
 export default function CommercePage() {
   const { getOriginContext } = useNavigationContext();
-  const { getReturnLabel, navigateBack } = useReturnNavigation({});
+  const { getReturnLabel, navigateBack } = useReturnNavigation({ skipScrollListener: true });
   const shell = useCommerceShell();
   const billing = useBillingWorkspace();
   const { checkLimit } = usePlan();
