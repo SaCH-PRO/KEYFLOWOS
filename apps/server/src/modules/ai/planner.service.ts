@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from './ai-usage.service';
@@ -276,21 +276,21 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
       where: { id: planId, businessId },
       include: { steps: true },
     });
-    if (!plan) throw new Error(`Plan ${planId} not found for business ${businessId}`);
+    if (!plan) throw new NotFoundException(`Plan ${planId} not found for business ${businessId}`);
     if (plan.status !== 'draft') {
-      throw new Error(`Plan must be in "draft" state to approve (current: "${plan.status}")`);
+      throw new BadRequestException(`Plan must be in "draft" state to approve (current: "${plan.status}")`);
     }
 
     const maxTier = plan.maxRiskTier;
     if (maxTier >= 4) {
       const user = await this.prisma.client.user.findUnique({ where: { id: userId } });
-      if (!user) throw new Error('User not found');
+      if (!user) throw new NotFoundException('User not found');
       const membership = await this.prisma.client.membership.findFirst({
         where: { userId, businessId },
       });
       const isAdmin = user.role === 'SUPER_ADMIN' || membership?.role === 'OWNER' || membership?.role === 'ADMIN';
       if (!isAdmin) {
-        throw new Error('Plans with Tier 4 actions require admin-level authorization to approve');
+        throw new ForbiddenException('Plans with Tier 4 actions require admin-level authorization to approve');
       }
     }
 
@@ -309,7 +309,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
     const plan = await this.prisma.client.aiPlan.findFirst({
       where: { id: planId, businessId },
     });
-    if (!plan) throw new Error(`Plan ${planId} not found for business ${businessId}`);
+    if (!plan) throw new NotFoundException(`Plan ${planId} not found for business ${businessId}`);
     return this.prisma.client.aiPlan.update({
       where: { id: planId },
       data: updateData,
