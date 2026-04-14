@@ -1,5 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { BusinessGraphService, BusinessGraphSnapshot } from './business-graph.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface WorkspaceRecommendation {
   id: string;
@@ -17,12 +18,19 @@ export interface WorkspaceRecommendation {
 
 type WorkspaceModule = 'crm' | 'revenue' | 'bookings' | 'marketing' | 'projects' | 'expenses' | 'automations';
 
+interface CrossModuleLinksResult {
+  invoices: Array<{ id: string; number: string; status: string; amount: number }>;
+  bookings: Array<{ id: string; date: string; service: string; status: string }>;
+  projects: Array<{ id: string; name: string; status: string }>;
+}
+
 @Injectable()
 export class WorkspaceRecommendationsService {
   private readonly logger = new Logger(WorkspaceRecommendationsService.name);
 
   constructor(
     @Inject(BusinessGraphService) private readonly graphService: BusinessGraphService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   async getRecommendations(businessId: string, module: WorkspaceModule): Promise<WorkspaceRecommendation[]> {
@@ -72,52 +80,48 @@ export class WorkspaceRecommendationsService {
     return { overallPct, modules };
   }
 
-  async getCrossModuleLinks(businessId: string, entityType: string, entityId: string): Promise<{
-    invoices: Array<{ id: string; number: string; status: string; amount: number }>;
-    bookings: Array<{ id: string; date: string; service: string; status: string }>;
-    projects: Array<{ id: string; name: string; status: string }>;
-  }> {
-    const result = { invoices: [] as any[], bookings: [] as any[], projects: [] as any[] };
+  async getCrossModuleLinks(businessId: string, entityType: string, entityId: string): Promise<CrossModuleLinksResult> {
+    const result: CrossModuleLinksResult = { invoices: [], bookings: [], projects: [] };
 
     if (entityType !== 'contact') return result;
 
     try {
       const [invoices, bookings, projects] = await Promise.all([
-        this.graphService['prisma'].invoice.findMany({
+        this.prisma.client.invoice.findMany({
           where: { contactId: entityId, businessId },
           select: { id: true, invoiceNumber: true, status: true, total: true },
           take: 5,
           orderBy: { createdAt: 'desc' },
-        }).catch(() => []),
-        this.graphService['prisma'].booking.findMany({
+        }).catch(() => [] as Array<{ id: string; invoiceNumber: string | null; status: string; total: number | null }>),
+        this.prisma.client.booking.findMany({
           where: { contactId: entityId, businessId },
           select: { id: true, startTime: true, status: true, service: { select: { name: true } } },
           take: 5,
           orderBy: { startTime: 'desc' },
-        }).catch(() => []),
-        this.graphService['prisma'].project.findMany({
+        }).catch(() => [] as Array<{ id: string; startTime: Date; status: string; service: { name: string } | null }>),
+        this.prisma.client.project.findMany({
           where: { contactId: entityId, businessId },
           select: { id: true, name: true, status: true },
           take: 5,
           orderBy: { createdAt: 'desc' },
-        }).catch(() => []),
+        }).catch(() => [] as Array<{ id: string; name: string; status: string }>),
       ]);
 
-      result.invoices = invoices.map((inv: any) => ({
+      result.invoices = invoices.map((inv) => ({
         id: inv.id,
         number: inv.invoiceNumber || 'Draft',
         status: inv.status,
         amount: Number(inv.total || 0),
       }));
 
-      result.bookings = bookings.map((b: any) => ({
+      result.bookings = bookings.map((b) => ({
         id: b.id,
         date: b.startTime?.toISOString?.() ?? '',
         service: b.service?.name || 'Service',
         status: b.status,
       }));
 
-      result.projects = projects.map((p: any) => ({
+      result.projects = projects.map((p) => ({
         id: p.id,
         name: p.name || 'Untitled',
         status: p.status,

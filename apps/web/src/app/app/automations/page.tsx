@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { LayoutGrid, Clock, Workflow } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
@@ -22,6 +23,9 @@ import { COVERAGE_MODULES } from "./components/automation-constants";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { Playbook, CrossModuleWorkflow, fetchPlaybooks, fetchCrossModuleWorkflows, fetchActivityFeed } from "@/lib/client";
 import { useAutomationsAiHub } from "./hooks/use-automations-ai-hub";
+import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
+import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 
 const TABS = [
   { key: "flows", label: "My Flows", icon: Workflow, tooltip: "Active flows and playbooks running in your business." },
@@ -30,6 +34,7 @@ const TABS = [
 ];
 
 export default function FlowsPage() {
+  const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("flows");
   const { isFreePlan } = usePlan();
@@ -40,6 +45,7 @@ export default function FlowsPage() {
   const [showUpgradeBanner, setShowUpgradeBanner] = useState(true);
   const [executionStats, setExecutionStats] = useState({ total: 0, success: 0, failed: 0, skipped: 0, successRate: 0 });
   const { aiHook: automationsAi, updateAutomationsContext } = useAutomationsAiHub();
+  const intelligence = useWorkspaceIntelligence({ businessId, module: "automations" });
 
   const handleAutomationsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
@@ -249,6 +255,17 @@ export default function FlowsPage() {
       }
       metricStrip={flowHealthContent}
     >
+      {intelligence.moduleCoverage && (
+        <AutomationCoverageIndicator coverage={intelligence.moduleCoverage} />
+      )}
+
+      <WorkspaceInsightsPanel
+        recommendations={intelligence.recommendations}
+        loading={intelligence.loading}
+        onDismiss={intelligence.dismissRecommendation}
+        onNavigate={(route) => router.push(route)}
+      />
+
       <div data-walkthrough="automations-list">
         {activeTab === "flows" && (
           <FlowList
