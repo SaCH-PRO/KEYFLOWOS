@@ -461,6 +461,12 @@ export class FlowOrchestratorService {
       if (schema.type === 'number' && typeof value !== 'number') {
         const num = Number(value);
         if (isNaN(num)) throw new Error(`Field "${key}" for ${toolName} must be a number`);
+        args[key] = num;
+      }
+      if (schema.type === 'boolean' && typeof value !== 'boolean') {
+        if (value === 'true') args[key] = true;
+        else if (value === 'false') args[key] = false;
+        else throw new Error(`Field "${key}" for ${toolName} must be a boolean`);
       }
       if (schema.type === 'array' && !Array.isArray(value)) {
         throw new Error(`Field "${key}" for ${toolName} must be an array`);
