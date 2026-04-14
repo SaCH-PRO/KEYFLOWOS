@@ -16,6 +16,7 @@ export function CalendarTab({ project, milestones = [] }: CalendarTabProps) {
   const [loadingBooking, setLoadingBooking] = useState(false);
 
   useEffect(() => {
+    setLinkedBooking(null);
     if (!project.bookingId) return;
     const businessId = getStoredBusinessId();
     if (!businessId) return;

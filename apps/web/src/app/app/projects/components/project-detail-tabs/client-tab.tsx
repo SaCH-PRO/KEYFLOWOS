@@ -47,7 +47,13 @@ export function ClientTab({ contactId }: ClientTabProps) {
     fetchContactDetail(contactId, businessId, { signal: ctrl.signal })
       .then((res) => {
         if (res.data?.contact) {
-          setClient(res.data.contact as ClientData);
+          const contact = res.data.contact;
+          const meta = res.data.meta;
+          setClient({
+            ...contact,
+            leadScore: meta?.leadScore ?? contact.leadScore ?? null,
+            lastInteractionAt: meta?.lastInteractionAt ?? contact.lastInteractionAt ?? null,
+          } as ClientData);
         } else if (res.error) {
           setError(res.error);
         }
