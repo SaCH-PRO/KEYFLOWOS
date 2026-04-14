@@ -75,6 +75,32 @@ export class ExpensesController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/expenses/by-project/:projectId')
+  getExpensesByProject(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.expenses.getExpensesByEntity(businessId, 'projectId', projectId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/expenses/by-service/:serviceId')
+  getExpensesByService(
+    @Param('businessId') businessId: string,
+    @Param('serviceId') serviceId: string,
+  ) {
+    return this.expenses.getExpensesByEntity(businessId, 'serviceId', serviceId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/expenses/recurring-candidates')
+  getRecurringCandidates(
+    @Param('businessId') businessId: string,
+  ) {
+    return this.expenses.detectRecurringCandidates(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/expenses/export')
   async exportCSV(
     @Param('businessId') businessId: string,
