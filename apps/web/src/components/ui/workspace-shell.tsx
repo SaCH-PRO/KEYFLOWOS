@@ -38,6 +38,8 @@ interface WorkspaceShellProps {
     onAction?: (actionKey: string) => void;
     toolResultRenderer?: (toolId: string, result: unknown) => React.ReactNode;
   };
+  skipReturnNavigation?: boolean;
+  iconColor?: string;
   className?: string;
   children: React.ReactNode;
 }
@@ -58,11 +60,13 @@ export function WorkspaceShell({
   metricStrip,
   banners,
   ai,
+  skipReturnNavigation = false,
+  iconColor,
   className = "",
   children,
 }: WorkspaceShellProps) {
   const { setCurrentMeta } = useNavigationContext();
-  useReturnNavigation({ restoreScrollOnMount: true });
+  useReturnNavigation({ restoreScrollOnMount: !skipReturnNavigation });
 
   useEffect(() => {
     setCurrentMeta({ selectedEntityLabel: title });
@@ -85,6 +89,7 @@ export function WorkspaceShell({
         onAction={onAction}
         actionDataAttr={actionDataAttr}
         rightSlot={headerRight}
+        iconColor={iconColor}
       />
 
       {banners && <div className="space-y-2 mb-4">{banners}</div>}
