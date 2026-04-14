@@ -23,32 +23,34 @@ const SEVERITY_DOT: Record<string, string> = {
   opportunity: "hsl(var(--kf-success))",
 };
 
-const PIN_STORAGE_KEY = "kf-tower-pinned-priorities";
+function getPinKey(businessId: string) {
+  return `kf-tower-pinned-${businessId}`;
+}
 
-function getPinnedIds(): Set<string> {
+function getPinnedIds(businessId: string): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
-    const raw = localStorage.getItem(PIN_STORAGE_KEY);
+    const raw = localStorage.getItem(getPinKey(businessId));
     return raw ? new Set(JSON.parse(raw)) : new Set();
   } catch {
     return new Set();
   }
 }
 
-function savePinnedIds(ids: Set<string>) {
+function savePinnedIds(businessId: string, ids: Set<string>) {
   try {
-    localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify([...ids]));
+    localStorage.setItem(getPinKey(businessId), JSON.stringify([...ids]));
   } catch {}
 }
 
-export function PriorityQueue({ priorities }: { priorities: ControlTowerPriority[] }) {
+export function PriorityQueue({ priorities, businessId }: { priorities: ControlTowerPriority[]; businessId: string }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setPinnedIds(getPinnedIds());
-  }, []);
+    setPinnedIds(getPinnedIds(businessId));
+  }, [businessId]);
 
   const togglePin = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -56,10 +58,10 @@ export function PriorityQueue({ priorities }: { priorities: ControlTowerPriority
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      savePinnedIds(next);
+      savePinnedIds(businessId, next);
       return next;
     });
-  }, []);
+  }, [businessId]);
 
   const sorted = [...priorities].sort((a, b) => {
     const aPinned = pinnedIds.has(a.id) ? 1 : 0;
