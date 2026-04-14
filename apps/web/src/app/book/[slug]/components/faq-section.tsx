@@ -13,7 +13,7 @@ type Props = {
   compact?: boolean;
 };
 
-function FaqItem({ entry, primaryColor, index }: { entry: FaqEntry; primaryColor: string; index: number }) {
+function FaqItem({ entry, primaryColor }: { entry: FaqEntry; primaryColor: string }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -92,8 +92,8 @@ export function FaqSection({ entries, heading, primaryColor, accentColor, showIc
         </h3>
       </div>
       <div className={compact ? "space-y-2" : "space-y-3"}>
-        {entries.map((entry, idx) => (
-          <FaqItem key={entry.id} entry={entry} primaryColor={primaryColor} index={idx} />
+        {entries.map((entry) => (
+          <FaqItem key={entry.id} entry={entry} primaryColor={primaryColor} />
         ))}
       </div>
     </section>

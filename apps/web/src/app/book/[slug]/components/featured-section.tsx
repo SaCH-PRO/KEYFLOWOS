@@ -24,7 +24,6 @@ export function FeaturedSection({
   isInCart,
   addToCart,
   onItemClick,
-  badges,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
