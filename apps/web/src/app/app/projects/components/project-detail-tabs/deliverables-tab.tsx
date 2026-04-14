@@ -88,6 +88,13 @@ export function DeliverablesTab({ deliverables, onDeliverablesChange }: Delivera
           <FileText className="w-5 h-5 mx-auto mb-2 text-muted-foreground" />
           <p className="text-sm font-medium">No deliverables yet</p>
           <p className="text-xs text-muted-foreground mt-1">Track files, documents, and links associated with this project.</p>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
+          >
+            <Plus className="w-3 h-3" />
+            Add deliverable
+          </button>
         </div>
       )}
 

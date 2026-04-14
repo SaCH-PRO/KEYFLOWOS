@@ -38,7 +38,7 @@ export default function ProjectsPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [prefillContactId, setPrefillContactId] = useState<string | undefined>(undefined);
   const projectTaskIdRef = useRef<string | null>(null);
-  const { updateProjectsContext } = useProjectsAiHub();
+  const { aiHook: projectsAi, updateProjectsContext, handleAction: handleProjectsAiAction } = useProjectsAiHub();
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -152,6 +152,7 @@ export default function ProjectsPage() {
       activeTab={activeTab}
       onTabChange={setActiveTab}
       tabLayoutId="projects-tab"
+      ai={{ hook: projectsAi, moduleName: "Projects", onAction: handleProjectsAiAction }}
       headerRight={
         <RichTooltip title="Broadcast Update" description="Send a project update to selected contacts via the CRM.">
           <button

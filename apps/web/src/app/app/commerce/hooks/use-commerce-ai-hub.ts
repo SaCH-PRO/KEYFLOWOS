@@ -496,6 +496,7 @@ export function useCommerceAiHub() {
 
   return {
     ...ai,
+    aiHook: ai,
     tools: contextualTools,
     updateCommerceContext,
     copilotMode,

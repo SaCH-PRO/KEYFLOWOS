@@ -181,7 +181,7 @@ export function useAutomationsAiHub() {
     });
   }, [ai.updateContext]);
 
-  return { ...ai, updateAutomationsContext };
+  return { aiHook: ai, updateAutomationsContext };
 }
 
 export type UseAutomationsAiHubReturn = ReturnType<typeof useAutomationsAiHub>;

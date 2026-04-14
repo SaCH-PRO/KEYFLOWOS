@@ -1072,6 +1072,7 @@ export function useStoreAiHub() {
 
   return {
     ...ai,
+    aiHook: ai,
     updateStoreContext,
   };
 }

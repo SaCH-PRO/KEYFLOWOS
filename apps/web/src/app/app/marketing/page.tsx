@@ -712,6 +712,7 @@ export default function ContentPage() {
         activeTab={activeTab}
         onTabChange={handleTabChange}
         tabLayoutId="content-tab-pill"
+        ai={{ hook: marketingAi.aiHook, moduleName: "Content" }}
       >
         <MarketingSkeleton activeTab="social" />
       </WorkspaceShell>
@@ -738,6 +739,7 @@ export default function ContentPage() {
       activeTab={activeTab}
       onTabChange={handleTabChange}
       tabLayoutId="content-tab-pill"
+      ai={{ hook: marketingAi.aiHook, moduleName: "Content" }}
       actionLabel={actionLabel}
       onAction={actionLabel ? handleNewItem : undefined}
       enableSwipe

@@ -447,6 +447,7 @@ export function useMarketingAiHub() {
 
   return {
     ...ai,
+    aiHook: ai,
     updateMarketingContext,
   };
 }
