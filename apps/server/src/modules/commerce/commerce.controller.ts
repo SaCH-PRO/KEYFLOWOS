@@ -7,6 +7,7 @@ import { CommerceVisionService } from './commerce-vision.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { CreateProductDto } from './dto/create-product.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
@@ -70,6 +71,8 @@ export class CommerceController {
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
   @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'product_created', 'product')
   @RequirePlanLimit('products')
   @Post('businesses/:businessId/products')
   createProduct(
@@ -91,6 +94,8 @@ export class CommerceController {
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'product_updated', 'product')
   @Patch('businesses/:businessId/products/:productId')
   updateProduct(
     @Param('businessId') businessId: string,
@@ -102,6 +107,8 @@ export class CommerceController {
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'product_deleted', 'product')
   @Delete('businesses/:businessId/products/:productId')
   deleteProduct(
     @Param('businessId') businessId: string,
@@ -262,7 +269,10 @@ export class CommerceController {
     );
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
+  @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'invoice_created', 'invoice')
   @RequirePlanLimit('invoices')
   @Post('businesses/:businessId/invoices')
   createInvoice(

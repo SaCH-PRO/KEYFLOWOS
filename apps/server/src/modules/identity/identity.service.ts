@@ -347,6 +347,7 @@ export class IdentityService {
 
   async inviteTeamMember(businessId: string, email: string, role: string, inviterId: string, scopes?: Record<string, string>, maxApprovalTier?: number) {
     await this.assertTeamAdmin(businessId, inviterId);
+    this.validateRole(role);
     if (scopes || maxApprovalTier !== undefined) {
       this.validateScopesPayload(
         scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF),
@@ -395,6 +396,7 @@ export class IdentityService {
   }
 
   async updateMemberRole(businessId: string, membershipId: string, role: string, requesterId?: string) {
+    this.validateRole(role);
     if (requesterId) await this.assertTeamAdmin(businessId, requesterId);
     const membership = await this.prisma.client.membership.findUnique({
       where: { id: membershipId },
@@ -418,6 +420,14 @@ export class IdentityService {
       await this.logTeamActivity(businessId, requesterId, 'team', 'role_changed', 'membership', membershipId, `Changed ${updated.user.email} role to ${role}`, undefined, { newRole: role });
     }
     return updated;
+  }
+
+  private static readonly ASSIGNABLE_ROLES = ['ADMIN', 'STAFF'] as const;
+
+  private validateRole(role: string): void {
+    if (!(IdentityService.ASSIGNABLE_ROLES as readonly string[]).includes(role)) {
+      throw new BadRequestException(`Invalid role: ${role}. Allowed roles: ${IdentityService.ASSIGNABLE_ROLES.join(', ')}`);
+    }
   }
 
   private validateScopesPayload(scopes: Record<string, string>, tier: number): void {

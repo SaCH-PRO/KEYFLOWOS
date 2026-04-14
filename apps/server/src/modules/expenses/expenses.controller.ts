@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Header, Inject, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Inject, Param, Patch, Post, Query, Res, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ExpensesService } from './expenses.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { Response } from 'express';
 
 @Controller('expenses')
@@ -136,6 +137,8 @@ export class ExpensesController {
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('expenses', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('expenses', 'expense_created', 'expense')
   @Post('businesses/:businessId/expenses')
   createExpense(
     @Param('businessId') businessId: string,
@@ -162,6 +165,8 @@ export class ExpensesController {
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('expenses', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('expenses', 'expense_updated', 'expense')
   @Patch('businesses/:businessId/expenses/:expenseId')
   updateExpense(
     @Param('businessId') businessId: string,
@@ -189,6 +194,8 @@ export class ExpensesController {
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('expenses', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('expenses', 'expense_deleted', 'expense')
   @Delete('businesses/:businessId/expenses/:expenseId')
   deleteExpense(
     @Param('businessId') businessId: string,
