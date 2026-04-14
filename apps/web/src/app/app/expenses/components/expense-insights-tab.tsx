@@ -8,7 +8,7 @@ import {
   Zap, DollarSign, Sparkles, Brain, Shield,
   ChevronDown, ChevronUp, Users, Percent,
 } from "lucide-react";
-import { Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget, MarginAnalysis } from "@/lib/client";
+import { Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget, MarginAnalysis, RecurringCandidate } from "@/lib/client";
 import { formatCurrency } from "./expense-utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
@@ -39,6 +39,7 @@ interface ExpenseInsightsTabProps {
   projects?: ProjectOption[];
   contacts?: ContactOption[];
   services?: ServiceOption[];
+  recurringCandidates?: RecurringCandidate[];
   onNavigate: (tab: TabKey) => void;
   periodTotalCount?: number;
   periodUncategorizedCount?: number;
@@ -56,6 +57,7 @@ const TYPE_STYLES: Record<string, { border: string; bg: string; iconColor: strin
 export function ExpenseInsightsTab({
   expenses, categories, summary, vendors, budgets, marginData,
   projects: _projects = [], contacts: _contacts = [], services: _services = [],
+  recurringCandidates = [],
   onNavigate,
   periodTotalCount, periodUncategorizedCount, periodMissingReceiptCount, periodRecurringCount,
 }: ExpenseInsightsTabProps) {
@@ -642,6 +644,53 @@ export function ExpenseInsightsTab({
         </div>
       )}
 
+      {recurringCandidates.length > 0 && (
+        <div className="kf-card rounded-xl p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <Zap className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+              Recurring Expense Patterns
+            </h3>
+            <button
+              onClick={() => onNavigate("transactions")}
+              className="text-[11px] font-medium flex items-center gap-1 transition-colors"
+              style={{ color: "hsl(var(--kf-accent2))" }}
+            >
+              View in Transactions <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {recurringCandidates.slice(0, 6).map((rc) => {
+              const freqMap: Record<string, string> = { WEEKLY: "Weekly", BIWEEKLY: "Bi-weekly", MONTHLY: "Monthly", QUARTERLY: "Quarterly", YEARLY: "Yearly" };
+              return (
+                <div key={`${rc.vendor}-${rc.amount}`} className="bg-white/5 rounded-lg p-3 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold truncate">{rc.vendor}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-blue-500/10 text-blue-400">{freqMap[rc.frequency] || rc.frequency}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-red-400 font-semibold">{formatCurrency(rc.amount)}</span>
+                    <span className="text-muted-foreground">{rc.occurrences} times</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground truncate">{rc.description}</p>
+                </div>
+              );
+            })}
+          </div>
+          {recurringCandidates.length > 0 && (
+            <div className="bg-white/[0.03] rounded-lg p-3 flex items-start gap-2.5">
+              <Zap className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+              <div>
+                <p className="text-xs font-medium">Projected Recurring Cost</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {recurringCandidates.length} recurring pattern{recurringCandidates.length !== 1 ? "s" : ""} detected totaling ~{formatCurrency(recurringCandidates.reduce((s, rc) => s + rc.amount, 0))}/cycle. Review and confirm to improve cash flow forecasting accuracy.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {vendorDistribution && (
         <div className="kf-card rounded-xl p-4 space-y-4">
           <div className="flex items-center justify-between">
@@ -828,12 +877,13 @@ export function ExpenseInsightsTab({
           Cross-Module Data Propagation
         </h3>
         <p className="text-xs text-muted-foreground">Expense data flows into project cost panels, client profitability, and service pricing across your platform.</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {[
             { label: "Revenue", icon: DollarSign, desc: marginData && marginData.totalRevenue > 0 ? `${marginData.grossMargin}% margin` : "Margin & profitability", color: "hsl(var(--kf-success))", active: !!(marginData && marginData.totalRevenue > 0) },
             { label: "Projects", icon: BarChart3, desc: marginData && marginData.byProject.length > 0 ? `${marginData.byProject.length} linked` : "Cost tracking", color: "hsl(var(--kf-info))", active: !!(marginData && marginData.byProject.length > 0) },
             { label: "Clients", icon: Users, desc: marginData && marginData.byClient.length > 0 ? `${marginData.byClient.length} tracked` : "Profitability", color: "hsl(var(--kf-accent2))", active: !!(marginData && marginData.byClient.length > 0) },
             { label: "Services", icon: Sparkles, desc: marginData && marginData.byService.length > 0 ? `${marginData.byService.length} costed` : "Pricing impact", color: "hsl(var(--kf-accent1))", active: !!(marginData && marginData.byService.length > 0) },
+            { label: "Recurring", icon: Zap, desc: recurringCandidates.length > 0 ? `${recurringCandidates.length} detected` : "Pattern detection", color: "hsl(var(--kf-warning))", active: recurringCandidates.length > 0 },
           ].map(mod => (
             <div key={mod.label} className={`bg-white/5 rounded-lg p-3 flex items-center gap-2.5 ${mod.active ? "ring-1 ring-white/10" : ""}`}>
               <div className="p-1.5 rounded-lg" style={{ background: `${mod.color.replace(")", " / 0.1)")}` }}>

@@ -242,7 +242,7 @@ export default function ExpensesPage() {
         {activeTab === "transactions" && (
           <div className="space-y-4">
             <ExpenseFilters period={d.period} setPeriod={d.setPeriod} customStart={d.customStart} setCustomStart={d.setCustomStart} customEnd={d.customEnd} setCustomEnd={d.setCustomEnd} searchQuery={d.searchQuery} setSearchQuery={d.setSearchQuery} />
-            <ExpenseList expenses={d.expenses} totalExpenses={d.totalExpenses} categories={d.categories} filterCategory={d.filterCategory} setFilterCategory={d.setFilterCategory} filterPayment={d.filterPayment} setFilterPayment={d.setFilterPayment} page={d.page} setPage={d.setPage} pageSize={d.pageSize} setPageSize={d.setPageSize} onEdit={openEditModal} onDelete={handleDelete} onViewDetail={setDetailExpense} onAdd={openAddModal} businessId={d.businessId} onReload={d.loadData} projects={d.projects} contacts={d.contacts} services={d.services} />
+            <ExpenseList expenses={d.expenses} totalExpenses={d.totalExpenses} categories={d.categories} filterCategory={d.filterCategory} setFilterCategory={d.setFilterCategory} filterPayment={d.filterPayment} setFilterPayment={d.setFilterPayment} page={d.page} setPage={d.setPage} pageSize={d.pageSize} setPageSize={d.setPageSize} onEdit={openEditModal} onDelete={handleDelete} onViewDetail={setDetailExpense} onAdd={openAddModal} businessId={d.businessId} onReload={d.loadData} projects={d.projects} contacts={d.contacts} services={d.services} recurringCandidates={d.recurringCandidates} />
             <ExpenseTaxCalc summary={d.summary} />
           </div>
         )}
@@ -267,6 +267,7 @@ export default function ExpensesPage() {
             projects={d.projects}
             contacts={d.contacts}
             services={d.services}
+            recurringCandidates={d.recurringCandidates}
             onNavigate={setActiveTab}
             periodTotalCount={totalCount}
             periodUncategorizedCount={uncategorizedCount}

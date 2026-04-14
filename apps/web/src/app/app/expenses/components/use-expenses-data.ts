@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   fetchExpenses, fetchExpenseCategories, fetchExpenseSummary, fetchVendorAnalytics, fetchExpenseBudgets,
-  fetchMarginAnalysis, fetchProjects, fetchServices, fetchContacts,
-  Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget, MarginAnalysis,
+  fetchMarginAnalysis, fetchRecurringCandidates, fetchProjects, fetchServices, fetchContacts,
+  Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget, MarginAnalysis, RecurringCandidate,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
@@ -21,6 +21,7 @@ export function useExpensesData() {
   const [vendors, setVendors] = useState<VendorAnalytics[]>([]);
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
   const [marginData, setMarginData] = useState<MarginAnalysis | null>(null);
+  const [recurringCandidates, setRecurringCandidates] = useState<RecurringCandidate[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [contacts, setContacts] = useState<ContactOption[]>([]);
@@ -76,13 +77,14 @@ export function useExpensesData() {
     setLoading(true);
     try {
       const useCustom = period === "custom" && customStart && customEnd;
-      const [expRes, catRes, sumRes, venRes, budRes, margRes] = await Promise.all([
+      const [expRes, catRes, sumRes, venRes, budRes, margRes, recRes] = await Promise.all([
         fetchExpenses(businessId, { search: debouncedSearch || undefined, categoryId: filterCategory || undefined, paymentMethod: filterPayment || undefined, period: useCustom ? undefined : period, startDate: useCustom ? customStart : undefined, endDate: useCustom ? customEnd : undefined, page, limit: pageSize }),
         fetchExpenseCategories(businessId),
         fetchExpenseSummary(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchVendorAnalytics(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchExpenseBudgets(businessId),
         fetchMarginAnalysis(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
+        fetchRecurringCandidates(businessId),
       ]);
       if (expRes.data) { setExpenses(expRes.data.data); setTotalExpenses(expRes.data.total); }
       if (catRes.data) setCategories(catRes.data);
@@ -90,6 +92,7 @@ export function useExpensesData() {
       if (venRes.data) setVendors(venRes.data);
       if (budRes.data) setBudgets(budRes.data);
       if (margRes.data) setMarginData(margRes.data);
+      if (recRes.data) setRecurringCandidates(recRes.data.candidates);
     } catch {}
     setLoading(false);
   }, [businessId, period, debouncedSearch, filterCategory, filterPayment, customStart, customEnd, page, pageSize]);
@@ -101,7 +104,7 @@ export function useExpensesData() {
 
   return {
     businessId, expenses, totalExpenses, categories, setCategories,
-    summary, vendors, budgets, marginData, loading, loadData,
+    summary, vendors, budgets, marginData, recurringCandidates, loading, loadData,
     projects, services, contacts,
     period, setPeriod, customStart, setCustomStart, customEnd, setCustomEnd,
     searchQuery, setSearchQuery,

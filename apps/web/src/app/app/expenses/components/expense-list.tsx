@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoBadge } from "@/components/ui/info-badge";
-import { Expense, ExpenseCategory, PAYMENT_METHODS, updateExpense } from "@/lib/client";
+import { Expense, ExpenseCategory, PAYMENT_METHODS, updateExpense, RecurringCandidate } from "@/lib/client";
 import { formatCurrency, formatDate } from "./expense-utils";
 import { toast } from "sonner";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
@@ -35,6 +35,7 @@ interface ExpenseListProps {
   projects?: ProjectOption[];
   contacts?: ContactOption[];
   services?: ServiceOption[];
+  recurringCandidates?: RecurringCandidate[];
 }
 
 const PAYMENT_ICONS: Record<string, typeof CreditCard> = {
@@ -60,12 +61,14 @@ export function ExpenseList({
   onEdit, onDelete, onViewDetail, onAdd,
   businessId, onReload,
   projects = [], contacts = [], services = [],
+  recurringCandidates = [],
 }: ExpenseListProps) {
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkCategoryId, setBulkCategoryId] = useState("");
   const [inlineCatExpId, setInlineCatExpId] = useState<string | null>(null);
+  const [showRecurring, setShowRecurring] = useState(false);
 
   const filteredExpenses = useMemo(() =>
     [...expenses].sort((a, b) => {
@@ -339,6 +342,65 @@ export function ExpenseList({
               <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="px-3 py-1.5 rounded-lg text-xs border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {recurringCandidates.length > 0 && (
+        <div className="border-t border-border/40">
+          <button
+            onClick={() => setShowRecurring(prev => !prev)}
+            className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Repeat className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+              <span className="text-sm font-semibold">Recurring Expense Detection</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: "hsl(var(--kf-accent2) / 0.12)", color: "hsl(var(--kf-accent2))" }}>
+                {recurringCandidates.length} pattern{recurringCandidates.length !== 1 ? "s" : ""} found
+              </span>
+            </div>
+            <span className="text-xs text-muted-foreground">{showRecurring ? "Hide" : "Show"}</span>
+          </button>
+          <AnimatePresence>
+            {showRecurring && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-4 space-y-2">
+                  <p className="text-[11px] text-muted-foreground mb-3">
+                    These expenses follow a recurring pattern based on vendor, amount, and timing. Review to confirm and manage recurring commitments.
+                  </p>
+                  {recurringCandidates.map((rc) => {
+                    const freqLabel = RECURRING_LABELS[rc.frequency] || rc.frequency;
+                    return (
+                      <div key={`${rc.vendor}-${rc.amount}`} className="bg-white/[0.03] rounded-lg p-3 flex items-center gap-3 hover:bg-white/[0.05] transition-colors">
+                        <div className="p-2 rounded-lg shrink-0" style={{ background: "hsl(var(--kf-accent2) / 0.1)" }}>
+                          <Repeat className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-xs font-semibold truncate">{rc.vendor}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-blue-500/10 text-blue-400">{freqLabel}</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground truncate">{rc.description}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-sm font-semibold text-red-400 block">{formatCurrency(rc.amount)}</span>
+                          <span className="text-[10px] text-muted-foreground">{rc.occurrences} occurrence{rc.occurrences !== 1 ? "s" : ""}</span>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-[10px] text-muted-foreground block">~{Math.round(rc.avgDaysBetween)}d apart</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
     </div>
