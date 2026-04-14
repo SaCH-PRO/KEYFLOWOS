@@ -2,10 +2,11 @@
 
 import {
   FolderKanban, CalendarClock, AlertTriangle, Clock, CheckCircle,
-  UserX, Sparkles, HeartPulse, TrendingUp,
+  UserX, Sparkles, HeartPulse, TrendingUp, Target, DollarSign,
+  BarChart3, Flag,
 } from "lucide-react";
 import { Project } from "@/lib/client";
-import { normalizeStatus, isOverdue, isDueSoon, getProjectRisk } from "./project-constants";
+import { normalizeStatus, isOverdue, isDueSoon, getProjectRisk, getProjectProgress } from "./project-constants";
 
 interface ProjectExecutionStripProps {
   projects: Project[];
@@ -17,12 +18,20 @@ export function ProjectExecutionStrip({ projects }: ProjectExecutionStripProps) 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
+  const total = projects.length;
+
   const activeProjects = projects.filter((p) => {
     const s = normalizeStatus(p.status);
     return s !== "COMPLETED" && s !== "ARCHIVED";
   });
 
   const active = activeProjects.length;
+  const completedTotal = projects.filter((p) => normalizeStatus(p.status) === "COMPLETED").length;
+
+  const atRisk = activeProjects.filter((p) => {
+    const r = getProjectRisk(p);
+    return r === "critical" || r === "at-risk" || r === "blocked";
+  }).length;
 
   const dueThisWeek = activeProjects.filter((p) => isDueSoon(p.dueDate, 7)).length;
 
@@ -48,14 +57,21 @@ export function ProjectExecutionStrip({ projects }: ProjectExecutionStripProps) 
   const completedTasks = projects.reduce((s, p) => s + (p.tasks?.filter((t) => t.isCompleted).length ?? 0), 0);
   const taskCompletionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
+  const avgProgress = active > 0
+    ? Math.round(activeProjects.reduce((s, p) => s + getProjectProgress(p.tasks ?? []), 0) / active)
+    : 0;
+
   const metrics = [
+    { label: "Total", value: String(total), icon: FolderKanban, color: "hsl(var(--foreground))", bg: "hsl(var(--muted) / 0.3)" },
     { label: "Health Score", value: `${healthScore}%`, icon: HeartPulse, color: healthScore >= 70 ? "hsl(var(--kf-success))" : healthScore >= 40 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))", bg: healthScore >= 70 ? "hsl(var(--kf-success) / 0.1)" : healthScore >= 40 ? "hsl(var(--kf-warning) / 0.1)" : "hsl(var(--kf-error) / 0.1)" },
-    { label: "Active", value: String(active), icon: FolderKanban, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.1)" },
-    { label: "Due This Week", value: String(dueThisWeek), icon: CalendarClock, color: "hsl(var(--kf-warning))", bg: "hsl(var(--kf-warning) / 0.1)" },
-    ...(blocked > 0 ? [{ label: "Blocked", value: String(blocked), icon: AlertTriangle, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.1)" }] : []),
-    ...(overdue > 0 ? [{ label: "Overdue", value: String(overdue), icon: Clock, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.08)" }] : []),
+    { label: "Active", value: String(active), icon: Target, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.1)" },
+    { label: "Completed", value: String(completedTotal), icon: CheckCircle, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.1)" },
+    { label: "At Risk", value: String(atRisk), icon: AlertTriangle, color: atRisk > 0 ? "hsl(var(--kf-error))" : "hsl(var(--muted-foreground))", bg: atRisk > 0 ? "hsl(var(--kf-error) / 0.1)" : "hsl(var(--muted) / 0.2)" },
+    { label: "Avg Progress", value: `${avgProgress}%`, icon: BarChart3, color: "hsl(var(--kf-info))", bg: "hsl(var(--kf-info) / 0.1)" },
     { label: "Task Rate", value: `${taskCompletionRate}%`, icon: TrendingUp, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.1)" },
-    { label: "Completed", value: String(completedThisMonth), icon: CheckCircle, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.1)" },
+    { label: "Due This Week", value: String(dueThisWeek), icon: CalendarClock, color: dueThisWeek > 0 ? "hsl(var(--kf-warning))" : "hsl(var(--muted-foreground))", bg: dueThisWeek > 0 ? "hsl(var(--kf-warning) / 0.1)" : "hsl(var(--muted) / 0.2)" },
+    ...(blocked > 0 ? [{ label: "Blocked", value: String(blocked), icon: Flag, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.1)" }] : []),
+    ...(overdue > 0 ? [{ label: "Overdue", value: String(overdue), icon: Clock, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.08)" }] : []),
     ...(unassigned > 0 ? [{ label: "No Client", value: String(unassigned), icon: UserX, color: "hsl(var(--muted-foreground))", bg: "hsl(var(--muted) / 0.3)" }] : []),
   ];
 
@@ -66,6 +82,7 @@ export function ProjectExecutionStrip({ projects }: ProjectExecutionStripProps) 
           <Sparkles className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
         </div>
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Delivery Pulse</span>
+        <span className="text-[10px] text-muted-foreground ml-1">{completedThisMonth} completed this month</span>
         <div className="ml-auto flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full" style={{ background: healthScore >= 70 ? "hsl(var(--kf-success))" : healthScore >= 40 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))" }} />
           <span className="text-[10px] font-medium" style={{ color: healthScore >= 70 ? "hsl(var(--kf-success))" : healthScore >= 40 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))" }}>

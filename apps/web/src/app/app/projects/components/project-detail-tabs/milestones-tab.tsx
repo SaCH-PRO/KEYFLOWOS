@@ -143,6 +143,12 @@ export function MilestonesTab({ milestones, onMilestonesChange }: MilestonesTabP
                     </span>
                   )}
                 </div>
+                {i > 0 && !ms.completed && !milestones[i - 1].completed && (
+                  <span className="text-[9px] text-muted-foreground/50 mt-0.5 inline-flex items-center gap-0.5">
+                    <ChevronRight className="w-2.5 h-2.5" />
+                    Depends on M{i}
+                  </span>
+                )}
               </div>
               {ms.dueDate && (
                 <span
