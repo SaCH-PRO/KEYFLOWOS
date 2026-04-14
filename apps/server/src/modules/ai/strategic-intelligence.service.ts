@@ -637,24 +637,24 @@ Momentum: ${snapshot.momentumScore}/100`;
       }),
       this.db.socialPost.count({
         where: { businessId, deletedAt: null, status: 'DRAFT' },
-      }).catch(() => 0),
+      }),
       this.db.socialPost.count({
         where: { businessId, deletedAt: null, status: 'SCHEDULED' },
-      }).catch(() => 0),
+      }),
       this.db.project.findMany({
         where: { businessId, deletedAt: null, status: { in: ['IN_PROGRESS', 'ACTIVE'] } },
         select: { id: true, name: true, status: true, dueDate: true, contactId: true },
         take: 10,
-      }).catch(() => []),
+      }),
       this.db.expense.aggregate({
         where: { businessId, deletedAt: null, date: { gte: startOfMonth } },
         _sum: { amount: true },
         _count: true,
-      }).catch(() => ({ _sum: { amount: null }, _count: 0 })),
+      }),
       this.db.invoice.aggregate({
         where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: startOfMonth } },
         _sum: { total: true },
-      }).catch(() => ({ _sum: { total: null } })),
+      }),
       this.businessGraph.getSnapshot(businessId),
     ]);
 

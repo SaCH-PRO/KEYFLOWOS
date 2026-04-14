@@ -266,7 +266,10 @@ export class AiAdvisorService {
           updatedAt: { lt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
         },
       }),
-      this.strategic.getStrategicDashboard(businessId).catch(() => null),
+      this.strategic.getStrategicDashboard(businessId).catch((err) => {
+        this.logger.warn('Strategic dashboard unavailable for briefing', (err as Error).message);
+        return null;
+      }),
     ]);
 
     const revenue = revenueThisMonth._sum.total ?? 0;
