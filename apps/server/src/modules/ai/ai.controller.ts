@@ -617,6 +617,114 @@ export class AiController {
 
     priorities.sort((a, b) => b.urgency - a.urgency);
 
+    type RiskAlert = {
+      id: string;
+      domain: 'cash_flow' | 'churn' | 'overdue' | 'capacity' | 'storefront' | 'delivery';
+      severity: 'critical' | 'warning' | 'info';
+      title: string;
+      description: string;
+      module: string;
+      actionLabel?: string;
+      actionRoute?: string;
+    };
+
+    const risks: RiskAlert[] = [];
+    let riskIdx = 0;
+
+    if (dashboard.overdueInvoices > 0) {
+      risks.push({
+        id: `risk-cashflow-${riskIdx++}`,
+        domain: 'cash_flow',
+        severity: dashboard.overdueAmount > 5000 ? 'critical' : 'warning',
+        title: `$${dashboard.overdueAmount.toFixed(0)} TTD in overdue invoices`,
+        description: `${dashboard.overdueInvoices} invoice${dashboard.overdueInvoices > 1 ? 's' : ''} past due — follow up immediately to protect cash flow`,
+        module: 'revenue',
+        actionLabel: 'Review Invoices',
+        actionRoute: '/app/commerce?tab=operations',
+      });
+    }
+
+    if (dashboard.staleLeads > 3) {
+      risks.push({
+        id: `risk-churn-${riskIdx++}`,
+        domain: 'churn',
+        severity: dashboard.staleLeads > 10 ? 'critical' : 'warning',
+        title: `${dashboard.staleLeads} leads going cold`,
+        description: 'Leads inactive 30+ days — high churn risk without re-engagement',
+        module: 'crm',
+        actionLabel: 'View Leads',
+        actionRoute: '/app/crm/pipeline',
+      });
+    }
+
+    const overdueTaskCount = snapshot.projects?.overdueTaskCount ?? 0;
+    if (overdueTaskCount > 0) {
+      risks.push({
+        id: `risk-delivery-${riskIdx++}`,
+        domain: 'delivery',
+        severity: overdueTaskCount > 5 ? 'critical' : 'warning',
+        title: `${overdueTaskCount} overdue project tasks`,
+        description: 'Delivery delays can cascade into client dissatisfaction and revenue loss',
+        module: 'projects',
+        actionLabel: 'View Projects',
+        actionRoute: '/app/projects',
+      });
+    }
+
+    const utilRate = snapshot.bookings?.utilizationRate ?? 100;
+    if (utilRate < 40) {
+      risks.push({
+        id: `risk-capacity-${riskIdx++}`,
+        domain: 'capacity',
+        severity: utilRate < 20 ? 'critical' : 'warning',
+        title: `Only ${utilRate.toFixed(0)}% booking utilization`,
+        description: 'Low utilization means lost revenue potential — consider promotions or outreach',
+        module: 'bookings',
+        actionLabel: 'View Calendar',
+        actionRoute: '/app/bookings',
+      });
+    }
+
+    const activeProducts = snapshot.storefront?.activeProductCount ?? 0;
+    if (activeProducts === 0) {
+      risks.push({
+        id: `risk-storefront-${riskIdx++}`,
+        domain: 'storefront',
+        severity: 'warning',
+        title: 'Storefront has no active products',
+        description: 'Your public store is empty — visitors will leave without converting',
+        module: 'storefront',
+        actionLabel: 'Manage Products',
+        actionRoute: '/app/commerce?tab=catalog',
+      });
+    }
+
+    for (const h of healthIndicators) {
+      if (h.status === 'critical') {
+        risks.push({
+          id: `risk-health-${riskIdx++}`,
+          domain: 'overdue',
+          severity: 'critical',
+          title: h.detail,
+          description: `Critical health alert in ${h.area}`,
+          module: h.area,
+        });
+      }
+    }
+
+    for (const insight of insights.slice(0, 5)) {
+      if (insight.severity === 'critical' || insight.severity === 'warning') {
+        risks.push({
+          id: `risk-insight-${insight.id}`,
+          domain: 'overdue',
+          severity: insight.severity as 'critical' | 'warning',
+          title: insight.title,
+          description: insight.description,
+          module: insight.module,
+        });
+      }
+    }
+
     return {
       snapshot: {
         business: snapshot.business,
@@ -625,6 +733,7 @@ export class AiController {
       },
       dashboard,
       priorities: priorities.slice(0, 25),
+      risks,
       pendingApprovals: totalPendingApprovals,
       modules: {
         contacts: snapshot.contacts,

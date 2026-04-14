@@ -4390,6 +4390,17 @@ export interface ControlTowerModules {
   storefront: { activeProductCount: number; averagePrice: number };
 }
 
+export interface ControlTowerRiskAlert {
+  id: string;
+  domain: 'cash_flow' | 'churn' | 'overdue' | 'capacity' | 'storefront' | 'delivery';
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  description: string;
+  module: string;
+  actionLabel?: string;
+  actionRoute?: string;
+}
+
 export interface ControlTowerData {
   snapshot: {
     business: { name: string; industry: string | null; archetype: string | null; currency: string };
@@ -4398,6 +4409,7 @@ export interface ControlTowerData {
   };
   dashboard: StrategicDashboard;
   priorities: ControlTowerPriority[];
+  risks: ControlTowerRiskAlert[];
   pendingApprovals: number;
   modules: ControlTowerModules;
 }

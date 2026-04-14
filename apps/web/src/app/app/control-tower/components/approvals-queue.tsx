@@ -21,9 +21,11 @@ const TIER_COLORS: Record<number, string> = {
 export function ApprovalsQueue({
   businessId,
   pendingCount,
+  onResolve,
 }: {
   businessId: string;
   pendingCount: number;
+  onResolve?: () => void;
 }) {
   const [approvals, setApprovals] = useState<AiApprovalItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -53,6 +55,7 @@ export function ApprovalsQueue({
       await resolveAiApproval(businessId, id, resolution);
       setApprovals((prev) => prev.filter((a) => a.id !== id));
       toast.success(resolution === "approved" ? "Action approved" : resolution === "rejected" ? "Action rejected" : "Deferred for later");
+      onResolve?.();
     } catch {
       toast.error("Failed to resolve approval");
     } finally {
