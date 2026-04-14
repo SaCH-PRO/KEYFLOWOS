@@ -140,30 +140,6 @@ export function CatalogGrid({
     return items;
   }, [sortedCatalog, activeTab, searchQuery, sortOption, reviewAggregates]);
 
-  if (catalogItems.length === 0) {
-    return (
-      <div className={`${ts.cardRadius} border border-gray-200 bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl p-16 text-center space-y-5 ${ts.fontClass}`}>
-        <div className="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] flex items-center justify-center">
-          <Sparkles className="w-10 h-10 text-gray-300" />
-        </div>
-        <div className="space-y-2">
-          <h2 className={`text-xl ${ts.headerWeight} text-gray-600 ${ts.textStyle}`}>Coming Soon</h2>
-          <p className={`text-sm text-gray-900/35 max-w-sm mx-auto leading-relaxed ${ts.bodyWeight}`}>
-            This business is setting up their online store. Check back soon for services, products, and packages!
-          </p>
-        </div>
-        <div className="flex items-center justify-center gap-6 pt-2">
-          {["Services", "Products", "Packages"].map((label) => (
-            <div key={label} className="flex items-center gap-1.5 text-xs text-gray-300">
-              <div className="w-1.5 h-1.5 rounded-full bg-white/15" />
-              {label}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   const sortLabels: Record<SortOption, string> = {
     default: "Default",
     price_asc: "Price: Low → High",
@@ -526,8 +502,53 @@ export function CatalogGrid({
     ...(hasPackages ? [["package", "Packages"]] : []),
   ] as [FilterTab, string][];
 
+  const [sectionVisible, setSectionVisible] = useState(false);
+  const sectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setSectionVisible(true); obs.disconnect(); }
+    }, { threshold: 0.08 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  if (catalogItems.length === 0) {
+    return (
+      <div className={`${ts.cardRadius} border border-gray-200 bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl p-16 text-center space-y-5 ${ts.fontClass}`}>
+        <div className="w-20 h-20 mx-auto rounded-2xl bg-gray-50 flex items-center justify-center">
+          <Sparkles className="w-10 h-10 text-gray-300" />
+        </div>
+        <div className="space-y-2">
+          <h2 className={`text-xl ${ts.headerWeight} text-gray-600 ${ts.textStyle}`}>Coming Soon</h2>
+          <p className={`text-sm text-gray-400 max-w-sm mx-auto leading-relaxed ${ts.bodyWeight}`}>
+            This business is setting up their online store. Check back soon for services, products, and packages!
+          </p>
+        </div>
+        <div className="flex items-center justify-center gap-6 pt-2">
+          {["Services", "Products", "Packages"].map((label) => (
+            <div key={label} className="flex items-center gap-1.5 text-xs text-gray-300">
+              <div className="w-1.5 h-1.5 rounded-full bg-gray-200" />
+              {label}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`space-y-6 ${ts.fontClass}`}>
+    <div
+      ref={sectionRef}
+      className={`space-y-6 ${ts.fontClass}`}
+      style={{
+        opacity: sectionVisible ? 1 : 0,
+        transform: sectionVisible ? "translateY(0)" : "translateY(16px)",
+        transition: "opacity 0.6s ease-out, transform 0.6s ease-out",
+      }}
+    >
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1 group/search">
           <Search
@@ -552,7 +573,7 @@ export function CatalogGrid({
           {searchQuery && (
             <button
               onClick={() => setSearchQuery("")}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-gray-200/50 flex items-center justify-center hover:bg-gray-200 transition-colors"
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 w-7 h-7 min-h-[44px] min-w-[44px] rounded-full bg-gray-200/50 flex items-center justify-center hover:bg-gray-200 transition-colors"
             >
               <X className="w-3 h-3 text-gray-500" />
             </button>
