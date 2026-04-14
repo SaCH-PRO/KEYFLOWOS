@@ -11,7 +11,7 @@ import { WorkspaceMetricStrip } from "@/components/ui/workspace-metric-strip";
 import {
   Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus,
   TrendingUp, AlertTriangle, Tag, FileQuestion, BarChart3, Lightbulb,
-  Layers, PieChart,
+  Layers, PieChart, ShieldCheck,
 } from "lucide-react";
 import { deleteExpense, getExpenseExportUrl, Expense } from "@/lib/client";
 import { getAuthHeaders } from "@/lib/api";
@@ -125,10 +125,26 @@ export default function ExpensesPage() {
       .then(r => r.blob()).then(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `expenses-${new Date().toISOString().split("T")[0]}.csv`; a.click(); });
   };
 
-  const uncategorizedCount = d.expenses.filter(e => !e.categoryId).length;
-  const missingReceiptCount = d.expenses.filter(e => !e.receiptUrl).length;
+  const totalCount = d.summary?.count ?? d.totalExpenses;
+  const summaryAny = d.summary as Record<string, unknown> | null;
+  const uncategorizedCount = (typeof summaryAny?.uncategorizedCount === "number" ? summaryAny.uncategorizedCount : null) ?? d.expenses.filter(e => !e.categoryId).length;
+  const missingReceiptCount = (typeof summaryAny?.missingReceiptCount === "number" ? summaryAny.missingReceiptCount : null) ?? d.expenses.filter(e => !e.receiptUrl).length;
+  const recurringCount = (typeof summaryAny?.recurringCount === "number" ? summaryAny.recurringCount : null) ?? d.expenses.filter(e => e.isRecurring).length;
   const largestCategory = d.summary?.byCategory?.[0];
   const largestCategoryPct = largestCategory?.percent ?? 0;
+
+  const spendingHealth = useMemo(() => {
+    let score = 100;
+    if (d.overBudgetCount > 0) score -= d.overBudgetCount * 15;
+    if (d.nearAlertCount > 0) score -= d.nearAlertCount * 5;
+    if (uncategorizedCount > 5) score -= 10;
+    else if (uncategorizedCount > 0) score -= 5;
+    if (totalCount > 0 && missingReceiptCount > totalCount * 0.5) score -= 10;
+    const changePct = d.summary?.comparison?.changePercent ?? 0;
+    if (changePct > 30) score -= 15;
+    else if (changePct > 15) score -= 8;
+    return Math.max(0, Math.min(100, score));
+  }, [d.overBudgetCount, d.nearAlertCount, uncategorizedCount, missingReceiptCount, d.summary, totalCount]);
 
   if (d.loading) return <ListPageSkeleton />;
 
@@ -181,6 +197,14 @@ export default function ExpensesPage() {
       iconColor: "hsl(var(--kf-success))",
       sub: d.vendors[0] ? formatCurrency(d.vendors[0].total) : "No vendor data",
     },
+    {
+      label: "Health Score",
+      value: `${spendingHealth}%`,
+      icon: ShieldCheck,
+      iconColor: spendingHealth >= 80 ? "hsl(var(--kf-success))" : spendingHealth >= 50 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))",
+      sub: spendingHealth >= 80 ? "Good standing" : spendingHealth >= 50 ? "Needs attention" : "Critical issues",
+      threshold: spendingHealth < 50 ? { status: "critical" as const } : spendingHealth < 80 ? { status: "warn" as const } : undefined,
+    },
   ];
 
   return (
@@ -218,7 +242,7 @@ export default function ExpensesPage() {
         {activeTab === "transactions" && (
           <div className="space-y-4">
             <ExpenseFilters period={d.period} setPeriod={d.setPeriod} customStart={d.customStart} setCustomStart={d.setCustomStart} customEnd={d.customEnd} setCustomEnd={d.setCustomEnd} searchQuery={d.searchQuery} setSearchQuery={d.setSearchQuery} />
-            <ExpenseList expenses={d.expenses} totalExpenses={d.totalExpenses} categories={d.categories} filterCategory={d.filterCategory} setFilterCategory={d.setFilterCategory} filterPayment={d.filterPayment} setFilterPayment={d.setFilterPayment} page={d.page} setPage={d.setPage} pageSize={d.pageSize} setPageSize={d.setPageSize} onEdit={openEditModal} onDelete={handleDelete} onViewDetail={setDetailExpense} onAdd={openAddModal} />
+            <ExpenseList expenses={d.expenses} totalExpenses={d.totalExpenses} categories={d.categories} filterCategory={d.filterCategory} setFilterCategory={d.setFilterCategory} filterPayment={d.filterPayment} setFilterPayment={d.setFilterPayment} page={d.page} setPage={d.setPage} pageSize={d.pageSize} setPageSize={d.setPageSize} onEdit={openEditModal} onDelete={handleDelete} onViewDetail={setDetailExpense} onAdd={openAddModal} businessId={d.businessId} onReload={d.loadData} />
             <ExpenseTaxCalc summary={d.summary} />
           </div>
         )}
@@ -240,6 +264,10 @@ export default function ExpensesPage() {
             vendors={d.vendors}
             budgets={d.budgets}
             onNavigate={setActiveTab}
+            periodTotalCount={totalCount}
+            periodUncategorizedCount={uncategorizedCount}
+            periodMissingReceiptCount={missingReceiptCount}
+            periodRecurringCount={recurringCount}
           />
         )}
       </div>
