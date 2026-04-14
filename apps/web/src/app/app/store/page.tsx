@@ -102,6 +102,15 @@ export default function StorePage() {
     window.history.replaceState({}, "", url.toString());
   }, [activeTab, s.emitEvent, setCurrentMeta]);
 
+  const handleStoreAiAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("switch_tab:")) {
+      const tab = actionKey.replace("switch_tab:", "");
+      if (TAB_KEYS.includes(tab as TabKey)) {
+        handleTabChange(tab);
+      }
+    }
+  }, [handleTabChange]);
+
   const shortcuts = useMemo<ShortcutGroup[]>(() => [{
     groupName: "Store",
     shortcuts: [
@@ -345,7 +354,7 @@ export default function StorePage() {
       <AiHubTrigger ai={ai.aiHook} moduleName="Store" />
       <AnimatePresence>
         {ai.aiHook.panelOpen && (
-          <AiCommandHub ai={ai.aiHook} moduleName="Store" />
+          <AiCommandHub ai={ai.aiHook} moduleName="Store" onAction={handleStoreAiAction} />
         )}
       </AnimatePresence>
     </div>

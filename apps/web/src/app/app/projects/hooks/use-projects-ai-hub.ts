@@ -43,7 +43,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
       explanation: "Tasks past their due date increase project risk and may delay dependent work.",
       priority: "high",
       actionLabel: "Review tasks",
-      actionKey: "switch_tab:projects",
+      actionKey: "switch_tab:board",
     });
   }
 
@@ -60,7 +60,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
       explanation: "Blocked projects consume resources without advancing. Clearing blockers early prevents cascading delays.",
       priority: "high",
       actionLabel: "Review projects",
-      actionKey: "switch_tab:projects",
+      actionKey: "switch_tab:board",
     });
   }
 
@@ -73,7 +73,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
       description: `${unlinkedProjects.length} project${unlinkedProjects.length > 1 ? "s" : ""} without a linked client. Connect them for full delivery tracking.`,
       priority: "low",
       actionLabel: "Review",
-      actionKey: "switch_tab:projects",
+      actionKey: "switch_tab:board",
     });
   }
 
@@ -90,7 +90,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
       explanation: "Projects below 30% completion may need scope re-evaluation or additional task decomposition.",
       priority: "medium",
       actionLabel: "Review",
-      actionKey: "switch_tab:projects",
+      actionKey: "switch_tab:board",
     });
   }
 

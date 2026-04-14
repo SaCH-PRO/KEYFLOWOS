@@ -78,6 +78,13 @@ export default function ContactsPage() {
     }
   }, [businessId, crmViewTab, contacts.length, state.selectedContact?.id, crmAi.updateCrmContext]);
 
+  const handleCrmAiAction = useCallback((actionKey: string) => {
+    const { contactId } = crmAi.parseActionKey(actionKey);
+    if (contactId) {
+      selectContact(contactId);
+      setCrmViewTab("contacts");
+    }
+  }, [crmAi, selectContact, setCrmViewTab]);
 
   const crmShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
@@ -257,7 +264,7 @@ export default function ContactsPage() {
       <AiHubTrigger ai={crmAi.aiHook} moduleName="Clients" />
       <AnimatePresence>
         {crmAi.aiHook.panelOpen && (
-          <AiCommandHub ai={crmAi.aiHook} moduleName="Clients" />
+          <AiCommandHub ai={crmAi.aiHook} moduleName="Clients" onAction={handleCrmAiAction} />
         )}
       </AnimatePresence>
     </div>

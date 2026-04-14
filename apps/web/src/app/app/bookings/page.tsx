@@ -145,6 +145,20 @@ export default function BookingsPage() {
 
   const ai = useBookingsAiHub();
 
+  const handleBookingsAiAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("switch_tab:")) {
+      const t = actionKey.replace("switch_tab:", "");
+      if (["schedule", "performance", "catalog"].includes(t)) {
+        setTab(t as Tab);
+        moduleEvents.emit("module:tab_changed", "bookings", { tab: t });
+      }
+    } else if (actionKey.startsWith("filter_status:")) {
+      const status = actionKey.replace("filter_status:", "");
+      setStatusFilter(status as StatusFilter);
+      setTab("schedule");
+    }
+  }, []);
+
   const handleTabChange = useCallback((key: string) => {
     setTab(key as Tab);
     moduleEvents.emit("module:tab_changed", "bookings", { tab: key });
@@ -471,7 +485,7 @@ export default function BookingsPage() {
         activeTab={tab}
         onTabChange={handleTabChange}
         tabLayoutId="bookings-tab"
-        ai={{ hook: ai.aiHook, moduleName: "Bookings" }}
+        ai={{ hook: ai.aiHook, moduleName: "Bookings", onAction: handleBookingsAiAction }}
       >
         <BookingsSkeleton />
       </WorkspaceShell>
@@ -487,7 +501,7 @@ export default function BookingsPage() {
       activeTab={tab}
       onTabChange={handleTabChange}
       tabLayoutId="bookings-tab"
-      ai={{ hook: ai.aiHook, moduleName: "Bookings" }}
+      ai={{ hook: ai.aiHook, moduleName: "Bookings", onAction: handleBookingsAiAction }}
       enableSwipe
       enableSlideAnimation
       headerRight={

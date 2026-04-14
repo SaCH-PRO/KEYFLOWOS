@@ -469,6 +469,15 @@ export default function ContentPage() {
   const composeSessionIdRef = useRef<string | null>(null);
   const [prefillContactId, setPrefillContactId] = useState<string | undefined>(undefined);
 
+  const handleMarketingAiAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("switch_tab:")) {
+      const tab = actionKey.replace("switch_tab:", "");
+      if (["create", "calendar", "audience", "studio"].includes(tab)) setActiveTab(tab as ContentTab);
+    } else if (actionKey.startsWith("filter_status:")) {
+      setActiveTab("create");
+    }
+  }, []);
+
   useEffect(() => {
     if (activeTab === "create" && createSubmode === "compose") {
       if (!composeSessionIdRef.current) {
@@ -712,7 +721,7 @@ export default function ContentPage() {
         activeTab={activeTab}
         onTabChange={handleTabChange}
         tabLayoutId="content-tab-pill"
-        ai={{ hook: marketingAi.aiHook, moduleName: "Content" }}
+        ai={{ hook: marketingAi.aiHook, moduleName: "Content", onAction: handleMarketingAiAction }}
       >
         <MarketingSkeleton activeTab="social" />
       </WorkspaceShell>
@@ -739,7 +748,7 @@ export default function ContentPage() {
       activeTab={activeTab}
       onTabChange={handleTabChange}
       tabLayoutId="content-tab-pill"
-      ai={{ hook: marketingAi.aiHook, moduleName: "Content" }}
+      ai={{ hook: marketingAi.aiHook, moduleName: "Content", onAction: handleMarketingAiAction }}
       actionLabel={actionLabel}
       onAction={actionLabel ? handleNewItem : undefined}
       enableSwipe

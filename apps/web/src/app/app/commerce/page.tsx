@@ -110,6 +110,22 @@ export default function CommercePage() {
   const { businessId, businessCurrency } = shell;
   const { invoices, quotes } = shell;
 
+  const handleCommerceAiAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("switch_tab:")) {
+      const t = actionKey.replace("switch_tab:", "");
+      if (["operations", "catalog", "setup"].includes(t)) {
+        setMode(t as RevenueMode);
+      } else if (["invoices", "quotes", "payments", "recurring"].includes(t)) {
+        setMode("operations");
+        setOpsSection(t);
+        overview.handleTabChange(t);
+      }
+    } else if (actionKey.startsWith("filter_status:")) {
+      setMode("operations");
+      setOpsSection("invoices");
+    }
+  }, [overview.handleTabChange]);
+
   useEffect(() => {
     const paramTab = searchParams.get("tab");
     if (paramTab === "products") {
@@ -352,7 +368,7 @@ export default function CommercePage() {
       activeTab={mode}
       onTabChange={(key) => setMode(key as RevenueMode)}
       tabLayoutId="commerce-mode-tabs"
-      ai={{ hook: commerceAi.aiHook, moduleName: "Revenue" }}
+      ai={{ hook: commerceAi.aiHook, moduleName: "Revenue", onAction: handleCommerceAiAction }}
       actionLabel="+ New"
       actionIcon={Plus}
       onAction={composer.handleNewItem}
