@@ -908,6 +908,9 @@ export class FlowOrchestratorService {
           results.push({ stepId: step.id, action: step.action, status: 'awaiting_approval' });
           continue;
         }
+        if (decision.requiresQuickConfirm) {
+          this.logger.log(`Tier 2 quick-confirm for ${step.toolName} implicitly satisfied by plan approval — proceeding`);
+        }
       }
 
       if (!step.toolName) {
