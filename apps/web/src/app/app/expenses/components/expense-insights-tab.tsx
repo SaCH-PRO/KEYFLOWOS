@@ -580,7 +580,7 @@ export function ExpenseInsightsTab({
         <div className="kf-card rounded-xl p-4 space-y-4">
           <h3 className="text-sm font-semibold flex items-center gap-2">
             <BarChart3 className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-            Project Cost Panels
+            Project Profitability
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {marginData.byProject.map((proj) => (
@@ -589,7 +589,25 @@ export function ExpenseInsightsTab({
                   <span className="text-xs font-semibold truncate">{proj.name}</span>
                   <span className="text-[10px] text-muted-foreground">{proj.count} expense{proj.count !== 1 ? "s" : ""}</span>
                 </div>
-                <span className="text-sm font-bold text-red-400">{formatCurrency(proj.expenses)}</span>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-red-400">Costs: {formatCurrency(proj.expenses)}</span>
+                  {proj.revenue > 0 && <span className="text-emerald-400">Rev: {formatCurrency(proj.revenue)}</span>}
+                </div>
+                {proj.revenue > 0 && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className={proj.profit >= 0 ? "text-emerald-400" : "text-red-400"}>
+                        Profit: {formatCurrency(proj.profit)}
+                      </span>
+                      <span className={`font-bold ${proj.margin >= 20 ? "text-emerald-400" : proj.margin >= 0 ? "text-amber-400" : "text-red-400"}`}>
+                        {proj.margin}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-white/10 rounded-full h-1.5">
+                      <div className={`h-1.5 rounded-full ${proj.margin >= 20 ? "bg-emerald-500" : proj.margin >= 0 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${Math.min(Math.max(proj.margin, 0), 100)}%` }} />
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -600,14 +618,24 @@ export function ExpenseInsightsTab({
         <div className="kf-card rounded-xl p-4 space-y-4">
           <h3 className="text-sm font-semibold flex items-center gap-2">
             <Sparkles className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Service Cost Impact
+            Service Profitability
           </h3>
           <div className="space-y-2">
             {marginData.byService.map((svc) => (
-              <div key={svc.serviceId} className="flex items-center gap-3 bg-white/5 rounded-lg p-2.5">
-                <span className="text-xs font-medium flex-1 truncate">{svc.name}</span>
-                <span className="text-xs text-muted-foreground">{svc.count} item{svc.count !== 1 ? "s" : ""}</span>
-                <span className="text-xs font-bold text-red-400">{formatCurrency(svc.expenses)}</span>
+              <div key={svc.serviceId} className="bg-white/5 rounded-lg p-2.5 space-y-1.5">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-medium flex-1 truncate">{svc.name}</span>
+                  <span className="text-xs text-muted-foreground">{svc.count} item{svc.count !== 1 ? "s" : ""}</span>
+                  <span className="text-xs text-red-400">{formatCurrency(svc.expenses)}</span>
+                </div>
+                {svc.revenue > 0 && (
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-emerald-400">Revenue: {formatCurrency(svc.revenue)}</span>
+                    <span className={`font-bold ${svc.margin >= 20 ? "text-emerald-400" : svc.margin >= 0 ? "text-amber-400" : "text-red-400"}`}>
+                      Margin: {svc.margin}%
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
           </div>

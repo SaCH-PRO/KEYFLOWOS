@@ -496,12 +496,27 @@ export class ExpensesService {
     const grossMargin = totalRevenue > 0 ? Math.round((grossProfit / totalRevenue) * 1000) / 10 : 0;
     const expenseToRevenueRatio = totalRevenue > 0 ? Math.round((totalExpenses / totalRevenue) * 1000) / 10 : 0;
 
-    const byProject: Record<string, { expenses: number; count: number }> = {};
+    const byProject: Record<string, { expenses: number; count: number; revenue: number; clientIds: Set<string> }> = {};
     for (const e of expenses) {
       if (e.projectId) {
-        if (!byProject[e.projectId]) byProject[e.projectId] = { expenses: 0, count: 0 };
+        if (!byProject[e.projectId]) byProject[e.projectId] = { expenses: 0, count: 0, revenue: 0, clientIds: new Set() };
         byProject[e.projectId].expenses += e.amount;
         byProject[e.projectId].count += 1;
+        if (e.contactId) byProject[e.projectId].clientIds.add(e.contactId);
+      }
+    }
+
+    const invoiceByContact: Record<string, number> = {};
+    for (const i of invoices) {
+      if (i.contactId) {
+        const amt = typeof i.total === 'number' ? i.total : parseFloat(String(i.total)) || 0;
+        invoiceByContact[i.contactId] = (invoiceByContact[i.contactId] || 0) + amt;
+      }
+    }
+
+    for (const [, projData] of Object.entries(byProject)) {
+      for (const cid of projData.clientIds) {
+        projData.revenue += invoiceByContact[cid] || 0;
       }
     }
 
@@ -519,12 +534,29 @@ export class ExpensesService {
       }
     }
 
-    const byService: Record<string, { expenses: number; count: number }> = {};
+    const byService: Record<string, { expenses: number; count: number; revenue: number }> = {};
     for (const e of expenses) {
       if (e.serviceId) {
-        if (!byService[e.serviceId]) byService[e.serviceId] = { expenses: 0, count: 0 };
+        if (!byService[e.serviceId]) byService[e.serviceId] = { expenses: 0, count: 0, revenue: 0 };
         byService[e.serviceId].expenses += e.amount;
         byService[e.serviceId].count += 1;
+      }
+    }
+
+    const serviceIds = [...new Set(expenses.filter(e => e.serviceId).map(e => e.serviceId!))];
+    if (serviceIds.length > 0) {
+      const svcInvoiceItems = await this.prisma.client.invoiceItem.findMany({
+        where: {
+          invoice: { businessId, issueDate: { gte: startDate, lte: endDate }, status: { in: ['PAID', 'SENT', 'OVERDUE'] } },
+          product: { serviceId: { in: serviceIds } },
+        },
+        select: { total: true, product: { select: { serviceId: true } } },
+      });
+      for (const item of svcInvoiceItems) {
+        const sid = item.product?.serviceId;
+        if (sid && byService[sid]) {
+          byService[sid].revenue += item.total;
+        }
       }
     }
 
@@ -552,11 +584,11 @@ export class ExpensesService {
       }
     }
 
-    const serviceIds = Object.keys(byService);
+    const svcNameIds = Object.keys(byService);
     let serviceNames: Record<string, string> = {};
-    if (serviceIds.length > 0) {
+    if (svcNameIds.length > 0) {
       const services = await this.prisma.client.service.findMany({
-        where: { id: { in: serviceIds }, businessId },
+        where: { id: { in: svcNameIds }, businessId },
         select: { id: true, name: true },
       });
       for (const s of services) {
@@ -574,7 +606,11 @@ export class ExpensesService {
       byProject: Object.entries(byProject).map(([id, data]) => ({
         projectId: id,
         name: projectNames[id] || 'Unknown Project',
-        ...data,
+        expenses: data.expenses,
+        count: data.count,
+        revenue: data.revenue,
+        profit: data.revenue - data.expenses,
+        margin: data.revenue > 0 ? Math.round(((data.revenue - data.expenses) / data.revenue) * 1000) / 10 : 0,
       })),
       byClient: Object.entries(byClient).map(([id, data]) => ({
         contactId: id,
@@ -586,7 +622,11 @@ export class ExpensesService {
       byService: Object.entries(byService).map(([id, data]) => ({
         serviceId: id,
         name: serviceNames[id] || 'Unknown Service',
-        ...data,
+        expenses: data.expenses,
+        count: data.count,
+        revenue: data.revenue,
+        profit: data.revenue - data.expenses,
+        margin: data.revenue > 0 ? Math.round(((data.revenue - data.expenses) / data.revenue) * 1000) / 10 : 0,
       })),
     };
   }
