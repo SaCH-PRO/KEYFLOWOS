@@ -16,6 +16,7 @@ import { PriorityQueue } from "./components/priority-queue";
 import { ModuleHealthGrid } from "./components/module-health-grid";
 import { GrowthOpsPanel } from "./components/growth-ops-panel";
 import { ApprovalsQueue } from "./components/approvals-queue";
+import { RiskAlerts } from "./components/risk-alerts";
 import { StorefrontIntel } from "./components/storefront-intel";
 
 function formatTTD(n: number): string {
@@ -145,11 +146,16 @@ export default function ControlTowerPage() {
 
           <PriorityQueue priorities={d.priorities} />
 
+          {(d.data.risks?.length ?? 0) > 0 && (
+            <RiskAlerts risks={d.data.risks} />
+          )}
+
           {d.data.pendingApprovals > 0 && (
             <div id="tower-approvals">
               <ApprovalsQueue
                 businessId={d.businessId}
                 pendingCount={d.data.pendingApprovals}
+                onResolve={d.refresh}
               />
             </div>
           )}
