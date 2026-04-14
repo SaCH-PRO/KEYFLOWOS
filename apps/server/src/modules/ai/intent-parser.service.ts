@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { AiUsageService } from './ai-usage.service';
-import { BusinessGraphService, BusinessGraphSnapshot } from './business-graph.service';
+import OpenAI from 'openai';
+import { BusinessGraphService } from './business-graph.service';
 
 export interface ParsedIntent {
   objective: string;
@@ -19,31 +19,50 @@ export interface ParsedIntent {
   rawInput: string;
 }
 
-const INTENT_PARSE_SCHEMA = {
-  type: 'object' as const,
-  properties: {
-    objective: { type: 'string', description: 'Clear, specific statement of what the user wants to accomplish' },
-    urgency: { type: 'string', enum: ['low', 'normal', 'high', 'critical'], description: 'How urgent this request is based on language and business context' },
-    scope: { type: 'array', items: { type: 'string' }, description: 'Business areas affected (e.g. "client relationships", "cash flow", "marketing reach")' },
-    modules: { type: 'array', items: { type: 'string', enum: ['crm', 'commerce', 'bookings', 'marketing', 'content', 'projects', 'expenses', 'automations', 'storefront'] }, description: 'KeyFlowOS modules involved' },
-    missingInfo: { type: 'array', items: { type: 'string' }, description: 'Information needed to fully execute this request that the user did not provide' },
-    actionCandidates: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          toolName: { type: 'string', description: 'The tool name from the available tool registry' },
-          description: { type: 'string', description: 'What this action would do in this context' },
-          confidence: { type: 'number', description: 'Confidence this action is needed (0-1)' },
-          riskTier: { type: 'number', description: 'Risk level 1-4' },
+const PARSE_INTENT_FUNCTION: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'parse_intent',
+    description: 'Parse user input into a structured intent for the KeyFlowOS AI pipeline',
+    parameters: {
+      type: 'object',
+      properties: {
+        objective: { type: 'string', description: 'Clear, specific statement of what the user wants to accomplish' },
+        urgency: { type: 'string', enum: ['low', 'normal', 'high', 'critical'], description: 'How urgent this request is based on language and business context' },
+        scope: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Business areas affected (e.g. "client relationships", "cash flow", "marketing reach")',
         },
-        required: ['toolName', 'description', 'confidence', 'riskTier'],
+        modules: {
+          type: 'array',
+          items: { type: 'string', enum: ['crm', 'commerce', 'bookings', 'marketing', 'content', 'projects', 'expenses', 'automations', 'storefront'] },
+          description: 'KeyFlowOS modules involved',
+        },
+        missingInfo: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Information needed to fully execute this request that the user did not provide',
+        },
+        actionCandidates: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              toolName: { type: 'string', description: 'The tool name from the available tool registry' },
+              description: { type: 'string', description: 'What this action would do in this context' },
+              confidence: { type: 'number', description: 'Confidence this action is needed (0-1)' },
+              riskTier: { type: 'number', description: 'Risk level 1-4' },
+            },
+            required: ['toolName', 'description', 'confidence', 'riskTier'],
+          },
+        },
+        clarificationNeeded: { type: 'boolean', description: 'Whether additional info is needed before planning' },
+        clarificationQuestion: { type: 'string', description: 'If clarification needed, the question to ask' },
       },
+      required: ['objective', 'urgency', 'scope', 'modules', 'missingInfo', 'actionCandidates', 'clarificationNeeded'],
     },
-    clarificationNeeded: { type: 'boolean', description: 'Whether additional info is needed before planning' },
-    clarificationQuestion: { type: 'string', description: 'If clarification needed, the question to ask' },
   },
-  required: ['objective', 'urgency', 'scope', 'modules', 'missingInfo', 'actionCandidates', 'clarificationNeeded'],
 };
 
 const AVAILABLE_TOOLS = [
@@ -61,17 +80,22 @@ const AVAILABLE_TOOLS = [
 @Injectable()
 export class IntentParserService {
   private readonly logger = new Logger(IntentParserService.name);
+  private readonly openai: OpenAI;
 
   constructor(
-    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
-  ) {}
+  ) {
+    this.openai = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  }
 
   async parse(businessId: string, userInput: string): Promise<ParsedIntent> {
     const snapshot = await this.businessGraph.getSnapshot(businessId);
     const contextString = this.businessGraph.buildContextString(snapshot);
 
-    const systemPrompt = `You are KeyFlow AI's intent parser. Your job is to analyze a user's natural-language request and decompose it into a structured intent object.
+    const systemPrompt = `You are KeyFlow AI's intent parser. Your job is to analyze a user's natural-language request and call the parse_intent function with a structured intent object.
 
 BUSINESS CONTEXT:
 ${contextString}
@@ -85,22 +109,33 @@ RISK TIERS:
 - Tier 3: Significant changes requiring explicit approval (delete, cancel)
 - Tier 4: High-impact external actions requiring admin approval (send campaigns, publish posts)
 
-Parse the user's input and return a structured intent. Be specific about which tools would be needed. If the request is vague, note what clarification is needed.`;
+Parse the user's input and call parse_intent with the structured result. Be specific about which tools would be needed. If the request is vague, note what clarification is needed.`;
 
     try {
-      const result = await this.aiUsage.callAi({
-        businessId,
-        feature: 'intent_parse',
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userInput },
         ],
-        maxTokens: 800,
+        tools: [PARSE_INTENT_FUNCTION],
+        tool_choice: { type: 'function', function: { name: 'parse_intent' } },
+        max_tokens: 800,
         temperature: 0.3,
-        responseMode: 'structured_json',
       });
 
-      const parsed = JSON.parse(result.content);
+      const toolCall = response.choices[0]?.message?.tool_calls?.[0];
+      if (!toolCall || toolCall.type !== 'function') {
+        this.logger.warn('OpenAI did not return expected function call, falling back');
+        return this.fallbackParse(userInput);
+      }
+      const fnCall = toolCall as Extract<typeof toolCall, { type: 'function' }>;
+      if (fnCall.function.name !== 'parse_intent') {
+        this.logger.warn('OpenAI returned unexpected function name, falling back');
+        return this.fallbackParse(userInput);
+      }
+
+      const parsed = JSON.parse(fnCall.function.arguments);
       return {
         objective: parsed.objective || userInput,
         urgency: parsed.urgency || 'normal',
