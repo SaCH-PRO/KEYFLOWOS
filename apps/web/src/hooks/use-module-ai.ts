@@ -122,15 +122,24 @@ export function useModuleAi(config: ModuleAiConfig) {
     }));
   }, []);
 
+  const notifyGlobalQueue = useCallback((eventType: string, detail: Record<string, unknown>) => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("kf:ai-activity", {
+        detail: { module: configRef.current.moduleId, eventType, ...detail, timestamp: Date.now() },
+      }));
+    }
+  }, []);
+
   const executeSuggestionAction = useCallback(async (suggestion: AiSuggestion) => {
     if (!suggestion.actionKey || !configRef.current.executeAction) return;
     try {
       await configRef.current.executeAction(suggestion.actionKey, contextRef.current);
       dismissSuggestion(suggestion.id);
+      notifyGlobalQueue("suggestion-executed", { actionKey: suggestion.actionKey, title: suggestion.title });
     } catch {
       toast.error("Failed to execute action");
     }
-  }, [dismissSuggestion]);
+  }, [dismissSuggestion, notifyGlobalQueue]);
 
   const togglePanel = useCallback(() => {
     setState(prev => ({ ...prev, panelOpen: !prev.panelOpen }));
@@ -166,6 +175,7 @@ export function useModuleAi(config: ModuleAiConfig) {
         toolResult: result,
         toolLoading: false,
       }));
+      notifyGlobalQueue("tool-executed", { toolId, toolName: tool.name });
     } catch (err: unknown) {
       const error = err as Error & { status?: number; response?: { status?: number } };
       const status = error.status || error.response?.status;
