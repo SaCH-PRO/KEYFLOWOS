@@ -249,6 +249,18 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/plans/:planId/approve')
+  async approvePlan(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.id;
+    if (!userId) throw new Error('Authenticated user required to approve plans');
+    return this.planner.approvePlan(planId, businessId, userId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/execution-logs')
   async getExecutionLogs(
     @Param('businessId') businessId: string,

@@ -167,8 +167,14 @@ export class FlowOrchestratorService {
         return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
       }
       if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
+        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName);
+        if (!confirmDecision.allowed) {
+          return {
+            reply: `This action is blocked: ${confirmDecision.reason}`,
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+          };
+        }
         const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs);
-        const tool = getToolByName(pendingConfirmation.toolName);
         return {
           reply: result.success
             ? `Done! ${this.formatToolSuccess(pendingConfirmation.toolName, result.result)}`
@@ -801,8 +807,8 @@ export class FlowOrchestratorService {
       include: { steps: { orderBy: { order: 'asc' } } },
     });
     if (!plan) throw new Error(`Plan ${planId} not found`);
-    if (plan.status !== 'draft' && plan.status !== 'approved') {
-      throw new Error(`Plan is in "${plan.status}" state and cannot be executed`);
+    if (plan.status !== 'approved') {
+      throw new Error(`Plan must be in "approved" state to execute (current: "${plan.status}"). Approve the plan first.`);
     }
 
     await this.planner.updatePlanStatus(planId, businessId, 'executing');
@@ -836,11 +842,17 @@ export class FlowOrchestratorService {
         }
       }
 
-      if (step.requiresApproval) {
-        const decision = await this.governance.evaluate(businessId, step.toolName ?? step.action);
+      if (step.toolName) {
+        const decision = await this.governance.evaluate(businessId, step.toolName);
+        if (!decision.allowed) {
+          await this.planner.updateStepStatus(step.id, 'blocked', null, decision.reason);
+          stepsSkipped++;
+          results.push({ stepId: step.id, action: step.action, status: 'blocked', error: decision.reason });
+          continue;
+        }
         if (decision.requiresApproval) {
           await this.governance.createApprovalItem(businessId, {
-            toolName: step.toolName ?? step.action,
+            toolName: step.toolName,
             title: step.action,
             description: step.description ?? step.action,
             rationale: decision.reason,
@@ -851,12 +863,6 @@ export class FlowOrchestratorService {
           await this.planner.updateStepStatus(step.id, 'awaiting_approval');
           stepsSkipped++;
           results.push({ stepId: step.id, action: step.action, status: 'awaiting_approval' });
-          continue;
-        }
-        if (!decision.allowed) {
-          await this.planner.updateStepStatus(step.id, 'blocked', null, decision.reason);
-          stepsSkipped++;
-          results.push({ stepId: step.id, action: step.action, status: 'blocked', error: decision.reason });
           continue;
         }
       }

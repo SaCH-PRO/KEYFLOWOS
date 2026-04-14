@@ -211,6 +211,36 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
     });
   }
 
+  async approvePlan(planId: string, businessId: string, userId: string) {
+    const plan = await this.prisma.client.aiPlan.findFirst({
+      where: { id: planId, businessId },
+      include: { steps: true },
+    });
+    if (!plan) throw new Error(`Plan ${planId} not found for business ${businessId}`);
+    if (plan.status !== 'draft') {
+      throw new Error(`Plan must be in "draft" state to approve (current: "${plan.status}")`);
+    }
+
+    const maxTier = plan.maxRiskTier;
+    if (maxTier >= 4) {
+      const user = await this.prisma.client.user.findUnique({ where: { id: userId } });
+      if (!user) throw new Error('User not found');
+      const membership = await this.prisma.client.membership.findFirst({
+        where: { userId, businessId },
+      });
+      const isAdmin = user.role === 'SUPER_ADMIN' || membership?.role === 'OWNER' || membership?.role === 'ADMIN';
+      if (!isAdmin) {
+        throw new Error('Plans with Tier 4 actions require admin-level authorization to approve');
+      }
+    }
+
+    return this.prisma.client.aiPlan.update({
+      where: { id: planId },
+      data: { status: 'approved' },
+      include: { steps: { orderBy: { order: 'asc' } } },
+    });
+  }
+
   async updatePlanStatus(planId: string, businessId: string, status: string) {
     const updateData: any = { status };
     if (status === 'executing') updateData.startedAt = new Date();
