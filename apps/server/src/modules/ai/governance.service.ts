@@ -28,40 +28,6 @@ const DEFAULT_AUTONOMY: AutonomySettings = {
   blockedModules: [],
 };
 
-const TOOL_TIER_MAP: Record<string, RiskTier> = {
-  crm_search_contacts: 1,
-  crm_list_contacts: 1,
-  crm_create_contact: 1,
-  crm_update_contact: 1,
-  crm_add_note: 1,
-  crm_add_task: 1,
-  crm_delete_contact: 3,
-
-  commerce_list_invoices: 1,
-  commerce_create_invoice: 2,
-  commerce_create_product: 1,
-  commerce_create_quote: 2,
-  commerce_mark_invoice_paid: 2,
-  commerce_delete_invoice: 3,
-
-  bookings_list_bookings: 1,
-  bookings_list_services: 1,
-  bookings_create_booking: 1,
-  bookings_reschedule_booking: 2,
-  bookings_cancel_booking: 3,
-
-  marketing_list_campaigns: 1,
-  marketing_create_campaign: 1,
-  marketing_send_campaign: 4,
-
-  social_list_posts: 1,
-  social_create_post: 1,
-  social_publish_post: 4,
-
-  automations_list_playbooks: 1,
-  automations_create_playbook: 2,
-  automations_toggle_playbook: 2,
-};
 
 @Injectable()
 export class GovernanceService {
@@ -76,9 +42,6 @@ export class GovernanceService {
     const tool = getToolByName(toolName);
     if (tool && tool.riskTier) {
       return tool.riskTier as RiskTier;
-    }
-    if (TOOL_TIER_MAP[toolName] !== undefined) {
-      return TOOL_TIER_MAP[toolName];
     }
     if (tool) {
       switch (tool.riskLevel) {
