@@ -164,11 +164,13 @@ export function AiPreferencesPanel() {
     setSaving(true);
     try {
       if (!value) {
-        await deleteAiMemory(biz, category, key);
+        const delRes = await deleteAiMemory(biz, category, key);
+        if (delRes.error) { toast.error(delRes.error); return; }
         setMemories(prev => prev.filter(m => !(m.category === category && m.key === key)));
         toast.success("Preference cleared");
       } else {
         const res = await upsertAiMemory(biz, { category, key, value });
+        if (res.error) { toast.error(res.error); return; }
         if (res.data) {
           setMemories(prev => {
             const filtered = prev.filter(m => !(m.category === category && m.key === key));
@@ -191,6 +193,7 @@ export function AiPreferencesPanel() {
     const key = value.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 50);
     try {
       const res = await upsertAiMemory(biz, { category, key, value });
+      if (res.error) { toast.error(res.error); return; }
       if (res.data) {
         setMemories(prev => {
           const filtered = prev.filter(m => !(m.category === category && m.key === key));
@@ -210,7 +213,8 @@ export function AiPreferencesPanel() {
     if (!biz) return;
     setSaving(true);
     try {
-      await deleteAiMemory(biz, category, key);
+      const delRes = await deleteAiMemory(biz, category, key);
+      if (delRes.error) { toast.error(delRes.error); return; }
       setMemories(prev => prev.filter(m => !(m.category === category && m.key === key)));
       toast.success("Removed");
     } catch {
