@@ -12,6 +12,7 @@ import { GovernanceService } from './governance.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
+import { AiMemoryService } from './ai-memory.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
@@ -29,6 +30,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     AiExecutionLogService,
     IntentParserService,
     PlannerService,
+    AiMemoryService,
   ],
   exports: [
     AiAdvisorService,
@@ -40,6 +42,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     AiExecutionLogService,
     IntentParserService,
     PlannerService,
+    AiMemoryService,
   ],
 })
 export class AiModule {}

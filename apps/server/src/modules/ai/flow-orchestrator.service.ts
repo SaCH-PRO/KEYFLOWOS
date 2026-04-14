@@ -8,6 +8,7 @@ import { GovernanceService } from './governance.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
+import { AiMemoryService } from './ai-memory.service';
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
@@ -118,6 +119,7 @@ export class FlowOrchestratorService {
     @Inject(GovernanceService) private readonly governance: GovernanceService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
+    @Inject(AiMemoryService) private readonly memory: AiMemoryService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -144,9 +146,12 @@ export class FlowOrchestratorService {
     const businessName = snapshot.business.name || 'your business';
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
 
+    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    const memorySection = this.memory.buildPromptSection(memoryCtx);
+
     const systemPrompt = FLOW_SYSTEM_PROMPT
       .replace('{{CURRENT_DATE}}', new Date().toISOString())
-      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot);
+      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection);
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
