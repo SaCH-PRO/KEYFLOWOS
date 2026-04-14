@@ -3553,11 +3553,11 @@ export interface Expense {
   tags?: string[];
   isRecurring: boolean;
   recurringFrequency?: string;
-  categoryId?: string;
+  categoryId?: string | null;
   category?: ExpenseCategory;
-  projectId?: string;
-  contactId?: string;
-  serviceId?: string;
+  projectId?: string | null;
+  contactId?: string | null;
+  serviceId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
