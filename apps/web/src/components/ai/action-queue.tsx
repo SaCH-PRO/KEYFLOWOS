@@ -3,43 +3,83 @@
 import { useState, useEffect, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
-  Loader2, RefreshCw, Inbox,
+  Loader2, RefreshCw, Inbox, CheckCircle2,
+  Clock, AlertTriangle, FileText, Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchAiPendingApprovals,
+  fetchAiApprovalHistory,
   resolveAiApproval,
   type AiApprovalItem,
 } from "@/lib/client";
 import { VerificationCard } from "./verification-card";
 
-type QueueFilter = "all" | "pending" | "resolved";
+type QueueView = "waiting" | "handled" | "all";
+
+interface QueueCategory {
+  id: string;
+  label: string;
+  icon: typeof AlertTriangle;
+  color: string;
+  filter: (item: AiApprovalItem) => boolean;
+}
+
+const QUEUE_CATEGORIES: QueueCategory[] = [
+  {
+    id: "urgent",
+    label: "Urgent / High Risk",
+    icon: AlertTriangle,
+    color: "text-red-400",
+    filter: (item) => item.riskTier >= 3 && item.status === "pending",
+  },
+  {
+    id: "approvals",
+    label: "Pending Approvals",
+    icon: Clock,
+    color: "text-amber-400",
+    filter: (item) => item.riskTier < 3 && item.status === "pending",
+  },
+  {
+    id: "deferred",
+    label: "Deferred",
+    icon: FileText,
+    color: "text-blue-400",
+    filter: (item) => item.resolution === "deferred",
+  },
+];
 
 interface ActionQueueProps {
-  compact?: boolean;
   maxItems?: number;
   showFilters?: boolean;
   onCountChange?: (count: number) => void;
 }
 
-export function ActionQueue({ compact = false, maxItems, showFilters = true, onCountChange }: ActionQueueProps) {
-  const [items, setItems] = useState<AiApprovalItem[]>([]);
+export function ActionQueue({ maxItems, showFilters = true, onCountChange }: ActionQueueProps) {
+  const [pendingItems, setPendingItems] = useState<AiApprovalItem[]>([]);
+  const [handledItems, setHandledItems] = useState<AiApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState<string | null>(null);
-  const [filter, setFilter] = useState<QueueFilter>("pending");
+  const [view, setView] = useState<QueueView>("waiting");
 
   const loadItems = useCallback(async () => {
     const businessId = getStoredBusinessId();
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
-    const res = await fetchAiPendingApprovals(businessId);
-    if (res.data) {
-      setItems(res.data);
-      const pendingCount = res.data.filter(i => i.status === "pending").length;
+    const [pendingRes, historyRes] = await Promise.all([
+      fetchAiPendingApprovals(businessId),
+      fetchAiApprovalHistory(businessId, 20),
+    ]);
+    if (pendingRes.data) {
+      setPendingItems(pendingRes.data);
+      const pendingCount = pendingRes.data.filter(i => i.status === "pending").length;
       onCountChange?.(pendingCount);
-    } else if (res.error) {
-      toast.error(res.error);
+    } else if (pendingRes.error) {
+      toast.error(pendingRes.error);
+    }
+    if (historyRes.data) {
+      setHandledItems(historyRes.data.filter(i => i.status !== "pending"));
     }
     setLoading(false);
   }, [onCountChange]);
@@ -52,24 +92,25 @@ export function ActionQueue({ compact = false, maxItems, showFilters = true, onC
     setResolving(approvalId);
     const res = await resolveAiApproval(businessId, approvalId, resolution);
     if (res.data) {
-      setItems(prev => prev.map(i => i.id === approvalId ? { ...i, status: resolution, resolution, resolvedAt: new Date().toISOString() } : i));
+      const resolved = pendingItems.find(i => i.id === approvalId);
+      setPendingItems(prev => prev.filter(i => i.id !== approvalId));
+      if (resolved && resolution !== "deferred") {
+        setHandledItems(prev => [{ ...resolved, status: resolution, resolution, resolvedAt: new Date().toISOString() }, ...prev]);
+      } else if (resolved && resolution === "deferred") {
+        setPendingItems(prev => [...prev, { ...resolved, status: "deferred", resolution: "deferred" }]);
+      }
       toast.success(`Action ${resolution}`);
-      const remaining = items.filter(i => i.id !== approvalId && i.status === "pending").length;
+      const remaining = pendingItems.filter(i => i.id !== approvalId && i.status === "pending").length;
       onCountChange?.(remaining);
     } else {
       toast.error(res.error || "Failed to resolve");
     }
     setResolving(null);
-  }, [items, onCountChange]);
+  }, [pendingItems, onCountChange]);
 
-  const filtered = items.filter(item => {
-    if (filter === "pending") return item.status === "pending";
-    if (filter === "resolved") return item.status !== "pending";
-    return true;
-  });
-
-  const displayed = maxItems ? filtered.slice(0, maxItems) : filtered;
-  const pendingCount = items.filter(i => i.status === "pending").length;
+  const allItems = [...pendingItems, ...pendingItems.filter(i => i.resolution === "deferred")];
+  const pendingCount = pendingItems.filter(i => i.status === "pending").length;
+  const handledCount = handledItems.length;
 
   if (loading) {
     return (
@@ -80,21 +121,28 @@ export function ActionQueue({ compact = false, maxItems, showFilters = true, onC
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {showFilters && (
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted/30 border border-border/30">
-            {(["pending", "resolved", "all"] as QueueFilter[]).map(f => (
+          <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted/30 border border-border/30" role="tablist">
+            {([
+              { id: "waiting" as QueueView, label: `AI Waiting (${pendingCount})`, icon: Clock },
+              { id: "handled" as QueueView, label: `AI Handled (${handledCount})`, icon: CheckCircle2 },
+              { id: "all" as QueueView, label: "All", icon: Zap },
+            ]).map(tab => (
               <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                  filter === f
+                key={tab.id}
+                role="tab"
+                aria-selected={view === tab.id}
+                onClick={() => setView(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  view === tab.id
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground/60 hover:text-foreground/80"
                 }`}
               >
-                {f === "pending" ? `Pending (${pendingCount})` : f.charAt(0).toUpperCase() + f.slice(1)}
+                <tab.icon className="w-3 h-3" />
+                {tab.label}
               </button>
             ))}
           </div>
@@ -109,36 +157,93 @@ export function ActionQueue({ compact = false, maxItems, showFilters = true, onC
         </div>
       )}
 
-      <AnimatePresence mode="popLayout">
-        {displayed.map(item => (
-          <VerificationCard
-            key={item.id}
-            item={item}
-            onApprove={(id) => handleResolve(id, "approved")}
-            onReject={(id) => handleResolve(id, "rejected")}
-            onDefer={(id) => handleResolve(id, "deferred")}
-            loading={resolving === item.id}
-          />
-        ))}
-      </AnimatePresence>
-
-      {displayed.length === 0 && (
-        <div className="flex flex-col items-center py-8 gap-2">
-          <Inbox className="w-6 h-6 text-muted-foreground/30" />
-          <span className="text-xs text-muted-foreground/50">
-            {filter === "pending" ? "No pending actions" : "No actions found"}
-          </span>
-          <p className="text-[10px] text-muted-foreground/40 text-center max-w-[200px]">
-            Actions requiring your review will appear here
-          </p>
+      {view === "waiting" && (
+        <div className="space-y-4" role="tabpanel" aria-label="AI waiting on you">
+          {QUEUE_CATEGORIES.map(cat => {
+            const catItems = pendingItems.filter(cat.filter);
+            if (catItems.length === 0) return null;
+            const displayed = maxItems ? catItems.slice(0, maxItems) : catItems;
+            return (
+              <div key={cat.id} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <cat.icon className={`w-3.5 h-3.5 ${cat.color}`} />
+                  <span className="text-xs font-semibold text-foreground/70">{cat.label}</span>
+                  <span className="text-[10px] text-muted-foreground/40">({catItems.length})</span>
+                </div>
+                <AnimatePresence mode="popLayout">
+                  {displayed.map(item => (
+                    <VerificationCard
+                      key={item.id}
+                      item={item}
+                      onApprove={(id) => handleResolve(id, "approved")}
+                      onReject={(id) => handleResolve(id, "rejected")}
+                      onDefer={(id) => handleResolve(id, "deferred")}
+                      loading={resolving === item.id}
+                    />
+                  ))}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+          {pendingItems.filter(i => i.status === "pending").length === 0 && (
+            <EmptyState message="All clear — AI has no pending requests" />
+          )}
         </div>
       )}
 
-      {maxItems && filtered.length > maxItems && (
-        <p className="text-[10px] text-center text-muted-foreground/40">
-          +{filtered.length - maxItems} more items
-        </p>
+      {view === "handled" && (
+        <div className="space-y-2" role="tabpanel" aria-label="AI handled automatically">
+          {handledItems.length > 0 ? (
+            <AnimatePresence mode="popLayout">
+              {handledItems.map(item => (
+                <VerificationCard
+                  key={item.id}
+                  item={item}
+                  onApprove={() => {}}
+                  onReject={() => {}}
+                  onDefer={() => {}}
+                  loading={false}
+                />
+              ))}
+            </AnimatePresence>
+          ) : (
+            <EmptyState message="No recent AI-handled actions" />
+          )}
+        </div>
       )}
+
+      {view === "all" && (
+        <div className="space-y-2" role="tabpanel" aria-label="All actions">
+          {[...pendingItems, ...handledItems].length > 0 ? (
+            <AnimatePresence mode="popLayout">
+              {[...pendingItems, ...handledItems].map(item => (
+                <VerificationCard
+                  key={item.id}
+                  item={item}
+                  onApprove={(id) => handleResolve(id, "approved")}
+                  onReject={(id) => handleResolve(id, "rejected")}
+                  onDefer={(id) => handleResolve(id, "deferred")}
+                  loading={resolving === item.id}
+                />
+              ))}
+            </AnimatePresence>
+          ) : (
+            <EmptyState message="No actions recorded yet" />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center py-8 gap-2">
+      <Inbox className="w-6 h-6 text-muted-foreground/30" />
+      <span className="text-xs text-muted-foreground/50">{message}</span>
+      <p className="text-[10px] text-muted-foreground/40 text-center max-w-[200px]">
+        Actions requiring your review will appear here
+      </p>
     </div>
   );
 }

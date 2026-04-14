@@ -146,7 +146,7 @@ export default function AiControlCenterPage() {
         )}
       </div>
 
-      <div className="flex items-center border-b border-border/30">
+      <div className="flex items-center border-b border-border/30" role="tablist" aria-label="AI Control Center sections">
         {([
           { id: "governance" as SectionTab, label: "Governance", icon: Shield },
           { id: "queue" as SectionTab, label: `Action Queue${pendingCount > 0 ? ` (${pendingCount})` : ""}`, icon: AlertTriangle },
@@ -154,6 +154,9 @@ export default function AiControlCenterPage() {
         ]).map(t => (
           <button
             key={t.id}
+            role="tab"
+            aria-selected={activeTab === t.id}
+            aria-controls={`panel-${t.id}`}
             onClick={() => setActiveTab(t.id)}
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-all border-b-2 ${
               activeTab === t.id
@@ -168,7 +171,7 @@ export default function AiControlCenterPage() {
       </div>
 
       {activeTab === "governance" && settings && (
-        <div className="space-y-6">
+        <div className="space-y-6" role="tabpanel" id="panel-governance" aria-label="Governance settings">
           <div>
             <h2 className="text-sm font-semibold text-foreground/80 mb-3">Autonomy Mode</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -239,6 +242,65 @@ export default function AiControlCenterPage() {
             </div>
           </div>
 
+          <div className="border-t border-border/20 pt-6">
+            <h2 className="text-sm font-semibold text-foreground/80 mb-3">Permissions Matrix</h2>
+            <p className="text-xs text-muted-foreground/60 mb-4">
+              How each action type is handled based on your current autonomy settings.
+            </p>
+            <div className="rounded-xl border border-border/30 overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border/20 bg-muted/10">
+                    <th className="text-left px-3 py-2.5 text-muted-foreground/60 font-medium">Action Type</th>
+                    <th className="text-center px-3 py-2.5 text-muted-foreground/60 font-medium">Risk</th>
+                    <th className="text-center px-3 py-2.5 text-muted-foreground/60 font-medium">Behavior</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { action: "Read data / Fetch records", tier: 1, label: "Tier 1" },
+                    { action: "Create drafts / Low-risk updates", tier: 1, label: "Tier 1" },
+                    { action: "Send messages / Modify records", tier: 2, label: "Tier 2" },
+                    { action: "Financial transactions / Bulk ops", tier: 3, label: "Tier 3" },
+                    { action: "Delete data / Admin operations", tier: 4, label: "Tier 4" },
+                  ].map(row => {
+                    const autoExec = row.tier <= settings.maxAutoTier && row.tier < 4 && settings.mode !== "restricted" && settings.mode !== "advisory";
+                    const blocked = settings.mode === "restricted";
+                    const advisory = settings.mode === "advisory";
+                    return (
+                      <tr key={row.action} className="border-b border-border/10 last:border-0">
+                        <td className="px-3 py-2.5 text-foreground/80">{row.action}</td>
+                        <td className="text-center px-3 py-2.5">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                            row.tier <= 1 ? "bg-emerald-500/10 text-emerald-400" :
+                            row.tier === 2 ? "bg-blue-500/10 text-blue-400" :
+                            row.tier === 3 ? "bg-amber-500/10 text-amber-400" :
+                            "bg-red-500/10 text-red-400"
+                          }`}>
+                            {row.label}
+                          </span>
+                        </td>
+                        <td className="text-center px-3 py-2.5">
+                          {blocked ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">Blocked</span>
+                          ) : advisory ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400">Suggest Only</span>
+                          ) : row.tier === 4 ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">Admin Required</span>
+                          ) : autoExec ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">Auto-Execute</span>
+                          ) : (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400">Needs Approval</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           {(settings.blockedTools.length > 0 || settings.blockedModules.length > 0) && (
             <div className="border-t border-border/20 pt-6">
               <h2 className="text-sm font-semibold text-foreground/80 mb-3">Restrictions</h2>
@@ -268,11 +330,15 @@ export default function AiControlCenterPage() {
       )}
 
       {activeTab === "queue" && (
-        <ActionQueue onCountChange={setPendingCount} />
+        <div role="tabpanel" id="panel-queue" aria-label="Action queue">
+          <ActionQueue onCountChange={setPendingCount} />
+        </div>
       )}
 
       {activeTab === "history" && (
-        <ExecutionHistory />
+        <div role="tabpanel" id="panel-history" aria-label="Execution history">
+          <ExecutionHistory />
+        </div>
       )}
     </div>
   );
