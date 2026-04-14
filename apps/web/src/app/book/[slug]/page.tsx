@@ -1073,7 +1073,8 @@ export default function PublicBookingPage() {
         return (
           <div key="catalog" id="catalog-section">
             {showSectionHeader && (
-              <div className="mb-4">
+              <div className="mb-5 flex items-center gap-3">
+                <div className="w-1 h-6 rounded-full" style={{ background: `linear-gradient(to bottom, ${primaryColor}, ${primaryColor}40)` }} />
                 <h2
                   className="text-lg font-bold tracking-tight"
                   style={{ color: catalogSectionStyle?.sectionHeaderEmphasis ? primaryColor : "inherit" }}
@@ -1232,8 +1233,9 @@ export default function PublicBookingPage() {
           const tag = col.railType ? railLabel[col.railType] : null;
           return (
             <div key={col.id} className="space-y-3">
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-semibold" style={{ color: primaryColor }}>{col.name}</h3>
+              <div className="flex items-center gap-3">
+                <div className="w-1 h-5 rounded-full" style={{ background: `linear-gradient(to bottom, ${primaryColor}, ${primaryColor}40)` }} />
+                <h3 className="text-base font-bold tracking-tight" style={{ color: primaryColor }}>{col.name}</h3>
                 {tag && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: `${primaryColor}18`, color: primaryColor }}>
                     {tag}
@@ -1253,9 +1255,9 @@ export default function PublicBookingPage() {
                         <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
                       </div>
                     )}
-                    <p className="text-xs font-semibold text-gray-900 truncate">{item.name}</p>
+                    <p className="text-xs font-semibold text-gray-800 truncate">{item.name}</p>
                     {item.price != null && storefrontConfig?.appearance?.showPrices !== false && (
-                      <p className="text-xs mt-0.5" style={{ color: primaryColor }}>
+                      <p className="text-xs font-semibold mt-0.5" style={{ color: primaryColor }}>
                         {item.currency || "USD"} {(item.price / 100).toFixed(2)}
                       </p>
                     )}
@@ -1314,11 +1316,11 @@ export default function PublicBookingPage() {
         )}
 
         {storefrontConfig?.socialProof?.guaranteeText && (
-          <div className="rounded-2xl p-4 flex items-center gap-3 text-sm backdrop-blur-sm" style={{ border: `1px solid ${accentColor}18`, background: `${accentColor}06` }}>
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${accentColor}15` }}>
-              <Shield className="w-4 h-4" style={{ color: accentColor }} />
+          <div className="rounded-2xl p-5 flex items-center gap-4 text-sm backdrop-blur-sm" style={{ border: `1px solid ${accentColor}15`, background: `linear-gradient(135deg, ${accentColor}06, ${accentColor}03)` }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${accentColor}12`, boxShadow: `0 2px 8px ${accentColor}10` }}>
+              <Shield className="w-5 h-5" style={{ color: accentColor }} />
             </div>
-            <span className="text-gray-900/55">{storefrontConfig.socialProof.guaranteeText}</span>
+            <span className="text-gray-700 font-medium leading-relaxed">{storefrontConfig.socialProof.guaranteeText}</span>
           </div>
         )}
 
@@ -1330,10 +1332,10 @@ export default function PublicBookingPage() {
 
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
         <div
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] text-gray-900/25 backdrop-blur-xl border border-gray-200 shadow-lg pointer-events-auto hover:text-gray-400 transition-colors"
-          style={{ backgroundColor: `${ts.pageBg}cc` }}
+          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-[11px] text-gray-400 backdrop-blur-xl border shadow-lg pointer-events-auto hover:text-gray-500 transition-all hover:shadow-xl"
+          style={{ backgroundColor: `${ts.pageBg}e6`, borderColor: `${primaryColor}10` }}
         >
-          <Sparkles className="w-3 h-3" style={{ color: `${primaryColor}60` }} />
+          <Sparkles className="w-3 h-3" style={{ color: `${primaryColor}70` }} />
           Powered by <span style={{ color: primaryColor }} className="font-semibold">KeyFlowOS</span>
         </div>
       </div>

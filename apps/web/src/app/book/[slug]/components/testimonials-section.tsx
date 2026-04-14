@@ -97,7 +97,7 @@ export function TestimonialsSection({ testimonials, primaryColor, secondaryColor
             <MessageCircle className="w-4.5 h-4.5" style={{ color: primaryColor }} />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-800">What Our Clients Say</h3>
+            <h3 className="text-lg font-bold text-gray-800 tracking-tight">What Our Clients Say</h3>
             <div className="flex items-center gap-2 mt-0.5">
               <div className="flex gap-0.5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -206,15 +206,15 @@ function TestimonialCard({
     <div
       className={`${gridMode ? "" : "flex-shrink-0 w-[300px] sm:w-[340px] snap-start"} rounded-2xl p-5 space-y-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg group relative`}
       style={{
-        border: "1px solid rgba(0,0,0,0.06)",
-        background: "linear-gradient(135deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 100%)",
+        border: `1px solid ${primaryColor}0A`,
+        background: `linear-gradient(135deg, ${primaryColor}03 0%, ${secondaryColor}02 100%)`,
         opacity: visible ? 1 : 0,
         transform: visible ? "translateY(0)" : "translateY(12px)",
         transition: `opacity 0.5s ${0.1 + index * 0.08}s, transform 0.5s ${0.1 + index * 0.08}s, box-shadow 0.3s`,
       }}
     >
       <Quote
-        className="w-8 h-8 absolute top-4 right-4 opacity-[0.06]"
+        className="w-8 h-8 absolute top-4 right-4 opacity-[0.08]"
         style={{ color: primaryColor }}
       />
 
@@ -224,19 +224,19 @@ function TestimonialCard({
             key={i}
             className="w-4 h-4 transition-transform duration-200 group-hover:scale-110"
             fill={i < t.rating ? "#f59e0b" : "transparent"}
-            color={i < t.rating ? "#f59e0b" : "#e5e7eb"}
+            color={i < t.rating ? "#f59e0b" : "#d1d5db"}
           />
         ))}
       </div>
 
-      <p className="text-sm text-gray-600 leading-relaxed line-clamp-4">
+      <p className="text-sm text-gray-700 leading-relaxed line-clamp-4">
         &ldquo;{t.text}&rdquo;
       </p>
 
       <div className="flex items-center gap-3 pt-1">
         <AvatarCircle name={t.name} color={primaryColor} />
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-700 truncate">{t.name}</p>
+          <p className="text-sm font-semibold text-gray-800 truncate">{t.name}</p>
           {t.date && (
             <p className="text-[11px] text-gray-400">{formatDate(t.date)}</p>
           )}
