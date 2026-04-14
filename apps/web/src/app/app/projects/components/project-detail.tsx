@@ -382,7 +382,7 @@ export function ProjectDetail({
           />
         )}
         {activeTab === "timeline" && (
-          <TimelineTab project={project} notes={notes} />
+          <TimelineTab project={project} notes={notes} milestones={milestones} />
         )}
         {activeTab === "notes" && (
           <NotesTab notes={notes} onNotesChange={setNotes} />

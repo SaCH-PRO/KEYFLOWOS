@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Plus, Trash2, FileStack, X, ListChecks, Search, Sparkles, Tag, Zap } from "lucide-react";
+import { Plus, Trash2, FileStack, X, ListChecks, Search, Sparkles, Tag, Zap, Flag } from "lucide-react";
 import {
   fetchProjectTemplates,
   createProjectTemplate,
@@ -277,6 +277,22 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
               ))}
             </div>
           </div>
+
+          {INTELLIGENT_DEFAULTS[newTemplateServiceType]?.milestones.length > 0 && (
+            <div className="rounded-lg p-3" style={{ background: "hsl(var(--muted) / 0.1)" }}>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                <Flag className="w-2.5 h-2.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+                Suggested Milestones — add to project after creation
+              </span>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {INTELLIGENT_DEFAULTS[newTemplateServiceType].milestones.map((ms, i) => (
+                  <span key={i} className="text-[10px] px-2 py-0.5 rounded-md" style={{ background: "hsl(var(--kf-accent2) / 0.1)", color: "hsl(var(--kf-accent2))" }}>
+                    {ms}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-2">
             <input
