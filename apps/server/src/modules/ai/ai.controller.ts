@@ -483,4 +483,11 @@ export class AiController {
   async weeklyPlan(@Param('businessId') businessId: string) {
     return this.strategic.generateWeeklyPlan(businessId);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/strategic/actions')
+  async strategicActions(@Param('businessId') businessId: string) {
+    const actions = await this.strategic.getStrategicActions(businessId);
+    return { actions };
+  }
 }
