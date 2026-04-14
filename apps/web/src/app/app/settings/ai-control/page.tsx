@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Brain, Shield, ShieldCheck, AlertTriangle,
-  Activity, Loader2, Zap, Lock,
+  Activity, Loader2, Zap, Lock, Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -14,6 +14,7 @@ import {
 } from "@/lib/client";
 import { ExecutionHistory } from "@/components/ai/execution-history";
 import { ActionQueue } from "@/components/ai/action-queue";
+import { AiPreferencesPanel } from "@/components/ai/ai-preferences-panel";
 
 const MODES: Array<{
   id: AiAutonomySettings["mode"];
@@ -62,7 +63,7 @@ const MODES: Array<{
   },
 ];
 
-type SectionTab = "governance" | "queue" | "history";
+type SectionTab = "governance" | "preferences" | "queue" | "history";
 
 export default function AiControlCenterPage() {
   const [settings, setSettings] = useState<AiAutonomySettings | null>(null);
@@ -164,6 +165,7 @@ export default function AiControlCenterPage() {
       <div className="flex items-center border-b border-border/30" role="tablist" aria-label="AI Control Center sections">
         {([
           { id: "governance" as SectionTab, label: "Governance", icon: Shield },
+          { id: "preferences" as SectionTab, label: "AI Preferences", icon: Sparkles },
           { id: "queue" as SectionTab, label: `Action Queue${pendingCount > 0 ? ` (${pendingCount})` : ""}`, icon: AlertTriangle },
           { id: "history" as SectionTab, label: "Execution History", icon: Activity },
         ]).map(t => (
@@ -341,6 +343,12 @@ export default function AiControlCenterPage() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === "preferences" && (
+        <div role="tabpanel" id="panel-preferences" aria-label="AI Preferences">
+          <AiPreferencesPanel />
         </div>
       )}
 

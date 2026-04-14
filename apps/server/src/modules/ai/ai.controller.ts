@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
@@ -6,6 +6,7 @@ import { GovernanceService, RiskTier } from './governance.service';
 import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
+import { AiMemoryService, MemoryCategory } from './ai-memory.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -32,6 +33,7 @@ export class AiController {
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(IntentParserService) private readonly intentParser: IntentParserService,
     @Inject(PlannerService) private readonly planner: PlannerService,
+    @Inject(AiMemoryService) private readonly memory: AiMemoryService,
   ) {}
 
   @Get('health')
@@ -337,5 +339,73 @@ export class AiController {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required to update governance settings');
     return this.governance.updateAutonomySettings(businessId, body, userId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/memory')
+  async getMemory(
+    @Param('businessId') businessId: string,
+    @Query('category') category?: string,
+  ) {
+    if (category) {
+      const entries = await this.memory.getByCategory(businessId, category as MemoryCategory);
+      return { memories: entries };
+    }
+    const entries = await this.memory.getAll(businessId);
+    return { memories: entries };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/ai/memory')
+  async upsertMemory(
+    @Param('businessId') businessId: string,
+    @Body() body: { category: MemoryCategory; key: string; value: string; confidence?: number },
+  ) {
+    const entry = await this.memory.upsert(businessId, {
+      category: body.category,
+      key: body.key,
+      value: body.value,
+      confidence: body.confidence,
+      source: 'user',
+    });
+    return { memory: entry };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/ai/memory/bulk')
+  async upsertMemoryBulk(
+    @Param('businessId') businessId: string,
+    @Body() body: { entries: Array<{ category: MemoryCategory; key: string; value: string; confidence?: number }> },
+  ) {
+    const results = await this.memory.upsertMany(
+      businessId,
+      body.entries.map(e => ({ ...e, source: 'user' as const })),
+    );
+    return { memories: results };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/ai/memory/:category/:key')
+  async deleteMemory(
+    @Param('businessId') businessId: string,
+    @Param('category') category: string,
+    @Param('key') key: string,
+  ) {
+    const deleted = await this.memory.remove(businessId, category as MemoryCategory, key);
+    return { deleted };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/memory/context')
+  async getMemoryContext(@Param('businessId') businessId: string) {
+    const ctx = await this.memory.buildContextBlock(businessId);
+    return ctx;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/memory/summarize-patterns')
+  async summarizePatterns(@Param('businessId') businessId: string) {
+    const patterns = await this.memory.summarizePatterns(businessId);
+    return { patterns };
   }
 }

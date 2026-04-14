@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import OpenAI from 'openai';
 import { BusinessGraphService } from './business-graph.service';
+import { AiMemoryService } from './ai-memory.service';
 
 export interface ParsedIntent {
   objective: string;
@@ -84,6 +85,7 @@ export class IntentParserService {
 
   constructor(
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
+    @Inject(AiMemoryService) private readonly memory: AiMemoryService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -95,10 +97,13 @@ export class IntentParserService {
     const snapshot = await this.businessGraph.getSnapshot(businessId);
     const contextString = this.businessGraph.buildContextString(snapshot);
 
+    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    const memorySection = this.memory.buildPromptSection(memoryCtx);
+
     const systemPrompt = `You are KeyFlow AI's intent parser. Your job is to analyze a user's natural-language request and call the parse_intent function with a structured intent object.
 
 BUSINESS CONTEXT:
-${contextString}
+${contextString}${memorySection}
 
 AVAILABLE TOOLS:
 ${AVAILABLE_TOOLS.join(', ')}

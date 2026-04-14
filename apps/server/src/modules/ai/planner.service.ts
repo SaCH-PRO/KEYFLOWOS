@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from './ai-usage.service';
 import { BusinessGraphService } from './business-graph.service';
 import { GovernanceService } from './governance.service';
+import { AiMemoryService } from './ai-memory.service';
 import { ParsedIntent } from './intent-parser.service';
 
 interface RawAiStep {
@@ -64,16 +65,20 @@ export class PlannerService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiMemoryService) private readonly memory: AiMemoryService,
   ) {}
 
   async createPlan(businessId: string, intent: ParsedIntent, userId?: string): Promise<AiPlanResult> {
     const snapshot = await this.businessGraph.getSnapshot(businessId);
     const contextString = this.businessGraph.buildContextString(snapshot);
 
+    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    const memorySection = this.memory.buildPromptSection(memoryCtx);
+
     const systemPrompt = `You are KeyFlow AI's plan decomposition engine. Given a parsed intent and business context, produce an ordered list of concrete steps to accomplish the objective.
 
 BUSINESS CONTEXT:
-${contextString}
+${contextString}${memorySection}
 
 INTENT:
 - Objective: ${intent.objective}

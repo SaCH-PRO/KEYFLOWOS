@@ -4064,6 +4064,81 @@ export async function updateAiGovernance(
 }
 
 // ---
+// AI MEMORY & PREFERENCES
+// ---
+
+export type AiMemoryCategory =
+  | 'goals'
+  | 'tone'
+  | 'riskTolerance'
+  | 'outreachStyle'
+  | 'reportingCadence'
+  | 'priorities'
+  | 'bottlenecks'
+  | 'corrections'
+  | 'patterns'
+  | 'preferences';
+
+export interface AiMemoryEntry {
+  id: string;
+  category: string;
+  key: string;
+  value: string;
+  confidence: number;
+  source: string;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiMemoryContextBlock {
+  goals: string[];
+  tone: string | null;
+  riskTolerance: string | null;
+  outreachStyle: string | null;
+  reportingCadence: string | null;
+  priorities: string[];
+  bottlenecks: string[];
+  corrections: string[];
+  patterns: string[];
+}
+
+export async function fetchAiMemory(businessId: string, category?: string): Promise<ApiResult<{ memories: AiMemoryEntry[] }>> {
+  const qs = category ? `?category=${encodeURIComponent(category)}` : '';
+  return apiGetSimple<{ memories: AiMemoryEntry[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/memory${qs}`);
+}
+
+export async function upsertAiMemory(
+  businessId: string,
+  entry: { category: AiMemoryCategory; key: string; value: string; confidence?: number },
+): Promise<ApiResult<{ memory: AiMemoryEntry }>> {
+  return apiPut<{ memory: AiMemoryEntry }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/memory`, entry);
+}
+
+export async function upsertAiMemoryBulk(
+  businessId: string,
+  entries: Array<{ category: AiMemoryCategory; key: string; value: string; confidence?: number }>,
+): Promise<ApiResult<{ memories: AiMemoryEntry[] }>> {
+  return apiPut<{ memories: AiMemoryEntry[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/memory/bulk`, { entries });
+}
+
+export async function deleteAiMemory(
+  businessId: string,
+  category: string,
+  key: string,
+): Promise<ApiResult<{ deleted: boolean }>> {
+  return apiDelete<{ deleted: boolean }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/memory/${encodeURIComponent(category)}/${encodeURIComponent(key)}`);
+}
+
+export async function fetchAiMemoryContext(businessId: string): Promise<ApiResult<AiMemoryContextBlock>> {
+  return apiGetSimple<AiMemoryContextBlock>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/memory/context`);
+}
+
+export async function summarizeAiPatterns(businessId: string): Promise<ApiResult<{ patterns: string[] }>> {
+  return apiPost<{ patterns: string[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/memory/summarize-patterns`, {});
+}
+
+// ---
 // AI USAGE & BILLING
 // ---
 export interface AiUsageSummary {

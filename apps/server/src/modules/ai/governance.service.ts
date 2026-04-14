@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, forwardRef, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
+import { AiMemoryService } from './ai-memory.service';
 import { getToolByName } from './flow-tool-registry';
 
 export type RiskTier = 1 | 2 | 3 | 4;
@@ -36,6 +37,7 @@ export class GovernanceService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(forwardRef(() => AiExecutionLogService)) private readonly logService: AiExecutionLogService,
+    @Inject(forwardRef(() => AiMemoryService)) private readonly memoryService: AiMemoryService,
   ) {}
 
   getToolTier(toolName: string): RiskTier {
@@ -213,6 +215,13 @@ export class GovernanceService {
       actor: 'user',
       rationale: `Approval ${approvalId} ${resolution} by user ${resolvedByUserId}`,
       success: true,
+    });
+
+    this.memoryService.recordApprovalSignal(businessId, item.toolName, resolution, {
+      rationale: item.rationale ?? undefined,
+      inputPayload: (item.inputPayload as Record<string, unknown>) ?? undefined,
+    }).catch((e: unknown) => {
+      this.logger.error(`Failed to record approval signal: ${e instanceof Error ? e.message : String(e)}`);
     });
 
     return this.prisma.client.aiApprovalItem.update({
