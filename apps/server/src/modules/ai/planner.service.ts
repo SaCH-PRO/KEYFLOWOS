@@ -14,6 +14,19 @@ export interface PlanStep {
   description: string;
   riskTier: number;
   requiresApproval: boolean;
+  dependsOnOrders: number[];
+  inputPayload: Record<string, any> | null;
+  expectedBenefit: string | null;
+}
+
+export interface AiPlanResultStep {
+  order: number;
+  toolName: string | null;
+  module: string | null;
+  action: string;
+  description: string;
+  riskTier: number;
+  requiresApproval: boolean;
   dependsOn: string[];
   inputPayload: Record<string, any> | null;
   expectedBenefit: string | null;
@@ -26,7 +39,7 @@ export interface AiPlanResult {
   urgency: string;
   modules: string[];
   maxRiskTier: number;
-  steps: PlanStep[];
+  steps: AiPlanResultStep[];
 }
 
 @Injectable()
@@ -66,7 +79,7 @@ RULES:
 4. Be specific with input payloads when enough context exists
 5. Include expected benefits for each step
 
-Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_null", "module": "crm|commerce|bookings|marketing|content|projects|expenses|automations|null", "action": "verb phrase", "description": "detail", "riskTier": 1-4, "dependsOn": [], "inputPayload": {} or null, "expectedBenefit": "string" } ] }`;
+Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_null", "module": "crm|commerce|bookings|marketing|content|projects|expenses|automations|null", "action": "verb phrase", "description": "detail", "riskTier": 1-4, "dependsOnOrders": [<order numbers of prerequisite steps, e.g. [1] means depends on step with order=1>], "inputPayload": {} or null, "expectedBenefit": "string" } ] }`;
 
     let steps: PlanStep[] = [];
 
@@ -88,6 +101,8 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
 
       steps = rawSteps.map((s: any, idx: number) => {
         const tierFromGov = s.toolName ? this.governance.getToolTier(s.toolName) : (s.riskTier || 1);
+        const depOrders = Array.isArray(s.dependsOnOrders) ? s.dependsOnOrders
+          : Array.isArray(s.dependsOn) ? s.dependsOn : [];
         return {
           order: s.order ?? idx + 1,
           toolName: s.toolName || null,
@@ -96,7 +111,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
           description: s.description || '',
           riskTier: tierFromGov,
           requiresApproval: tierFromGov >= 2,
-          dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn : [],
+          dependsOnOrders: depOrders.map((v: any) => typeof v === 'number' ? v : parseInt(v, 10)).filter((n: number) => !isNaN(n)),
           inputPayload: s.inputPayload || null,
           expectedBenefit: s.expectedBenefit || null,
         };
@@ -111,7 +126,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
         description: ac.description,
         riskTier: ac.riskTier,
         requiresApproval: ac.riskTier >= 2,
-        dependsOn: [],
+        dependsOnOrders: [] as number[],
         inputPayload: null,
         expectedBenefit: null,
       }));
@@ -138,7 +153,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
             description: s.description,
             riskTier: s.riskTier,
             requiresApproval: s.requiresApproval,
-            dependsOn: s.dependsOn,
+            dependsOn: [],
             inputPayload: s.inputPayload ? (s.inputPayload as Prisma.InputJsonValue) : Prisma.JsonNull,
             expectedBenefit: s.expectedBenefit ?? undefined,
             status: 'pending',
@@ -147,6 +162,28 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
       },
       include: { steps: { orderBy: { order: 'asc' } } },
     });
+
+    const orderToIdMap = new Map<number, string>();
+    for (const s of plan.steps) {
+      orderToIdMap.set(s.order, s.id);
+    }
+
+    for (const rawStep of steps) {
+      if (rawStep.dependsOnOrders.length > 0) {
+        const dbStep = plan.steps.find(s => s.order === rawStep.order);
+        if (!dbStep) continue;
+        const resolvedIds = rawStep.dependsOnOrders
+          .map((depOrder: number) => orderToIdMap.get(depOrder))
+          .filter((id): id is string => !!id);
+        if (resolvedIds.length > 0) {
+          await this.prisma.client.aiPlanStep.update({
+            where: { id: dbStep.id },
+            data: { dependsOn: resolvedIds },
+          });
+          (dbStep as any).dependsOn = resolvedIds;
+        }
+      }
+    }
 
     return {
       id: plan.id,

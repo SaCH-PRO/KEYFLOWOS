@@ -73,17 +73,21 @@ export class GovernanceService {
   ) {}
 
   getToolTier(toolName: string): RiskTier {
+    const tool = getToolByName(toolName);
+    if (tool && tool.riskTier) {
+      return tool.riskTier as RiskTier;
+    }
     if (TOOL_TIER_MAP[toolName] !== undefined) {
       return TOOL_TIER_MAP[toolName];
     }
-    const tool = getToolByName(toolName);
-    if (!tool) return 2;
-    switch (tool.riskLevel) {
-      case 'low': return 1;
-      case 'medium': return 2;
-      case 'high': return 3;
-      default: return 2;
+    if (tool) {
+      switch (tool.riskLevel) {
+        case 'low': return 1;
+        case 'medium': return 2;
+        case 'high': return 3;
+      }
     }
+    return 2;
   }
 
   async evaluate(
