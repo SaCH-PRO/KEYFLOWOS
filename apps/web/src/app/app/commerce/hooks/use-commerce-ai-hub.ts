@@ -34,6 +34,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
         type: "warning",
         title: "Overdue Payments",
         description: `You have $${stats.overdueAmount.toLocaleString()} in overdue invoices. Consider sending payment reminders.`,
+        explanation: "Overdue invoices reduce cash flow predictability and may indicate client payment risk.",
         priority: "high",
         actionLabel: "View overdue",
         actionKey: "filter_status:overdue",
@@ -46,6 +47,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
         type: "insight",
         title: "Low Quote Conversion",
         description: `Your quote-to-invoice conversion rate is ${stats.quoteConversionRate}%. Consider following up on pending quotes.`,
+        explanation: "Low conversion rates mean potential revenue is being lost at the proposal stage.",
         priority: "medium",
         actionLabel: "View quotes",
         actionKey: "switch_tab:quotes",
@@ -58,6 +60,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
         type: "warning",
         title: "High Outstanding Balance",
         description: `Outstanding amount ($${stats.outstandingAmount.toLocaleString()}) is over 50% of total revenue. Focus on collections.`,
+        explanation: "A high outstanding-to-revenue ratio signals cash flow pressure that could limit operations.",
         priority: "high",
       });
     }
@@ -69,6 +72,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
         type: "tip",
         title: "Top Performer",
         description: `"${top.name}" is your best seller with $${top.revenue.toLocaleString()} revenue from ${top.count} sales.`,
+        explanation: "Top performers deserve increased visibility, promotional focus, and potential upsell pairing.",
         priority: "low",
       });
     }
@@ -82,6 +86,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
             type: "insight",
             title: "Products With No Sales",
             description: `${lowPerformers.length} product${lowPerformers.length > 1 ? "s have" : " has"} no sales yet. Run an AI health scan to find optimization opportunities.`,
+            explanation: "Zero-sale products may need better descriptions, images, pricing, or promotion.",
             priority: "medium",
             actionLabel: "Run Health Scan",
             actionKey: "tool:product-health-scan",
@@ -95,6 +100,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
           type: "tip",
           title: "Pricing Review",
           description: `With ${stats.productCount} products, periodic pricing reviews can optimize revenue. Use AI Pricing Advisor on individual products.`,
+          explanation: "Regular pricing analysis ensures your margins stay healthy as costs and demand change.",
           priority: "low",
         });
       }
@@ -108,6 +114,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
           type: "action",
           title: "Pending Invoices",
           description: `${sent.count} invoices totaling $${sent.total.toLocaleString()} are awaiting payment.`,
+          explanation: "Timely reminders significantly improve collection rates and reduce days-sales-outstanding.",
           priority: "medium",
           actionLabel: "Send reminders",
           actionKey: "send_reminders:sent",
@@ -120,6 +127,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
           type: "action",
           title: "AI Recovery Plan",
           description: `Generate an AI-powered recovery strategy for $${stats.overdueAmount.toLocaleString()} in overdue payments.`,
+          explanation: "Structured recovery plans prioritize high-value invoices and optimize follow-up timing.",
           priority: "high",
           actionLabel: "Generate plan",
           actionKey: "tool:overdue-recovery",
@@ -132,6 +140,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
           type: "tip",
           title: "Invoice Insights",
           description: `Average invoice value: $${stats.averageInvoiceValue.toLocaleString()}. Run Client Intelligence on key accounts to optimize billing.`,
+          explanation: "Understanding invoice value distribution helps identify upsell and bundling opportunities.",
           priority: "low",
         });
       }
@@ -144,6 +153,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
           type: "insight",
           title: "Quote Win Analysis",
           description: `Analyze ${stats.quoteCount} quotes to discover conversion patterns and improvement opportunities.`,
+          explanation: "Quote analysis reveals which pricing, timing, and scope patterns win deals most often.",
           priority: "medium",
           actionLabel: "Analyze quotes",
           actionKey: "tool:quote-win-analysis",
@@ -157,6 +167,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
         type: "warning",
         title: "Churn Risk Scanner",
         description: "Detect declining payment patterns in recurring customers before you lose revenue.",
+        explanation: "Early churn detection allows proactive retention efforts before revenue is permanently lost.",
         priority: "medium",
         actionLabel: "Scan for risk",
         actionKey: "tool:churn-risk",
@@ -169,6 +180,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
         type: "insight",
         title: "Revenue Journey Analysis",
         description: "Map your Contact → Quote → Invoice → Payment funnel and find conversion drop-off points.",
+        explanation: "Funnel analysis pinpoints where leads or revenue stall, enabling targeted process improvements.",
         priority: "medium",
         actionLabel: "View funnel",
         actionKey: "tool:revenue-journey",
@@ -181,6 +193,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
         type: "action",
         title: "Predictive Collections",
         description: `Score ${stats.invoiceStatusBreakdown?.OVERDUE?.count ?? 0} overdue invoices for recovery likelihood with AI-recommended follow-up timing.`,
+        explanation: "Predictive scoring focuses your collection efforts on invoices most likely to be recovered.",
         priority: "high",
         actionLabel: "Score invoices",
         actionKey: "tool:collections-scoring",
@@ -193,6 +206,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
         type: "tip",
         title: "Commerce Health",
         description: `${stats.invoiceCount} invoices, ${stats.productCount} products. Revenue: $${stats.totalRevenue.toLocaleString()}.`,
+        explanation: "Your commerce metrics are healthy — keep monitoring for trends and optimization opportunities.",
         priority: "low",
       });
     }
@@ -204,6 +218,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
       type: "warning",
       title: "Analysis Unavailable",
       description: "Could not complete commerce analysis. Try again in a moment.",
+      explanation: "A temporary issue prevented data retrieval. Your data is safe — just retry.",
       priority: "low",
     }];
   }
@@ -453,6 +468,13 @@ export function useCommerceAiHub() {
     moduleName: "Commerce",
     generateSuggestions: generateCommerceSuggestions,
     tools,
+    executeAction: async (actionKey, context) => {
+      if (actionKey.startsWith("tool:")) {
+        const toolId = actionKey.replace("tool:", "");
+        const tool = tools.find((t) => t.id === toolId);
+        if (tool) await tool.execute(context);
+      }
+    },
   });
 
   const [copilotMode, setCopilotMode] = useState<CopilotMode>("command");
