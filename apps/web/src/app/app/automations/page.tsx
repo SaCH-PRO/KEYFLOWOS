@@ -256,13 +256,17 @@ export default function FlowsPage() {
       metricStrip={flowHealthContent}
     >
       {intelligence.moduleCoverage && (
-        <AutomationCoverageIndicator coverage={intelligence.moduleCoverage} />
+        <AutomationCoverageIndicator
+          coveragePct={intelligence.moduleCoverage.coveragePct}
+          automatedCount={intelligence.moduleCoverage.automatedCount}
+          totalProcesses={intelligence.moduleCoverage.totalProcesses}
+        />
       )}
 
       <WorkspaceInsightsPanel
         recommendations={intelligence.recommendations}
         loading={intelligence.loading}
-        onDismiss={intelligence.dismissRecommendation}
+        onDismiss={intelligence.dismiss}
         onNavigate={(route) => router.push(route)}
       />
 

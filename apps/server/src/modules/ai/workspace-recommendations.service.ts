@@ -61,6 +61,7 @@ export class WorkspaceRecommendationsService {
       marketing: 4,
       projects: 3,
       expenses: 2,
+      automations: 3,
     };
 
     const modules = Object.entries(moduleProcessCounts).map(([mod, total]) => {
