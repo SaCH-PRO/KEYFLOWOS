@@ -28,7 +28,7 @@ export interface FlowTool {
   changedEntities?: string[];
   followOnSuggestions?: string[];
   parameters: ToolParamSchema;
-  outputSchema?: ToolOutputSchema;
+  outputSchema: ToolOutputSchema;
 }
 
 export interface ToolExecutionEnvelope<T = any> {
@@ -436,11 +436,10 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
   {
     name: 'segment_contacts',
-    description: 'Create a named contact segment based on status, tag, or spending criteria.',
-    family: 'organize',
-    riskLevel: 'medium',
-    riskTier: 2 as RiskTier,
-    changedEntities: ['contactSegment'],
+    description: 'Filter contacts into a named segment based on status, tag, or spending criteria. Returns matching contacts without persisting the segment.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -644,6 +643,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['query'],
     },
+    outputSchema: { type: 'object', description: 'Search results', fields: { contacts: { type: 'array', description: 'Matching contacts' } } },
   },
   {
     name: 'crm_create_contact',
@@ -664,6 +664,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: [],
     },
+    outputSchema: { type: 'object', description: 'Created contact', fields: { contact: { type: 'object', description: 'Contact record' } } },
   },
   {
     name: 'crm_update_contact',
@@ -685,6 +686,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['contactId'],
     },
+    outputSchema: { type: 'object', description: 'Updated contact', fields: { contact: { type: 'object', description: 'Updated contact record' } } },
   },
   {
     name: 'crm_add_note',
@@ -701,6 +703,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['contactId', 'body'],
     },
+    outputSchema: { type: 'object', description: 'Created note', fields: { note: { type: 'object', description: 'Note record' } } },
   },
   {
     name: 'crm_add_task',
@@ -719,6 +722,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['contactId', 'title'],
     },
+    outputSchema: { type: 'object', description: 'Created task', fields: { task: { type: 'object', description: 'Task record' }, id: { type: 'string', description: 'Task ID' } } },
   },
   {
     name: 'crm_delete_contact',
@@ -734,6 +738,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['contactId'],
     },
+    outputSchema: { type: 'object', description: 'Deletion result', fields: { success: { type: 'boolean', description: 'Whether deletion succeeded' } } },
   },
   {
     name: 'crm_list_contacts',
@@ -749,6 +754,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: [],
     },
+    outputSchema: { type: 'object', description: 'Contact list', fields: { contacts: { type: 'array', description: 'Contact records' }, total: { type: 'number', description: 'Total count' } } },
   },
 
   // ================================================================
@@ -776,6 +782,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['items'],
     },
+    outputSchema: { type: 'object', description: 'Created invoice', fields: { invoiceNumber: { type: 'string', description: 'Invoice number' }, id: { type: 'string', description: 'Invoice ID' } } },
   },
   {
     name: 'commerce_list_invoices',
@@ -790,6 +797,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: [],
     },
+    outputSchema: { type: 'object', description: 'Invoice list', fields: { invoices: { type: 'array', description: 'Invoice records' } } },
   },
   {
     name: 'commerce_mark_invoice_paid',
@@ -805,6 +813,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['invoiceId'],
     },
+    outputSchema: { type: 'object', description: 'Updated invoice', fields: { invoice: { type: 'object', description: 'Updated invoice record' } } },
   },
   {
     name: 'commerce_create_product',
@@ -824,6 +833,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['name', 'price'],
     },
+    outputSchema: { type: 'object', description: 'Created product', fields: { product: { type: 'object', description: 'Product record' } } },
   },
   {
     name: 'commerce_create_quote',
@@ -846,6 +856,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['contactId', 'items'],
     },
+    outputSchema: { type: 'object', description: 'Created quote', fields: { quote: { type: 'object', description: 'Quote record' } } },
   },
   {
     name: 'commerce_delete_invoice',
@@ -861,6 +872,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['invoiceId'],
     },
+    outputSchema: { type: 'object', description: 'Deletion result', fields: { success: { type: 'boolean', description: 'Whether deletion succeeded' } } },
   },
 
   // ================================================================
@@ -885,6 +897,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['contactId', 'startTime', 'endTime'],
     },
+    outputSchema: { type: 'object', description: 'Created booking', fields: { id: { type: 'string', description: 'Booking ID' }, startTime: { type: 'string', description: 'Booking start time' } } },
   },
   {
     name: 'bookings_list_bookings',
@@ -899,6 +912,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: [],
     },
+    outputSchema: { type: 'object', description: 'Booking list', fields: { bookings: { type: 'array', description: 'Booking records' } } },
   },
   {
     name: 'bookings_reschedule_booking',
@@ -915,6 +929,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['bookingId', 'startTime'],
     },
+    outputSchema: { type: 'object', description: 'Rescheduled booking', fields: { booking: { type: 'object', description: 'Updated booking record' } } },
   },
   {
     name: 'bookings_cancel_booking',
@@ -930,6 +945,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['bookingId'],
     },
+    outputSchema: { type: 'object', description: 'Cancellation result', fields: { success: { type: 'boolean', description: 'Whether cancellation succeeded' } } },
   },
   {
     name: 'bookings_list_services',
@@ -942,6 +958,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       properties: {},
       required: [],
     },
+    outputSchema: { type: 'object', description: 'Service list', fields: { services: { type: 'array', description: 'Available services' } } },
   },
 
   // ================================================================
@@ -964,6 +981,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['name', 'subject', 'body'],
     },
+    outputSchema: { type: 'object', description: 'Created campaign', fields: { campaign: { type: 'object', description: 'Campaign record' } } },
   },
   {
     name: 'marketing_send_campaign',
@@ -979,6 +997,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['campaignId'],
     },
+    outputSchema: { type: 'object', description: 'Send result', fields: { success: { type: 'boolean', description: 'Whether send was initiated' } } },
   },
   {
     name: 'marketing_list_campaigns',
@@ -991,6 +1010,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       properties: {},
       required: [],
     },
+    outputSchema: { type: 'object', description: 'Campaign list', fields: { campaigns: { type: 'array', description: 'Campaign records' } } },
   },
 
   // ================================================================
@@ -1011,6 +1031,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['content'],
     },
+    outputSchema: { type: 'object', description: 'Created post', fields: { post: { type: 'object', description: 'Post record' } } },
   },
   {
     name: 'social_publish_post',
@@ -1026,6 +1047,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['postId'],
     },
+    outputSchema: { type: 'object', description: 'Publish result', fields: { success: { type: 'boolean', description: 'Whether post was published' } } },
   },
   {
     name: 'social_list_posts',
@@ -1038,6 +1060,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       properties: {},
       required: [],
     },
+    outputSchema: { type: 'object', description: 'Post list', fields: { posts: { type: 'array', description: 'Post records' } } },
   },
 
   // ================================================================
@@ -1059,6 +1082,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['name', 'triggerEvent'],
     },
+    outputSchema: { type: 'object', description: 'Created playbook', fields: { playbook: { type: 'object', description: 'Playbook record' } } },
   },
   {
     name: 'automations_list_playbooks',
@@ -1071,6 +1095,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       properties: {},
       required: [],
     },
+    outputSchema: { type: 'object', description: 'Playbook list', fields: { playbooks: { type: 'array', description: 'Playbook records' } } },
   },
   {
     name: 'automations_toggle_playbook',
@@ -1087,6 +1112,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['playbookId', 'enabled'],
     },
+    outputSchema: { type: 'object', description: 'Toggle result', fields: { playbook: { type: 'object', description: 'Updated playbook' }, enabled: { type: 'boolean', description: 'New enabled state' } } },
   },
 ];
 
