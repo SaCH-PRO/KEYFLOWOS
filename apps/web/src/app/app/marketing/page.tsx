@@ -26,7 +26,8 @@ import {
   Settings,
 } from "lucide-react";
 import { toast } from "sonner";
-import { WorkspaceShell, useWorkspaceReturnNav } from "@/components/ui/workspace-shell";
+import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { ProgressivePrompts } from "../profile/components/progressive-prompts";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useSearchParams } from "next/navigation";
@@ -342,7 +343,7 @@ function BusinessPulseStrip({
 }
 
 export default function ContentPage() {
-  const { getReturnLabel, navigateBack, getOriginWorkspace } = useWorkspaceReturnNav();
+  const { getReturnLabel, navigateBack, getOriginWorkspace } = useReturnNavigation({});
   const searchParams = useSearchParams();
   const mk = useMarketing();
   const marketingAi = useMarketingAiHub();
