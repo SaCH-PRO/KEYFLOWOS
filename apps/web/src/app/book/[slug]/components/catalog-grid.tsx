@@ -341,7 +341,7 @@ export function CatalogGrid({
                 className={`${btnStyles.className} shadow-sm hover:shadow-md active:scale-95 min-h-[44px]`}
                 style={btnStyles.style}
               >
-                <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Add</span><span className="sm:hidden">+</span>
+                <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Add</span>
               </button>
             )}
           </div>

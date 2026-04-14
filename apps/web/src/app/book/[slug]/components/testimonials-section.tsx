@@ -78,7 +78,6 @@ export function TestimonialsSection({ testimonials, primaryColor, secondaryColor
   };
 
   const useCarousel = testimonials.length > 2;
-  const gridMode = !useCarousel;
   const sectionPadding = socialProofWeight === "prominent" ? "space-y-6" : socialProofWeight === "subtle" ? "space-y-3" : "space-y-5";
 
   return (
