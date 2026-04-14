@@ -473,8 +473,12 @@ export default function ContentPage() {
     if (actionKey.startsWith("switch_tab:")) {
       const tab = actionKey.replace("switch_tab:", "");
       if (["create", "calendar", "audience", "studio"].includes(tab)) setActiveTab(tab as ContentTab);
+    } else if (actionKey === "filter_status:DRAFT") {
+      setActiveTab("create");
+      setCreateSubmode("campaigns");
     } else if (actionKey.startsWith("filter_status:")) {
       setActiveTab("create");
+      setCreateSubmode("campaigns");
     }
   }, []);
 

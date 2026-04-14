@@ -120,9 +120,18 @@ export default function CommercePage() {
         setOpsSection(t);
         overview.handleTabChange(t);
       }
+    } else if (actionKey === "filter_status:overdue") {
+      setMode("operations");
+      setOpsSection("invoices");
+      overview.handleTabChange("invoices");
     } else if (actionKey.startsWith("filter_status:")) {
       setMode("operations");
       setOpsSection("invoices");
+      overview.handleTabChange("invoices");
+    } else if (actionKey.startsWith("send_reminders:")) {
+      setMode("operations");
+      setOpsSection("invoices");
+      overview.handleTabChange("invoices");
     }
   }, [overview.handleTabChange]);
 

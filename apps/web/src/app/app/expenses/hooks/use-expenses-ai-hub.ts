@@ -30,6 +30,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       type: "tip",
       title: "Start Tracking Expenses",
       description: "Add your first expense to begin tracking spending patterns, margins, budgets, and tax-ready records.",
+      explanation: "Expense tracking unlocks profitability analysis, budget monitoring, and AI-powered cost optimization.",
       priority: "medium",
       actionLabel: "Add expense",
       actionKey: "add_expense",
@@ -43,6 +44,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       type: "insight",
       title: "Set Up Categories",
       description: "Create spending categories to unlock budget tracking, spending breakdowns, and smarter AI insights.",
+      explanation: "Categorized expenses enable budget allocation, spending trends analysis, and more precise AI recommendations.",
       priority: "medium",
       actionLabel: "Go to categories",
       actionKey: "switch_tab:categories",
@@ -55,6 +57,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       type: "insight",
       title: "Set Up Budgets",
       description: "Configure monthly spending limits to get overspend alerts, cost control, and budget-vs-actual tracking.",
+      explanation: "Budget tracking enables proactive cost management and early detection of overspending patterns.",
       priority: "medium",
       actionLabel: "Set up budgets",
       actionKey: "switch_tab:budgets",
@@ -99,6 +102,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
       type: "tip",
       title: "Attach Receipts",
       description: "Less than 30% of your expenses have receipts. Attaching receipts improves tax compliance and audit readiness.",
+      explanation: "Receipt documentation protects you during tax audits and helps verify deductible business expenses.",
       priority: "low",
     });
   }
