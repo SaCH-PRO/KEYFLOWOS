@@ -8,6 +8,7 @@ import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
 import { AiMemoryService, MemoryCategory } from './ai-memory.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
+import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -51,6 +52,7 @@ export class AiController {
     @Inject(PlannerService) private readonly planner: PlannerService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(StrategicIntelligenceService) private readonly strategic: StrategicIntelligenceService,
+    @Inject(ProAutoMonitorService) private readonly proAutoMonitor: ProAutoMonitorService,
   ) {}
 
   @Get('health')
@@ -489,5 +491,12 @@ export class AiController {
   async strategicActions(@Param('businessId') businessId: string) {
     const actions = await this.strategic.getStrategicActions(businessId);
     return { actions };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/monitoring/insights')
+  async monitoringInsights(@Param('businessId') businessId: string) {
+    const insights = await this.proAutoMonitor.scanInsights(businessId);
+    return { insights };
   }
 }

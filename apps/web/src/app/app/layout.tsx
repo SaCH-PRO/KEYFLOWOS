@@ -53,7 +53,7 @@ import {
 } from "lucide-react";
 import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
 import { FlowChatPanel, FlowTriggerButton } from "./_command/flow-chat-panel";
-import { CopilotPanel } from "@/components/ai/copilot-panel";
+import { CopilotPanel, type CopilotModule } from "@/components/ai/copilot-panel";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
@@ -281,6 +281,20 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const { pushContext, setTaskOrigin, current } = useNavigationContext();
 
   const activePrimary = useMemo(() => detectPrimarySection(pathname), [pathname]);
+  const copilotModule = useMemo((): CopilotModule => {
+    if (pathname === "/app") return "cockpit";
+    if (pathname.startsWith("/app/crm")) return "crm";
+    if (pathname.startsWith("/app/commerce")) return "revenue";
+    if (pathname.startsWith("/app/bookings")) return "calendar";
+    if (pathname.startsWith("/app/social") || pathname.startsWith("/app/marketing")) return "content";
+    if (pathname.startsWith("/app/projects")) return "projects";
+    if (pathname.startsWith("/app/expenses")) return "expenses";
+    if (pathname.startsWith("/app/automations")) return "flows";
+    if (pathname.startsWith("/app/settings")) return "settings";
+    if (pathname.startsWith("/app/store")) return "store";
+    if (pathname.startsWith("/app/profile")) return "profile";
+    return "cockpit";
+  }, [pathname]);
   const [expandedSection, setExpandedSection] = useState<PrimarySectionId | null>(null);
   const secondaryVisible = expandedSection ?? (activePrimary !== "cockpit" ? activePrimary : null);
 
@@ -1020,7 +1034,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <KeyflowOSStoreDrawer open={kfStoreOpen} onClose={() => setKfStoreOpen(false)} />
       <FlowChatPanel open={flowOpen} onClose={() => setFlowOpen(false)} />
       {!flowOpen && <FlowTriggerButton onClick={() => setFlowOpen(true)} />}
-      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
+      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} currentModule={copilotModule} />
     </div>
   );
 }
