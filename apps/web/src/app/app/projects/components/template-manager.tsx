@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, FileStack, X, ListChecks } from "lucide-react";
+import { Plus, Trash2, FileStack, X, ListChecks, Search, Sparkles } from "lucide-react";
 import {
   fetchProjectTemplates,
   createProjectTemplate,
@@ -23,11 +23,16 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
   const [taskInput, setTaskInput] = useState("");
   const [tasks, setTasks] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const load = useCallback(async () => {
     if (!businessId) return;
-    const res = await fetchProjectTemplates(businessId);
-    if (res.data) setTemplates(res.data);
+    try {
+      const res = await fetchProjectTemplates(businessId);
+      if (res.data) setTemplates(res.data);
+    } catch {
+      toast.error("Failed to load templates");
+    }
   }, [businessId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -35,31 +40,43 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
   const handleCreate = async () => {
     if (!businessId || !name.trim() || tasks.length === 0) return;
     setCreating(true);
-    const res = await createProjectTemplate(businessId, { name: name.trim(), taskTitles: tasks });
-    if (res.data) {
-      setTemplates((prev) => [...prev, res.data!]);
-      setName("");
-      setTasks([]);
-      setTaskInput("");
-      setShowCreate(false);
-      toast.success("Template created");
+    try {
+      const res = await createProjectTemplate(businessId, { name: name.trim(), taskTitles: tasks });
+      if (res.data) {
+        setTemplates((prev) => [...prev, res.data!]);
+        setName("");
+        setTasks([]);
+        setTaskInput("");
+        setShowCreate(false);
+        toast.success("Template created");
+      }
+    } catch {
+      toast.error("Failed to create template");
     }
     setCreating(false);
   };
 
   const handleDelete = async (id: string) => {
     if (!businessId) return;
-    await deleteProjectTemplate(businessId, id);
-    setTemplates((prev) => prev.filter((t) => t.id !== id));
-    toast.success("Template deleted");
+    try {
+      await deleteProjectTemplate(businessId, id);
+      setTemplates((prev) => prev.filter((t) => t.id !== id));
+      toast.success("Template deleted");
+    } catch {
+      toast.error("Failed to delete template");
+    }
   };
 
   const handleUseTemplate = async (template: ProjectTemplate) => {
     if (!businessId) return;
-    const res = await createProjectFromTemplate(businessId, template.id);
-    if (res.data) {
-      toast.success(`Project "${res.data.name}" created from template`);
-      onProjectCreated?.();
+    try {
+      const res = await createProjectFromTemplate(businessId, template.id);
+      if (res.data) {
+        toast.success(`Project "${res.data.name}" created from template`);
+        onProjectCreated?.();
+      }
+    } catch {
+      toast.error("Failed to create project from template");
     }
   };
 
@@ -70,12 +87,21 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
     }
   };
 
+  const filteredTemplates = templates.filter((t) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      if (!t.name.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <FileStack className="w-4 h-4 text-muted-foreground" />
           <h3 className="text-sm font-medium">Project Templates</h3>
+          <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded-md bg-muted/30">{templates.length}</span>
         </div>
         <button
           onClick={() => setShowCreate(!showCreate)}
@@ -85,6 +111,21 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
           New Template
         </button>
       </div>
+
+      {templates.length > 3 && (
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1 sm:max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search templates..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-xl border border-border/60 bg-input pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground/60"
+            />
+          </div>
+        </div>
+      )}
 
       {showCreate && (
         <div className="kf-card rounded-xl p-4 space-y-3 border border-border/40">
@@ -140,47 +181,66 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
         </div>
       )}
 
-      {templates.length === 0 && !showCreate && (
-        <p className="text-xs text-muted-foreground text-center py-4">
-          No templates yet. Create one to quickly spin up projects with pre-defined tasks.
-        </p>
+      {filteredTemplates.length === 0 && !showCreate && (
+        <div className="text-center py-8 rounded-xl border border-dashed border-border/40">
+          <Sparkles className="w-5 h-5 mx-auto mb-2 text-muted-foreground" />
+          <p className="text-sm font-medium">No templates yet</p>
+          <p className="text-xs text-muted-foreground mt-1">Create reusable project blueprints with pre-defined tasks to spin up projects quickly.</p>
+        </div>
       )}
 
-      {templates.length > 0 && (
-        <div className="grid gap-2">
-          {templates.map((t) => {
+      {filteredTemplates.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredTemplates.map((t) => {
             const taskList = Array.isArray(t.taskTitles) ? t.taskTitles : [];
             return (
-              <div key={t.id} className="kf-card rounded-xl p-3 flex items-center gap-3 border border-border/30">
-                <div
-                  className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
-                >
-                  <ListChecks className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <div key={t.id} className="kf-card rounded-xl p-3 flex flex-col gap-2 border border-border/30">
+                <div className="flex items-start gap-3">
+                  <div
+                    className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                    style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
+                  >
+                    <ListChecks className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{t.name}</p>
+                    <p className="kf-text-caption text-muted-foreground">
+                      {taskList.length} task{taskList.length !== 1 ? "s" : ""}
+                      {t.product ? ` · ${t.product.name}` : ""}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{t.name}</p>
-                  <p className="kf-text-caption text-muted-foreground">
-                    {taskList.length} task{taskList.length !== 1 ? "s" : ""}
-                    {t.product ? ` · Linked to ${t.product.name}` : ""}
-                  </p>
+                {taskList.length > 0 && (
+                  <div className="space-y-0.5 pl-12">
+                    {taskList.slice(0, 3).map((task, i) => (
+                      <div key={i} className="text-[10px] text-muted-foreground/70 truncate flex items-center gap-1">
+                        <div className="w-1 h-1 rounded-full bg-muted-foreground/30 shrink-0" />
+                        {typeof task === "string" ? task : String(task)}
+                      </div>
+                    ))}
+                    {taskList.length > 3 && (
+                      <div className="text-[10px] text-muted-foreground/50">+{taskList.length - 3} more</div>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center gap-2 mt-auto pt-1">
+                  <button
+                    onClick={() => handleUseTemplate(t)}
+                    className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors flex-1"
+                    style={{
+                      background: "hsl(var(--kf-accent2) / 0.1)",
+                      color: "hsl(var(--kf-accent2))",
+                    }}
+                  >
+                    Use Template
+                  </button>
+                  <button
+                    onClick={() => handleDelete(t.id)}
+                    className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-muted/30 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleUseTemplate(t)}
-                  className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
-                  style={{
-                    background: "hsl(var(--kf-accent2) / 0.1)",
-                    color: "hsl(var(--kf-accent2))",
-                  }}
-                >
-                  Use
-                </button>
-                <button
-                  onClick={() => handleDelete(t.id)}
-                  className="text-muted-foreground hover:text-foreground p-1"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
               </div>
             );
           })}

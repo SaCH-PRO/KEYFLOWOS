@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, MoreHorizontal, Calendar, Trash2, FolderKanban,
   ChevronDown, ChevronRight, Archive, Eye, EyeOff, Search,
-  AlertTriangle, Clock, User, ExternalLink,
+  AlertTriangle, Clock, User, ExternalLink, DollarSign,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -13,7 +13,8 @@ import { KanbanSkeleton } from "@/components/ui/skeleton";
 import {
   createProject, updateProject, deleteProject,
   createProjectTask, updateProjectTask, deleteProjectTask,
-  Project, ProjectTask,
+  fetchContacts,
+  Project, ProjectTask, type Contact,
 } from "@/lib/client";
 import {
   PROJECT_STAGES, ALL_PROJECT_STAGES, PROJECT_COLORS,
@@ -42,6 +43,24 @@ export function ProjectBoard({
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [contactMap, setContactMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!businessId) return;
+    const contactIds = [...new Set(projects.filter((p) => p.contactId).map((p) => p.contactId!))];
+    if (contactIds.length === 0) return;
+    fetchContacts(businessId).then((res) => {
+      if (res.data) {
+        const contacts = (res.data as { contacts?: Contact[] }).contacts ?? (Array.isArray(res.data) ? res.data as Contact[] : []);
+        const map: Record<string, string> = {};
+        contacts.forEach((c: Contact) => {
+          const name = [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "Client";
+          map[c.id] = name;
+        });
+        setContactMap(map);
+      }
+    });
+  }, [businessId, projects]);
 
   const handleCreateProject = async () => {
     if (!businessId || !newProjectName.trim()) return;
@@ -297,6 +316,8 @@ export function ProjectBoard({
                     const overdue = isOverdue(project.dueDate) && normalizeStatus(project.status) !== "COMPLETED";
                     const overdueTasks = (project.tasks ?? []).filter((t) => !t.isCompleted && isOverdue(t.dueDate)).length;
                     const stageInfo = getStageInfo(project.status);
+                    const clientName = project.contactId ? contactMap[project.contactId] : null;
+                    const priorityUpper = (project.priority || "").toUpperCase();
 
                     return (
                       <motion.div
@@ -332,7 +353,18 @@ export function ProjectBoard({
                                 >
                                   {project.name}
                                 </button>
+                                {priorityUpper === "HIGH" || priorityUpper === "URGENT" ? (
+                                  <span className="text-[8px] px-1 py-0.5 rounded font-bold shrink-0" style={{ background: "hsl(var(--kf-error) / 0.15)", color: "hsl(var(--kf-error))" }}>
+                                    {priorityUpper === "URGENT" ? "!!!" : "!!"}
+                                  </span>
+                                ) : null}
                               </div>
+                              {clientName && (
+                                <div className="flex items-center gap-1 mt-0.5 ml-[18px]">
+                                  <User className="w-2.5 h-2.5 text-muted-foreground/60" />
+                                  <span className="text-[10px] text-muted-foreground/80 truncate">{clientName}</span>
+                                </div>
+                              )}
                             </div>
                             <div className="relative">
                               <button
@@ -409,7 +441,7 @@ export function ProjectBoard({
                               </div>
                             )}
 
-                            <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span
                                 className="text-[9px] px-1.5 py-0.5 rounded-md font-medium"
                                 style={{ background: riskStyle.bg, color: riskStyle.color }}
@@ -417,7 +449,7 @@ export function ProjectBoard({
                                 {riskStyle.label}
                               </span>
 
-                              {project.contactId && (
+                              {project.contactId && !clientName && (
                                 <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium flex items-center gap-0.5"
                                   style={{ background: "hsl(var(--kf-info) / 0.1)", color: "hsl(var(--kf-info))" }}>
                                   <User className="w-2.5 h-2.5" />
@@ -426,8 +458,9 @@ export function ProjectBoard({
                               )}
 
                               {project.invoiceId && (
-                                <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium"
+                                <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium flex items-center gap-0.5"
                                   style={{ background: "hsl(var(--kf-success) / 0.1)", color: "hsl(var(--kf-success))" }}>
+                                  <DollarSign className="w-2.5 h-2.5" />
                                   Revenue
                                 </span>
                               )}
