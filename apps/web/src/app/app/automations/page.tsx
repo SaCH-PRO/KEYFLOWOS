@@ -3,11 +3,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { LayoutGrid, Clock, Workflow } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { PageHeader } from "@/components/ui/page-header";
-import { TabNav } from "@/components/ui/tab-nav";
-import { useNavigationContext } from "@/lib/navigation-context";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { AiBadge } from "@/components/ui/ai-badge";
+import { WorkspaceShell } from "@/components/ui/workspace-shell";
 
 import { AUTOMATIONS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
@@ -20,7 +18,6 @@ import { CoverageMap } from "./components/coverage-map";
 import { RecommendedFlows } from "./components/recommended-flows";
 import type { AutomationTemplate } from "./components/automation-constants";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
-import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { Playbook, CrossModuleWorkflow, fetchPlaybooks, fetchCrossModuleWorkflows } from "@/lib/client";
 
 const TABS = [
@@ -30,11 +27,9 @@ const TABS = [
 ];
 
 export default function FlowsPage() {
-  useReturnNavigation({ restoreScrollOnMount: true });
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("flows");
   const { isFreePlan } = usePlan();
-  const { setCurrentMeta } = useNavigationContext();
   const [selectedTemplate, setSelectedTemplate] = useState<AutomationTemplate | null>(null);
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [workflows, setWorkflows] = useState<CrossModuleWorkflow[]>([]);
@@ -45,10 +40,6 @@ export default function FlowsPage() {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
   }, []);
-
-  useEffect(() => {
-    setCurrentMeta({ selectedEntityLabel: "Flows" });
-  }, [setCurrentMeta]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -68,13 +59,11 @@ export default function FlowsPage() {
   function handleTemplateSelect(template: AutomationTemplate) {
     setSelectedTemplate(template);
     setActiveTab("flows");
-    setCurrentMeta({ tab: "flows" });
   }
 
   function handleRecommendedSelect(template: AutomationTemplate) {
     setSelectedTemplate(template);
     setActiveTab("flows");
-    setCurrentMeta({ tab: "flows" });
   }
 
   const healthStats = useMemo(() => {
@@ -120,80 +109,80 @@ export default function FlowsPage() {
     return triggers;
   }, [playbooks, workflows]);
 
-  return (
-    <div className="space-y-4">
-      <ResumePrompt module="automations" />
-      <PageHeader
-        icon={Workflow}
-        title="Flows"
-        subtitle={<span className="inline-flex items-center gap-1.5">Automate and orchestrate how your business reacts across every module <AiBadge label="AI-Powered" compact /></span>}
+  const upgradeBanner = isFreePlan && showUpgradeBanner ? (
+    <div className="relative">
+      <UpgradePrompt
+        feature="Flow Automations"
+        description="Automate your business with event-driven workflows. Available on Flow and above."
+        requiredPlan="FLOW"
+        variant="inline"
       />
+      <button
+        onClick={() => setShowUpgradeBanner(false)}
+        className="absolute top-2 right-2 text-xs text-muted-foreground/60 hover:text-foreground transition-colors px-2 py-1"
+      >
+        Dismiss
+      </button>
+    </div>
+  ) : null;
 
-      <div className="flex items-center gap-2">
-        <PageGuideTrigger moduleKey="automations" />
-      </div>
+  const flowHealthContent = !loading && activeTab === "flows" ? (
+    <div className="space-y-3">
+      <FlowHealthStrip stats={healthStats} />
+      <CoverageMap activeTriggers={activeTriggers} />
+      <RecommendedFlows activeTriggers={activeTriggers} onSelect={handleRecommendedSelect} />
+    </div>
+  ) : null;
 
-      {isFreePlan && showUpgradeBanner && (
-        <div className="relative">
-          <UpgradePrompt
-            feature="Flow Automations"
-            description="Automate your business with event-driven workflows. Available on Flow and above."
-            requiredPlan="FLOW"
-            variant="inline"
-          />
-          <button
-            onClick={() => setShowUpgradeBanner(false)}
-            className="absolute top-2 right-2 text-xs text-muted-foreground/60 hover:text-foreground transition-colors px-2 py-1"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {!loading && activeTab === "flows" && (
+  return (
+    <WorkspaceShell
+      icon={Workflow}
+      title="Flows"
+      subtitle={<span className="inline-flex items-center gap-1.5">Automate and orchestrate how your business reacts across every module <AiBadge label="AI-Powered" compact /></span>}
+      tabs={TABS}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      tabLayoutId="flows-tab"
+      banners={
         <>
-          <FlowHealthStrip stats={healthStats} />
-          <CoverageMap activeTriggers={activeTriggers} />
-          <RecommendedFlows activeTriggers={activeTriggers} onSelect={handleRecommendedSelect} />
+          <ResumePrompt module="automations" />
+          {upgradeBanner}
+          <div className="flex items-center gap-2">
+            <PageGuideTrigger moduleKey="automations" />
+          </div>
         </>
-      )}
-
+      }
+      metricStrip={flowHealthContent}
+    >
       <div data-walkthrough="automations-list">
-        <TabNav
-          tabs={TABS}
-          activeTab={activeTab}
-          onTabChange={(tab) => { setActiveTab(tab); setCurrentMeta({ tab }); }}
-          layoutId="flows-tab"
-        />
+        {activeTab === "flows" && (
+          <FlowList
+            businessId={businessId}
+            templateToUse={selectedTemplate}
+            onTemplateClear={() => setSelectedTemplate(null)}
+            playbooks={playbooks}
+            workflows={workflows}
+            loading={loading}
+            onPlaybooksChange={setPlaybooks}
+            onWorkflowsChange={setWorkflows}
+          />
+        )}
+
+        {activeTab === "templates" && (
+          <div data-walkthrough="automations-templates">
+            <TemplateGallery onSelect={handleTemplateSelect} businessId={businessId} />
+          </div>
+        )}
+
+        {activeTab === "log" && (
+          <ExecutionLog businessId={businessId} />
+        )}
       </div>
-
-      {activeTab === "flows" && (
-        <FlowList
-          businessId={businessId}
-          templateToUse={selectedTemplate}
-          onTemplateClear={() => setSelectedTemplate(null)}
-          playbooks={playbooks}
-          workflows={workflows}
-          loading={loading}
-          onPlaybooksChange={setPlaybooks}
-          onWorkflowsChange={setWorkflows}
-        />
-      )}
-
-      {activeTab === "templates" && (
-        <div data-walkthrough="automations-templates">
-          <TemplateGallery onSelect={handleTemplateSelect} businessId={businessId} />
-        </div>
-      )}
-
-      {activeTab === "log" && (
-        <ExecutionLog businessId={businessId} />
-      )}
 
       <PageGuide
         moduleKey="automations"
         walkthroughSteps={AUTOMATIONS_WALKTHROUGH}
       />
-    </div>
+    </WorkspaceShell>
   );
 }
