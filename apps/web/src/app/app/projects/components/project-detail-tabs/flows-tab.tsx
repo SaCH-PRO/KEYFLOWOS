@@ -10,6 +10,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 
 interface FlowsTabProps {
   projectId?: string;
+  projectName?: string;
   businessId?: string;
 }
 
