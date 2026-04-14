@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { getToolByName } from './flow-tool-registry';
@@ -162,7 +162,7 @@ export class GovernanceService {
       });
       const isAdmin = user?.role === 'SUPER_ADMIN' || membership?.role === 'OWNER' || membership?.role === 'ADMIN';
       if (!isAdmin) {
-        throw new Error('Only admins can update AI governance settings');
+        throw new ForbiddenException('Only admins can update AI governance settings');
       }
     }
 
@@ -222,17 +222,17 @@ export class GovernanceService {
     const item = await this.prisma.client.aiApprovalItem.findFirst({
       where: { id: approvalId, businessId },
     });
-    if (!item) throw new Error(`Approval item ${approvalId} not found for business ${businessId}`);
+    if (!item) throw new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
 
     if (item.riskTier === 4) {
       const user = await this.prisma.client.user.findUnique({ where: { id: resolvedByUserId } });
-      if (!user) throw new Error('User not found');
+      if (!user) throw new NotFoundException('User not found');
       const membership = await this.prisma.client.membership.findFirst({
         where: { userId: resolvedByUserId, businessId },
       });
       const isAdmin = user.role === 'SUPER_ADMIN' || membership?.role === 'OWNER' || membership?.role === 'ADMIN';
       if (!isAdmin) {
-        throw new Error('Tier 4 approvals require admin-level authorization');
+        throw new ForbiddenException('Tier 4 approvals require admin-level authorization');
       }
     }
 

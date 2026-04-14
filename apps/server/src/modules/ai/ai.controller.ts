@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
