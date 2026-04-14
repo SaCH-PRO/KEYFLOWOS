@@ -250,12 +250,12 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
                             <div className="p-2 rounded-lg bg-muted/20 text-center">
                               <TrendingUp className="w-3.5 h-3.5 mx-auto mb-1 text-emerald-400" />
                               <p className="text-[10px] text-muted-foreground/60">Revenue</p>
-                              <p className="text-xs font-medium text-foreground/80">{stats?.totalExecutions ?? "—"}</p>
+                              <p className="text-xs font-medium text-foreground/80">{stats?.totalActions ?? "—"}</p>
                             </div>
                             <div className="p-2 rounded-lg bg-muted/20 text-center">
                               <Calendar className="w-3.5 h-3.5 mx-auto mb-1 text-blue-400" />
                               <p className="text-[10px] text-muted-foreground/60">AI Actions</p>
-                              <p className="text-xs font-medium text-foreground/80">{stats?.totalExecutions ?? 0}</p>
+                              <p className="text-xs font-medium text-foreground/80">{stats?.totalActions ?? 0}</p>
                             </div>
                             <div className="p-2 rounded-lg bg-muted/20 text-center">
                               <AlertCircle className="w-3.5 h-3.5 mx-auto mb-1 text-amber-400" />
