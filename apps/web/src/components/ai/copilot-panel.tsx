@@ -17,9 +17,12 @@ import {
   fetchAiExecutionStats,
   resolveAiApproval,
   fetchProAutoInsights,
+  fetchProfileStatus,
+  sendProfileChat,
   type AiApprovalItem,
   type AiExecutionStats,
   type ProAutoInsight,
+  type ProfileStatus,
 } from "@/lib/client";
 import { VerificationCardCompact } from "./verification-card";
 
@@ -126,6 +129,10 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
   const [insights, setInsights] = useState<ProAutoInsight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [profileStatus, setProfileStatus] = useState<ProfileStatus | null>(null);
+  const [profileMode, setProfileMode] = useState(false);
+  const [profileSending, setProfileSending] = useState(false);
+  const [profileMessages, setProfileMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -170,13 +177,41 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     }
   }, []);
 
+  const loadProfileStatus = useCallback(async () => {
+    const biz = getStoredBusinessId();
+    if (!biz) return;
+    try {
+      const res = await fetchProfileStatus(biz);
+      if (res.data) setProfileStatus(res.data);
+    } catch {}
+  }, []);
+
+  const handleProfileSend = useCallback(async (msg: string) => {
+    const biz = getStoredBusinessId();
+    if (!biz || !msg.trim()) return;
+    setProfileMessages(prev => [...prev, { role: "user", content: msg }]);
+    setProfileSending(true);
+    try {
+      const res = await sendProfileChat(biz, msg);
+      if (res.data) {
+        setProfileMessages(prev => [...prev, { role: "assistant", content: res.data!.reply }]);
+        loadProfileStatus();
+      }
+    } catch {
+      toast.error("Failed to process response");
+    } finally {
+      setProfileSending(false);
+    }
+  }, [loadProfileStatus]);
+
   useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 300);
       loadSidebarData();
       loadInsights();
+      loadProfileStatus();
     }
-  }, [open, loadSidebarData, loadInsights]);
+  }, [open, loadSidebarData, loadInsights, loadProfileStatus]);
 
   useEffect(() => {
     const handler = () => { loadSidebarData(); };
@@ -339,7 +374,74 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {tab === "chat" && (
+              {tab === "chat" && profileMode && (
+                <div id="copilot-panel-profile" role="tabpanel" className="flex flex-col h-full">
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-border/20">
+                    <button
+                      onClick={() => setProfileMode(false)}
+                      className="text-xs text-muted-foreground/60 hover:text-foreground/70 transition-colors"
+                    >
+                      &larr; Back
+                    </button>
+                    <Brain className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
+                    <span className="text-xs font-semibold text-foreground/80">Business Profile Interview</span>
+                    {profileStatus && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent2)_/_0.15)] text-[hsl(var(--kf-accent2))] font-medium ml-auto">
+                        {profileStatus.completionPercent}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+                    {profileMessages.map((msg, i) => (
+                      <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                            msg.role === "user"
+                              ? "bg-[hsl(var(--kf-accent2))] text-white rounded-br-md"
+                              : "bg-muted/30 text-foreground/85 border border-border/20 rounded-bl-md"
+                          }`}
+                        >
+                          {msg.content}
+                        </div>
+                      </div>
+                    ))}
+                    {profileSending && (
+                      <div className="flex justify-start">
+                        <div className="bg-muted/30 border border-border/20 rounded-2xl rounded-bl-md px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--kf-accent2))]" />
+                            <span className="text-xs text-muted-foreground/60">Learning...</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
+                  <form
+                    onSubmit={(e) => { e.preventDefault(); if (input.trim() && !profileSending) { handleProfileSend(input.trim()); setInput(""); } }}
+                    className="p-3 border-t border-border/20"
+                  >
+                    <div className="flex items-center gap-2 bg-muted/20 border border-border/30 rounded-xl px-3 py-2">
+                      <input
+                        value={input}
+                        onChange={e => setInput(e.target.value)}
+                        placeholder="Tell me about your business..."
+                        className="flex-1 bg-transparent text-sm text-foreground/85 placeholder:text-muted-foreground/35 outline-none"
+                        disabled={profileSending}
+                      />
+                      <button
+                        type="submit"
+                        disabled={!input.trim() || profileSending}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center bg-[hsl(var(--kf-accent2))] text-white disabled:opacity-30 transition-opacity"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {tab === "chat" && !profileMode && (
                 <div id="copilot-panel-chat" role="tabpanel" aria-labelledby="copilot-tab-chat" className="flex flex-col h-full">
                   <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
                     {messages.length === 0 && (
@@ -423,6 +525,44 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                           <div className="flex items-center justify-center py-3 gap-2">
                             <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--kf-accent1))]" />
                             <span className="text-[10px] text-muted-foreground/40">Scanning business health...</span>
+                          </div>
+                        )}
+
+                        {profileStatus && profileStatus.completionPercent < 100 && (
+                          <div className="p-3 rounded-xl border border-[hsl(var(--kf-accent2)_/_0.3)] bg-[hsl(var(--kf-accent2)_/_0.05)]">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Brain className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
+                              <span className="text-xs font-semibold text-foreground/80">Teach Me Your Business</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent2)_/_0.15)] text-[hsl(var(--kf-accent2))] font-medium ml-auto">
+                                {profileStatus.completionPercent}%
+                              </span>
+                            </div>
+                            <div className="w-full h-1.5 rounded-full bg-muted/30 mb-2">
+                              <div
+                                className="h-full rounded-full bg-[hsl(var(--kf-accent2))] transition-all"
+                                style={{ width: `${profileStatus.completionPercent}%` }}
+                              />
+                            </div>
+                            <p className="text-[10px] text-muted-foreground/60 mb-2">
+                              Help me understand your business better so I can give smarter suggestions and automate more for you.
+                            </p>
+                            {profileStatus.remainingTopics.length > 0 && (
+                              <p className="text-[10px] text-muted-foreground/40 mb-2">
+                                Next: {profileStatus.remainingTopics[0]}
+                              </p>
+                            )}
+                            <button
+                              onClick={() => {
+                                setProfileMode(true);
+                                if (profileMessages.length === 0) {
+                                  handleProfileSend("Hi, I'd like to tell you about my business");
+                                }
+                              }}
+                              className="w-full flex items-center justify-center gap-1.5 p-2 rounded-lg bg-[hsl(var(--kf-accent2)_/_0.15)] text-xs text-[hsl(var(--kf-accent2))] font-medium hover:bg-[hsl(var(--kf-accent2)_/_0.25)] transition-all"
+                            >
+                              <span>Start Conversation</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
                           </div>
                         )}
 

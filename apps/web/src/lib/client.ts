@@ -4071,6 +4071,34 @@ export async function fetchProAutoInsights(businessId: string): Promise<ApiResul
   return apiGetSimple<{ insights: ProAutoInsight[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/monitoring/insights`);
 }
 
+export interface ProfileInterviewMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ProfileInterviewState {
+  messages: ProfileInterviewMessage[];
+  extractedFields: Record<string, { value: string; category: string; key: string; confidence: number }>;
+  completedTopics: string[];
+  nextTopic: string | null;
+}
+
+export interface ProfileStatus {
+  completedTopics: string[];
+  remainingTopics: string[];
+  totalTopics: number;
+  completionPercent: number;
+  memories: Array<{ category: string; key: string; value: string; confidence: number }>;
+}
+
+export async function sendProfileChat(businessId: string, message: string): Promise<ApiResult<{ reply: string; state: ProfileInterviewState }>> {
+  return apiPostSimple<{ reply: string; state: ProfileInterviewState }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/profile/chat`, { message });
+}
+
+export async function fetchProfileStatus(businessId: string): Promise<ApiResult<ProfileStatus>> {
+  return apiGetSimple<ProfileStatus>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/profile/status`);
+}
+
 export async function fetchAiGovernance(businessId: string): Promise<ApiResult<AiAutonomySettings>> {
   return apiGetSimple<AiAutonomySettings>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/governance`);
 }
