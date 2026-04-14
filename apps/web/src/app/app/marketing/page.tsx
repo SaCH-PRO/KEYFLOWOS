@@ -27,7 +27,6 @@ import {
   Wifi,
   WifiOff,
   Globe,
-  MessageCircle,
   BarChart3,
   Eye,
 } from "lucide-react";
@@ -100,7 +99,7 @@ function ContentKpiStrip({ stats, outboundContent, campaigns }: { stats: Marketi
   );
 }
 
-function ChannelHealthSummaryStrip({ healthData }: { healthData: ChannelHealthData }) {
+function ChannelHealthSummaryStrip({ healthData, onOpenStudio }: { healthData: ChannelHealthData; onOpenStudio: () => void }) {
   const statusCounts = useMemo(() => {
     const counts = { connected: 0, warning: 0, error: 0 };
     healthData.connections.forEach((conn: EnrichedConnection) => {
@@ -120,7 +119,7 @@ function ChannelHealthSummaryStrip({ healthData }: { healthData: ChannelHealthDa
         <WifiOff className="w-3.5 h-3.5 text-muted-foreground" />
         <span className="text-[11px] text-muted-foreground">No channels connected</span>
         <button className="text-[10px] text-[hsl(var(--kf-accent1))] ml-auto hover:underline"
-          onClick={() => document.querySelector<HTMLButtonElement>('[data-tab-key="studio"]')?.click()}>
+          onClick={onOpenStudio}>
           Connect channels
         </button>
       </div>
@@ -156,7 +155,7 @@ function ChannelHealthSummaryStrip({ healthData }: { healthData: ChannelHealthDa
       {healthData.connections.some((c: EnrichedConnection) => c.healthState !== "Connected") && (
         <button
           className="ml-auto p-0.5 rounded hover:bg-muted/20 transition-colors"
-          onClick={() => document.querySelector<HTMLButtonElement>('[data-tab-key="studio"]')?.click()}
+          onClick={onOpenStudio}
           aria-label="View channel health details"
         >
           <BarChart3 className="w-3 h-3 text-amber-400" />
@@ -807,7 +806,7 @@ export default function ContentPage() {
                   onCreatePost={() => { setCreateSubmode("compose"); setComposeType("social"); setTimeout(() => document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click(), 100); }}
                 />
 
-                <ChannelHealthSummaryStrip healthData={channelHealth} />
+                <ChannelHealthSummaryStrip healthData={channelHealth} onOpenStudio={() => handleTabChange("studio")} />
 
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-muted/20 border border-border/30" data-walkthrough="marketing-create">
