@@ -38,16 +38,15 @@ const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 const INSIGHT_CACHE_TTL_MS = 10 * 60 * 1000;
 const BATCH_SIZE = 50;
 
-const TOOL_DEFAULT_ARGS: Record<string, (businessId: string) => Record<string, any>> = {
-  draft_followup_message: (bId) => ({ businessId: bId }),
-  draft_payment_reminder: (bId) => ({ businessId: bId }),
-  fetch_business_summary: (bId) => ({ businessId: bId }),
-  fetch_storefront_quality: (bId) => ({ businessId: bId }),
-  fetch_project_status: (bId) => ({ businessId: bId }),
-  fetch_expense_pressure: (bId) => ({ businessId: bId }),
-  fetch_schedule_health: (bId) => ({ businessId: bId }),
-  enable_flow: (bId) => ({ businessId: bId }),
-};
+const AUTO_EXECUTABLE_TOOLS = new Set([
+  'fetch_business_summary',
+  'fetch_storefront_quality',
+  'fetch_project_status',
+  'fetch_expense_pressure',
+  'fetch_schedule_health',
+  'fetch_client_health',
+  'fetch_revenue_risk',
+]);
 
 @Injectable()
 export class ProAutoMonitorService implements OnModuleInit {
@@ -169,27 +168,32 @@ export class ProAutoMonitorService implements OnModuleInit {
       if (existingTools.has(toolKey)) continue;
 
       if (insight.riskTier <= settings.maxAutoTier && settings.mode === 'pro_auto') {
-        if (insight.suggestedTool) {
-          const argBuilder = TOOL_DEFAULT_ARGS[insight.suggestedTool];
-          const args = argBuilder ? argBuilder(businessId) : { businessId };
+        if (insight.suggestedTool && AUTO_EXECUTABLE_TOOLS.has(insight.suggestedTool)) {
           try {
-            const result = await this.orchestrator.autoExecuteToolForMonitoring(businessId, insight.suggestedTool, args);
-            insight.escalated = true;
-            insight.autoExecuteResult = result;
-            this.logger.log(`Auto-executed ${insight.suggestedTool} for ${businessId}: ${result.success ? 'success' : result.error}`);
+            const result = await this.orchestrator.autoExecuteToolForMonitoring(
+              businessId,
+              insight.suggestedTool,
+              { businessId },
+            );
+            if (result.success) {
+              insight.escalated = true;
+              insight.autoExecuteResult = result;
+              this.logger.log(`Auto-executed ${insight.suggestedTool} for ${businessId}: success`);
+              continue;
+            }
+            this.logger.warn(`Auto-execution of ${insight.suggestedTool} returned error for ${businessId}: ${result.error}`);
           } catch (err) {
             this.logger.warn(`Auto-execution of ${insight.suggestedTool} failed for ${businessId}: ${(err as Error).message}`);
-            insight.escalated = false;
           }
-        } else {
+        } else if (!insight.suggestedTool) {
           insight.escalated = true;
           this.executionLog.logToolExecution(businessId, toolKey, {}, { acknowledged: true }, true, 0, {
             riskTier: insight.riskTier,
             mode: 'pro_auto',
             rationale: `Monitoring insight acknowledged: ${insight.title}`,
           }).catch(() => {});
+          continue;
         }
-        continue;
       }
 
       await this.prisma.client.aiApprovalItem.create({
