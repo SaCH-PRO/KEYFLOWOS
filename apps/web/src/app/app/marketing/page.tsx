@@ -26,10 +26,8 @@ import {
   Settings,
 } from "lucide-react";
 import { toast } from "sonner";
-import { PageHeader } from "@/components/ui/page-header";
+import { WorkspaceShell, useWorkspaceReturnNav } from "@/components/ui/workspace-shell";
 import { ProgressivePrompts } from "../profile/components/progressive-prompts";
-import { TabNav } from "@/components/ui/tab-nav";
-import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useSearchParams } from "next/navigation";
 import { useModuleEvent } from "@/hooks/use-module-events";
@@ -37,8 +35,6 @@ import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
 import { useMarketing } from "./hooks/use-marketing";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
-import { useReturnNavigation } from "@/lib/use-return-navigation";
-import { useNavigationContext } from "@/lib/navigation-context";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { AiBadge } from "@/components/ui/ai-badge";
@@ -91,11 +87,6 @@ const LEGACY_TAB_MAP: Record<string, ContentTab> = {
   channels: "studio",
 };
 
-const slideVariants = {
-  enter: (dir: number) => ({ x: dir > 0 ? 60 : -60, opacity: 0 }),
-  center: { x: 0, opacity: 1 },
-  exit: (dir: number) => ({ x: dir > 0 ? -60 : 60, opacity: 0 }),
-};
 
 function ContentIntelligenceStrip({
   campaigns,
@@ -351,12 +342,11 @@ function BusinessPulseStrip({
 }
 
 export default function ContentPage() {
-  const { getReturnLabel, navigateBack, getOriginWorkspace } = useReturnNavigation({ restoreScrollOnMount: true });
+  const { getReturnLabel, navigateBack, getOriginWorkspace } = useWorkspaceReturnNav();
   const searchParams = useSearchParams();
   const mk = useMarketing();
   const marketingAi = useMarketingAiHub();
   const channelHealth = useChannelHealth(mk.businessId || "");
-  const { setCurrentMeta } = useNavigationContext();
 
   const [activeTab, setActiveTab] = useState<ContentTab>("create");
   const [createSubmode, setCreateSubmode] = useState<CreateSubmode>("compose");
@@ -366,7 +356,6 @@ export default function ContentPage() {
   const [outboundContent, setOutboundContent] = useState<OutboundContent[]>([]);
   const [editingContentId, setEditingContentId] = useState<string | undefined>();
   const initialTabSet = useRef(false);
-  const directionRef = useRef<number>(0);
   const composeTaskIdRef = useRef<string | null>(null);
   const composeSessionIdRef = useRef<string | null>(null);
   const [prefillContactId, setPrefillContactId] = useState<string | undefined>(undefined);
@@ -458,18 +447,12 @@ export default function ContentPage() {
 
   const handleTabChange = useCallback((key: string) => {
     const resolved = LEGACY_TAB_MAP[key] || key;
-    const newIndex = TAB_KEYS.indexOf(resolved as ContentTab);
-    const oldIndex = TAB_KEYS.indexOf(activeTab);
-    directionRef.current = newIndex > oldIndex ? 1 : -1;
     setActiveTab(resolved as ContentTab);
-    setCurrentMeta({ tab: resolved === "create" ? null : resolved });
     const url = new URL(window.location.href);
     if (resolved === "create") url.searchParams.delete("tab");
     else url.searchParams.set("tab", resolved);
     window.history.replaceState({}, "", url.toString());
-  }, [activeTab, setCurrentMeta]);
-
-  const { swipeHandlers } = useSwipeTabs({ tabs: TAB_KEYS, activeTab, onTabChange: handleTabChange });
+  }, []);
 
   useModuleEvent("marketing:create_campaign_for_segment", useCallback(() => {
     handleTabChange("create");
@@ -612,10 +595,17 @@ export default function ContentPage() {
 
   if (mk.loading) {
     return (
-      <div className="space-y-6">
-        <PageHeader icon={Megaphone} title="Content" subtitle="Create, schedule, target, and grow" />
+      <WorkspaceShell
+        icon={Megaphone}
+        title="Content"
+        subtitle="Create, schedule, target, and grow"
+        tabs={TABS}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        tabLayoutId="content-tab-pill"
+      >
         <MarketingSkeleton activeTab="social" />
-      </div>
+      </WorkspaceShell>
     );
   }
 
@@ -631,64 +621,65 @@ export default function ContentPage() {
   const showCrossModuleBanner = !!prefillContactId && !!originWorkspace && originWorkspace !== "Content";
 
   return (
-    <div className="space-y-5" aria-label="Content">
-      <ResumePrompt module="marketing" />
-      {showCrossModuleBanner && (
-        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border/60 bg-card/60 backdrop-blur-sm">
-          <button
-            onClick={() => navigateBack()}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 group"
-            title={getReturnLabel()}
-          >
-            <span className="group-hover:-translate-x-0.5 transition-transform inline-flex items-center">&#8592;</span>
-            <span className="max-w-[180px] truncate hidden sm:inline ml-1">{getReturnLabel()}</span>
-          </button>
-          <div className="w-px h-4 bg-border/60 shrink-0" />
-          <span className="text-sm font-medium text-foreground truncate">
-            Creating campaign for contact from {originWorkspace}
-          </span>
-        </div>
-      )}
-      <PageHeader
-        icon={Megaphone}
-        title="Content"
-        subtitle="Create, schedule, target, and grow"
-        actionLabel={actionLabel}
-        onAction={actionLabel ? handleNewItem : undefined}
-        titleExtra={<PageGuideTrigger moduleKey="marketing" />}
-        rightSlot={
-          <div className="flex items-center gap-1.5">
-            {showSearch ? (
-              <div className="flex items-center gap-1 bg-muted/30 border border-border/30 rounded-md px-2 py-1">
-                <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                <input
-                  autoFocus
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search content..."
-                  className="bg-transparent text-xs w-36 focus:outline-none placeholder:text-muted-foreground/50"
-                />
-                <button onClick={() => { setShowSearch(false); setSearchQuery(""); }} className="p-0.5 hover:text-foreground text-muted-foreground">
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ) : (
-              <button onClick={() => setShowSearch(true)} className="p-2 rounded-lg hover:bg-muted/50 transition-colors" aria-label="Search content">
-                <Search className="w-4 h-4 text-muted-foreground" />
+    <WorkspaceShell
+      icon={Megaphone}
+      title="Content"
+      subtitle="Create, schedule, target, and grow"
+      tabs={TABS}
+      activeTab={activeTab}
+      onTabChange={handleTabChange}
+      tabLayoutId="content-tab-pill"
+      actionLabel={actionLabel}
+      onAction={actionLabel ? handleNewItem : undefined}
+      enableSwipe
+      enableSlideAnimation
+      banners={
+        <>
+          <ResumePrompt module="marketing" />
+          {showCrossModuleBanner && (
+            <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border/60 bg-card/60 backdrop-blur-sm">
+              <button
+                onClick={() => navigateBack()}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 group"
+                title={getReturnLabel()}
+              >
+                <span className="group-hover:-translate-x-0.5 transition-transform inline-flex items-center">&#8592;</span>
+                <span className="max-w-[180px] truncate hidden sm:inline ml-1">{getReturnLabel()}</span>
               </button>
-            )}
-          </div>
-        }
-      />
-
-      <div data-walkthrough="marketing-tabs">
-        <TabNav tabs={TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="content-tab-pill" />
-      </div>
-
-      <div {...swipeHandlers} className="touch-pan-y">
-        <AnimatePresence mode="wait" custom={directionRef.current}>
-          <motion.div key={activeTab} custom={directionRef.current} variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}>
+              <div className="w-px h-4 bg-border/60 shrink-0" />
+              <span className="text-sm font-medium text-foreground truncate">
+                Creating campaign for contact from {originWorkspace}
+              </span>
+            </div>
+          )}
+        </>
+      }
+      headerRight={
+        <div className="flex items-center gap-1.5">
+          <PageGuideTrigger moduleKey="marketing" />
+          {showSearch ? (
+            <div className="flex items-center gap-1 bg-muted/30 border border-border/30 rounded-md px-2 py-1">
+              <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+              <input
+                autoFocus
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search content..."
+                className="bg-transparent text-xs w-36 focus:outline-none placeholder:text-muted-foreground/50"
+              />
+              <button onClick={() => { setShowSearch(false); setSearchQuery(""); }} className="p-0.5 hover:text-foreground text-muted-foreground">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setShowSearch(true)} className="p-2 rounded-lg hover:bg-muted/50 transition-colors" aria-label="Search content">
+              <Search className="w-4 h-4 text-muted-foreground" />
+            </button>
+          )}
+        </div>
+      }
+    >
             {activeTab === "create" && (
               <div className="space-y-4">
                 <ContentIntelligenceStrip
@@ -941,17 +932,13 @@ export default function ContentPage() {
             {activeTab === "studio" && (
               <ContentStudioTab businessId={mk.businessId || ""} sharedHealth={channelHealth} />
             )}
-          </motion.div>
-        </AnimatePresence>
-      </div>
-
       <ProgressivePrompts moduleFilter={["marketingStrategy", "growth"]} />
 
       <PageGuide
         moduleKey="marketing"
         walkthroughSteps={MARKETING_WALKTHROUGH}
       />
-    </div>
+    </WorkspaceShell>
   );
 }
 

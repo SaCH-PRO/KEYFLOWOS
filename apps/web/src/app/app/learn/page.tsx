@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   GraduationCap,
   BookOpen,
@@ -16,12 +15,10 @@ import {
   CourseEnrollment,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { PageHeader } from "@/components/ui/page-header";
-import { TabNav } from "@/components/ui/tab-nav";
+import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { LEARN_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
-import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { LearnSkeleton } from "./components/learn-skeleton";
 import { CourseCatalog } from "./components/course-catalog";
 import { ProgressTracker } from "./components/progress-tracker";
@@ -44,7 +41,6 @@ export default function LearnPage() {
   const [selectedEnrollment, setSelectedEnrollment] = useState<CourseEnrollment | null>(null);
   const [enrollingId, setEnrollingId] = useState<string | null>(null);
   const [tab, setTab] = useState("learning");
-  const [slideDirection, setSlideDirection] = useState(0);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -100,18 +96,8 @@ export default function LearnPage() {
   }, []);
 
   const handleTabChange = useCallback((t: string) => {
-    if (t === tab) return;
-    const oldIndex = LEARN_TAB_KEYS.indexOf(tab);
-    const newIndex = LEARN_TAB_KEYS.indexOf(t);
-    setSlideDirection(newIndex > oldIndex ? 1 : -1);
     setTab(t);
-  }, [tab]);
-
-  const { swipeHandlers } = useSwipeTabs({
-    tabs: LEARN_TAB_KEYS,
-    activeTab: tab,
-    onTabChange: handleTabChange,
-  });
+  }, []);
 
   const enrolledCourseIds = useMemo(() => new Set(enrollments.map((e) => e.courseId)), [enrollments]);
 
@@ -162,82 +148,52 @@ export default function LearnPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={GraduationCap}
-        title="MasterClass"
-        subtitle="Level up your business skills"
-        titleExtra={<PageGuideTrigger moduleKey="learn" />}
-      />
+    <WorkspaceShell
+      icon={GraduationCap}
+      title="MasterClass"
+      subtitle="Level up your business skills"
+      tabs={LEARN_TABS}
+      activeTab={tab}
+      onTabChange={handleTabChange}
+      tabLayoutId="learn-tab"
+      enableSwipe
+      enableSlideAnimation
+      headerRight={<PageGuideTrigger moduleKey="learn" />}
+    >
+      {tab === "learning" && (
+        <div data-walkthrough="learn-progress">
+          <ProgressTracker
+            enrolledCourses={enrolledCourses}
+            onOpenCourse={openCourseViewer}
+          />
+        </div>
+      )}
 
-      <TabNav
-        tabs={LEARN_TABS}
-        activeTab={tab}
-        onTabChange={handleTabChange}
-        layoutId="learn-tab"
-      />
+      {tab === "catalog" && (
+        <div data-walkthrough="learn-catalog">
+          <CourseCatalog
+            courses={courses}
+            enrolledCourseIds={enrolledCourseIds}
+            enrollingId={enrollingId}
+            onEnroll={handleEnroll}
+            onOpenCourse={(course) => openCourseViewer(course)}
+          />
+        </div>
+      )}
 
-      <div {...swipeHandlers} className="touch-pan-y">
-        <AnimatePresence mode="wait" custom={slideDirection}>
-          {tab === "learning" && (
-            <motion.div
-              key="learning"
-              custom={slideDirection}
-              initial={{ opacity: 0, x: slideDirection * 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: slideDirection * -60 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              data-walkthrough="learn-progress"
-            >
-              <ProgressTracker
-                enrolledCourses={enrolledCourses}
-                onOpenCourse={openCourseViewer}
-              />
-            </motion.div>
-          )}
+      {tab === "certificates" && (
+        <div data-walkthrough="learn-certificates">
+          <ProgressTracker
+            enrolledCourses={completedCourses}
+            onOpenCourse={openCourseViewer}
+          />
+        </div>
+      )}
 
-          {tab === "catalog" && (
-            <motion.div
-              key="catalog"
-              custom={slideDirection}
-              initial={{ opacity: 0, x: slideDirection * 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: slideDirection * -60 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              data-walkthrough="learn-catalog"
-            >
-              <CourseCatalog
-                courses={courses}
-                enrolledCourseIds={enrolledCourseIds}
-                enrollingId={enrollingId}
-                onEnroll={handleEnroll}
-                onOpenCourse={(course) => openCourseViewer(course)}
-              />
-            </motion.div>
-          )}
-
-          {tab === "certificates" && (
-            <motion.div
-              key="certificates"
-              custom={slideDirection}
-              initial={{ opacity: 0, x: slideDirection * 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: slideDirection * -60 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              data-walkthrough="learn-certificates"
-            >
-              <ProgressTracker
-                enrolledCourses={completedCourses}
-                onOpenCourse={openCourseViewer}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
       <PageGuide
         moduleKey="learn"
         walkthroughSteps={LEARN_WALKTHROUGH}
       />
-    </div>
+    </WorkspaceShell>
   );
 }

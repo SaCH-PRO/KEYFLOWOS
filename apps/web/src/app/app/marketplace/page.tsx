@@ -18,7 +18,7 @@ import {
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
-import { PageHeader } from "@/components/ui/page-header";
+import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { Modal, FormField, inputClass, selectClass } from "./components/marketplace-utils";
 import { CommerceCatalogTab } from "./components/commerce-catalog-tab";
 import { CommerceListingsTab } from "./components/commerce-listings-tab";
@@ -290,104 +290,80 @@ export default function MarketplacePage() {
   if (loading && activeTab === "catalog" && products.length === 0) return <DashboardSkeleton />;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={ShoppingBag}
-        title="Commerce"
-        subtitle="Catalog, listings, orders, fulfillment, inventory, and supplier management"
-        titleExtra={
-          <div className="relative">
-            <button
-              onClick={() => setShowGuide(!showGuide)}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
-                showGuide
-                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
-                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
-              }`}
-              aria-label="Getting started guide"
-              title="Getting started guide"
-            >
-              <Lightbulb className="w-3.5 h-3.5" />
-            </button>
-            <AnimatePresence>
-              {showGuide && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.12 }}
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-1.5 rounded-lg bg-amber-400/10">
-                        <Lightbulb className="w-4 h-4 text-amber-400" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold">Commerce Workspace Guide</h4>
-                        <p className="text-[11px] text-muted-foreground">Get started with your commerce workspace</p>
-                      </div>
-                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
-                        <X className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[
-                        { step: "1", title: "Build Your Catalog", desc: "Add products with variants, cost profiles, and source links." },
-                        { step: "2", title: "Create Listings", desc: "Publish products with fulfillment strategies and pricing controls." },
-                        { step: "3", title: "Manage Orders", desc: "Process customer orders with full status pipeline visibility." },
-                        { step: "4", title: "Track Fulfillment", desc: "Monitor shipments, purchase orders, and fulfillment routes." },
-                        { step: "5", title: "Control Inventory", desc: "Manage warehouse stock levels with reorder signals." },
-                        { step: "6", title: "Connect Suppliers", desc: "Track supplier health and map products to sources." },
-                      ].map((item) => (
-                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
-                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
-                            {item.step}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium">{item.title}</p>
-                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
-        }
-      />
-
-      <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl whitespace-nowrap transition-all ${
-                isActive ? "text-white" : "text-muted-foreground hover:text-white hover:bg-white/5"
-              }`}
-            >
-              {isActive && (
+    <WorkspaceShell
+      icon={ShoppingBag}
+      title="Commerce"
+      subtitle="Catalog, listings, orders, fulfillment, inventory, and supplier management"
+      tabs={TABS}
+      activeTab={activeTab}
+      onTabChange={(key) => setActiveTab(key as Tab)}
+      tabLayoutId="marketplace-tabs"
+      enableSwipe
+      enableSlideAnimation
+      headerRight={
+        <div className="relative">
+          <button
+            onClick={() => setShowGuide(!showGuide)}
+            className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+              showGuide
+                ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+            }`}
+            aria-label="Getting started guide"
+            title="Getting started guide"
+          >
+            <Lightbulb className="w-3.5 h-3.5" />
+          </button>
+          <AnimatePresence>
+            {showGuide && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
                 <motion.div
-                  layoutId="commerce-tab"
-                  className="absolute inset-0 bg-orange-500/20 border border-orange-500/30 rounded-xl"
-                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                />
-              )}
-              <span className="relative flex items-center gap-1.5">
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.12 }}
+                  className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="p-1.5 rounded-lg bg-amber-400/10">
+                      <Lightbulb className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold">Commerce Workspace Guide</h4>
+                      <p className="text-[11px] text-muted-foreground">Get started with your commerce workspace</p>
+                    </div>
+                    <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                      <X className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {[
+                      { step: "1", title: "Build Your Catalog", desc: "Add products with variants, cost profiles, and source links." },
+                      { step: "2", title: "Create Listings", desc: "Publish products with fulfillment strategies and pricing controls." },
+                      { step: "3", title: "Manage Orders", desc: "Process customer orders with full status pipeline visibility." },
+                      { step: "4", title: "Track Fulfillment", desc: "Monitor shipments, purchase orders, and fulfillment routes." },
+                      { step: "5", title: "Control Inventory", desc: "Manage warehouse stock levels with reorder signals." },
+                      { step: "6", title: "Connect Suppliers", desc: "Track supplier health and map products to sources." },
+                    ].map((item) => (
+                      <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                        <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                          {item.step}
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium">{item.title}</p>
+                          <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
+      }
+    >
       {loading && (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -395,14 +371,7 @@ export default function MarketplacePage() {
       )}
 
       {!loading && (
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-          >
+        <>
             {activeTab === "catalog" && (
               <CommerceCatalogTab
                 products={products}
@@ -536,8 +505,7 @@ export default function MarketplacePage() {
                 inventory={inventory}
               />
             )}
-          </motion.div>
-        </AnimatePresence>
+        </>
       )}
 
       <ProductEditorModal
@@ -893,6 +861,6 @@ export default function MarketplacePage() {
           </button>
         </div>
       </Modal>
-    </div>
+    </WorkspaceShell>
   );
 }

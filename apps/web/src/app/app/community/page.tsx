@@ -23,10 +23,8 @@ import {
   Cohort,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { PageHeader } from "@/components/ui/page-header";
-import { TabNav } from "@/components/ui/tab-nav";
+import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
-import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { Feed } from "./components/feed";
 import { CohortList } from "./components/cohort-list";
 import { ProfileCard } from "./components/profile-card";
@@ -49,7 +47,6 @@ export default function CommunityPage() {
   const [submittingComment, setSubmittingComment] = useState(false);
   const [joiningCohort, setJoiningCohort] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
-  const [slideDirection, setSlideDirection] = useState(0);
   const [profileCardBusinessId, setProfileCardBusinessId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -172,18 +169,8 @@ export default function CommunityPage() {
   }, [businessId, loadCohorts]);
 
   const handleTabChange = useCallback((t: string) => {
-    if (t === tab) return;
-    const oldIndex = TAB_KEYS.indexOf(tab);
-    const newIndex = TAB_KEYS.indexOf(t);
-    setSlideDirection(newIndex > oldIndex ? 1 : -1);
     setTab(t);
-  }, [tab]);
-
-  const { swipeHandlers } = useSwipeTabs({
-    tabs: TAB_KEYS,
-    activeTab: tab,
-    onTabChange: handleTabChange,
-  });
+  }, []);
 
   const communityShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
@@ -202,136 +189,110 @@ export default function CommunityPage() {
   useKeyboardShortcuts(communityShortcuts);
 
   return (
-    <div className="space-y-6" aria-label="Community">
-      <PageHeader
-        icon={Users}
-        title="Community"
-        subtitle="Connect with fellow entrepreneurs"
-        titleExtra={
-          <div className="relative">
-            <button
-              onClick={() => setShowGuide(!showGuide)}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
-                showGuide
-                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
-                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
-              }`}
-              aria-label="Getting started guide"
-              title="Getting started guide"
-            >
-              <Lightbulb className="w-3.5 h-3.5" />
-            </button>
-            <AnimatePresence>
-              {showGuide && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.12 }}
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-1.5 rounded-lg bg-amber-400/10">
-                        <Lightbulb className="w-4 h-4 text-amber-400" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold">Getting Started</h4>
-                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
-                      </div>
-                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
-                        <X className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[
-                        { step: "1", title: "Browse the Feed", desc: "Read posts from other business owners covering discussions, questions, wins, and resources." },
-                        { step: "2", title: "Create a Post", desc: "Share your experience, ask for advice, or celebrate a business milestone." },
-                        { step: "3", title: "Engage", desc: "Like and comment on posts to build connections and help other founders." },
-                        { step: "4", title: "Join Cohorts", desc: "Browse founder circles and join groups of entrepreneurs in similar industries." },
-                      ].map((item) => (
-                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
-                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
-                            {item.step}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium">{item.title}</p>
-                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
-        }
-      />
-
-      <TabNav
-        tabs={COMMUNITY_TABS}
-        activeTab={tab}
-        onTabChange={handleTabChange}
-        layoutId="community-tab"
-      />
-
-      <div {...swipeHandlers} className="touch-pan-y">
-        <AnimatePresence mode="wait" custom={slideDirection}>
-          {tab === "feed" && (
+    <WorkspaceShell
+      icon={Users}
+      title="Community"
+      subtitle="Connect with fellow entrepreneurs"
+      tabs={COMMUNITY_TABS}
+      activeTab={tab}
+      onTabChange={handleTabChange}
+      tabLayoutId="community-tab"
+      enableSwipe
+      enableSlideAnimation
+      headerRight={
+        <button
+          onClick={() => setShowGuide(!showGuide)}
+          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+            showGuide
+              ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+              : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+          }`}
+          aria-label="Getting started guide"
+          title="Getting started guide"
+        >
+          <Lightbulb className="w-3.5 h-3.5" />
+        </button>
+      }
+    >
+      <AnimatePresence>
+        {showGuide && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
             <motion.div
-              key="feed"
-              custom={slideDirection}
-              initial={{ opacity: 0, x: slideDirection * 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: slideDirection * -60 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.12 }}
+              className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
             >
-              <Feed
-                posts={posts}
-                loading={loading}
-                filterType={filterType}
-                onFilterChange={setFilterType}
-                expandedPost={expandedPost}
-                onExpandPost={handleExpandPost}
-                onCollapsePost={handleCollapsePost}
-                onLike={handleLike}
-                onCreatePost={handleCreatePost}
-                onAddComment={handleAddComment}
-                submittingComment={submittingComment}
-                onAuthorClick={setProfileCardBusinessId}
-              />
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-1.5 rounded-lg bg-amber-400/10">
+                  <Lightbulb className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold">Getting Started</h4>
+                  <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                </div>
+                <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                  <X className="w-3.5 h-3.5 text-muted-foreground" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {[
+                  { step: "1", title: "Browse the Feed", desc: "Read posts from other business owners covering discussions, questions, wins, and resources." },
+                  { step: "2", title: "Create a Post", desc: "Share your experience, ask for advice, or celebrate a business milestone." },
+                  { step: "3", title: "Engage", desc: "Like and comment on posts to build connections and help other founders." },
+                  { step: "4", title: "Join Cohorts", desc: "Browse founder circles and join groups of entrepreneurs in similar industries." },
+                ].map((item) => (
+                  <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                    <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                      {item.step}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium">{item.title}</p>
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </motion.div>
-          )}
+          </>
+        )}
+      </AnimatePresence>
 
-          {tab === "cohorts" && (
-            <motion.div
-              key="cohorts"
-              custom={slideDirection}
-              initial={{ opacity: 0, x: slideDirection * 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: slideDirection * -60 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              <CohortList
-                cohorts={cohorts}
-                myCohorts={myCohorts}
-                loading={loading}
-                joiningCohort={joiningCohort}
-                onJoin={handleJoinCohort}
-                onLeave={handleLeaveCohort}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      {tab === "feed" && (
+        <Feed
+          posts={posts}
+          loading={loading}
+          filterType={filterType}
+          onFilterChange={setFilterType}
+          expandedPost={expandedPost}
+          onExpandPost={handleExpandPost}
+          onCollapsePost={handleCollapsePost}
+          onLike={handleLike}
+          onCreatePost={handleCreatePost}
+          onAddComment={handleAddComment}
+          submittingComment={submittingComment}
+          onAuthorClick={setProfileCardBusinessId}
+        />
+      )}
+
+      {tab === "cohorts" && (
+        <CohortList
+          cohorts={cohorts}
+          myCohorts={myCohorts}
+          loading={loading}
+          joiningCohort={joiningCohort}
+          onJoin={handleJoinCohort}
+          onLeave={handleLeaveCohort}
+        />
+      )}
 
       <ProfileCard
         businessId={profileCardBusinessId || ""}
         isOpen={!!profileCardBusinessId}
         onClose={() => setProfileCardBusinessId(null)}
       />
-    </div>
+    </WorkspaceShell>
   );
 }

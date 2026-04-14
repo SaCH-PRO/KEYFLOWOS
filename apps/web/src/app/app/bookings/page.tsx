@@ -40,9 +40,7 @@ import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useOpenComposer } from "@/hooks/use-open-composer";
 import { useSearchParams, useRouter } from "next/navigation";
 import type { Tab, StatusFilter } from "./components/bookings-types";
-import { PageHeader } from "@/components/ui/page-header";
-import { TabNav } from "@/components/ui/tab-nav";
-import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
+import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useBookingsAiHub } from "./hooks/use-bookings-ai-hub";
 import { BookingsSkeleton } from "./components/bookings-skeleton";
@@ -50,8 +48,6 @@ import { WorkspaceError } from "@/components/ui/workspace-error";
 import { moduleEvents } from "@/lib/module-events";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
-import { useReturnNavigation } from "@/lib/use-return-navigation";
-import { useNavigationContext } from "@/lib/navigation-context";
 import CalendarView from "./calendar/calendar-view";
 import BookingDetailDrawer from "./components/booking-detail-drawer";
 import BookingSideSheet from "./components/booking-side-sheet";
@@ -74,20 +70,12 @@ const TABS: { key: Tab; label: string; icon: React.ElementType; tooltip?: string
   { key: "catalog", label: "Setup", icon: Briefcase, tooltip: "Configure bookable services, staff availability, and capacity limits." },
 ];
 
-const slideVariants = {
-  enter: (dir: number) => ({ x: dir > 0 ? 60 : -60, opacity: 0 }),
-  center: { x: 0, opacity: 1 },
-  exit: (dir: number) => ({ x: dir > 0 ? -60 : 60, opacity: 0 }),
-};
-
 export default function BookingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("schedule");
   const { checkLimit } = usePlan();
-  const { setCurrentMeta } = useNavigationContext();
-  useReturnNavigation({ restoreScrollOnMount: true });
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -155,25 +143,12 @@ export default function BookingsPage() {
   const [staffForm, setStaffForm] = useState({ name: "", email: "" });
   const [businessHoursSet, setBusinessHoursSet] = useState(false);
 
-  const directionRef = useRef<number>(0);
-  const tabKeys = useMemo(() => TABS.map((t) => t.key), []);
-
   const ai = useBookingsAiHub();
 
   const handleTabChange = useCallback((key: string) => {
-    const newIndex = tabKeys.indexOf(key as Tab);
-    const oldIndex = tabKeys.indexOf(tab);
-    directionRef.current = newIndex > oldIndex ? 1 : -1;
     setTab(key as Tab);
-    setCurrentMeta({ tab: key });
     moduleEvents.emit("module:tab_changed", "bookings", { tab: key });
-  }, [tab, tabKeys, setCurrentMeta]);
-
-  const { swipeHandlers } = useSwipeTabs({
-    tabs: tabKeys,
-    activeTab: tab,
-    onTabChange: handleTabChange,
-  });
+  }, []);
 
   useKeyboardShortcuts([
     {
@@ -488,93 +463,97 @@ export default function BookingsPage() {
 
   if (loading && bookings.length === 0) {
     return (
-      <div className="space-y-6">
-        <PageHeader
-          icon={Calendar}
-          title="Bookings"
-          subtitle="Schedule, booking health, and capacity"
-        />
+      <WorkspaceShell
+        icon={Calendar}
+        title="Bookings"
+        subtitle="Schedule, booking health, and capacity"
+        tabs={TABS}
+        activeTab={tab}
+        onTabChange={handleTabChange}
+        tabLayoutId="bookings-tab"
+      >
         <BookingsSkeleton />
-      </div>
+      </WorkspaceShell>
     );
   }
 
   return (
-    <div className="space-y-5" {...swipeHandlers}>
+    <WorkspaceShell
+      icon={Calendar}
+      title="Bookings"
+      subtitle="Schedule, booking health, and capacity"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={handleTabChange}
+      tabLayoutId="bookings-tab"
+      enableSwipe
+      enableSlideAnimation
+      headerRight={
+        <div className="flex items-center gap-1">
+          <PageGuideTrigger moduleKey="bookings" />
+          {businessSlug && services.length > 0 && (
+            <>
+              <button
+                onClick={() => {
+                  const topService = services[0];
+                  const bookingUrl = `${window.location.origin}/book/${businessSlug}`;
+                  openComposer({
+                    contentType: "social",
+                    body: `Book your next appointment with us! 🗓️\n\n${topService ? `Featured: ${topService.name}` : "Browse our services"}\n\n${bookingUrl}`,
+                    subject: `Book with us — ${topService?.name ?? "Services available"}`,
+                  });
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] kf-radius-sm kf-text-micro font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  background: "hsl(var(--kf-accent) / 0.1)",
+                  border: "1px solid hsl(var(--kf-accent) / 0.2)",
+                  color: "hsl(var(--kf-accent))",
+                }}
+                title="Promote your booking services"
+                data-walkthrough="bookings-promote"
+              >
+                <Megaphone className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Promote</span>
+              </button>
+              <button
+                onClick={() => setShareModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] kf-radius-sm kf-text-micro font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  background: "hsl(var(--kf-accent2) / 0.1)",
+                  border: "1px solid hsl(var(--kf-accent2) / 0.2)",
+                  color: "hsl(var(--kf-accent2))",
+                }}
+                title="Share booking link"
+                data-walkthrough="bookings-share"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Share</span>
+              </button>
+            </>
+          )}
+          <RichTooltip title="Calendar Sync" description={calendarConnected ? `Connected to ${calendarEmail ?? "Google Calendar"}. Bookings sync automatically.` : "Click to connect Google Calendar and sync your bookings."} side="bottom">
+          <button
+            onClick={handleConnectCalendar}
+            className="inline-flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] rounded-lg text-[11px] transition-colors"
+            style={{
+              background: calendarConnected ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--muted) / 0.3)",
+              color: calendarConnected ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
+              borderWidth: 1,
+              borderColor: calendarConnected ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--border))",
+            }}
+            title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Connect Google Calendar"}
+            disabled={calendarLoading || calendarConnected}
+          >
+            <Link2 className="w-4 h-4" />
+            {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
+          </button>
+          </RichTooltip>
+        </div>
+      }
+      actionLabel="New Booking"
+      onAction={() => setShowCreateBooking(true)}
+    >
       <ResumePrompt module="bookings" onResume={handleResumeBookingTask} />
-      <PageHeader
-        icon={Calendar}
-        title="Bookings"
-        subtitle="Schedule, booking health, and capacity"
-        titleExtra={
-          <div className="flex items-center gap-2">
-            <PageGuideTrigger moduleKey="bookings" />
-          </div>
-        }
-        rightSlot={
-          <div className="flex items-center gap-1">
-            {businessSlug && services.length > 0 && (
-              <>
-                <button
-                  onClick={() => {
-                    const topService = services[0];
-                    const bookingUrl = `${window.location.origin}/book/${businessSlug}`;
-                    openComposer({
-                      contentType: "social",
-                      body: `Book your next appointment with us! 🗓️\n\n${topService ? `Featured: ${topService.name}` : "Browse our services"}\n\n${bookingUrl}`,
-                      subject: `Book with us — ${topService?.name ?? "Services available"}`,
-                    });
-                  }}
-                  className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] kf-radius-sm kf-text-micro font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-                  style={{
-                    background: "hsl(var(--kf-accent) / 0.1)",
-                    border: "1px solid hsl(var(--kf-accent) / 0.2)",
-                    color: "hsl(var(--kf-accent))",
-                  }}
-                  title="Promote your booking services"
-                  data-walkthrough="bookings-promote"
-                >
-                  <Megaphone className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Promote</span>
-                </button>
-                <button
-                  onClick={() => setShareModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] kf-radius-sm kf-text-micro font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-                  style={{
-                    background: "hsl(var(--kf-accent2) / 0.1)",
-                    border: "1px solid hsl(var(--kf-accent2) / 0.2)",
-                    color: "hsl(var(--kf-accent2))",
-                  }}
-                  title="Share booking link"
-                  data-walkthrough="bookings-share"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Share</span>
-                </button>
-              </>
-            )}
-            <RichTooltip title="Calendar Sync" description={calendarConnected ? `Connected to ${calendarEmail ?? "Google Calendar"}. Bookings sync automatically.` : "Click to connect Google Calendar and sync your bookings."} side="bottom">
-            <button
-              onClick={handleConnectCalendar}
-              className="inline-flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] rounded-lg text-[11px] transition-colors"
-              style={{
-                background: calendarConnected ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--muted) / 0.3)",
-                color: calendarConnected ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
-                borderWidth: 1,
-                borderColor: calendarConnected ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--border))",
-              }}
-              title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Connect Google Calendar"}
-              disabled={calendarLoading || calendarConnected}
-            >
-              <Link2 className="w-4 h-4" />
-              {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
-            </button>
-            </RichTooltip>
-          </div>
-        }
-        actionLabel="New Booking"
-        onAction={() => setShowCreateBooking(true)}
-      />
 
       <AnimatePresence>
         {banner && (
@@ -610,25 +589,6 @@ export default function BookingsPage() {
         />
       )}
 
-      <div data-walkthrough="bookings-calendar">
-        <TabNav
-          tabs={TABS}
-          activeTab={tab}
-          onTabChange={handleTabChange}
-          layoutId="bookings-tab"
-        />
-      </div>
-
-      <AnimatePresence mode="wait" custom={directionRef.current}>
-        <motion.div
-          key={tab}
-          custom={directionRef.current}
-          variants={slideVariants}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
-        >
           {tab === "schedule" && (
             <div className="space-y-1.5">
               <TodayStrip
@@ -703,8 +663,6 @@ export default function BookingsPage() {
             />
             </div>
           )}
-        </motion.div>
-      </AnimatePresence>
 
       <AnimatePresence>
         {showCreateBooking && (
@@ -754,6 +712,6 @@ export default function BookingsPage() {
         moduleKey="bookings"
         walkthroughSteps={BOOKINGS_WALKTHROUGH}
       />
-    </div>
+    </WorkspaceShell>
   );
 }

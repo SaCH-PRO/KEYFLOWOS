@@ -19,7 +19,7 @@ export type { Column, DataTableProps, SortDirection } from "./data-table";
 export { FilterBar } from "./filter-bar";
 export type { FilterGroup, FilterOption } from "./filter-bar";
 export { SideSheet } from "./side-sheet";
-export { WorkspaceShell } from "./workspace-shell";
+export { WorkspaceShell, useWorkspaceReturnNav } from "./workspace-shell";
 export type { WorkspaceShellProps, WorkspaceTab } from "./workspace-shell";
 export { KfButton } from "./kf-button";
 export type { ButtonVariant, ButtonSize } from "./kf-button";
