@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronDown, HelpCircle } from "lucide-react";
 import type { FaqEntry } from "@/lib/client";
 
@@ -53,10 +53,31 @@ function FaqItem({ entry, primaryColor, index }: { entry: FaqEntry; primaryColor
 }
 
 export function FaqSection({ entries, heading, primaryColor, accentColor, showIcon = true, compact = false }: Props) {
+  const [visible, setVisible] = useState(false);
+  const sectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setVisible(true); obs.disconnect(); }
+    }, { threshold: 0.15 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
   if (!entries || entries.length === 0) return null;
 
   return (
-    <section className={compact ? "space-y-3" : "space-y-5"}>
+    <section
+      ref={sectionRef}
+      className={compact ? "space-y-3" : "space-y-5"}
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateY(0)" : "translateY(20px)",
+        transition: "opacity 0.6s ease-out, transform 0.6s ease-out",
+      }}
+    >
       <div className="flex items-center gap-3">
         {showIcon && (
           <div

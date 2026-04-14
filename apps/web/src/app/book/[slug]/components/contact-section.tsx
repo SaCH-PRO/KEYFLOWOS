@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { Phone, Mail, MapPin, MessageCircle, Send } from "lucide-react";
 import type { Business } from "./types";
 
@@ -27,6 +28,19 @@ export function ContactSection({
   secondaryColor,
 }: Props) {
   const hasContact = (showPhone && business.phone) || (showEmail && business.email) || (showAddress && business.address) || (showWhatsApp && business.whatsapp);
+  const [visible, setVisible] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setVisible(true); obs.disconnect(); }
+    }, { threshold: 0.15 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
   if (!hasContact) return null;
 
   const waPhone = business.whatsapp?.replace(/[^0-9+]/g, "").replace(/^\+/, "") || "";
@@ -35,7 +49,15 @@ export function ContactSection({
     : null;
 
   return (
-    <section className="space-y-5">
+    <section
+      ref={ref}
+      className="space-y-5"
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateY(0)" : "translateY(20px)",
+        transition: "opacity 0.6s ease-out, transform 0.6s ease-out",
+      }}
+    >
       <div className="flex items-center gap-3">
         <div
           className="w-8 h-8 rounded-xl flex items-center justify-center"

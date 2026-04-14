@@ -7,13 +7,13 @@ import {
   MapPin,
   Star,
   Mail,
-  ArrowRight,
   ShoppingBag,
   Bell,
   FileText,
   AlertTriangle,
   RefreshCw,
   Package,
+  Shield,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import { ShareButtons } from "./share-buttons";
@@ -138,13 +138,18 @@ export function OrderConfirmation({
           animation: "successPop 600ms cubic-bezier(0.16,1,0.3,1)",
         }}
       >
+        <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
+          <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full" style={{ background: "radial-gradient(circle, rgba(234,179,8,0.08), transparent 60%)" }} />
+        </div>
+
         <div className="w-20 h-20 rounded-2xl bg-yellow-500/10 flex items-center justify-center mx-auto relative">
-          <Clock className="w-10 h-10 text-yellow-400 relative" />
+          <div className="absolute inset-0 rounded-2xl bg-yellow-500/5 animate-ping" />
+          <Clock className="w-10 h-10 text-yellow-500 relative" />
         </div>
 
         <div>
-          <h1 className="text-2xl font-bold text-yellow-400 mb-2">Payment Processing</h1>
-          <p className="text-sm text-gray-500 leading-relaxed">
+          <h1 className="text-2xl font-bold text-yellow-600 mb-2">Payment Processing</h1>
+          <p className="text-sm text-gray-500 leading-relaxed max-w-sm mx-auto">
             Your payment is still being processed. This may take a moment.
             Please check back shortly or contact the business if the issue persists.
           </p>
@@ -161,7 +166,7 @@ export function OrderConfirmation({
           {onRetryPayment && (
             <button
               onClick={onRetryPayment}
-              className="w-full py-3.5 rounded-2xl font-semibold text-sm text-gray-900 transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2"
+              className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2 min-h-[48px]"
               style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
             >
               <RefreshCw className="w-4 h-4" />
@@ -170,7 +175,7 @@ export function OrderConfirmation({
           )}
           <button
             onClick={onContinueShopping}
-            className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all duration-200 flex items-center justify-center gap-2"
+            className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all duration-200 flex items-center justify-center gap-2 min-h-[48px]"
           >
             <ShoppingBag className="w-3.5 h-3.5" />
             Back to Shop
@@ -189,13 +194,17 @@ export function OrderConfirmation({
           animation: "successPop 600ms cubic-bezier(0.16,1,0.3,1)",
         }}
       >
+        <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
+          <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full" style={{ background: "radial-gradient(circle, rgba(239,68,68,0.08), transparent 60%)" }} />
+        </div>
+
         <div className="w-20 h-20 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto relative">
-          <AlertTriangle className="w-10 h-10 text-red-400 relative" />
+          <AlertTriangle className="w-10 h-10 text-red-500 relative" />
         </div>
 
         <div>
-          <h1 className="text-2xl font-bold text-red-400 mb-2">Payment Failed</h1>
-          <p className="text-sm text-gray-500 leading-relaxed">
+          <h1 className="text-2xl font-bold text-red-600 mb-2">Payment Failed</h1>
+          <p className="text-sm text-gray-500 leading-relaxed max-w-sm mx-auto">
             Something went wrong with your payment. Please try again or choose a different payment method.
           </p>
         </div>
@@ -204,7 +213,7 @@ export function OrderConfirmation({
           {onRetryPayment && (
             <button
               onClick={onRetryPayment}
-              className="w-full py-3.5 rounded-2xl font-semibold text-sm text-gray-900 transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2"
+              className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2 min-h-[48px]"
               style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
             >
               <RefreshCw className="w-4 h-4" />
@@ -213,7 +222,7 @@ export function OrderConfirmation({
           )}
           <button
             onClick={onContinueShopping}
-            className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all duration-200 flex items-center justify-center gap-2"
+            className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all duration-200 flex items-center justify-center gap-2 min-h-[48px]"
           >
             <ShoppingBag className="w-3.5 h-3.5" />
             Back to Shop
@@ -223,8 +232,6 @@ export function OrderConfirmation({
     );
   }
 
-  const displayOrderNumber = orderNumber || bookingResults[0]?.bookingId?.slice(-8)?.toUpperCase() || "";
-
   return (
     <div
       className="relative max-w-lg w-full rounded-3xl border border-emerald-500/20 backdrop-blur-xl p-8 sm:p-10 text-center space-y-6"
@@ -233,6 +240,11 @@ export function OrderConfirmation({
         animation: "successPop 600ms cubic-bezier(0.16,1,0.3,1)",
       }}
     >
+      <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
+        <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full" style={{ background: `radial-gradient(circle, ${primaryColor}08, transparent 60%)` }} />
+        <div className="absolute -bottom-16 -left-16 w-32 h-32 rounded-full" style={{ background: `radial-gradient(circle, ${secondaryColor}06, transparent 60%)` }} />
+      </div>
+
       <div
         className="w-20 h-20 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto relative"
         style={{ animation: "checkBounce 800ms cubic-bezier(0.16,1,0.3,1) 200ms both" }}
@@ -241,11 +253,11 @@ export function OrderConfirmation({
           className="absolute inset-0 rounded-2xl opacity-30 blur-xl"
           style={{ backgroundColor: "#10b981" }}
         />
-        <CheckCircle2 className="w-10 h-10 text-emerald-400 relative" />
+        <CheckCircle2 className="w-10 h-10 text-emerald-500 relative" />
       </div>
 
       <div style={{ animation: "fadeUp 500ms ease-out 300ms both" }}>
-        <h1 className="text-2xl font-bold text-emerald-400 mb-2">
+        <h1 className="text-2xl font-bold text-emerald-600 mb-2">
           {isOrder ? "Order Placed!" : "Booking Confirmed!"}
         </h1>
         <p className="text-sm text-gray-500 leading-relaxed">
@@ -280,34 +292,39 @@ export function OrderConfirmation({
         <div
           className="rounded-2xl border border-gray-200 overflow-hidden text-left"
           style={{
-            background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
+            background: "linear-gradient(135deg, rgba(0,0,0,0.025) 0%, rgba(0,0,0,0.008) 100%)",
             animation: "fadeUp 500ms ease-out 380ms both",
           }}
         >
-          <div className="px-4 py-3 border-b border-gray-200">
+          <div className="px-4 py-3 border-b border-gray-100">
             <p className="text-[10px] uppercase tracking-widest text-gray-400 font-medium">Items Ordered</p>
           </div>
-          <div className="p-4 space-y-2">
+          <div className="p-4 space-y-2.5">
             {orderItems.map((item) => (
               <div key={`${item.id}_${item.itemType}`} className="flex justify-between text-sm items-center">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5">
                   {item.imageUrl ? (
-                    <img src={item.imageUrl} alt={item.name} className="w-8 h-8 rounded-lg object-cover" />
+                    <img src={item.imageUrl} alt={item.name} className="w-9 h-9 rounded-lg object-cover shadow-sm" />
                   ) : (
-                    <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center">
-                      <Package className="w-4 h-4 text-gray-300" />
+                    <div
+                      className="w-9 h-9 rounded-lg flex items-center justify-center"
+                      style={{ background: `${primaryColor}08` }}
+                    >
+                      <Package className="w-4 h-4" style={{ color: `${primaryColor}50` }} />
                     </div>
                   )}
-                  <span className="text-gray-500">{item.name}</span>
-                  <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">x{item.quantity}</span>
+                  <div>
+                    <span className="text-gray-600 font-medium">{item.name}</span>
+                    <span className="text-[10px] text-gray-400 ml-1.5 bg-gray-100 px-1.5 py-0.5 rounded">x{item.quantity}</span>
+                  </div>
                 </div>
-                <span className="text-gray-600 font-medium tabular-nums">
+                <span className="text-gray-600 font-semibold tabular-nums">
                   {formatPrice(item.price * item.quantity, item.currency)}
                 </span>
               </div>
             ))}
             {orderTotal !== undefined && orderCurrency && (
-              <div className="border-t border-gray-200 pt-2 flex justify-between items-center">
+              <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
                 <span className="text-sm font-medium text-gray-500">Total</span>
                 <span className="text-base font-bold tabular-nums" style={{ color: primaryColor }}>
                   {formatPrice(orderTotal, orderCurrency)}
@@ -326,7 +343,7 @@ export function OrderConfirmation({
               className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-left space-y-1.5"
             >
               <p className="text-sm font-medium text-gray-700">{name}</p>
-              <div className="flex items-center gap-4 text-[12px] text-gray-900/45">
+              <div className="flex items-center gap-4 text-[12px] text-gray-400">
                 {confirmedDetails.dates[idx] && (
                   <span className="flex items-center gap-1">
                     <CalendarPlus className="w-3 h-3" />
@@ -349,21 +366,21 @@ export function OrderConfirmation({
         <div
           className="rounded-2xl border border-gray-200 overflow-hidden text-left"
           style={{
-            background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
+            background: "linear-gradient(135deg, rgba(0,0,0,0.025) 0%, rgba(0,0,0,0.008) 100%)",
             animation: "fadeUp 500ms ease-out 420ms both",
           }}
         >
-          <div className="p-4 space-y-2">
+          <div className="p-4 space-y-2.5">
             {paymentMethod && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Payment</span>
-                <span className="text-gray-500">{paymentMethodLabels[paymentMethod] || paymentMethod}</span>
+                <span className="text-gray-600 font-medium">{paymentMethodLabels[paymentMethod] || paymentMethod}</span>
               </div>
             )}
             {estimatedDelivery && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Est. Delivery</span>
-                <span className="text-gray-500">{estimatedDelivery}</span>
+                <span className="text-gray-600 font-medium">{estimatedDelivery}</span>
               </div>
             )}
           </div>
@@ -373,11 +390,11 @@ export function OrderConfirmation({
       <div
         className="rounded-2xl border border-gray-200 overflow-hidden text-left"
         style={{
-          background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
+          background: "linear-gradient(135deg, rgba(0,0,0,0.025) 0%, rgba(0,0,0,0.008) 100%)",
           animation: "fadeUp 500ms ease-out 480ms both",
         }}
       >
-        <div className="px-4 py-3 border-b border-gray-200">
+        <div className="px-4 py-3 border-b border-gray-100">
           <p className="text-[10px] uppercase tracking-widest text-gray-400 font-medium">
             What Happens Next
           </p>
@@ -394,21 +411,21 @@ export function OrderConfirmation({
               >
                 <div className="flex flex-col items-center">
                   <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                    style={{ background: `${primaryColor}12` }}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: `${primaryColor}10` }}
                   >
-                    <Icon className="w-3.5 h-3.5" style={{ color: primaryColor }} />
+                    <Icon className="w-4 h-4" style={{ color: primaryColor }} />
                   </div>
                   {!isLast && (
                     <div
                       className="w-px flex-1 my-1"
-                      style={{ background: `${primaryColor}15` }}
+                      style={{ background: `${primaryColor}12` }}
                     />
                   )}
                 </div>
                 <div className={`pb-4 ${isLast ? "pb-0" : ""}`}>
-                  <p className="text-xs font-medium text-gray-600">{step.title}</p>
-                  <p className="text-[11px] text-gray-900/35 mt-0.5">{step.desc}</p>
+                  <p className="text-xs font-semibold text-gray-600">{step.title}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">{step.desc}</p>
                 </div>
               </div>
             );
@@ -422,7 +439,7 @@ export function OrderConfirmation({
             href={calendarUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full py-3.5 rounded-2xl font-semibold text-sm text-gray-900 transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2 min-h-[44px]"
+            className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2 min-h-[48px] shadow-lg"
             style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
           >
             <CalendarPlus className="w-4 h-4" />
@@ -441,22 +458,20 @@ export function OrderConfirmation({
               }
             }}
             aria-label="Download receipt"
-            className="w-full py-3.5 rounded-2xl font-semibold text-sm transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] min-h-[44px]"
+            className="w-full py-3.5 rounded-2xl font-semibold text-sm transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] min-h-[48px] flex items-center justify-center gap-2"
             style={{
               backgroundColor: calendarUrl ? "transparent" : primaryColor,
-              color: "white",
-              border: calendarUrl ? "1px solid rgba(0,0,0,0.06)" : "none",
+              color: calendarUrl ? primaryColor : "white",
+              border: calendarUrl ? `1.5px solid ${primaryColor}25` : "none",
               boxShadow: calendarUrl ? "none" : `0 8px 32px ${primaryColor}30`,
             }}
           >
-            <span className="flex items-center justify-center gap-2">
-              <FileText className="w-4 h-4" />
-              {orderId ? "View Order Details" : "Download Receipt"}
-            </span>
+            <FileText className="w-4 h-4" />
+            {orderId ? "View Order Details" : "Download Receipt"}
           </button>
         )}
 
-        <div className="space-y-2">
+        <div className="space-y-2.5 pt-1">
           <p className="text-xs text-gray-400">Share with friends</p>
           <div className="flex justify-center">
             <ShareButtons
@@ -470,7 +485,7 @@ export function OrderConfirmation({
 
         <button
           onClick={onContinueShopping}
-          className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all duration-200 flex items-center justify-center gap-2 min-h-[44px]"
+          className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all duration-200 flex items-center justify-center gap-2 min-h-[48px]"
         >
           <ShoppingBag className="w-3.5 h-3.5" />
           Continue Shopping
@@ -478,7 +493,7 @@ export function OrderConfirmation({
       </div>
 
       {businessAddress && (
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-gray-900/25" style={{ animation: "fadeUp 500ms ease-out 700ms both" }}>
+        <div className="flex items-center justify-center gap-1.5 text-[11px] text-gray-300" style={{ animation: "fadeUp 500ms ease-out 700ms both" }}>
           <MapPin className="w-3 h-3" />
           <span>{businessAddress}</span>
         </div>
@@ -488,21 +503,21 @@ export function OrderConfirmation({
         <div
           className="rounded-2xl border border-gray-200 overflow-hidden text-left"
           style={{
-            background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
+            background: "linear-gradient(135deg, rgba(0,0,0,0.025) 0%, rgba(0,0,0,0.008) 100%)",
             animation: "fadeUp 500ms ease-out 750ms both",
           }}
         >
           <div className="p-4 space-y-3">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                style={{ background: `${secondaryColor}15` }}
+                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: `${secondaryColor}12` }}
               >
                 <Bell className="w-4 h-4" style={{ color: secondaryColor }} />
               </div>
               <div>
-                <p className="text-xs font-medium text-gray-600">Get Order Updates</p>
-                <p className="text-[10px] text-gray-900/35">Receive status notifications via email</p>
+                <p className="text-xs font-semibold text-gray-600">Get Order Updates</p>
+                <p className="text-[10px] text-gray-400">Receive status notifications via email</p>
               </div>
             </div>
             <form
@@ -536,16 +551,11 @@ export function OrderConfirmation({
                 type="email"
                 required
                 placeholder="your@email.com"
-                className="flex-1 rounded-xl px-3 py-2.5 text-sm min-h-[44px]"
-                style={{
-                  background: "rgba(0,0,0,0.03)",
-                  border: "1px solid rgba(0,0,0,0.05)",
-                  color: "rgba(0,0,0,0.7)",
-                }}
+                className="flex-1 rounded-xl px-3 py-2.5 text-sm min-h-[44px] bg-gray-50 border border-gray-200 text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-200 transition-all"
               />
               <button
                 type="submit"
-                className="px-4 py-2.5 rounded-xl text-sm font-medium text-gray-900 transition-all hover:scale-[1.02] active:scale-[0.98] min-h-[44px]"
+                className="px-4 py-2.5 rounded-xl text-sm font-medium text-white transition-all hover:scale-[1.02] active:scale-[0.98] min-h-[44px]"
                 style={{ backgroundColor: secondaryColor }}
               >
                 Notify Me
@@ -555,9 +565,9 @@ export function OrderConfirmation({
         </div>
       )}
 
-      <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-300">
-        <Star className="w-3 h-3" />
-        <span>Thank you for your business</span>
+      <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-300 pt-2">
+        <Shield className="w-3 h-3" />
+        <span>Secured by KeyFlowOS</span>
       </div>
     </div>
   );
