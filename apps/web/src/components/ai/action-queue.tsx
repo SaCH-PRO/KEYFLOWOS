@@ -197,47 +197,17 @@ export function ActionQueue({ maxItems, showFilters = true, onCountChange }: Act
       )}
 
       {editingItem && (
-        <div className="p-3 rounded-xl border border-[hsl(var(--kf-accent2))]/30 bg-[hsl(var(--kf-accent2))]/5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-foreground/80">Editing: {editingItem.title}</span>
-            <button
-              onClick={() => setEditingItem(null)}
-              className="text-[10px] text-muted-foreground/50 hover:text-foreground/70"
-              aria-label="Cancel edit"
-            >
-              Cancel
-            </button>
-          </div>
-          {editingItem.inputPayload && Object.keys(editingItem.inputPayload).length > 0 ? (
-            <div className="space-y-1.5">
-              {Object.entries(editingItem.inputPayload).map(([key, val]) => (
-                <div key={key} className="flex items-center gap-2 text-xs">
-                  <span className="text-muted-foreground/60 w-24 shrink-0">{key}</span>
-                  <span className="text-foreground/70 truncate flex-1">{typeof val === 'string' ? val : JSON.stringify(val)}</span>
-                </div>
-              ))}
-              <p className="text-[10px] text-muted-foreground/40 mt-2">
-                Parameter editing will be available in a future update. For now, review parameters and approve or reject.
-              </p>
-            </div>
-          ) : (
-            <p className="text-[10px] text-muted-foreground/50">No editable parameters for this action.</p>
-          )}
-          <div className="flex items-center gap-2 mt-3">
-            <button
-              onClick={() => { handleResolve(editingItem.id, "approved"); setEditingItem(null); }}
-              className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/20 transition-all"
-            >
-              Approve as-is
-            </button>
-            <button
-              onClick={() => { handleResolve(editingItem.id, "rejected"); setEditingItem(null); }}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-all"
-            >
-              Reject
-            </button>
-          </div>
-        </div>
+        <EditPanel
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onApprove={(id, updatedPayload) => {
+            const updated = { ...editingItem, inputPayload: updatedPayload };
+            setPendingItems(prev => prev.map(i => i.id === id ? updated : i));
+            handleResolve(id, "approved");
+            setEditingItem(null);
+          }}
+          onReject={(id) => { handleResolve(id, "rejected"); setEditingItem(null); }}
+        />
       )}
 
       {view === "waiting" && (
@@ -322,6 +292,89 @@ export function ActionQueue({ maxItems, showFilters = true, onCountChange }: Act
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function EditPanel({
+  item,
+  onClose,
+  onApprove,
+  onReject,
+}: {
+  item: AiApprovalItem;
+  onClose: () => void;
+  onApprove: (id: string, payload: Record<string, unknown>) => void;
+  onReject: (id: string) => void;
+}) {
+  const [editedPayload, setEditedPayload] = useState<Record<string, unknown>>(
+    () => (item.inputPayload && typeof item.inputPayload === "object" ? { ...(item.inputPayload as Record<string, unknown>) } : {})
+  );
+
+  const updateField = (key: string, value: string) => {
+    setEditedPayload(prev => {
+      const original = (item.inputPayload as Record<string, unknown>)?.[key];
+      let parsed: unknown = value;
+      if (typeof original === "number") {
+        const n = Number(value);
+        if (!isNaN(n)) parsed = n;
+      } else if (typeof original === "boolean") {
+        parsed = value === "true";
+      }
+      return { ...prev, [key]: parsed };
+    });
+  };
+
+  const hasPayload = Object.keys(editedPayload).length > 0;
+
+  return (
+    <div className="p-3 rounded-xl border border-[hsl(var(--kf-accent2))]/30 bg-[hsl(var(--kf-accent2))]/5">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-foreground/80">Edit: {item.title}</span>
+        <button onClick={onClose} className="text-[10px] text-muted-foreground/50 hover:text-foreground/70" aria-label="Cancel edit">
+          Cancel
+        </button>
+      </div>
+      {hasPayload ? (
+        <div className="space-y-2">
+          {Object.entries(editedPayload).map(([key, val]) => (
+            <div key={key} className="space-y-0.5">
+              <label className="text-[10px] text-muted-foreground/60 font-medium">{key}</label>
+              {typeof val === "string" && val.length > 60 ? (
+                <textarea
+                  value={String(val)}
+                  onChange={(e) => updateField(key, e.target.value)}
+                  rows={2}
+                  className="w-full px-2 py-1.5 text-xs rounded-lg bg-background/60 border border-border/40 text-foreground/80 focus:outline-none focus:border-[hsl(var(--kf-accent2))]/50 resize-none"
+                />
+              ) : (
+                <input
+                  type={typeof val === "number" ? "number" : "text"}
+                  value={typeof val === "object" ? JSON.stringify(val) : String(val ?? "")}
+                  onChange={(e) => updateField(key, e.target.value)}
+                  className="w-full px-2 py-1.5 text-xs rounded-lg bg-background/60 border border-border/40 text-foreground/80 focus:outline-none focus:border-[hsl(var(--kf-accent2))]/50"
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-[10px] text-muted-foreground/50">No editable parameters for this action.</p>
+      )}
+      <div className="flex items-center gap-2 mt-3">
+        <button
+          onClick={() => onApprove(item.id, editedPayload)}
+          className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/20 transition-all"
+        >
+          {hasPayload ? "Approve with changes" : "Approve"}
+        </button>
+        <button
+          onClick={() => onReject(item.id)}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-all"
+        >
+          Reject
+        </button>
+      </div>
     </div>
   );
 }

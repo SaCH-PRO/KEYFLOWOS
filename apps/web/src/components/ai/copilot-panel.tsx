@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Brain, X, Send, Loader2, Sparkles, ArrowRight,
   Activity, Shield, CheckCircle2,
-  ChevronRight, Settings,
+  ChevronRight, Settings, TrendingUp, Calendar, AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -51,17 +51,6 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 300);
-      loadSidebarData();
-    }
-  }, [open]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
   const loadSidebarData = useCallback(async () => {
     const biz = getStoredBusinessId();
     if (!biz) return;
@@ -76,6 +65,23 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
       /* silently fail on sidebar data load */
     }
   }, []);
+
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => inputRef.current?.focus(), 300);
+      loadSidebarData();
+    }
+  }, [open, loadSidebarData]);
+
+  useEffect(() => {
+    const handler = () => { loadSidebarData(); };
+    window.addEventListener("kf:ai-activity", handler);
+    return () => window.removeEventListener("kf:ai-activity", handler);
+  }, [loadSidebarData]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const handleSend = useCallback(async (text?: string) => {
     const msg = text || input.trim();
@@ -226,28 +232,62 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
                 <div id="copilot-panel-chat" role="tabpanel" aria-labelledby="copilot-tab-chat" className="flex flex-col h-full">
                   <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
                     {messages.length === 0 && (
-                      <div className="flex flex-col items-center py-8 gap-4">
-                        <div
-                          className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                          style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.15))" }}
-                        >
-                          <Sparkles className="w-6 h-6 text-[hsl(var(--kf-accent1))]" />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm font-medium text-foreground/80">How can I help?</p>
-                          <p className="text-xs text-muted-foreground/50 mt-1">Ask me anything about your business</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 w-full max-w-[320px]">
-                          {QUICK_PROMPTS.map(qp => (
-                            <button
-                              key={qp.label}
-                              onClick={() => handleSend(qp.prompt)}
-                              className="flex items-center gap-2 p-2.5 rounded-xl text-xs text-left text-muted-foreground/70 bg-muted/20 border border-border/30 hover:bg-muted/30 hover:text-foreground/80 transition-all"
+                      <div className="space-y-4">
+                        <div className="p-3 rounded-xl border border-border/30 bg-card/40">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div
+                              className="w-8 h-8 rounded-lg flex items-center justify-center"
+                              style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.15))" }}
                             >
-                              <ArrowRight className="w-3 h-3 shrink-0 text-[hsl(var(--kf-accent1))]" />
-                              <span>{qp.label}</span>
+                              <Sparkles className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-foreground/85">Today&apos;s Pulse</p>
+                              <p className="text-[10px] text-muted-foreground/50">{new Date().toLocaleDateString("en-TT", { weekday: "long", month: "short", day: "numeric" })}</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 mb-3">
+                            <div className="p-2 rounded-lg bg-muted/20 text-center">
+                              <TrendingUp className="w-3.5 h-3.5 mx-auto mb-1 text-emerald-400" />
+                              <p className="text-[10px] text-muted-foreground/60">Revenue</p>
+                              <p className="text-xs font-medium text-foreground/80">{stats?.totalExecutions ?? "—"}</p>
+                            </div>
+                            <div className="p-2 rounded-lg bg-muted/20 text-center">
+                              <Calendar className="w-3.5 h-3.5 mx-auto mb-1 text-blue-400" />
+                              <p className="text-[10px] text-muted-foreground/60">AI Actions</p>
+                              <p className="text-xs font-medium text-foreground/80">{stats?.totalExecutions ?? 0}</p>
+                            </div>
+                            <div className="p-2 rounded-lg bg-muted/20 text-center">
+                              <AlertCircle className="w-3.5 h-3.5 mx-auto mb-1 text-amber-400" />
+                              <p className="text-[10px] text-muted-foreground/60">Pending</p>
+                              <p className="text-xs font-medium text-foreground/80">{pendingApprovals.length}</p>
+                            </div>
+                          </div>
+                          {pendingApprovals.length > 0 && (
+                            <button
+                              onClick={() => setTab("queue")}
+                              className="w-full flex items-center justify-between p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 hover:bg-amber-500/15 transition-all"
+                            >
+                              <span className="font-medium">{pendingApprovals.length} action{pendingApprovals.length !== 1 ? "s" : ""} waiting for your review</span>
+                              <ChevronRight className="w-3.5 h-3.5" />
                             </button>
-                          ))}
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-2">Suggested Actions</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {QUICK_PROMPTS.map(qp => (
+                              <button
+                                key={qp.label}
+                                onClick={() => handleSend(qp.prompt)}
+                                className="flex items-center gap-2 p-2.5 rounded-xl text-xs text-left text-muted-foreground/70 bg-muted/20 border border-border/30 hover:bg-muted/30 hover:text-foreground/80 transition-all"
+                              >
+                                <ArrowRight className="w-3 h-3 shrink-0 text-[hsl(var(--kf-accent1))]" />
+                                <span>{qp.label}</span>
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}
