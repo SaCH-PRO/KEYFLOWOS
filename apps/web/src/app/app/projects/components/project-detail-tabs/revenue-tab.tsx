@@ -44,6 +44,7 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
   }, [businessId, projectId]);
 
   useEffect(() => {
+    setLinkedInvoice(null);
     if (!businessId || !invoiceId) return;
     let cancelled = false;
     async function loadInvoice() {
