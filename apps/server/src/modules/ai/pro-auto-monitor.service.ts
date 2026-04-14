@@ -37,6 +37,7 @@ export interface ProAutoInsight {
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 const INSIGHT_CACHE_TTL_MS = 10 * 60 * 1000;
 const BATCH_SIZE = 50;
+const AUTO_EXEC_COOLDOWN_MS = 60 * 60 * 1000;
 
 const AUTO_EXECUTABLE_READ_TOOLS = new Set([
   'fetch_business_summary',
@@ -62,6 +63,7 @@ export class ProAutoMonitorService implements OnModuleInit {
   private readonly logger = new Logger(ProAutoMonitorService.name);
   private intervalRef: ReturnType<typeof setInterval> | null = null;
   private readonly insightCache = new Map<string, { insights: ProAutoInsight[]; expiresAt: number }>();
+  private readonly autoExecCooldowns = new Map<string, number>();
   private lastCursorId: string | null = null;
 
   constructor(
@@ -178,6 +180,12 @@ export class ProAutoMonitorService implements OnModuleInit {
 
       if (insight.riskTier <= settings.maxAutoTier && settings.mode === 'pro_auto') {
         if (insight.suggestedTool && TIER1_TOOLS.has(insight.suggestedTool)) {
+          const cooldownKey = `${businessId}:${insight.suggestedTool}:${insight.category}`;
+          const lastExec = this.autoExecCooldowns.get(cooldownKey) || 0;
+          if (Date.now() - lastExec < AUTO_EXEC_COOLDOWN_MS) {
+            this.logger.debug(`Skipping ${insight.suggestedTool} for ${businessId} (cooldown active)`);
+            continue;
+          }
           const args = await this.buildAutoExecArgs(businessId, insight);
           if (args) {
             try {
@@ -191,6 +199,7 @@ export class ProAutoMonitorService implements OnModuleInit {
               } else if (result.success) {
                 insight.escalated = true;
                 insight.autoExecuteResult = result;
+                this.autoExecCooldowns.set(cooldownKey, Date.now());
                 this.logger.log(`Auto-executed ${insight.suggestedTool} for ${businessId}: success`);
                 continue;
               } else {

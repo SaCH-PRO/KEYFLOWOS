@@ -41,10 +41,10 @@ const PROFILE_TOPICS = [
   { topic: 'business_overview', label: 'Business Overview', category: 'goals' as MemoryCategory, keys: ['business_description', 'target_customers', 'years_operating'], unlocks: 'Smarter AI recommendations tailored to your industry, better client communication drafts, and accurate business summaries.' },
   { topic: 'brand_tone', label: 'Brand Voice', category: 'tone' as MemoryCategory, keys: ['preferred'], unlocks: 'AI-drafted messages, emails, and content that match your brand personality — no more generic copy.' },
   { topic: 'goals', label: 'Business Goals', category: 'goals' as MemoryCategory, keys: ['primary_goal', 'secondary_goal', 'six_month_target'], unlocks: 'Prioritized daily action items, strategic insights aligned with your targets, and progress tracking toward your goals.' },
-  { topic: 'risk_tolerance', label: 'AI Autonomy', category: 'riskTolerance' as MemoryCategory, keys: ['comfort_level'], unlocks: 'Fine-tuned automation: the AI knows what it can handle alone vs. what needs your approval first.' },
-  { topic: 'outreach_style', label: 'Outreach Preferences', category: 'outreachStyle' as MemoryCategory, keys: ['channel_preference'], unlocks: 'Automated client outreach via your preferred channels, with the right tone and timing.' },
+  { topic: 'risk_tolerance', label: 'AI Autonomy', category: 'riskTolerance' as MemoryCategory, keys: ['level'], unlocks: 'Fine-tuned automation: the AI knows what it can handle alone vs. what needs your approval first.' },
+  { topic: 'outreach_style', label: 'Outreach Preferences', category: 'outreachStyle' as MemoryCategory, keys: ['preferred'], unlocks: 'Automated client outreach via your preferred channels, with the right tone and timing.' },
   { topic: 'priorities', label: 'Current Priorities', category: 'priorities' as MemoryCategory, keys: ['current_focus', 'main_bottleneck'], unlocks: 'Focused daily briefings, smart task ordering, and AI suggestions that tackle your biggest challenges first.' },
-  { topic: 'reporting', label: 'Reporting Preferences', category: 'reportingCadence' as MemoryCategory, keys: ['frequency'], unlocks: 'Business intelligence delivered on your schedule — daily snapshots, weekly summaries, or on-demand insights.' },
+  { topic: 'reporting', label: 'Reporting Preferences', category: 'reportingCadence' as MemoryCategory, keys: ['preferred'], unlocks: 'Business intelligence delivered on your schedule — daily snapshots, weekly summaries, or on-demand insights.' },
 ];
 
 @Injectable()
@@ -142,14 +142,14 @@ When you extract information from the user's response, include it in a JSON bloc
 [{"topic": "brand_tone", "category": "tone", "key": "preferred", "value": "friendly and professional", "confidence": 0.9}]
 \`\`\`
 
-TOPIC-to-CATEGORY mapping (you MUST use these exact topic and category values):
+TOPIC-to-CATEGORY mapping (you MUST use these exact topic, category, and key values):
 - business_overview → category: goals, keys: business_description, target_customers, years_operating
 - brand_tone → category: tone, keys: preferred
 - goals → category: goals, keys: primary_goal, secondary_goal, six_month_target
-- risk_tolerance → category: riskTolerance, keys: comfort_level
-- outreach_style → category: outreachStyle, keys: channel_preference
+- risk_tolerance → category: riskTolerance, keys: level
+- outreach_style → category: outreachStyle, keys: preferred
 - priorities → category: priorities, keys: current_focus, main_bottleneck
-- reporting → category: reportingCadence, keys: frequency
+- reporting → category: reportingCadence, keys: preferred
 
 NEVER use category "settings" or keys like "autonomy", "admin", "mode", "blockedTools", "blockedModules".
 Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
