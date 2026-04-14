@@ -1,9 +1,11 @@
 export type RiskLevel = 'low' | 'medium' | 'high';
+export type RiskTier = 1 | 2 | 3 | 4;
 
 export interface FlowTool {
   name: string;
   description: string;
   riskLevel: RiskLevel;
+  riskTier: RiskTier;
   parameters: {
     type: 'object';
     properties: Record<string, {
@@ -22,6 +24,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'crm_search_contacts',
     description: 'Search for contacts by name, email, or phone number.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -34,6 +37,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'crm_create_contact',
     description: 'Create a new contact in the CRM.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -51,6 +55,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'crm_update_contact',
     description: 'Update an existing contact\'s information.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -69,6 +74,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'crm_add_note',
     description: 'Add a note to a contact\'s timeline.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -82,6 +88,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'crm_add_task',
     description: 'Add a task for a contact.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -97,6 +104,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'crm_delete_contact',
     description: 'Delete (soft-delete) a contact from the CRM.',
     riskLevel: 'high',
+    riskTier: 3 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -109,6 +117,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'crm_list_contacts',
     description: 'List contacts with optional filters.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -124,6 +133,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'commerce_create_invoice',
     description: 'Create a new invoice for a contact.',
     riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -144,6 +154,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'commerce_list_invoices',
     description: 'List invoices with optional status filter.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -156,6 +167,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'commerce_mark_invoice_paid',
     description: 'Mark an invoice as paid.',
     riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -168,6 +180,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'commerce_create_product',
     description: 'Create a new product or service in the catalog.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -184,6 +197,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'commerce_create_quote',
     description: 'Create a quote for a contact.',
     riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -203,6 +217,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'commerce_delete_invoice',
     description: 'Delete an invoice.',
     riskLevel: 'high',
+    riskTier: 3 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -217,6 +232,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'bookings_create_booking',
     description: 'Create a new booking/appointment for a contact.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -234,6 +250,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'bookings_list_bookings',
     description: 'List upcoming bookings.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -246,6 +263,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'bookings_reschedule_booking',
     description: 'Reschedule an existing booking to a new time.',
     riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -259,6 +277,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'bookings_cancel_booking',
     description: 'Cancel an existing booking.',
     riskLevel: 'high',
+    riskTier: 3 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -271,6 +290,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'bookings_list_services',
     description: 'List all available services for booking.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {},
@@ -283,6 +303,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'marketing_create_campaign',
     description: 'Create a new email marketing campaign (draft).',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -298,6 +319,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'marketing_send_campaign',
     description: 'Send an existing email campaign to contacts.',
     riskLevel: 'high',
+    riskTier: 4 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -310,6 +332,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'marketing_list_campaigns',
     description: 'List email marketing campaigns.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {},
@@ -322,6 +345,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'social_create_post',
     description: 'Create a new social media post (draft or scheduled).',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -335,6 +359,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'social_publish_post',
     description: 'Publish a social media post immediately.',
     riskLevel: 'high',
+    riskTier: 3 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -347,6 +372,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'social_list_posts',
     description: 'List social media posts.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {},
@@ -359,6 +385,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'automations_create_playbook',
     description: 'Create a new automation playbook.',
     riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
@@ -373,6 +400,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'automations_list_playbooks',
     description: 'List automation playbooks.',
     riskLevel: 'low',
+    riskTier: 1 as RiskTier,
     parameters: {
       type: 'object',
       properties: {},
@@ -383,6 +411,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     name: 'automations_toggle_playbook',
     description: 'Enable or disable an automation playbook.',
     riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
     parameters: {
       type: 'object',
       properties: {
