@@ -40,7 +40,7 @@ export class TeamAuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap({
         next: (result: unknown) => {
-          const entityId = (result && typeof result === 'object' && 'id' in result) ? (result as Record<string, unknown>).id as string : req.params?.contactId || req.params?.productId || req.params?.expenseId;
+          const entityId = (result && typeof result === 'object' && 'id' in result) ? (result as Record<string, unknown>).id as string : req.params?.contactId || req.params?.productId || req.params?.expenseId || req.params?.invoiceId || req.params?.quoteId || req.params?.taskId || req.params?.noteId;
           this.prisma.client.teamActivityLog.create({
             data: {
               businessId,
