@@ -43,7 +43,8 @@ export class ExpensesController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses/summary')
   getExpenseSummary(
     @Param('businessId') businessId: string,
@@ -54,7 +55,8 @@ export class ExpensesController {
     return this.expenses.getExpenseSummary(businessId, period, startDate, endDate);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses/vendors')
   getVendorAnalytics(
     @Param('businessId') businessId: string,
@@ -65,7 +67,8 @@ export class ExpensesController {
     return this.expenses.getVendorAnalytics(businessId, period, startDate, endDate);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses/margin-analysis')
   getMarginAnalysis(
     @Param('businessId') businessId: string,
@@ -76,7 +79,8 @@ export class ExpensesController {
     return this.expenses.getMarginAnalysis(businessId, period, startDate, endDate);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses/by-project/:projectId')
   getExpensesByProject(
     @Param('businessId') businessId: string,
@@ -85,7 +89,8 @@ export class ExpensesController {
     return this.expenses.getExpensesByEntity(businessId, 'projectId', projectId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses/by-service/:serviceId')
   getExpensesByService(
     @Param('businessId') businessId: string,
@@ -94,7 +99,8 @@ export class ExpensesController {
     return this.expenses.getExpensesByEntity(businessId, 'serviceId', serviceId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses/recurring-candidates')
   getRecurringCandidates(
     @Param('businessId') businessId: string,
@@ -102,7 +108,8 @@ export class ExpensesController {
     return this.expenses.detectRecurringCandidates(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses/export')
   async exportCSV(
     @Param('businessId') businessId: string,
@@ -117,7 +124,8 @@ export class ExpensesController {
     res!.send(csv);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses/:expenseId')
   getExpense(
     @Param('businessId') businessId: string,
@@ -189,13 +197,15 @@ export class ExpensesController {
     return this.expenses.deleteExpense(businessId, expenseId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expense-categories')
   listCategories(@Param('businessId') businessId: string) {
     return this.expenses.listCategories(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Post('businesses/:businessId/expense-categories')
   createCategory(
     @Param('businessId') businessId: string,
@@ -204,7 +214,8 @@ export class ExpensesController {
     return this.expenses.createCategory({ businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Delete('businesses/:businessId/expense-categories/:categoryId')
   deleteCategory(
     @Param('businessId') businessId: string,
@@ -213,7 +224,8 @@ export class ExpensesController {
     return this.expenses.deleteCategory(businessId, categoryId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expense-budgets')
   listBudgets(
     @Param('businessId') businessId: string,
@@ -227,7 +239,8 @@ export class ExpensesController {
     );
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Post('businesses/:businessId/expense-budgets')
   upsertBudget(
     @Param('businessId') businessId: string,
@@ -243,7 +256,8 @@ export class ExpensesController {
     return this.expenses.upsertBudget({ businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Delete('businesses/:businessId/expense-budgets/:budgetId')
   deleteBudget(
     @Param('businessId') businessId: string,

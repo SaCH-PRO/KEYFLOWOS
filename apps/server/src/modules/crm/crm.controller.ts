@@ -111,21 +111,24 @@ export class CrmController {
     return this.crm.createContact({ businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/poll')
   getContactsPollState(@Param('businessId') businessId: string) {
     return this.crmStats.getContactsPollState(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/favorites')
   getFavorites(@Param('businessId') businessId: string) {
     return this.crmStats.getFavorites(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId')
   getContactDetail(
@@ -165,7 +168,8 @@ export class CrmController {
     return this.crm.bulkUpdateContacts({ businessId, contactIds: body.contactIds, status: body.status, addTags: body.addTags });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(10, 60_000)
   @Delete('businesses/:businessId/contacts/bulk')
   bulkDeleteContacts(
@@ -178,7 +182,8 @@ export class CrmController {
     return this.crm.bulkDeleteContacts({ businessId, contactIds: body.contactIds });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/contacts/:contactId')
   softDeleteContact(
@@ -188,7 +193,8 @@ export class CrmController {
     return this.crm.softDeleteContact({ businessId, contactId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/merge/:duplicateId')
   mergeContact(
@@ -200,7 +206,8 @@ export class CrmController {
     return this.crm.mergeContacts({ businessId, primaryId: contactId, duplicateId, fieldOverrides: body?.fieldOverrides });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/notes')
   addNote(
@@ -218,28 +225,32 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contact-stats')
   getContactStats(@Param('businessId') businessId: string) {
     return this.crmStats.getContactStats(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/segments')
   segmentSummary(@Param('businessId') businessId: string) {
     return this.crmStats.segmentSummary({ businessId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/highlights')
   flowHighlights(@Param('businessId') businessId: string) {
     return this.crmStats.flowHighlights({ businessId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/tasks/due')
   dueTasks(
@@ -252,7 +263,8 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/tasks')
   addTask(
@@ -274,7 +286,8 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/tasks/:taskId/complete')
   completeTask(
@@ -284,7 +297,8 @@ export class CrmController {
     return this.timeline.completeTask({ businessId, taskId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/tasks/:taskId/reopen')
   reopenTask(
@@ -294,7 +308,8 @@ export class CrmController {
     return this.timeline.reopenTask({ businessId, taskId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Patch('businesses/:businessId/notes/:noteId')
   updateNote(
@@ -305,7 +320,8 @@ export class CrmController {
     return this.timeline.updateNote({ businessId, noteId, body: body.body, source: body.source });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/notes/:noteId')
   deleteNote(
@@ -315,7 +331,8 @@ export class CrmController {
     return this.timeline.deleteNote({ businessId, noteId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Patch('businesses/:businessId/tasks/:taskId')
   updateTask(
@@ -333,7 +350,8 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/tasks/:taskId')
   deleteTask(
@@ -343,7 +361,8 @@ export class CrmController {
     return this.timeline.deleteTask({ businessId, taskId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/autopilot-actions/:actionId/approve')
   approveAutopilotAction(
@@ -353,7 +372,8 @@ export class CrmController {
     return this.timeline.approveAutopilotAction({ businessId, actionId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/autopilot-actions/:actionId/deny')
   denyAutopilotAction(
@@ -363,7 +383,8 @@ export class CrmController {
     return this.timeline.denyAutopilotAction({ businessId, actionId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/import/file')
   @UseInterceptors(
@@ -390,7 +411,8 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/import/link')
   async importContactsFromLink(@Param('businessId') businessId: string, @Body('url') url?: string) {
@@ -400,7 +422,8 @@ export class CrmController {
     return this.crmImport.createLinkImport({ businessId, sourceUrl: url });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/import/image/ocr')
   async createContactFromOcr(
@@ -418,7 +441,8 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/import/scan')
   @UseInterceptors(
@@ -452,21 +476,24 @@ export class CrmController {
     return { contact, extracted };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/imports')
   listImports(@Param('businessId') businessId: string) {
     return this.crmImport.listImports(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/imports/:importId/records')
   listImportRecords(@Param('businessId') businessId: string, @Param('importId') importId: string) {
     return this.crmImport.listImportRecords(businessId, importId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(10, 60000)
   @Post('businesses/:businessId/contacts/check-duplicates')
   checkImportDuplicates(
@@ -482,14 +509,16 @@ export class CrmController {
     return this.crm.checkDuplicates(businessId, body.contacts);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/duplicates')
   findDuplicates(@Param('businessId') businessId: string) {
     return this.crm.findDuplicates(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/log-communication')
   logCommunication(
@@ -512,7 +541,8 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/events')
   createEvent(
@@ -532,21 +562,24 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/events')
   contactEvents(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
     return this.crm.listContactEvents({ businessId, contactId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/notes')
   contactNotes(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
     return this.crm.listContactNotes({ businessId, contactId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/tasks')
   listTasks(
@@ -563,14 +596,16 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/playbook')
   getPlaybook(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
     return this.playbook.getOrCreatePlaybook({ businessId, contactId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/playbook')
   updatePlaybook(
@@ -586,14 +621,16 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/lists')
   listContactLists(@Param('businessId') businessId: string) {
     return this.crm.listContactLists(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/lists')
   createContactList(
@@ -603,7 +640,8 @@ export class CrmController {
     return this.crm.createContactList({ businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Put('businesses/:businessId/lists/:listId')
   updateContactList(
@@ -614,7 +652,8 @@ export class CrmController {
     return this.crm.updateContactList({ businessId, listId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/lists/:listId')
   deleteContactList(
@@ -624,7 +663,8 @@ export class CrmController {
     return this.crm.deleteContactList({ businessId, listId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/lists/:listId/contacts')
   getContactListContacts(
@@ -634,7 +674,8 @@ export class CrmController {
     return this.crm.getContactListContacts({ businessId, listId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/lists/:listId/contacts')
   addContactsToList(
@@ -645,7 +686,8 @@ export class CrmController {
     return this.crm.addContactsToList({ businessId, listId, contactIds: body.contactIds });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/lists/:listId/contacts/:contactId')
   removeContactFromList(
@@ -656,7 +698,8 @@ export class CrmController {
     return this.crm.removeContactFromList({ businessId, listId, contactId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('insights')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/flow-intelligence')
@@ -664,21 +707,24 @@ export class CrmController {
     return this.flow.getFlowIntelligence(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/next-actions')
   getNextActions(@Param('businessId') businessId: string) {
     return this.actions.getNextActions(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(30, 60_000)
   @Get('businesses/:businessId/ai-next-actions')
   getAiNextActions(@Param('businessId') businessId: string) {
     return this.actions.getAiNextActions(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/next-actions/:actionId/complete')
   completeNextAction(
@@ -688,28 +734,32 @@ export class CrmController {
     return this.actions.completeNextAction(businessId, actionId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/autopilot-actions')
   getAutopilotActions(@Param('businessId') businessId: string) {
     return this.actions.getAutopilotActions(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/predictive-revenue')
   getPredictiveRevenue(@Param('businessId') businessId: string) {
     return this.revenue.getPredictiveRevenue(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/financial-growth')
   getFinancialGrowth(@Param('businessId') businessId: string) {
     return this.revenue.getFinancialGrowth(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/health-metrics')
   getContactHealthMetrics(
@@ -719,7 +769,8 @@ export class CrmController {
     return this.journey.getContactHealthMetrics(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/journey')
   getContactJourney(
@@ -729,7 +780,8 @@ export class CrmController {
     return this.journey.getContactJourney(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/cross-journey')
   getContactCrossJourney(
@@ -739,7 +791,8 @@ export class CrmController {
     return this.journey.getContactCrossJourney(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/conversation-context')
   getConversationContext(
@@ -749,7 +802,8 @@ export class CrmController {
     return this.journey.getConversationContext(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/favorite')
   toggleFavorite(

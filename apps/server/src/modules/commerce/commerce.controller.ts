@@ -110,7 +110,8 @@ export class CommerceController {
     return this.commerce.deleteProduct(businessId, productId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/products/import/scan')
   @UseInterceptors(FileInterceptor('image'))
   async scanProductImage(
@@ -124,7 +125,8 @@ export class CommerceController {
     return { extracted, count: extracted.length };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/products/import/file')
   @UseInterceptors(FileInterceptor('file'))
   async importProductsFile(
@@ -137,7 +139,8 @@ export class CommerceController {
     return { extracted, count: extracted.length };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/products/import/confirm')
   async confirmImportedProducts(
     @Param('businessId') businessId: string,
@@ -244,7 +247,8 @@ export class CommerceController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/invoices')
   listInvoices(
     @Param('businessId') businessId: string,
@@ -314,7 +318,8 @@ export class CommerceController {
     return this.commerce.getInvoiceWithBusiness(invoiceId, true);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/invoices/bulk')
   bulkUpdateInvoices(
     @Param('businessId') businessId: string,
@@ -323,7 +328,8 @@ export class CommerceController {
     return this.commerce.bulkUpdateInvoices(businessId, body.ids, body.action);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/quotes/bulk')
   bulkUpdateQuotes(
     @Param('businessId') businessId: string,
@@ -332,7 +338,8 @@ export class CommerceController {
     return this.commerce.bulkUpdateQuotes(businessId, body.ids, body.action);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/invoices/:invoiceId')
   deleteInvoice(
     @Param('businessId') businessId: string,
@@ -341,7 +348,8 @@ export class CommerceController {
     return this.commerce.deleteInvoice(invoiceId, businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/invoices/:invoiceId')
   updateInvoice(
     @Param('businessId') businessId: string,
@@ -362,7 +370,8 @@ export class CommerceController {
 
   // ========== QUOTES ==========
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/quotes')
   listQuotes(
     @Param('businessId') businessId: string,
@@ -381,7 +390,8 @@ export class CommerceController {
     return this.commerce.getQuote(quoteId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/quotes')
   createQuote(
     @Param('businessId') businessId: string,
@@ -395,7 +405,8 @@ export class CommerceController {
     return this.commerce.createQuote({ businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/quotes/:quoteId')
   updateQuote(
     @Param('businessId') businessId: string,
@@ -410,7 +421,8 @@ export class CommerceController {
     return this.commerce.updateQuote({ quoteId, businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/quotes/:quoteId')
   deleteQuote(
     @Param('businessId') businessId: string,
@@ -419,7 +431,8 @@ export class CommerceController {
     return this.commerce.deleteQuote(quoteId, businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/quotes/:quoteId/convert')
   convertQuoteToInvoice(
     @Param('businessId') businessId: string,
@@ -437,7 +450,8 @@ export class CommerceController {
 
   // ========== GMAIL INTEGRATION ==========
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/gmail/auth-url')
   getGmailAuthUrl(@Param('businessId') businessId: string) {
     const url = this.gmail.getAuthUrl(businessId);
@@ -467,19 +481,22 @@ export class CommerceController {
     }
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/gmail/status')
   getGmailStatus(@Param('businessId') businessId: string) {
     return this.gmail.getGmailStatus(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/gmail')
   disconnectGmail(@Param('businessId') businessId: string) {
     return this.gmail.disconnectGmail(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/quotes/:quoteId/send-email')
   async sendQuoteEmail(
     @Param('businessId') businessId: string,
@@ -543,7 +560,8 @@ export class CommerceController {
 
   // ========== PARTIAL PAYMENTS ==========
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/invoices/:invoiceId/payments')
   listPayments(
     @Param('businessId') businessId: string,
@@ -552,7 +570,8 @@ export class CommerceController {
     return this.commerce.listPayments(invoiceId, businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/invoices/:invoiceId/payments')
   recordPayment(
     @Param('businessId') businessId: string,
@@ -569,7 +588,8 @@ export class CommerceController {
 
   // ========== CAMPAIGN REVENUE ==========
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/campaigns/:campaignId/revenue')
   getCampaignRevenue(
     @Param('businessId') businessId: string,
@@ -580,13 +600,15 @@ export class CommerceController {
 
   // ========== RECURRING INVOICES ==========
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/recurring-invoices')
   listRecurringInvoices(@Param('businessId') businessId: string) {
     return this.recurringInvoices.listRecurringInvoices(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/recurring-invoices/:id')
   getRecurringInvoice(
     @Param('businessId') businessId: string,
@@ -595,7 +617,8 @@ export class CommerceController {
     return this.recurringInvoices.getRecurringInvoice(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/recurring-invoices')
   createRecurringInvoice(
     @Param('businessId') businessId: string,
@@ -616,7 +639,8 @@ export class CommerceController {
     return this.recurringInvoices.createRecurringInvoice({ businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/recurring-invoices/:id')
   updateRecurringInvoice(
     @Param('businessId') businessId: string,
@@ -639,7 +663,8 @@ export class CommerceController {
     return this.recurringInvoices.updateRecurringInvoice({ id, businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/recurring-invoices/:id')
   deleteRecurringInvoice(
     @Param('businessId') businessId: string,
@@ -648,7 +673,8 @@ export class CommerceController {
     return this.recurringInvoices.deleteRecurringInvoice(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/recurring-invoices/:id/toggle')
   toggleRecurringInvoice(
     @Param('businessId') businessId: string,
@@ -659,7 +685,8 @@ export class CommerceController {
 
   // ========== PAYMENT LINKS ==========
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/invoices/:invoiceId/payment-link')
   createPaymentLink(
     @Param('businessId') businessId: string,
@@ -669,13 +696,15 @@ export class CommerceController {
     return this.commerce.createPaymentLink(invoiceId, businessId, body.expiresInDays);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/payment-links')
   listPaymentLinks(@Param('businessId') businessId: string) {
     return this.commerce.listPaymentLinks(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/payment-links/:id')
   deactivatePaymentLink(
     @Param('businessId') businessId: string,
