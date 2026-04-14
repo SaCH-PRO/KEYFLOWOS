@@ -50,6 +50,7 @@ import {
   Users2,
   Shield,
   Brain,
+  Radar,
 } from "lucide-react";
 
 
@@ -183,7 +184,7 @@ interface NavItem {
   exactMatch?: boolean;
 }
 
-type PrimarySectionId = "cockpit" | "workspaces" | "studio" | "public";
+type PrimarySectionId = "cockpit" | "tower" | "workspaces" | "studio" | "public";
 
 interface PrimaryNavItem {
   id: PrimarySectionId;
@@ -194,6 +195,7 @@ interface PrimaryNavItem {
 
 const primaryNav: PrimaryNavItem[] = [
   { id: "cockpit", label: "Cockpit", icon: Gauge, href: "/app" },
+  { id: "tower", label: "Control Tower", icon: Radar, href: "/app/control-tower" },
   { id: "workspaces", label: "Workspaces", icon: LayoutGrid },
   { id: "studio", label: "Studio", icon: Wrench },
   { id: "public", label: "Public", icon: Globe },
@@ -229,6 +231,7 @@ const secondaryNav: Record<string, NavItem[]> = {
 };
 
 const routeToSurface: [string, PrimarySectionId][] = [
+  ["/app/control-tower", "tower"],
   ["/app/settings", "studio"],
   ["/app/profile", "studio"],
   ["/app/store", "studio"],
@@ -296,7 +299,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     return "cockpit";
   }, [pathname]);
   const [expandedSection, setExpandedSection] = useState<PrimarySectionId | null>(null);
-  const secondaryVisible = expandedSection ?? (activePrimary !== "cockpit" ? activePrimary : null);
+  const secondaryVisible = expandedSection ?? (activePrimary !== "cockpit" && activePrimary !== "tower" ? activePrimary : null);
 
   useEffect(() => {
     setExpandedSection(null);
@@ -346,6 +349,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           projects: "Projects", documents: "Documents", automations: "Flows", reports: "Reports",
           store: "Presence", settings: "Studio", learn: "Learn",
           community: "Community", marketplace: "Marketplace",
+          "control-tower": "Control Tower",
         };
         const label = labelMap[labelSegment || ""] || (labelSegment ? labelSegment.charAt(0).toUpperCase() + labelSegment.slice(1) : "");
         if (label) {

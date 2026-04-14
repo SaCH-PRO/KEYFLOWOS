@@ -4367,6 +4367,45 @@ export interface StrategicAction {
   estimatedValue?: number;
 }
 
+export interface ControlTowerPriority {
+  id: string;
+  type: 'risk' | 'approval' | 'action' | 'opportunity';
+  severity: 'critical' | 'warning' | 'info' | 'opportunity';
+  title: string;
+  description: string;
+  module: string;
+  urgency: number;
+  actionLabel?: string;
+  actionRoute?: string;
+}
+
+export interface ControlTowerModules {
+  contacts: { total: number; byStatus: Record<string, number>; recentCount: number; staleLeadCount: number };
+  revenue: { totalCollected: number; outstandingAmount: number; outstandingCount: number; overdueCount: number; overdueAmount: number; monthlyRevenue: number; averageInvoiceValue: number };
+  bookings: { upcomingCount: number; completedThisMonth: number; cancelledThisMonth: number; utilizationRate: number };
+  expenses: { totalThisMonth: number; topCategories: Array<{ name: string; amount: number }>; budgetUtilization: number };
+  projects: { activeCount: number; overdueTaskCount: number; completionRate: number };
+  content: { draftPostCount: number; scheduledPostCount: number; draftCampaignCount: number };
+  automations: { activeCount: number; disabledCount: number; totalRuns: number };
+  storefront: { activeProductCount: number; averagePrice: number };
+}
+
+export interface ControlTowerData {
+  snapshot: {
+    business: { name: string; industry: string | null; archetype: string | null; currency: string };
+    momentumScore: number;
+    healthIndicators: Array<{ area: string; status: 'good' | 'warning' | 'critical'; detail: string }>;
+  };
+  dashboard: StrategicDashboard;
+  priorities: ControlTowerPriority[];
+  pendingApprovals: number;
+  modules: ControlTowerModules;
+}
+
+export async function fetchControlTower(businessId: string): Promise<ApiResult<ControlTowerData>> {
+  return apiGetSimple<ControlTowerData>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/control-tower`);
+}
+
 export async function fetchStrategicActions(businessId: string): Promise<ApiResult<{ actions: StrategicAction[] }>> {
   return apiGetSimple<{ actions: StrategicAction[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/actions`);
 }
