@@ -249,8 +249,8 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
                           <div className="grid grid-cols-3 gap-2 mb-3">
                             <div className="p-2 rounded-lg bg-muted/20 text-center">
                               <TrendingUp className="w-3.5 h-3.5 mx-auto mb-1 text-emerald-400" />
-                              <p className="text-[10px] text-muted-foreground/60">Revenue</p>
-                              <p className="text-xs font-medium text-foreground/80">{stats?.totalActions ?? "—"}</p>
+                              <p className="text-[10px] text-muted-foreground/60">Success</p>
+                              <p className="text-xs font-medium text-foreground/80">{stats ? `${Math.round(stats.successRate)}%` : "—"}</p>
                             </div>
                             <div className="p-2 rounded-lg bg-muted/20 text-center">
                               <Calendar className="w-3.5 h-3.5 mx-auto mb-1 text-blue-400" />
