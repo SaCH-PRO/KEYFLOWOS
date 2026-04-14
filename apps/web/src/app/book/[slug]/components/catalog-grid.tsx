@@ -673,7 +673,7 @@ export function CatalogGrid({
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-5">
+          <div className={`grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 ${ts.cardDensity === "dense" ? "gap-2.5 sm:gap-4" : ts.cardDensity === "spacious" ? "gap-4 sm:gap-6" : "gap-3 sm:gap-5"}`}>
             {filteredItems.map((item, idx) => (
               <div
                 key={`${item.id}_${item.itemType}`}

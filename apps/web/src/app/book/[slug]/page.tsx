@@ -1120,6 +1120,7 @@ export default function PublicBookingPage() {
             testimonials={storefrontConfig.socialProof.testimonials}
             primaryColor={primaryColor}
             secondaryColor={secondaryColor}
+            socialProofWeight={ts.socialProofWeight}
           />
         ) : null;
       case "faq": {
