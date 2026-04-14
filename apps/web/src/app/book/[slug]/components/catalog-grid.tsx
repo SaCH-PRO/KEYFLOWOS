@@ -208,7 +208,7 @@ export function CatalogGrid({
             </div>
           ) : (
             <div
-              className={`w-full ${ts.imageHeight} flex items-center justify-center text-4xl ${ts.headerWeight} relative overflow-hidden`}
+              className={`w-full ${ts.imageHeight} flex items-center justify-center text-3xl sm:text-4xl ${ts.headerWeight} relative overflow-hidden`}
               style={{
                 background: ia.bg,
                 color: `${itemColor}50`,
@@ -248,7 +248,7 @@ export function CatalogGrid({
           {onToggleWishlist && (
             <button
               onClick={(e) => { e.stopPropagation(); onToggleWishlist(item); }}
-              className="absolute top-2.5 left-2.5 w-8 h-8 rounded-full backdrop-blur-md flex items-center justify-center transition-all hover:scale-110 z-10"
+              className="absolute top-2.5 left-2.5 w-10 h-10 min-w-[44px] min-h-[44px] rounded-full backdrop-blur-md flex items-center justify-center transition-all hover:scale-110 z-10"
               style={{
                 backgroundColor: wishlisted ? `${primaryColor}30` : "rgba(0,0,0,0.4)",
                 border: wishlisted ? `1px solid ${primaryColor}40` : "1px solid rgba(0,0,0,0.06)",
@@ -264,23 +264,23 @@ export function CatalogGrid({
           )}
         </div>
 
-        <div className={`${ts.spacing === "relaxed" ? "p-5" : "p-4"} space-y-3`}>
+        <div className={`${ts.spacing === "relaxed" ? "p-4 sm:p-5" : "p-3 sm:p-4"} space-y-2 sm:space-y-3`}>
           <div className="flex items-center gap-2">
             <span
-              className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold ${ts.badgeRadius} transition-colors duration-200`}
+              className={`inline-flex items-center px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold ${ts.badgeRadius} transition-colors duration-200`}
               style={{ backgroundColor: `${badge.color}15`, color: badge.color }}
             >
               {badge.label}
             </span>
           </div>
 
-          <div className="flex items-start justify-between gap-2">
-            <h4 className={`${ts.nameSize} ${ts.headerWeight} text-gray-900 leading-tight ${ts.textStyle} group-hover:text-gray-900 transition-colors`}>
+          <div className="space-y-1">
+            <h4 className={`${ts.nameSize} ${ts.headerWeight} text-gray-900 leading-tight ${ts.textStyle} group-hover:text-gray-900 transition-colors line-clamp-2`}>
               {item.name}
             </h4>
             {showPrices && (
               <div
-                className={`text-base ${ts.priceWeight} whitespace-nowrap tabular-nums`}
+                className={`text-sm sm:text-base ${ts.priceWeight} whitespace-nowrap tabular-nums`}
                 style={{ color: itemColor }}
               >
                 {formatPrice(item.price, item.currency)}
@@ -289,18 +289,20 @@ export function CatalogGrid({
           </div>
 
           {item.description && (
-            <p className={`${ts.descSize} text-gray-600/80 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>
+            <p className={`${ts.descSize} text-gray-600/80 line-clamp-1 sm:line-clamp-2 leading-relaxed ${ts.bodyWeight} hidden sm:block`}>
               {item.description}
             </p>
           )}
 
           {reviewAgg && reviewAgg.reviewCount > 0 && (
-            <StarRatingDisplay rating={reviewAgg.averageRating} count={reviewAgg.reviewCount} />
+            <div className="hidden sm:block">
+              <StarRatingDisplay rating={reviewAgg.averageRating} count={reviewAgg.reviewCount} />
+            </div>
           )}
 
-          <div className="flex items-center justify-between pt-1">
+          <div className="flex items-center justify-between pt-0.5 sm:pt-1">
             {showDuration && item.duration ? (
-              <span className={`flex items-center gap-1.5 ${ts.descSize} text-gray-500 px-2.5 py-1 rounded-lg`} style={{ backgroundColor: `${itemColor}06` }}>
+              <span className={`hidden sm:flex items-center gap-1.5 ${ts.descSize} text-gray-500 px-2.5 py-1 rounded-lg`} style={{ backgroundColor: `${itemColor}06` }}>
                 <Clock className="w-3 h-3" style={{ color: `${itemColor}90` }} /> {item.duration} min
               </span>
             ) : (
@@ -310,7 +312,7 @@ export function CatalogGrid({
               item.itemType === "service" ? (
                 <button
                   onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
-                  className={`flex items-center gap-1.5 px-3.5 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all duration-200 text-emerald-600 bg-emerald-500/10 border border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20`}
+                  className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 ${ts.buttonRadius} text-[11px] sm:text-xs font-medium transition-all duration-200 text-emerald-600 bg-emerald-500/10 border border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 min-h-[44px]`}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" /> Added
                 </button>
@@ -336,10 +338,10 @@ export function CatalogGrid({
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); addToCart(item); }}
-                className={`${btnStyles.className} shadow-sm hover:shadow-md active:scale-95`}
+                className={`${btnStyles.className} shadow-sm hover:shadow-md active:scale-95 min-h-[44px]`}
                 style={btnStyles.style}
               >
-                <Plus className="w-3.5 h-3.5" /> Add
+                <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Add</span><span className="sm:hidden">+</span>
               </button>
             )}
           </div>
@@ -671,7 +673,7 @@ export function CatalogGrid({
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-5">
             {filteredItems.map((item, idx) => (
               <div
                 key={`${item.id}_${item.itemType}`}

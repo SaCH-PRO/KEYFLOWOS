@@ -1189,7 +1189,7 @@ export default function PublicBookingPage() {
         />
       )}
 
-      <div className={`max-w-4xl mx-auto ${densityPadding} pb-32 ${appearance?.density === "compact" ? "space-y-5" : "space-y-8"}`}>
+      <div className={`max-w-4xl mx-auto ${densityPadding} pb-32 ${appearance?.density === "compact" ? "space-y-5 sm:space-y-6" : "space-y-6 sm:space-y-10"}`}>
         {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && !bannerDismissed &&
           (!storefrontConfig.promotions.bannerExpiry || new Date(storefrontConfig.promotions.bannerExpiry) > new Date()) &&
           (!storefrontConfig.promotions.bannerStartDate || new Date(storefrontConfig.promotions.bannerStartDate) <= new Date()) && (
@@ -1332,7 +1332,7 @@ export default function PublicBookingPage() {
 
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
         <div
-          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-[11px] text-gray-400 backdrop-blur-xl border shadow-lg pointer-events-auto hover:text-gray-500 transition-all hover:shadow-xl"
+          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-[11px] text-gray-500 backdrop-blur-xl border shadow-lg pointer-events-auto hover:text-gray-600 transition-all hover:shadow-xl"
           style={{ backgroundColor: `${ts.pageBg}e6`, borderColor: `${primaryColor}10` }}
         >
           <Sparkles className="w-3 h-3" style={{ color: `${primaryColor}70` }} />
