@@ -308,9 +308,12 @@ export class IdentityService {
     return IdentityService.DEFAULT_SCOPES[membership.role] ?? IdentityService.DEFAULT_SCOPES.STAFF;
   }
 
-  private resolveApprovalTier(membership: { role: string; maxApprovalTier: number | null }): number {
-    if (membership.maxApprovalTier !== null && membership.maxApprovalTier !== undefined && membership.maxApprovalTier > 0) {
-      return membership.maxApprovalTier;
+  private resolveApprovalTier(membership: { role: string; maxApprovalTier: number | null; permissionScopes?: unknown }): number {
+    const hasCustomScopes = membership.permissionScopes !== null && membership.permissionScopes !== undefined;
+    if (membership.maxApprovalTier !== null && membership.maxApprovalTier !== undefined) {
+      if (hasCustomScopes || membership.maxApprovalTier !== 0) {
+        return membership.maxApprovalTier;
+      }
     }
     return IdentityService.DEFAULT_APPROVAL_TIERS[membership.role] ?? 0;
   }

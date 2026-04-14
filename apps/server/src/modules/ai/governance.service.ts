@@ -216,7 +216,8 @@ export class GovernanceService {
     if (!membership) throw new NotFoundException('User is not a member of this business');
 
     const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };
-    const memberTier = (membership.maxApprovalTier !== null && membership.maxApprovalTier !== undefined && membership.maxApprovalTier > 0)
+    const hasCustomScopes = membership.permissionScopes !== null && membership.permissionScopes !== undefined;
+    const memberTier = (membership.maxApprovalTier !== null && membership.maxApprovalTier !== undefined && (hasCustomScopes || membership.maxApprovalTier !== 0))
       ? membership.maxApprovalTier
       : (DEFAULT_TIERS[membership.role] ?? 0);
     if (item.riskTier > memberTier) {
