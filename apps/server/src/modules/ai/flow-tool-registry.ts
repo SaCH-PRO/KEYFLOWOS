@@ -2,6 +2,23 @@ export type RiskLevel = 'low' | 'medium' | 'high';
 export type RiskTier = 1 | 2 | 3 | 4;
 export type ToolFamily = 'read' | 'draft' | 'organize' | 'execute' | 'crud';
 
+export interface ToolParamSchema {
+  type: 'object';
+  properties: Record<string, {
+    type: string;
+    description: string;
+    enum?: string[];
+    items?: { type: string };
+  }>;
+  required: string[];
+}
+
+export interface ToolOutputSchema {
+  type: 'object';
+  description: string;
+  fields: Record<string, { type: string; description: string }>;
+}
+
 export interface FlowTool {
   name: string;
   description: string;
@@ -10,15 +27,26 @@ export interface FlowTool {
   riskTier: RiskTier;
   changedEntities?: string[];
   followOnSuggestions?: string[];
-  parameters: {
-    type: 'object';
-    properties: Record<string, {
-      type: string;
-      description: string;
-      enum?: string[];
-      items?: { type: string };
-    }>;
-    required: string[];
+  parameters: ToolParamSchema;
+  outputSchema?: ToolOutputSchema;
+}
+
+export interface ToolExecutionEnvelope<T = any> {
+  result: T;
+  changedEntities: string[];
+  followOnSuggestions: string[];
+  family: ToolFamily;
+  riskTier: RiskTier;
+}
+
+export function wrapToolResult(toolName: string, result: any): ToolExecutionEnvelope {
+  const tool = getToolByName(toolName);
+  return {
+    result,
+    changedEntities: tool?.changedEntities ?? [],
+    followOnSuggestions: tool?.followOnSuggestions ?? [],
+    family: tool?.family ?? 'crud',
+    riskTier: tool?.riskTier ?? (1 as RiskTier),
   };
 }
 
@@ -37,6 +65,19 @@ export const FLOW_TOOLS: FlowTool[] = [
       properties: {},
       required: [],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Business health snapshot',
+      fields: {
+        businessName: { type: 'string', description: 'Business name' },
+        industry: { type: 'string', description: 'Business industry' },
+        momentumScore: { type: 'number', description: 'Momentum score 0-100' },
+        contacts: { type: 'object', description: 'Contact stats (total, byStatus, staleLeadCount)' },
+        revenue: { type: 'object', description: 'Revenue stats (totalCollected, monthlyRevenue, outstandingAmount)' },
+        bookings: { type: 'object', description: 'Booking stats (upcomingCount, completedThisMonth)' },
+        expenses: { type: 'object', description: 'Expense stats (totalThisMonth)' },
+      },
+    },
   },
   {
     name: 'fetch_client_health',
@@ -50,6 +91,17 @@ export const FLOW_TOOLS: FlowTool[] = [
         contactId: { type: 'string', description: 'Optional: analyze a specific contact. Omit for portfolio-wide health.' },
       },
       required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Client health analysis',
+      fields: {
+        totalContacts: { type: 'number', description: 'Total contact count' },
+        staleLeads: { type: 'number', description: 'Leads with no activity in 14+ days' },
+        atRiskClients: { type: 'number', description: 'Clients with no activity in 30+ days' },
+        topSpenders: { type: 'array', description: 'Top 5 spenders with name and totalSpend' },
+        healthScore: { type: 'number', description: 'Client health score 0-100' },
+      },
     },
   },
   {
@@ -65,6 +117,17 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: [],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Schedule health analysis',
+      fields: {
+        totalUpcoming: { type: 'number', description: 'Total upcoming bookings' },
+        bookingsByDay: { type: 'object', description: 'Booking counts by date string' },
+        emptyDays: { type: 'array', description: 'Dates with no bookings' },
+        cancelledLast7Days: { type: 'number', description: 'Cancellations in last 7 days' },
+        utilizationPct: { type: 'number', description: 'Calendar utilization percentage' },
+      },
+    },
   },
   {
     name: 'fetch_revenue_risk',
@@ -77,6 +140,19 @@ export const FLOW_TOOLS: FlowTool[] = [
       properties: {},
       required: [],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Revenue risk indicators',
+      fields: {
+        overdueCount: { type: 'number', description: 'Number of overdue invoices' },
+        overdueTotal: { type: 'number', description: 'Total overdue amount (TTD)' },
+        revenueThisMonth: { type: 'number', description: 'Revenue collected this month' },
+        revenueTrend: { type: 'number', description: 'Month-over-month revenue change %' },
+        trendLabel: { type: 'string', description: 'growing | declining | stable' },
+        topClientConcentration: { type: 'number', description: 'Top client revenue concentration %' },
+        concentrationRisk: { type: 'string', description: 'high | medium | low' },
+      },
+    },
   },
   {
     name: 'fetch_storefront_quality',
@@ -88,6 +164,17 @@ export const FLOW_TOOLS: FlowTool[] = [
       type: 'object',
       properties: {},
       required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Storefront quality assessment',
+      fields: {
+        totalProducts: { type: 'number', description: 'Total product count' },
+        activeProducts: { type: 'number', description: 'Active product count' },
+        qualityScore: { type: 'number', description: 'Quality score 0-100' },
+        issues: { type: 'array', description: 'List of quality issues' },
+        productsNeedingWork: { type: 'array', description: 'Products with specific issues' },
+      },
     },
   },
   {
@@ -103,6 +190,14 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: [],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Project delivery status',
+      fields: {
+        projects: { type: 'array', description: 'Project summaries with health, progress, task counts' },
+        totalProjects: { type: 'number', description: 'Total project count' },
+      },
+    },
   },
   {
     name: 'fetch_expense_pressure',
@@ -114,6 +209,18 @@ export const FLOW_TOOLS: FlowTool[] = [
       type: 'object',
       properties: {},
       required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Expense pressure analysis',
+      fields: {
+        currentMonthTotal: { type: 'number', description: 'Current month expenses (TTD)' },
+        lastMonthTotal: { type: 'number', description: 'Last month expenses (TTD)' },
+        monthOverMonthChange: { type: 'number', description: 'Month-over-month change %' },
+        expenseToRevenueRatio: { type: 'number', description: 'Expense-to-revenue ratio %' },
+        pressure: { type: 'string', description: 'high | moderate | low' },
+        topCategories: { type: 'array', description: 'Top expense categories with totals' },
+      },
     },
   },
 
@@ -135,6 +242,16 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['contactId'],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Drafted follow-up message',
+      fields: {
+        subject: { type: 'string', description: 'Message subject line' },
+        body: { type: 'string', description: 'Message body content' },
+        channel: { type: 'string', description: 'Selected channel' },
+        contactName: { type: 'string', description: 'Contact name' },
+      },
+    },
   },
   {
     name: 'draft_campaign_bundle',
@@ -151,6 +268,16 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['objective'],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Drafted campaign bundle',
+      fields: {
+        subject: { type: 'string', description: 'Email subject line' },
+        body: { type: 'string', description: 'Email body HTML' },
+        cta: { type: 'string', description: 'Call-to-action text' },
+        audience: { type: 'string', description: 'Target audience description' },
+      },
+    },
   },
   {
     name: 'draft_payment_reminder',
@@ -165,6 +292,16 @@ export const FLOW_TOOLS: FlowTool[] = [
         urgency: { type: 'string', description: 'Reminder urgency level', enum: ['gentle', 'firm', 'final'] },
       },
       required: ['invoiceId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Drafted payment reminder',
+      fields: {
+        subject: { type: 'string', description: 'Reminder subject line' },
+        body: { type: 'string', description: 'Reminder body content' },
+        invoiceNumber: { type: 'string', description: 'Invoice reference' },
+        amountDue: { type: 'number', description: 'Amount due (TTD)' },
+      },
     },
   },
   {
@@ -181,6 +318,15 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['productId'],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Drafted storefront copy',
+      fields: {
+        productName: { type: 'string', description: 'Product name' },
+        description: { type: 'string', description: 'Generated product description' },
+        tagline: { type: 'string', description: 'Short tagline' },
+      },
+    },
   },
   {
     name: 'draft_project_update',
@@ -195,6 +341,16 @@ export const FLOW_TOOLS: FlowTool[] = [
         includeTimeline: { type: 'boolean', description: 'Include timeline/milestone details (default true)' },
       },
       required: ['projectId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Drafted project update',
+      fields: {
+        subject: { type: 'string', description: 'Update subject line' },
+        body: { type: 'string', description: 'Update body content' },
+        projectName: { type: 'string', description: 'Project name' },
+        progress: { type: 'number', description: 'Project progress percentage' },
+      },
     },
   },
 
@@ -218,6 +374,15 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['title', 'contactId'],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Created task',
+      fields: {
+        id: { type: 'string', description: 'Created task ID' },
+        title: { type: 'string', description: 'Task title' },
+        contactId: { type: 'string', description: 'Associated contact ID' },
+      },
+    },
   },
   {
     name: 'create_followup_queue',
@@ -236,6 +401,14 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: [],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Follow-up queue result',
+      fields: {
+        created: { type: 'number', description: 'Number of tasks created' },
+        contacts: { type: 'array', description: 'Contacts queued for follow-up' },
+      },
+    },
   },
   {
     name: 'tag_contact',
@@ -251,6 +424,14 @@ export const FLOW_TOOLS: FlowTool[] = [
         tags: { type: 'array', description: 'Tags to add', items: { type: 'string' } },
       },
       required: ['contactId', 'tags'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Tag result',
+      fields: {
+        contactId: { type: 'string', description: 'Tagged contact ID' },
+        tags: { type: 'array', description: 'Updated tags list' },
+      },
     },
   },
   {
@@ -271,6 +452,15 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['name'],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Created segment',
+      fields: {
+        segmentName: { type: 'string', description: 'Segment name' },
+        matchedCount: { type: 'number', description: 'Number of matching contacts' },
+        contacts: { type: 'array', description: 'Matched contacts (limited to 50)' },
+      },
+    },
   },
   {
     name: 'schedule_action',
@@ -289,6 +479,15 @@ export const FLOW_TOOLS: FlowTool[] = [
         description: { type: 'string', description: 'Human-readable description of the scheduled action' },
       },
       required: ['actionType', 'scheduledFor', 'description'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Scheduled action',
+      fields: {
+        id: { type: 'string', description: 'Scheduled action ID' },
+        actionType: { type: 'string', description: 'Type of scheduled action' },
+        scheduledFor: { type: 'string', description: 'Scheduled execution time' },
+      },
     },
   },
 
@@ -311,6 +510,16 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['campaignId', 'scheduledAt'],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Queued campaign',
+      fields: {
+        id: { type: 'string', description: 'Campaign ID' },
+        name: { type: 'string', description: 'Campaign name' },
+        status: { type: 'string', description: 'Updated status (SCHEDULED)' },
+        scheduledAt: { type: 'string', description: 'Scheduled send time' },
+      },
+    },
   },
   {
     name: 'send_message_with_approval',
@@ -318,7 +527,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
-    changedEntities: ['message'],
+    changedEntities: ['message', 'activity'],
     parameters: {
       type: 'object',
       properties: {
@@ -328,6 +537,16 @@ export const FLOW_TOOLS: FlowTool[] = [
         body: { type: 'string', description: 'Message body content' },
       },
       required: ['contactId', 'channel', 'body'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Queued message (pending governance approval)',
+      fields: {
+        id: { type: 'string', description: 'Activity/message ID' },
+        contactName: { type: 'string', description: 'Recipient name' },
+        channel: { type: 'string', description: 'Message channel' },
+        status: { type: 'string', description: 'queued_for_review' },
+      },
     },
   },
   {
@@ -348,6 +567,15 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
       required: ['productId'],
     },
+    outputSchema: {
+      type: 'object',
+      description: 'Updated product',
+      fields: {
+        id: { type: 'string', description: 'Product ID' },
+        name: { type: 'string', description: 'Product name' },
+        fieldsUpdated: { type: 'array', description: 'Fields that were updated' },
+      },
+    },
   },
   {
     name: 'enable_flow_with_approval',
@@ -362,6 +590,15 @@ export const FLOW_TOOLS: FlowTool[] = [
         playbookId: { type: 'string', description: 'The automation playbook ID to enable' },
       },
       required: ['playbookId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Enabled automation',
+      fields: {
+        id: { type: 'string', description: 'Playbook ID' },
+        name: { type: 'string', description: 'Playbook name' },
+        status: { type: 'string', description: 'Updated status (ACTIVE)' },
+      },
     },
   },
   {
@@ -379,6 +616,15 @@ export const FLOW_TOOLS: FlowTool[] = [
         newStatus: { type: 'string', description: 'New status value' },
       },
       required: ['entityType', 'ids', 'newStatus'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Bulk status update result',
+      fields: {
+        entityType: { type: 'string', description: 'Entity type updated' },
+        updatedCount: { type: 'number', description: 'Number of entities updated' },
+        newStatus: { type: 'string', description: 'Applied status' },
+      },
     },
   },
 
