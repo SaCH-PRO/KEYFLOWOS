@@ -409,12 +409,12 @@ export function OverviewMode({
     },
   ];
 
-  const aiRecommendations: { type: "action" | "insight" | "warning" | "tip"; priority: "high" | "medium" | "low"; title: string; description: string; explanation?: string; actionLabel: string; mode: string }[] = [];
-  if (!storeEnabled) aiRecommendations.push({ type: "warning", priority: "high", title: "Store is Offline", description: "Your storefront is in draft mode. Customers can't see or order from it.", explanation: "Publishing your store is the most impactful step you can take right now.", actionLabel: "Go to Launch", mode: "launch" });
+  const aiRecommendations: { type: "action" | "insight" | "risk" | "opportunity"; priority: "high" | "medium" | "low"; title: string; description: string; explanation?: string; actionLabel: string; mode: string }[] = [];
+  if (!storeEnabled) aiRecommendations.push({ type: "risk", priority: "high", title: "Store is Offline", description: "Your storefront is in draft mode. Customers can't see or order from it.", explanation: "Publishing your store is the most impactful step you can take right now.", actionLabel: "Go to Launch", mode: "launch" });
   if (!hasHeroImage) aiRecommendations.push({ type: "action", priority: "high", title: "Add a Hero Image", description: "Stores with hero banners see up to 40% higher engagement.", explanation: "Visual first impressions drive whether visitors stay or leave within 3 seconds.", actionLabel: "Customize Design", mode: "design" });
-  if (totalCatalog === 0) aiRecommendations.push({ type: "warning", priority: "high", title: "Empty Catalog", description: "Your store has no products. Add items so visitors have something to browse.", actionLabel: "Add Items", mode: "catalog" });
+  if (totalCatalog === 0) aiRecommendations.push({ type: "risk", priority: "high", title: "Empty Catalog", description: "Your store has no products. Add items so visitors have something to browse.", actionLabel: "Add Items", mode: "catalog" });
   if (!hasTestimonials) aiRecommendations.push({ type: "insight", priority: "medium", title: "Add Social Proof", description: "92% of consumers read reviews before purchasing. Aim for 3+ testimonials.", actionLabel: "Add Testimonials", mode: "merchandising" });
-  if (!hasMetaSeo) aiRecommendations.push({ type: "tip", priority: "medium", title: "Improve SEO", description: "Missing meta title and description hurts search visibility. AI can generate them.", actionLabel: "Configure SEO", mode: "merchandising" });
+  if (!hasMetaSeo) aiRecommendations.push({ type: "opportunity", priority: "medium", title: "Improve SEO", description: "Missing meta title and description hurts search visibility. AI can generate them.", actionLabel: "Configure SEO", mode: "merchandising" });
 
   return (
     <div className="space-y-4">

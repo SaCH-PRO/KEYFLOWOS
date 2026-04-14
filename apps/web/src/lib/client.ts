@@ -4084,7 +4084,7 @@ export async function fetchProAutoInsights(businessId: string): Promise<ApiResul
 
 export interface WorkspaceRecommendation {
   id: string;
-  type: 'action' | 'insight' | 'warning' | 'tip';
+  type: 'action' | 'insight' | 'risk' | 'opportunity';
   priority: 'high' | 'medium' | 'low';
   title: string;
   description: string;

@@ -21,7 +21,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
   if (projects.length === 0) {
     suggestions.push({
       id: `no-projects-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Create Your First Project",
       description: "Set up a delivery project with tasks, milestones, linked clients, and revenue tracking.",
       explanation: "Projects connect your client work, calendar, revenue, and flows into one delivery hub.",
@@ -38,7 +38,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
   if (overdueTasks.length > 0) {
     suggestions.push({
       id: `overdue-tasks-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: `${overdueTasks.length} Overdue Task${overdueTasks.length > 1 ? "s" : ""}`,
       description: "Review and reschedule overdue tasks to keep delivery on track.",
       explanation: "Tasks past their due date increase project risk and may delay dependent work.",
@@ -55,7 +55,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
   if (blockedProjects.length > 0) {
     suggestions.push({
       id: `blocked-projects-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: `${blockedProjects.length} Blocked/Waiting Project${blockedProjects.length > 1 ? "s" : ""}`,
       description: "Projects are stalled. Review blockers or follow up with clients to unblock progress.",
       explanation: "Blocked projects consume resources without advancing. Clearing blockers early prevents cascading delays.",
@@ -69,7 +69,7 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
   if (unlinkedProjects.length > 0 && projects.length > 0) {
     suggestions.push({
       id: `unlinked-projects-${Date.now()}`,
-      type: "tip",
+      type: "opportunity",
       title: "Link Clients to Projects",
       description: `${unlinkedProjects.length} project${unlinkedProjects.length > 1 ? "s" : ""} without a linked client. Connect them for full delivery tracking.`,
       explanation: "Linking clients enables cross-module tracking — client profitability, project costs, and communication history in one view.",

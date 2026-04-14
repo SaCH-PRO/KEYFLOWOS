@@ -17,9 +17,9 @@ interface WorkspaceInsightsPanelProps {
 const FILTER_OPTIONS: { key: RecommendationType | "all"; label: string }[] = [
   { key: "all", label: "All" },
   { key: "action", label: "Actions" },
-  { key: "warning", label: "Risks" },
+  { key: "risk", label: "Risks" },
   { key: "insight", label: "Insights" },
-  { key: "tip", label: "Tips" },
+  { key: "opportunity", label: "Opportunities" },
 ];
 
 export function WorkspaceInsightsPanel({

@@ -17,7 +17,7 @@ type TabKey = "transactions" | "budgets" | "categories" | "insights";
 
 interface InsightCard {
   id: string;
-  type: "warning" | "risk" | "opportunity" | "info";
+  type: "risk" | "opportunity" | "info";
   icon: typeof AlertTriangle;
   title: string;
   description: string;
@@ -48,8 +48,7 @@ interface ExpenseInsightsTabProps {
 }
 
 const TYPE_STYLES: Record<string, { border: string; bg: string; iconColor: string; badge: string; badgeLabel: string }> = {
-  warning: { border: "border-red-500/30", bg: "hsl(var(--kf-error) / 0.05)", iconColor: "hsl(var(--kf-error))", badge: "hsl(var(--kf-error) / 0.15)", badgeLabel: "Action Required" },
-  risk: { border: "border-amber-500/30", bg: "hsl(var(--kf-warning) / 0.05)", iconColor: "hsl(var(--kf-warning))", badge: "hsl(var(--kf-warning) / 0.15)", badgeLabel: "Monitor" },
+  risk: { border: "border-red-500/30", bg: "hsl(var(--kf-error) / 0.05)", iconColor: "hsl(var(--kf-error))", badge: "hsl(var(--kf-error) / 0.15)", badgeLabel: "Action Required" },
   opportunity: { border: "border-emerald-500/30", bg: "hsl(var(--kf-success) / 0.05)", iconColor: "hsl(var(--kf-success))", badge: "hsl(var(--kf-success) / 0.15)", badgeLabel: "Opportunity" },
   info: { border: "border-blue-500/30", bg: "hsl(var(--kf-info) / 0.05)", iconColor: "hsl(var(--kf-info))", badge: "hsl(var(--kf-info) / 0.15)", badgeLabel: "Insight" },
 };
@@ -76,7 +75,7 @@ export function ExpenseInsightsTab({
       const totalOver = overBudget.reduce((sum, b) => sum + Math.abs(b.remaining), 0);
       cards.push({
         id: "over-budget",
-        type: "warning",
+        type: "risk",
         icon: AlertTriangle,
         title: `${overBudget.length} Budget${overBudget.length > 1 ? "s" : ""} Exceeded`,
         description: `${names} ${overBudget.length > 1 ? "have" : "has"} exceeded the monthly limit by ${formatCurrency(totalOver)}.`,
@@ -155,7 +154,7 @@ export function ExpenseInsightsTab({
     if (uncategorizedExpenseCount > 0) {
       cards.push({
         id: "uncategorized",
-        type: uncategorizedExpenseCount > 5 ? "warning" : "risk",
+        type: "risk",
         icon: FileQuestion,
         title: `${uncategorizedExpenseCount} Uncategorized Expense${uncategorizedExpenseCount > 1 ? "s" : ""}`,
         description: `Uncategorized expenses reduce budget tracking accuracy and weaken financial reports.`,
@@ -231,7 +230,7 @@ export function ExpenseInsightsTab({
       if (spikeCategories.length > 0) {
         cards.push({
           id: "category-anomaly",
-          type: "warning",
+          type: "risk",
           icon: AlertTriangle,
           title: `${spikeCategories.length} Category Spending Anomal${spikeCategories.length > 1 ? "ies" : "y"}`,
           description: `${spikeCategories.map(c => c.name).join(", ")} show${spikeCategories.length === 1 ? "s" : ""} unusually high spending compared to the prior period.`,
@@ -409,7 +408,6 @@ export function ExpenseInsightsTab({
     return tips;
   }, [summary, vendors, budgets, uncategorizedExpenseCount, recurringExpenseCount]);
 
-  const warningCount = insights.filter(i => i.type === "warning").length;
   const riskCount = insights.filter(i => i.type === "risk").length;
   const opportunityCount = insights.filter(i => i.type === "opportunity").length;
 
@@ -435,11 +433,8 @@ export function ExpenseInsightsTab({
           <Lightbulb className="w-3.5 h-3.5" />
           Spending Intelligence
         </div>
-        {warningCount > 0 && (
-          <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: "hsl(var(--kf-error) / 0.15)", color: "hsl(var(--kf-error))" }}>{warningCount} action{warningCount > 1 ? "s" : ""} required</span>
-        )}
         {riskCount > 0 && (
-          <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: "hsl(var(--kf-warning) / 0.15)", color: "hsl(var(--kf-warning))" }}>{riskCount} to monitor</span>
+          <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: "hsl(var(--kf-error) / 0.15)", color: "hsl(var(--kf-error))" }}>{riskCount} action{riskCount > 1 ? "s" : ""} required</span>
         )}
         {opportunityCount > 0 && (
           <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: "hsl(var(--kf-success) / 0.15)", color: "hsl(var(--kf-success))" }}>{opportunityCount} opportunit{opportunityCount > 1 ? "ies" : "y"}</span>

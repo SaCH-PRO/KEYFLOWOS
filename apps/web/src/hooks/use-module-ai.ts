@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 export type AiSuggestion = {
   id: string;
-  type: "action" | "insight" | "warning" | "tip";
+  type: "action" | "insight" | "risk" | "opportunity";
   title: string;
   description: string;
   explanation?: string;

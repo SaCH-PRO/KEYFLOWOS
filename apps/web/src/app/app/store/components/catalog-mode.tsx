@@ -94,11 +94,11 @@ export function CatalogMode({
     },
   ];
 
-  const aiRecs: { type: "action" | "insight" | "warning" | "tip"; priority: "high" | "medium" | "low"; title: string; description: string }[] = [];
-  if (totalItems === 0) aiRecs.push({ type: "warning", priority: "high", title: "Empty Catalog", description: "Add products in Commerce first, then add them to your store here." });
+  const aiRecs: { type: "action" | "insight" | "risk" | "opportunity"; priority: "high" | "medium" | "low"; title: string; description: string }[] = [];
+  if (totalItems === 0) aiRecs.push({ type: "risk", priority: "high", title: "Empty Catalog", description: "Add products in Commerce first, then add them to your store here." });
   if (notAdded > 3) aiRecs.push({ type: "action", priority: "medium", title: `${notAdded} Items Not in Store`, description: "You have items in Commerce that aren't displayed. Consider adding them with the \"Add All\" button." });
   if (hiddenCount > 0) aiRecs.push({ type: "insight", priority: "low", title: `${hiddenCount} Hidden Items`, description: `${hiddenCount} catalog item${hiddenCount !== 1 ? "s are" : " is"} hidden from the storefront. Review visibility settings if this is unintentional.` });
-  if (featuredCount === 0 && inStore > 0) aiRecs.push({ type: "tip", priority: "medium", title: "No Featured Items", description: "Mark your best items as \"Featured\" to highlight them prominently at the top of your storefront." });
+  if (featuredCount === 0 && inStore > 0) aiRecs.push({ type: "opportunity", priority: "medium", title: "No Featured Items", description: "Mark your best items as \"Featured\" to highlight them prominently at the top of your storefront." });
 
   const catBreakdown = [
     serviceCount > 0 && { icon: Briefcase, label: "Services", count: serviceCount },

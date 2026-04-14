@@ -31,7 +31,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
     if (stats.overdueAmount > 0) {
       suggestions.push({
         id: `overdue-${Date.now()}`,
-        type: "warning",
+        type: "risk",
         title: "Overdue Payments",
         description: `You have $${stats.overdueAmount.toLocaleString()} in overdue invoices. Consider sending payment reminders.`,
         explanation: "Overdue invoices reduce cash flow predictability and may indicate client payment risk.",
@@ -57,7 +57,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
     if (stats.outstandingAmount > stats.totalRevenue * 0.5) {
       suggestions.push({
         id: `outstanding-${Date.now()}`,
-        type: "warning",
+        type: "risk",
         title: "High Outstanding Balance",
         description: `Outstanding amount ($${stats.outstandingAmount.toLocaleString()}) is over 50% of total revenue. Focus on collections.`,
         explanation: "A high outstanding-to-revenue ratio signals cash flow pressure that could limit operations.",
@@ -69,7 +69,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
       const top = stats.topProducts[0];
       suggestions.push({
         id: `top-product-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: "Top Performer",
         description: `"${top.name}" is your best seller with $${top.revenue.toLocaleString()} revenue from ${top.count} sales.`,
         explanation: "Top performers deserve increased visibility, promotional focus, and potential upsell pairing.",
@@ -97,7 +97,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
       if (stats.productCount > 5) {
         suggestions.push({
           id: `pricing-review-${Date.now()}`,
-          type: "tip",
+          type: "opportunity",
           title: "Pricing Review",
           description: `With ${stats.productCount} products, periodic pricing reviews can optimize revenue. Use AI Pricing Advisor on individual products.`,
           explanation: "Regular pricing analysis ensures your margins stay healthy as costs and demand change.",
@@ -137,7 +137,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
       if (stats.averageInvoiceValue > 0) {
         suggestions.push({
           id: `avg-invoice-${Date.now()}`,
-          type: "tip",
+          type: "opportunity",
           title: "Invoice Insights",
           description: `Average invoice value: $${stats.averageInvoiceValue.toLocaleString()}. Run Client Intelligence on key accounts to optimize billing.`,
           explanation: "Understanding invoice value distribution helps identify upsell and bundling opportunities.",
@@ -164,7 +164,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
     if (activeView === "schedules" || activeView === "recurring") {
       suggestions.push({
         id: `churn-risk-${Date.now()}`,
-        type: "warning",
+        type: "risk",
         title: "Churn Risk Scanner",
         description: "Detect declining payment patterns in recurring customers before you lose revenue.",
         explanation: "Early churn detection allows proactive retention efforts before revenue is permanently lost.",
@@ -203,7 +203,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
     if (suggestions.length === 0) {
       suggestions.push({
         id: `healthy-${Date.now()}`,
-        type: "tip",
+        type: "opportunity",
         title: "Commerce Health",
         description: `${stats.invoiceCount} invoices, ${stats.productCount} products. Revenue: $${stats.totalRevenue.toLocaleString()}.`,
         explanation: "Your commerce metrics are healthy — keep monitoring for trends and optimization opportunities.",
@@ -215,7 +215,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
   } catch {
     return [{
       id: `error-${Date.now()}`,
-      type: "warning",
+      type: "risk",
       title: "Analysis Unavailable",
       description: "Could not complete commerce analysis. Try again in a moment.",
       explanation: "A temporary issue prevented data retrieval. Your data is safe — just retry.",

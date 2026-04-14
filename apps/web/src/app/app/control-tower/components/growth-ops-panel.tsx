@@ -10,7 +10,7 @@ import { apiGet } from "@/lib/api";
 import type { StrategicDashboard, ControlTowerModules } from "@/lib/client";
 
 type GrowthInsight = {
-  type: "action" | "insight" | "warning" | "tip";
+  type: "action" | "insight" | "risk" | "opportunity";
   priority: "high" | "medium" | "low";
   title: string;
   description: string;
@@ -47,7 +47,7 @@ function buildGrowthInsights(dashboard: StrategicDashboard, modules: ControlTowe
 
   if (dashboard.utilizationRate < 50 && modules.bookings.upcomingCount < 5) {
     insights.push({
-      type: "tip",
+      type: "opportunity",
       priority: "medium",
       title: "Underbooked Capacity",
       description: `Calendar utilization is ${dashboard.utilizationRate.toFixed(0)}%. Consider promotions or outreach campaigns.`,
@@ -59,7 +59,7 @@ function buildGrowthInsights(dashboard: StrategicDashboard, modules: ControlTowe
 
   if (modules.storefront.activeProductCount > 0 && modules.storefront.averagePrice < 50) {
     insights.push({
-      type: "tip",
+      type: "opportunity",
       priority: "low",
       title: "Review Pricing Strategy",
       description: "Your average product price is below $50 TTD. Consider bundling or premium tiers.",
@@ -144,7 +144,7 @@ export function GrowthOpsPanel({
             {aiInsights.slice(0, 4).map((a) => (
               <AiRecommendationCard
                 key={a.title}
-                type={a.category === "risk" ? "warning" : a.category === "opportunity" ? "insight" : "action"}
+                type={a.category === "risk" ? "risk" : a.category === "opportunity" ? "opportunity" : "action"}
                 priority={a.priority as "high" | "medium" | "low"}
                 title={a.title}
                 description={a.description}

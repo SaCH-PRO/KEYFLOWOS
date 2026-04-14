@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import {
   Circle, CheckCircle, AlertTriangle, ArrowRight, Calendar,
-  MessageSquare, Flag, Zap, Clock,
+  MessageSquare, Flag,
 } from "lucide-react";
 import { Project } from "@/lib/client";
 import { normalizeStatus, getStageInfo, isOverdue, formatDate } from "../project-constants";
