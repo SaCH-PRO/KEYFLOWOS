@@ -55,11 +55,14 @@ export function useExpensesData() {
           fetchServices(businessId),
           fetchContacts(businessId),
         ]);
-        if (projRes.data) setProjects(projRes.data.map((p: any) => ({ id: p.id, name: p.name })));
-        if (svcRes.data) setServices(svcRes.data.map((s: any) => ({ id: s.id, name: s.name })));
-        if (ctRes.data) {
-          const list = Array.isArray(ctRes.data) ? ctRes.data : (ctRes.data as any).data ?? [];
-          setContacts(list.map((c: any) => ({
+        if (projRes.data) {
+          setProjects(projRes.data.map((p) => ({ id: p.id, name: p.name })));
+        }
+        if (svcRes.data) {
+          setServices(svcRes.data.map((s) => ({ id: s.id, name: s.name })));
+        }
+        if (ctRes.data && ctRes.data.contacts) {
+          setContacts(ctRes.data.contacts.map((c) => ({
             id: c.id,
             name: c.displayName || [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "Unknown",
           })));
