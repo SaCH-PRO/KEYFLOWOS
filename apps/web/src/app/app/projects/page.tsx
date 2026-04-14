@@ -28,7 +28,7 @@ const TABS = [
 ];
 
 export default function ProjectsPage() {
-  const { getReturnLabel, navigateBack, getOriginWorkspace } = useReturnNavigation({ restoreScrollOnMount: true });
+  const { getReturnLabel, navigateBack, getOriginWorkspace } = useReturnNavigation({});
   const searchParams = useSearchParams();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
