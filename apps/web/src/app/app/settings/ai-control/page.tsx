@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Brain, Shield, ShieldCheck, ShieldAlert, AlertTriangle,
+  Brain, Shield, ShieldCheck, AlertTriangle,
   Activity, Loader2, Zap, Lock,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -75,10 +75,15 @@ export default function AiControlCenterPage() {
     const biz = getStoredBusinessId();
     if (!biz) { setLoading(false); return; }
     setLoading(true);
-    const res = await fetchAiGovernance(biz);
-    if (res.data) setSettings(res.data);
-    else if (res.error) toast.error(res.error);
-    setLoading(false);
+    try {
+      const res = await fetchAiGovernance(biz);
+      if (res.data) setSettings(res.data);
+      else if (res.error) toast.error(res.error);
+    } catch {
+      toast.error("Failed to load AI settings");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -87,28 +92,38 @@ export default function AiControlCenterPage() {
     const biz = getStoredBusinessId();
     if (!biz || !settings) return;
     setSaving(true);
-    const res = await updateAiGovernance(biz, { mode });
-    if (res.data) {
-      setSettings(res.data);
-      toast.success(`Autonomy mode set to ${mode}`);
-    } else {
-      toast.error(res.error || "Failed to update");
+    try {
+      const res = await updateAiGovernance(biz, { mode });
+      if (res.data) {
+        setSettings(res.data);
+        toast.success(`Autonomy mode set to ${mode}`);
+      } else {
+        toast.error(res.error || "Failed to update");
+      }
+    } catch {
+      toast.error("Failed to update autonomy mode");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }, [settings]);
 
   const handleMaxTierChange = useCallback(async (tier: number) => {
     const biz = getStoredBusinessId();
     if (!biz || !settings) return;
     setSaving(true);
-    const res = await updateAiGovernance(biz, { maxAutoTier: tier });
-    if (res.data) {
-      setSettings(res.data);
-      toast.success(`Max auto tier set to ${tier}`);
-    } else {
-      toast.error(res.error || "Failed to update");
+    try {
+      const res = await updateAiGovernance(biz, { maxAutoTier: tier });
+      if (res.data) {
+        setSettings(res.data);
+        toast.success(`Max auto tier set to ${tier}`);
+      } else {
+        toast.error(res.error || "Failed to update");
+      }
+    } catch {
+      toast.error("Failed to update max tier");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }, [settings]);
 
   if (loading) {
