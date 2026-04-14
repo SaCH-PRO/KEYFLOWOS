@@ -98,6 +98,23 @@ export class ExpensesService {
     contactId?: string;
     serviceId?: string;
   }) {
+    let validProjectId: string | null = null;
+    let validContactId: string | null = null;
+    let validServiceId: string | null = null;
+
+    if (input.projectId) {
+      const proj = await this.prisma.client.project.findFirst({ where: { id: input.projectId, businessId: input.businessId } });
+      if (proj) validProjectId = input.projectId;
+    }
+    if (input.contactId) {
+      const ct = await this.prisma.client.contact.findFirst({ where: { id: input.contactId, businessId: input.businessId } });
+      if (ct) validContactId = input.contactId;
+    }
+    if (input.serviceId) {
+      const svc = await this.prisma.client.service.findFirst({ where: { id: input.serviceId, businessId: input.businessId } });
+      if (svc) validServiceId = input.serviceId;
+    }
+
     const expense = await this.prisma.client.expense.create({
       data: {
         businessId: input.businessId,
@@ -113,25 +130,12 @@ export class ExpensesService {
         isRecurring: input.isRecurring ?? false,
         recurringFrequency: input.recurringFrequency ?? null,
         categoryId: input.categoryId ?? null,
-        projectId: null as string | null,
-        contactId: null as string | null,
-        serviceId: null as string | null,
+        projectId: validProjectId,
+        contactId: validContactId,
+        serviceId: validServiceId,
       },
       include: { category: true },
     });
-
-    if (input.projectId) {
-      const proj = await this.prisma.client.project.findFirst({ where: { id: input.projectId, businessId: input.businessId } });
-      if (proj) await this.prisma.client.expense.update({ where: { id: expense.id }, data: { projectId: input.projectId } });
-    }
-    if (input.contactId) {
-      const ct = await this.prisma.client.contact.findFirst({ where: { id: input.contactId, businessId: input.businessId } });
-      if (ct) await this.prisma.client.expense.update({ where: { id: expense.id }, data: { contactId: input.contactId } });
-    }
-    if (input.serviceId) {
-      const svc = await this.prisma.client.service.findFirst({ where: { id: input.serviceId, businessId: input.businessId } });
-      if (svc) await this.prisma.client.expense.update({ where: { id: expense.id }, data: { serviceId: input.serviceId } });
-    }
 
     this.events.emit('expense.created', {
       expense: { id: expense.id, businessId: input.businessId, amount: expense.amount, description: expense.description, categoryId: expense.categoryId },
@@ -160,52 +164,48 @@ export class ExpensesService {
     contactId?: string | null;
     serviceId?: string | null;
   }) {
-    return this.prisma.client.expense.update({
-      where: { id: input.expenseId, businessId: input.businessId },
-      data: {
-        ...(input.description !== undefined && { description: input.description }),
-        ...(input.amount !== undefined && { amount: input.amount }),
-        ...(input.currency !== undefined && { currency: input.currency }),
-        ...(input.date !== undefined && { date: new Date(input.date) }),
-        ...(input.vendor !== undefined && { vendor: input.vendor }),
-        ...(input.receiptUrl !== undefined && { receiptUrl: input.receiptUrl }),
-        ...(input.notes !== undefined && { notes: input.notes }),
-        ...(input.paymentMethod !== undefined && { paymentMethod: input.paymentMethod }),
-        ...(input.tags !== undefined && { tags: input.tags }),
-        ...(input.isRecurring !== undefined && { isRecurring: input.isRecurring }),
-        ...(input.recurringFrequency !== undefined && { recurringFrequency: input.recurringFrequency }),
-        ...(input.categoryId !== undefined && { categoryId: input.categoryId }),
-      },
-      include: { category: true },
-    });
+    const updateData: Record<string, unknown> = {};
+    if (input.description !== undefined) updateData.description = input.description;
+    if (input.amount !== undefined) updateData.amount = input.amount;
+    if (input.currency !== undefined) updateData.currency = input.currency;
+    if (input.date !== undefined) updateData.date = new Date(input.date);
+    if (input.vendor !== undefined) updateData.vendor = input.vendor;
+    if (input.receiptUrl !== undefined) updateData.receiptUrl = input.receiptUrl;
+    if (input.notes !== undefined) updateData.notes = input.notes;
+    if (input.paymentMethod !== undefined) updateData.paymentMethod = input.paymentMethod;
+    if (input.tags !== undefined) updateData.tags = input.tags;
+    if (input.isRecurring !== undefined) updateData.isRecurring = input.isRecurring;
+    if (input.recurringFrequency !== undefined) updateData.recurringFrequency = input.recurringFrequency;
+    if (input.categoryId !== undefined) updateData.categoryId = input.categoryId;
 
     if (input.projectId !== undefined) {
       if (input.projectId === null) {
-        await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { projectId: null } });
+        updateData.projectId = null;
       } else {
         const proj = await this.prisma.client.project.findFirst({ where: { id: input.projectId, businessId: input.businessId } });
-        if (proj) await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { projectId: input.projectId } });
+        if (proj) updateData.projectId = input.projectId;
       }
     }
     if (input.contactId !== undefined) {
       if (input.contactId === null) {
-        await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { contactId: null } });
+        updateData.contactId = null;
       } else {
         const ct = await this.prisma.client.contact.findFirst({ where: { id: input.contactId, businessId: input.businessId } });
-        if (ct) await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { contactId: input.contactId } });
+        if (ct) updateData.contactId = input.contactId;
       }
     }
     if (input.serviceId !== undefined) {
       if (input.serviceId === null) {
-        await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { serviceId: null } });
+        updateData.serviceId = null;
       } else {
         const svc = await this.prisma.client.service.findFirst({ where: { id: input.serviceId, businessId: input.businessId } });
-        if (svc) await this.prisma.client.expense.update({ where: { id: input.expenseId }, data: { serviceId: input.serviceId } });
+        if (svc) updateData.serviceId = input.serviceId;
       }
     }
 
-    return this.prisma.client.expense.findFirst({
+    return this.prisma.client.expense.update({
       where: { id: input.expenseId, businessId: input.businessId },
+      data: updateData,
       include: { category: true },
     });
   }
