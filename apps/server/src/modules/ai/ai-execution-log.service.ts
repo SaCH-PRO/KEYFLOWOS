@@ -9,6 +9,7 @@ export interface LogEntry {
   riskTier?: number;
   mode?: string;
   actor?: string;
+  userId?: string;
   rationale?: string;
   inputSummary?: any;
   outputSummary?: any;
@@ -47,6 +48,7 @@ export class AiExecutionLogService {
           riskTier: entry.riskTier ?? 1,
           mode: entry.mode ?? 'assisted',
           actor: entry.actor ?? 'user',
+          userId: entry.userId ?? null,
           rationale: entry.rationale ?? null,
           inputSummary: entry.inputSummary ?? null,
           outputSummary: entry.outputSummary ?? null,
@@ -139,8 +141,8 @@ export class AiExecutionLogService {
       period: { days, since },
       totalActions: totalCount,
       successRate: totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 100,
-      byModule: byModule.map(m => ({ module: m.module ?? 'unknown', count: m._count })),
-      byMode: byMode.map(m => ({ mode: m.mode, count: m._count })),
+      byModule: byModule.map(m => ({ module: m.module ?? 'unknown', count: typeof m._count === 'number' ? m._count : (m._count as Record<string, number>)?._all ?? 0 })),
+      byMode: byMode.map(m => ({ mode: m.mode, count: typeof m._count === 'number' ? m._count : (m._count as Record<string, number>)?._all ?? 0 })),
     };
   }
 
