@@ -218,6 +218,77 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     });
   }
 
+  if (activeView === "catalog") {
+    if (products.length > 0) {
+      suggestions.push({
+        id: `catalog-reorder-${Date.now()}`,
+        type: "tip",
+        title: "Optimize Display Order",
+        description: "Drag items to reorder. Place your best-selling or highest-margin items first for maximum visibility.",
+        priority: "low",
+        actionLabel: "Reorder catalog",
+        actionKey: "switch_tab:catalog",
+      });
+    }
+    if (products.length >= 5) {
+      suggestions.push({
+        id: `catalog-emphasis-${Date.now()}`,
+        type: "tip",
+        title: "Category Emphasis",
+        description: "Set emphasis levels per category to control which types of items get more visual prominence in your storefront.",
+        priority: "low",
+        actionLabel: "Adjust emphasis",
+        actionKey: "switch_tab:catalog",
+      });
+    }
+    const productsWithoutImages = products.filter((p) => !p.imageUrl).length;
+    if (productsWithoutImages > 0) {
+      suggestions.push({
+        id: `catalog-images-${Date.now()}`,
+        type: "insight",
+        title: `${productsWithoutImages} Items Missing Images`,
+        description: "Products with images convert 2× better. Add images to improve click-through and conversions.",
+        priority: "medium",
+        actionLabel: "Go to Commerce",
+        actionKey: "switch_tab:catalog",
+      });
+    }
+  }
+
+  if (activeView === "operations") {
+    if (activeDeliveryCount === 0) {
+      suggestions.push({
+        id: `ops-delivery-${Date.now()}`,
+        type: "warning",
+        title: "No Delivery Methods Active",
+        description: "Customers cannot complete orders without a fulfillment method. Add shipping, pickup, or digital delivery.",
+        priority: "high",
+        actionLabel: "Configure delivery",
+        actionKey: "switch_tab:operations",
+      });
+    }
+    if (!hoursConfigured) {
+      suggestions.push({
+        id: `ops-hours-${Date.now()}`,
+        type: "insight",
+        title: "Set Business Hours",
+        description: "Business hours help customers plan visits and improve local search ranking.",
+        priority: "medium",
+        actionLabel: "Configure hours",
+        actionKey: "switch_tab:operations",
+      });
+    }
+    suggestions.push({
+      id: `ops-zones-${Date.now()}`,
+      type: "tip",
+      title: "Shipping Zones",
+      description: "Configure delivery zones with different rates for local, regional, and international customers.",
+      priority: "low",
+      actionLabel: "Manage zones",
+      actionKey: "switch_tab:operations",
+    });
+  }
+
   if (activeView === "launch") {
     suggestions.push({
       id: `launch-campaign-${Date.now()}`,
@@ -228,6 +299,15 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       actionLabel: "Generate campaign",
       actionKey: "tool:launch-campaign-generator",
     });
+    if (storeEnabled) {
+      suggestions.push({
+        id: `launch-share-${Date.now()}`,
+        type: "tip",
+        title: "Share Your Store",
+        description: "Your store is live! Share the URL on social media, WhatsApp groups, and email newsletters.",
+        priority: "low",
+      });
+    }
   }
 
   if (suggestions.length === 0) {

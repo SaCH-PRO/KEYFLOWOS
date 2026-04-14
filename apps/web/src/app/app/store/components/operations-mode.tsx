@@ -4,11 +4,14 @@ import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Power, Pause, Play, Truck, Clock, Phone,
-  Package, RefreshCw, ChevronDown, ChevronUp,
+  Package, RefreshCw,
   Loader2, MessageCircle, Mail, Save, Monitor,
   MapPin, Eye, Loader,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
+import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
+import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
+import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { DeliveryConfigPanel } from "./delivery-config-panel";
 import { ShippingZonesPanel } from "./shipping-zones-panel";
 import { HoursEditor, type BusinessHoursMap } from "./hours-editor";
@@ -33,49 +36,6 @@ type Props = {
   hoursSaving: boolean;
   onToggleStoreEnabled: () => void;
 };
-
-function OpsSection({
-  title,
-  subtitle,
-  icon: Icon,
-  accentColor,
-  children,
-  defaultOpen = false,
-}: {
-  title: string;
-  subtitle: string;
-  icon: React.ElementType;
-  accentColor: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.4)" }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[hsl(var(--kf-muted)/0.06)]"
-      >
-        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${accentColor}18` }}>
-          <Icon className="w-4 h-4" style={{ color: accentColor }} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold" style={{ color: "hsl(var(--kf-foreground))" }}>{title}</p>
-          <p className="text-[11px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{subtitle}</p>
-        </div>
-        {open
-          ? <ChevronUp className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
-          : <ChevronDown className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
-        }
-      </button>
-      {open && (
-        <div className="px-4 pb-5 pt-1" style={{ borderTop: "1px solid hsl(var(--kf-border)/0.25)" }}>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
 
 const STATUS_OPTIONS: { key: StoreStatus; label: string; description: string; icon: React.ElementType; color: string }[] = [
   { key: "active", label: "Active", description: "Store is live and accepting orders from customers", icon: Play, color: "hsl(var(--kf-success))" },
@@ -274,6 +234,49 @@ function DeliveryOptionsLegacy({
   );
 }
 
+const ORDER_STATUSES = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"] as const;
+
+const PIPELINE_STAGE: Record<string, { label: string; color: string }> = {
+  PENDING: { label: "Pending", color: "hsl(40 90% 50%)" },
+  CONFIRMED: { label: "Confirmed", color: "hsl(200 80% 50%)" },
+  PROCESSING: { label: "Processing", color: "hsl(270 70% 60%)" },
+  SHIPPED: { label: "Shipped", color: "hsl(var(--kf-accent1))" },
+  DELIVERED: { label: "Delivered", color: "hsl(var(--kf-success))" },
+  CANCELLED: { label: "Cancelled", color: "hsl(var(--kf-error))" },
+  REFUNDED: { label: "Refunded", color: "hsl(var(--kf-warning))" },
+};
+
+function FulfillmentPipeline({ orders }: { orders: Order[] }) {
+  const stageCounts: Record<string, number> = {};
+  for (const status of ORDER_STATUSES) stageCounts[status] = 0;
+  for (const o of orders) {
+    if (stageCounts[o.status] !== undefined) stageCounts[o.status]++;
+    else stageCounts[o.status] = 1;
+  }
+  const activeStages = ORDER_STATUSES.filter((s) => stageCounts[s] > 0);
+  if (activeStages.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {activeStages.map((status) => {
+        const stage = PIPELINE_STAGE[status];
+        const count = stageCounts[status];
+        return (
+          <div
+            key={status}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
+            style={{ background: `${stage.color}12`, border: `1px solid ${stage.color}25` }}
+          >
+            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: stage.color }} />
+            <span className="text-[10px] font-medium" style={{ color: stage.color }}>{count}</span>
+            <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{stage.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function OrdersSnapshot({ businessId }: { businessId: string }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
@@ -314,6 +317,10 @@ function OrdersSnapshot({ businessId }: { businessId: string }) {
 
   return (
     <div className="space-y-3 pt-2">
+      {orders.length > 0 && (
+        <FulfillmentPipeline orders={orders} />
+      )}
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium" style={{ color: "hsl(var(--kf-foreground))" }}>
@@ -396,6 +403,10 @@ export function OperationsMode({
 
   const storeSettings = storefrontConfig.storeSettings ?? {};
   const storeStatus: StoreStatus = storeSettings.storeStatus ?? (storeEnabled ? "active" : "paused");
+  const deliveryOptions: DeliveryMethod[] = storeSettings.deliveryOptions ?? [];
+  const contactOptions = storefrontConfig.contactOptions ?? {};
+  const hoursActive = Object.values(businessHours).filter((h) => (h as Record<string, unknown>)?.enabled).length;
+  const hasContact = !!(contactOptions.whatsappNumber || contactOptions.email || contactOptions.phone);
 
   function handleStatusChange(newStatus: StoreStatus) {
     onConfigChange("storeSettings", { storeStatus: newStatus });
@@ -409,11 +420,53 @@ export function OperationsMode({
 
   const liveStatusLabel = STATUS_OPTIONS.find((s) => s.key === storeStatus)?.label ?? "Active";
 
+  const metrics: MetricStripItem[] = [
+    {
+      label: "Store Status",
+      value: liveStatusLabel,
+      icon: Power,
+      iconColor: storeStatus === "active" ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
+      threshold: { status: storeStatus === "active" ? "good" : "warn" },
+    },
+    {
+      label: "Delivery Methods",
+      value: deliveryOptions.length,
+      icon: Truck,
+      iconColor: infoColor,
+      threshold: { status: deliveryOptions.length > 0 ? "good" : "critical" },
+    },
+    {
+      label: "Business Hours",
+      value: `${hoursActive}/7 days`,
+      icon: Clock,
+      iconColor: warningColor,
+      threshold: { status: hoursActive > 0 ? "good" : "warn" },
+    },
+    {
+      label: "Contact Setup",
+      value: hasContact ? "Configured" : "Missing",
+      icon: Phone,
+      iconColor: successColor,
+      threshold: { status: hasContact ? "good" : "warn" },
+    },
+  ];
+
+  const aiRecs: { type: "action" | "insight" | "warning" | "tip"; priority: "high" | "medium" | "low"; title: string; description: string; actionLabel?: string; onAction?: () => void }[] = [];
+  if (!storeEnabled) aiRecs.push({ type: "warning", priority: "high", title: "Store is Offline", description: "Your storefront is not accepting orders. Toggle it to Active to start receiving customers.", actionLabel: "Go Live", onAction: () => handleStatusChange("active") });
+  if (deliveryOptions.length === 0) aiRecs.push({ type: "action", priority: "high", title: "No Delivery Methods", description: "Customers can't complete purchases without a delivery method. Add shipping, pickup, or digital delivery." });
+  if (!hasContact) aiRecs.push({ type: "insight", priority: "medium", title: "No Contact Info", description: "Add WhatsApp, email, or phone so customers can reach you. This builds trust and reduces abandoned carts." });
+  if (hoursActive === 0) aiRecs.push({ type: "tip", priority: "medium", title: "Set Business Hours", description: "Let customers know when you're available. Stores with hours configured receive more bookings." });
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+        <WorkspaceMetricStrip items={metrics} columns={4} compact />
+      </motion.div>
+
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
         className="flex items-center gap-3 rounded-2xl px-4 py-3"
         style={{
           background: storeStatus === "active" ? "hsl(var(--kf-success)/0.06)" : storeStatus === "coming_soon" ? "hsl(217 91% 60% / 0.06)" : "hsl(var(--kf-warning)/0.06)",
@@ -444,54 +497,90 @@ export function OperationsMode({
         </button>
       </motion.div>
 
-      <OpsSection title="Store Status" subtitle="Choose how your storefront appears to customers" icon={Power} accentColor={successColor} defaultOpen>
-        <StoreStatusControl storeStatus={storeStatus} onStatusChange={handleStatusChange} />
-      </OpsSection>
+      {aiRecs.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="space-y-2"
+        >
+          {aiRecs.slice(0, 2).map((rec) => (
+            <AiRecommendationCard
+              key={rec.title}
+              type={rec.type}
+              priority={rec.priority}
+              title={rec.title}
+              description={rec.description}
+              actionLabel={rec.actionLabel}
+              onAction={rec.onAction}
+            />
+          ))}
+        </motion.div>
+      )}
 
-      <OpsSection title="Order Fulfillment" subtitle="View and manage customer orders" icon={Package} accentColor={primaryColor} defaultOpen>
-        <OrdersSnapshot businessId={businessId} />
-      </OpsSection>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+        <AccordionGroup title="Store Operations" brandColor="hsl(var(--kf-accent1))">
+          <AccordionSection title="Store Status" subtitle="How your storefront appears to customers" icon={Power} accentColor={successColor} defaultOpen>
+            <StoreStatusControl storeStatus={storeStatus} onStatusChange={handleStatusChange} />
+          </AccordionSection>
 
-      <OpsSection title="Delivery Methods (Advanced)" subtitle="Shipping, pickup, digital — storefront-level config" icon={Truck} accentColor={infoColor}>
-        <DeliveryOptionsLegacy
-          storefrontConfig={storefrontConfig}
-          onConfigChange={onConfigChange}
-          onSave={onSaveConfig}
-          saving={configSaving}
-        />
-      </OpsSection>
+          <AccordionSection title="Order Fulfillment" subtitle="View and manage customer orders" icon={Package} accentColor={primaryColor} defaultOpen>
+            <OrdersSnapshot businessId={businessId} />
+          </AccordionSection>
 
-      <OpsSection title="Delivery Config (Detailed)" subtitle="Zone rates, pickup settings, and service bookings" icon={Truck} accentColor={primaryColor}>
-        <div className="pt-2">
-          <DeliveryConfigPanel businessId={businessId} />
-        </div>
-      </OpsSection>
+          <AccordionSection title="Delivery Methods (Advanced)" subtitle="Shipping, pickup, digital — storefront-level config" icon={Truck} accentColor={infoColor}>
+            <DeliveryOptionsLegacy
+              storefrontConfig={storefrontConfig}
+              onConfigChange={onConfigChange}
+              onSave={onSaveConfig}
+              saving={configSaving}
+            />
+          </AccordionSection>
 
-      <OpsSection title="Shipping Zones" subtitle="Rates and regions for physical delivery" icon={Truck} accentColor={infoColor}>
-        <div className="pt-2">
-          <ShippingZonesPanel businessId={businessId} />
-        </div>
-      </OpsSection>
+          <AccordionSection title="Delivery Config (Detailed)" subtitle="Zone rates, pickup settings, and service bookings" icon={Truck} accentColor={primaryColor}>
+            <DeliveryConfigPanel businessId={businessId} />
+          </AccordionSection>
 
-      <OpsSection title="Business Hours" subtitle="When you're available for orders and bookings" icon={Clock} accentColor={warningColor}>
-        <div className="pt-2">
-          <HoursEditor
-            hours={businessHours}
-            onChange={onHoursChange}
-            onSave={onSaveHours}
-            saving={hoursSaving}
-          />
-        </div>
-      </OpsSection>
+          <AccordionSection title="Shipping Zones" subtitle="Rates and regions for physical delivery" icon={Truck} accentColor={infoColor}>
+            <ShippingZonesPanel businessId={businessId} />
+          </AccordionSection>
+        </AccordionGroup>
+      </motion.div>
 
-      <OpsSection title="Contact Options" subtitle="WhatsApp, email, phone, and contact form on your store" icon={Phone} accentColor={successColor}>
-        <ContactOptionsPanel
-          storefrontConfig={storefrontConfig}
-          onConfigChange={onConfigChange}
-          onSave={onSaveConfig}
-          saving={configSaving}
-        />
-      </OpsSection>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+        <AccordionGroup title="Schedule & Contact" brandColor="#14B8A6">
+          <AccordionSection
+            title="Business Hours"
+            subtitle={`${hoursActive} day${hoursActive !== 1 ? "s" : ""} active`}
+            icon={Clock}
+            accentColor={warningColor}
+          >
+            <HoursEditor
+              hours={businessHours}
+              onChange={onHoursChange}
+              onSave={onSaveHours}
+              saving={hoursSaving}
+            />
+          </AccordionSection>
+
+          <AccordionSection
+            title="Contact Options"
+            subtitle="WhatsApp, email, phone, and contact form"
+            icon={Phone}
+            accentColor={successColor}
+            badge={hasContact ? (
+              <span className="px-1.5 py-0.5 rounded-md text-[9px] font-semibold" style={{ background: "hsl(var(--kf-success)/0.15)", color: "hsl(var(--kf-success))" }}>Set</span>
+            ) : undefined}
+          >
+            <ContactOptionsPanel
+              storefrontConfig={storefrontConfig}
+              onConfigChange={onConfigChange}
+              onSave={onSaveConfig}
+              saving={configSaving}
+            />
+          </AccordionSection>
+        </AccordionGroup>
+      </motion.div>
     </div>
   );
 }
