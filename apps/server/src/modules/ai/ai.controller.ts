@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
@@ -15,6 +15,21 @@ interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
 }
 import { PrismaService } from '../../core/prisma/prisma.service';
+
+const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
+const ALLOWED_MEMORY_CATEGORIES = new Set<string>([
+  'goals', 'tone', 'riskTolerance', 'outreachStyle', 'reportingCadence',
+  'priorities', 'bottlenecks', 'corrections', 'patterns', 'preferences',
+]);
+
+function assertMemoryCategoryAllowed(category: string): void {
+  if (RESERVED_MEMORY_CATEGORIES.has(category)) {
+    throw new BadRequestException(`Category "${category}" is reserved and cannot be modified through this endpoint`);
+  }
+  if (!ALLOWED_MEMORY_CATEGORIES.has(category)) {
+    throw new BadRequestException(`Invalid memory category "${category}"`);
+  }
+}
 
 function safeInt(val: string | undefined, fallback: number): number {
   if (!val) return fallback;
@@ -361,6 +376,7 @@ export class AiController {
     @Param('businessId') businessId: string,
     @Body() body: { category: MemoryCategory; key: string; value: string; confidence?: number },
   ) {
+    assertMemoryCategoryAllowed(body.category);
     const entry = await this.memory.upsert(businessId, {
       category: body.category,
       key: body.key,
@@ -377,6 +393,9 @@ export class AiController {
     @Param('businessId') businessId: string,
     @Body() body: { entries: Array<{ category: MemoryCategory; key: string; value: string; confidence?: number }> },
   ) {
+    for (const e of body.entries) {
+      assertMemoryCategoryAllowed(e.category);
+    }
     const results = await this.memory.upsertMany(
       businessId,
       body.entries.map(e => ({ ...e, source: 'user' as const })),
@@ -391,6 +410,7 @@ export class AiController {
     @Param('category') category: string,
     @Param('key') key: string,
   ) {
+    assertMemoryCategoryAllowed(category);
     const deleted = await this.memory.remove(businessId, category as MemoryCategory, key);
     return { deleted };
   }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { API_BASE, apiPost, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, type PlanLimitError } from "./api";
+import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, type PlanLimitError } from "./api";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 
@@ -4135,7 +4135,7 @@ export async function fetchAiMemoryContext(businessId: string): Promise<ApiResul
 }
 
 export async function summarizeAiPatterns(businessId: string): Promise<ApiResult<{ patterns: string[] }>> {
-  return apiPost<{ patterns: string[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/memory/summarize-patterns`, {});
+  return apiPostSimple<{ patterns: string[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/memory/summarize-patterns`, {});
 }
 
 // ---
