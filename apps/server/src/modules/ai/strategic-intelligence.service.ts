@@ -801,11 +801,11 @@ BUSINESS MOMENTUM: ${snapshot.momentumScore}/100`;
       });
     }
 
-    if (dashboard.utilizationRate < 0.3 && dashboard.upcomingBookings < 3) {
+    if (dashboard.utilizationRate < 30 && dashboard.upcomingBookings < 3) {
       actions.push({
         type: 'fill_schedule',
         title: 'Schedule is underutilized',
-        description: `Utilization at ${(dashboard.utilizationRate * 100).toFixed(0)}% with only ${dashboard.upcomingBookings} upcoming bookings. Promote availability.`,
+        description: `Utilization at ${dashboard.utilizationRate.toFixed(0)}% with only ${dashboard.upcomingBookings} upcoming bookings. Promote availability.`,
         priority: 'medium',
         category: 'opportunity',
       });

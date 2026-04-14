@@ -282,7 +282,7 @@ Strategic Intelligence:
 - Pending quotes: ${strategicDashboard.pendingQuotes} (potential $${strategicDashboard.pendingQuoteValue.toLocaleString()})
 - Stale leads to re-engage: ${strategicDashboard.staleLeads}
 - Active projects: ${strategicDashboard.activeProjects} (${strategicDashboard.overdueTaskCount} overdue tasks)
-- Utilization rate: ${(strategicDashboard.utilizationRate * 100).toFixed(0)}%`;
+- Utilization rate: ${strategicDashboard.utilizationRate.toFixed(0)}%`;
     }
 
     const briefingPrompt = `Generate a morning business briefing for ${businessName}. Here is the current data:
