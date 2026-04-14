@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Zap, Play, Eye, X, ArrowDown, Search, CheckCircle, Sparkles, Workflow, Star } from "lucide-react";
 import { createPlaybook, fetchPlaybooks } from "@/lib/client";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   AUTOMATION_TEMPLATES, COVERAGE_MODULES, getTriggerLabel, getActionLabel,
   MODULE_COLORS, type AutomationTemplate, type FlowComplexity,
@@ -236,10 +237,13 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
       </div>
 
       {filteredTemplates.length === 0 ? (
-        <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
-          <p className="text-sm font-medium mb-1">No matching templates</p>
-          <p className="text-xs text-muted-foreground">Try adjusting your filters or search.</p>
-        </div>
+        <EmptyState
+          icon={Workflow}
+          title="No matching templates"
+          description="Try adjusting your filters or search."
+          variant="compact"
+          iconColor="hsl(var(--kf-accent1))"
+        />
       ) : (
         Object.entries(groupedTemplates).map(([category, templates]) => (
           <div key={category} className="space-y-3">

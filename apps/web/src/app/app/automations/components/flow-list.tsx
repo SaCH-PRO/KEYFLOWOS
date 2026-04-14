@@ -15,6 +15,8 @@ import {
   getTriggerLabel, getActionLabels, getWorkflowActionSummary,
   getFlowModules, getTriggerModule, MODULE_COLORS,
 } from "./automation-constants";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { PlaybookEditor } from "./playbook-editor";
 import { AiFlowGenerator } from "./ai-flow-generator";
 import type { AutomationTemplate, ActionStep } from "./automation-constants";
@@ -318,26 +320,27 @@ export function FlowList({
       />
 
       {loading ? (
-        <div className="text-sm text-muted-foreground py-8 text-center">Loading flows...</div>
+        <SkeletonList rows={4} cols={3} />
       ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
-          <div className="w-10 h-10 rounded-xl mx-auto mb-3 flex items-center justify-center" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
-            <Workflow className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
-          </div>
-          <p className="text-sm font-medium mb-1">
-            {search.trim() || statusFilter !== "all" ? "No matching flows" : "No flows yet"}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {search.trim() || statusFilter !== "all"
+        <EmptyState
+          icon={Workflow}
+          title={search.trim() || statusFilter !== "all" ? "No matching flows" : "No flows yet"}
+          description={
+            search.trim() || statusFilter !== "all"
               ? "Try a different search or filter."
-              : "Create a flow or use a template to start automating your business."}
-          </p>
-          {!search.trim() && statusFilter === "all" && (
-            <p className="text-[11px] text-muted-foreground/60 mt-3 px-4">
-              Tip: Start with a template like "Follow up on paid invoices" or "Remind no-shows" — they're one click to activate.
-            </p>
-          )}
-        </div>
+              : "Create a flow or use a template to start automating your business."
+          }
+          actionLabel={!search.trim() && statusFilter === "all" ? "Create Flow" : undefined}
+          actionIcon={Plus}
+          onAction={!search.trim() && statusFilter === "all" ? () => setShowEditor(true) : undefined}
+          tip={
+            !search.trim() && statusFilter === "all"
+              ? "Start with a template like \"Follow up on paid invoices\" or \"Remind no-shows\" — they're one click to activate."
+              : undefined
+          }
+          variant="compact"
+          iconColor="hsl(var(--kf-accent1))"
+        />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {filtered.map((item) => {
