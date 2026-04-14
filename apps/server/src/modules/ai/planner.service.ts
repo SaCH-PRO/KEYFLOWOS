@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from './ai-usage.service';
 import { BusinessGraphService } from './business-graph.service';
@@ -131,15 +132,15 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
         steps: {
           create: steps.map(s => ({
             order: s.order,
-            toolName: s.toolName,
-            module: s.module,
+            toolName: s.toolName ?? undefined,
+            module: s.module ?? undefined,
             action: s.action,
             description: s.description,
             riskTier: s.riskTier,
             requiresApproval: s.requiresApproval,
             dependsOn: s.dependsOn,
-            inputPayload: s.inputPayload,
-            expectedBenefit: s.expectedBenefit,
+            inputPayload: s.inputPayload ? (s.inputPayload as Prisma.InputJsonValue) : Prisma.JsonNull,
+            expectedBenefit: s.expectedBenefit ?? undefined,
             status: 'pending',
           })),
         },
