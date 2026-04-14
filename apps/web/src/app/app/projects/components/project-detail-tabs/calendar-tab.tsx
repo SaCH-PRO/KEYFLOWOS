@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Calendar, ExternalLink, Clock, MapPin, User, CheckCircle } from "lucide-react";
+import { Calendar, ExternalLink, Clock, CheckCircle } from "lucide-react";
 import { Project, fetchBookings, type Booking } from "@/lib/client";
 import { formatDate, isOverdue, isDueSoon } from "../project-constants";
 import { getStoredBusinessId } from "@/lib/workspace";

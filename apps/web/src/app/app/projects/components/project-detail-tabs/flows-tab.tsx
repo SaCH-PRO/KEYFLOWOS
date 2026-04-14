@@ -10,11 +10,10 @@ import { getStoredBusinessId } from "@/lib/workspace";
 
 interface FlowsTabProps {
   projectId?: string;
-  projectName?: string;
   businessId?: string;
 }
 
-export function FlowsTab({ projectId, businessId: propBusinessId }: FlowsTabProps) {
+export function FlowsTab({ businessId: propBusinessId }: FlowsTabProps) {
   const [workflows, setWorkflows] = useState<CrossModuleWorkflow[]>([]);
   const [loading, setLoading] = useState(false);
   const [coverage, setCoverage] = useState<AutomationCoverage | null>(null);
