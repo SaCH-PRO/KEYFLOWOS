@@ -38,7 +38,16 @@ export default function ProjectsPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [prefillContactId, setPrefillContactId] = useState<string | undefined>(undefined);
   const projectTaskIdRef = useRef<string | null>(null);
-  const { aiHook: projectsAi, updateProjectsContext, handleAction: handleProjectsAiAction } = useProjectsAiHub();
+  const { aiHook: projectsAi, updateProjectsContext } = useProjectsAiHub();
+
+  const handleProjectsAiAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("switch_tab:")) {
+      const tab = actionKey.replace("switch_tab:", "");
+      if (["board", "list", "templates"].includes(tab)) setActiveTab(tab);
+    } else if (actionKey === "new_project") {
+      setActiveTab("board");
+    }
+  }, []);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
