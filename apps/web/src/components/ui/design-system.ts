@@ -24,6 +24,7 @@ export type { WorkspaceShellProps, WorkspaceTab } from "./workspace-shell";
 export { KfButton } from "./kf-button";
 export type { ButtonVariant, ButtonSize } from "./kf-button";
 export { WorkspaceError } from "./workspace-error";
+export { ModuleErrorBoundary } from "./module-error-boundary";
 export {
   Skeleton,
   StatCardSkeleton,

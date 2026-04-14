@@ -390,17 +390,21 @@ export default function CommercePage() {
         <div className="flex items-center gap-2">
           <PageGuideTrigger moduleKey="commerce" />
           <RichTooltip title="Revenue Pulse" description="Total payments collected this month across all invoices." side="bottom">
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/50 bg-white/[0.03] text-sm cursor-help">
-              <DollarSign className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="font-semibold text-xs text-emerald-400">{overview.revenuePulse}</span>
-              <span className="text-[10px] text-muted-foreground/50">collected</span>
+            <div
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 kf-radius-md cursor-help kf-text-body"
+              style={{ border: "1px solid hsl(var(--kf-border) / 0.5)", background: "hsl(var(--kf-muted) / 0.12)" }}
+            >
+              <DollarSign className="w-3.5 h-3.5 shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
+              <span className="font-semibold kf-text-caption" style={{ color: "hsl(var(--kf-success))" }}>{overview.revenuePulse}</span>
+              <span className="kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>collected</span>
             </div>
           </RichTooltip>
           <div className="flex items-center gap-0.5">
             <RichTooltip title="Help" description="Revenue workspace guide" shortcut="?">
               <button
                 onClick={() => setHelpOpen(true)}
-                className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
+                className="min-w-[44px] min-h-[44px] kf-radius-md flex items-center justify-center transition-colors"
+                style={{ color: "hsl(var(--kf-muted-foreground))" }}
                 aria-label="Help"
                 title="Help (?)"
                 data-walkthrough="commerce-help"

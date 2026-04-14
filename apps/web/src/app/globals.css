@@ -568,6 +568,10 @@ html {
   .kf-radius-lg {
     border-radius: 12px;
   }
+
+  .kf-radius-xl {
+    border-radius: 16px;
+  }
 }
 
 @layer components {

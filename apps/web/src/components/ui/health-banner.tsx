@@ -184,7 +184,7 @@ export function WarningCard({
             )}
             {metric && (
               <div className="flex items-baseline gap-1.5 mt-1.5">
-                <span className="text-lg font-bold" style={{ color: config.iconColor }}>
+                <span className="kf-text-title font-bold" style={{ color: config.iconColor }}>
                   {metric.value}
                 </span>
                 <span className="kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>

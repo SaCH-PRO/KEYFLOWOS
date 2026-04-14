@@ -7,6 +7,8 @@ import {
   Workflow, RotateCcw,
 } from "lucide-react";
 import { fetchActivityFeed, testRunPlaybook, ActivityItem } from "@/lib/client";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SkeletonList } from "@/components/ui/skeleton";
 
 const TONE_STYLES: Record<string, { icon: typeof Zap; color: string; bg: string; label: string }> = {
   success: { icon: CheckCircle, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Success" },
@@ -229,21 +231,19 @@ export function ExecutionLog({ businessId, onExecutionStatsChange }: ExecutionLo
       </div>
 
       {loading ? (
-        <div className="text-sm text-muted-foreground py-8 text-center">Loading execution log...</div>
+        <SkeletonList rows={4} cols={3} />
       ) : filteredItems.length === 0 ? (
-        <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
-          <div className="w-10 h-10 rounded-xl mx-auto mb-3 flex items-center justify-center" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
-            <Clock className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
-          </div>
-          <p className="text-sm font-medium mb-1">
-            {items.length === 0 ? "No execution history yet" : "No matching results"}
-          </p>
-          <p className="text-xs text-muted-foreground max-w-md mx-auto">
-            {items.length === 0
+        <EmptyState
+          icon={Clock}
+          title={items.length === 0 ? "No execution history yet" : "No matching results"}
+          description={
+            items.length === 0
               ? "Once your flows run, you'll be able to inspect every execution, failure, and skipped condition here."
-              : "Try adjusting your search, status, or time filters."}
-          </p>
-        </div>
+              : "Try adjusting your search, status, or time filters."
+          }
+          variant="compact"
+          iconColor="hsl(var(--kf-accent1))"
+        />
       ) : (
         <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
           <div className="divide-y divide-border/40">

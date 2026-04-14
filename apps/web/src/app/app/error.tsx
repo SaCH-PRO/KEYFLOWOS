@@ -9,30 +9,33 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
   }, [error]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-6">
-      <div className="max-w-md w-full rounded-xl border border-border/60 bg-slate-900/80 backdrop-blur-xl p-8 text-center space-y-6">
-        <div className="mx-auto w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
-          <AlertTriangle className="w-8 h-8 text-red-400" />
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "hsl(var(--kf-background))" }}>
+      <div className="max-w-md w-full kf-card-glass kf-radius-xl p-8 text-center space-y-6" role="alert">
+        <div
+          className="mx-auto w-16 h-16 kf-radius-xl flex items-center justify-center"
+          style={{ background: "hsl(var(--kf-error) / 0.1)" }}
+        >
+          <AlertTriangle className="w-8 h-8" style={{ color: "hsl(var(--kf-error))" }} aria-hidden="true" />
         </div>
         <div>
-          <h2 className="text-xl font-semibold text-foreground mb-2">Something went wrong</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="kf-text-title font-semibold mb-2">Something went wrong</h2>
+          <p className="kf-text-body" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
             An unexpected error occurred. You can try refreshing or go back to the dashboard.
           </p>
         </div>
         <div className="flex gap-3 justify-center">
           <button
             onClick={reset}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors"
+            className="kf-btn-primary kf-radius-lg kf-text-emphasis font-medium inline-flex items-center gap-2 min-h-[44px] px-4 py-2.5"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-4 h-4" aria-hidden="true" />
             Try Again
           </button>
           <a
             href="/app"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white/10 hover:bg-white/15 text-foreground text-sm font-medium transition-colors"
+            className="kf-btn-secondary kf-radius-lg kf-text-emphasis font-medium inline-flex items-center gap-2 min-h-[44px] px-4 py-2.5"
           >
-            <Home className="w-4 h-4" />
+            <Home className="w-4 h-4" aria-hidden="true" />
             Dashboard
           </a>
         </div>
