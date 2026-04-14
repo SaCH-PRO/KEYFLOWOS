@@ -30,6 +30,9 @@ import { ExpenseInsightsTab } from "./components/expense-insights-tab";
 import { ExpenseDetailModal } from "./components/expense-detail-modal";
 import { ExpenseTaxCalc } from "./components/expense-tax-calc";
 import type { MetricStripItem } from "@/components/ui/workspace-metric-strip";
+import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
+import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
 
 const TABS = [
   { key: "transactions", label: "Transactions", icon: Receipt },
@@ -51,6 +54,7 @@ export default function ExpensesPage() {
   }, [router]);
 
   const d = useExpensesData();
+  const intelligence = useWorkspaceIntelligence({ businessId: d.businessId, module: "expenses" });
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
@@ -255,6 +259,24 @@ export default function ExpensesPage() {
         </div>
       }
     >
+      <div className="flex items-center justify-between gap-2 mb-2">
+        {intelligence.moduleCoverage && (
+          <AutomationCoverageIndicator
+            coveragePct={intelligence.moduleCoverage.coveragePct}
+            automatedCount={intelligence.moduleCoverage.automatedCount}
+            totalProcesses={intelligence.moduleCoverage.totalProcesses}
+          />
+        )}
+      </div>
+
+      <WorkspaceInsightsPanel
+        recommendations={intelligence.recommendations}
+        loading={intelligence.loading}
+        onDismiss={intelligence.dismiss}
+        onNavigate={(route) => router.push(route)}
+        className="mb-4"
+      />
+
       <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={activeTab} data-walkthrough="expenses-tabs">
         {activeTab === "transactions" && (
           <div className="space-y-4">

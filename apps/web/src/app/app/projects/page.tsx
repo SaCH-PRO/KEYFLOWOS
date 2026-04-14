@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { FolderKanban, Send, LayoutGrid, List, FileStack } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { AiBadge } from "@/components/ui/ai-badge";
@@ -20,6 +20,9 @@ import { ProjectDetail } from "./components/project-detail";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
+import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
+import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
 
 const TABS = [
   { key: "board", label: "Board", icon: LayoutGrid, tooltip: "Kanban board view grouped by delivery stage." },
@@ -39,6 +42,8 @@ export default function ProjectsPage() {
   const [prefillContactId, setPrefillContactId] = useState<string | undefined>(undefined);
   const projectTaskIdRef = useRef<string | null>(null);
   const { aiHook: projectsAi, updateProjectsContext } = useProjectsAiHub();
+  const router = useRouter();
+  const intelligence = useWorkspaceIntelligence({ businessId, module: "projects" });
 
   const handleProjectsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
@@ -199,6 +204,24 @@ export default function ProjectsPage() {
       }
       metricStrip={!loading ? <ProjectExecutionStrip projects={projects} /> : undefined}
     >
+      <div className="flex items-center justify-between gap-2 mb-2">
+        {intelligence.moduleCoverage && (
+          <AutomationCoverageIndicator
+            coveragePct={intelligence.moduleCoverage.coveragePct}
+            automatedCount={intelligence.moduleCoverage.automatedCount}
+            totalProcesses={intelligence.moduleCoverage.totalProcesses}
+          />
+        )}
+      </div>
+
+      <WorkspaceInsightsPanel
+        recommendations={intelligence.recommendations}
+        loading={intelligence.loading}
+        onDismiss={intelligence.dismiss}
+        onNavigate={(route) => router.push(route)}
+        className="mb-4"
+      />
+
       <div data-walkthrough="projects-board">
         {activeTab === "board" && (
           <ProjectBoard

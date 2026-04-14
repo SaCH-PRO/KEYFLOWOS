@@ -35,7 +35,7 @@ import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { ProgressivePrompts } from "../profile/components/progressive-prompts";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useModuleEvent } from "@/hooks/use-module-events";
 import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
 import { useMarketing } from "./hooks/use-marketing";
@@ -58,6 +58,9 @@ import { UnifiedComposer } from "./components/unified/unified-composer";
 import { ContentStudioTab } from "./components/content-studio-tab";
 import { OutboundHistory } from "./components/outbound-history";
 import { useChannelHealth } from "@/hooks/use-channel-health";
+import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
+import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
 import { listOutboundContent } from "@/lib/client";
 import type { EmailCampaign, LeadForm, OutboundContent } from "@/lib/client";
 import type { BusinessPulse, MarketingStats } from "./hooks/use-marketing";
@@ -453,9 +456,11 @@ function BusinessPulseStrip({
 export default function ContentPage() {
   const { getReturnLabel, navigateBack, getOriginWorkspace } = useReturnNavigation({ skipScrollListener: true });
   const searchParams = useSearchParams();
+  const marketingRouter = useRouter();
   const mk = useMarketing();
   const marketingAi = useMarketingAiHub();
   const channelHealth = useChannelHealth(mk.businessId || "");
+  const intelligence = useWorkspaceIntelligence({ businessId: mk.businessId, module: "marketing" });
 
   const [activeTab, setActiveTab] = useState<ContentTab>("create");
   const [createSubmode, setCreateSubmode] = useState<CreateSubmode>("compose");
@@ -805,6 +810,24 @@ export default function ContentPage() {
         </div>
       }
     >
+            <div className="flex items-center justify-between gap-2 mb-2">
+              {intelligence.moduleCoverage && (
+                <AutomationCoverageIndicator
+                  coveragePct={intelligence.moduleCoverage.coveragePct}
+                  automatedCount={intelligence.moduleCoverage.automatedCount}
+                  totalProcesses={intelligence.moduleCoverage.totalProcesses}
+                />
+              )}
+            </div>
+
+            <WorkspaceInsightsPanel
+              recommendations={intelligence.recommendations}
+              loading={intelligence.loading}
+              onDismiss={intelligence.dismiss}
+              onNavigate={(route) => marketingRouter.push(route)}
+              className="mb-4"
+            />
+
             {activeTab === "create" && (
               <div className="space-y-4">
                 <ContentIntelligenceStrip

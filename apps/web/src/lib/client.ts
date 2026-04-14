@@ -4071,6 +4071,43 @@ export async function fetchProAutoInsights(businessId: string): Promise<ApiResul
   return apiGetSimple<{ insights: ProAutoInsight[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/monitoring/insights`);
 }
 
+export interface WorkspaceRecommendation {
+  id: string;
+  type: 'action' | 'insight' | 'warning' | 'tip';
+  priority: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  explanation?: string;
+  sourceModule: string;
+  targetModule: string;
+  actionLabel?: string;
+  actionRoute?: string;
+  severity: number;
+}
+
+export async function fetchWorkspaceRecommendations(businessId: string, module: string): Promise<ApiResult<WorkspaceRecommendation[]>> {
+  return apiGetSimple<WorkspaceRecommendation[]>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/workspace-recommendations?module=${encodeURIComponent(module)}`);
+}
+
+export interface AutomationCoverage {
+  overallPct: number;
+  modules: Array<{ module: string; coveragePct: number; automatedCount: number; totalProcesses: number }>;
+}
+
+export async function fetchAutomationCoverage(businessId: string): Promise<ApiResult<AutomationCoverage>> {
+  return apiGetSimple<AutomationCoverage>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/automation-coverage`);
+}
+
+export interface CrossModuleLinks {
+  invoices: Array<{ id: string; number: string; status: string; amount: number }>;
+  bookings: Array<{ id: string; date: string; service: string; status: string }>;
+  projects: Array<{ id: string; name: string; status: string }>;
+}
+
+export async function fetchCrossModuleLinks(businessId: string, entityType: string, entityId: string): Promise<ApiResult<CrossModuleLinks>> {
+  return apiGetSimple<CrossModuleLinks>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/cross-module-links?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}`);
+}
+
 export interface ProfileInterviewMessage {
   role: 'user' | 'assistant';
   content: string;

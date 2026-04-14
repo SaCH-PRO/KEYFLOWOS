@@ -32,6 +32,9 @@ import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { AiHubTrigger, AiCommandHub } from "@/components/ai/ai-command-hub";
+import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
+import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -66,6 +69,8 @@ export default function ContactsPage() {
     handleApproveAutopilot, handleDenyAutopilot,
     selectContact, loadFlowData,
   } = state;
+
+  const intelligence = useWorkspaceIntelligence({ businessId, module: "crm" });
 
   useEffect(() => {
     if (businessId) {
@@ -215,14 +220,30 @@ export default function ContactsPage() {
         return <PlanLimitBanner resourceKey="contacts" label="contacts" currentUsage={cl.current} limit={cl.limit} isUnlimited={cl.isUnlimited} nearLimit={cl.nearLimit} atLimit={cl.atLimit} upgradeTo={cl.upgradeTo} />;
       })()}
 
-      <ClientsMetricsStrip
-        totalClients={contacts.length}
-        activeClients={state.flowIntelligence?.clients ?? contacts.filter((c) => c.status === "CLIENT").length}
-        followUpsDue={state.segmentCounts["needs-followup"] ?? 0}
-        atRisk={state.segmentCounts["at-risk"] ?? 0}
-        newThisWeek={state.segmentCounts["new-this-week"] ?? 0}
-        highValue={state.segmentCounts["high-value"] ?? 0}
-        onSegmentClick={state.setActiveSegment}
+      <div className="flex items-center justify-between gap-2">
+        <ClientsMetricsStrip
+          totalClients={contacts.length}
+          activeClients={state.flowIntelligence?.clients ?? contacts.filter((c) => c.status === "CLIENT").length}
+          followUpsDue={state.segmentCounts["needs-followup"] ?? 0}
+          atRisk={state.segmentCounts["at-risk"] ?? 0}
+          newThisWeek={state.segmentCounts["new-this-week"] ?? 0}
+          highValue={state.segmentCounts["high-value"] ?? 0}
+          onSegmentClick={state.setActiveSegment}
+        />
+        {intelligence.moduleCoverage && (
+          <AutomationCoverageIndicator
+            coveragePct={intelligence.moduleCoverage.coveragePct}
+            automatedCount={intelligence.moduleCoverage.automatedCount}
+            totalProcesses={intelligence.moduleCoverage.totalProcesses}
+          />
+        )}
+      </div>
+
+      <WorkspaceInsightsPanel
+        recommendations={intelligence.recommendations}
+        loading={intelligence.loading}
+        onDismiss={intelligence.dismiss}
+        onNavigate={(route) => router.push(route)}
       />
 
       <PipelineTabContent

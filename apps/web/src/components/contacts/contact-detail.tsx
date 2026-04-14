@@ -16,6 +16,7 @@ import { AiTagSuggestionsPanel } from "./ai-tag-suggestions";
 import { CommunicationLogger } from "./communication-logger";
 import { NextBestActionCard } from "./next-best-action-card";
 import { RelationshipHealthStrip } from "./relationship-health-strip";
+import { CrossModuleEntityLinks } from "@/components/ai/cross-module-links";
 
 export type ContactDetailData = {
   id: string;
@@ -124,6 +125,7 @@ interface ContactDetailProps {
   onSelectRelatedContact?: (contactId: string) => void;
   invoices?: Array<{ id: string; status: string; total?: number | null; currency?: string | null; dueDate?: string | null; issueDate?: string | null; createdAt?: string; paidAt?: string | null }>;
   bookings?: Array<{ id: string; startTime: string; endTime: string; status: string; service?: { name: string; price: number } | null; contact?: { firstName?: string | null } | null }>;
+  businessId?: string | null;
 }
 
 export function ContactDetail({
@@ -160,6 +162,7 @@ export function ContactDetail({
   onSelectRelatedContact,
   invoices,
   bookings,
+  businessId,
 }: ContactDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("activity");
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({
@@ -323,6 +326,16 @@ export function ContactDetail({
         <div className="shrink-0">
           <ContactDetailInfo contact={contact} relatedContacts={relatedContacts} onSelectRelatedContact={onSelectRelatedContact} />
         </div>
+
+        {businessId && contact.id && (
+          <div className="shrink-0">
+            <CrossModuleEntityLinks
+              businessId={businessId}
+              entityType="contact"
+              entityId={contact.id}
+            />
+          </div>
+        )}
 
         <div className="flex-1 min-h-0 flex flex-col">
           <ContactDetailTabs
