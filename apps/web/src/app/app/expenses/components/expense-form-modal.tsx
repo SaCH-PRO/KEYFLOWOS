@@ -52,9 +52,9 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       paymentMethod: formData.paymentMethod || undefined,
       tags: formData.tags ? formData.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
       isRecurring: formData.isRecurring, recurringFrequency: formData.isRecurring ? formData.recurringFrequency : undefined,
-      projectId: formData.projectId || undefined,
-      contactId: formData.contactId || undefined,
-      serviceId: formData.serviceId || undefined,
+      projectId: formData.projectId || null,
+      contactId: formData.contactId || null,
+      serviceId: formData.serviceId || null,
     };
     try {
       if (editingExpense) {
