@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
@@ -294,9 +294,12 @@ export class AiController {
   async resolveApproval(
     @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
-    @Body() body: { resolution: 'approved' | 'rejected' | 'deferred'; resolvedBy: string },
+    @Body() body: { resolution: 'approved' | 'rejected' | 'deferred' },
+    @Req() req: any,
   ) {
-    return this.governance.resolveApproval(approvalId, businessId, body.resolution, body.resolvedBy);
+    const userId = req?.user?.id;
+    if (!userId) throw new Error('Authenticated user required to resolve approvals');
+    return this.governance.resolveApproval(approvalId, businessId, body.resolution, userId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

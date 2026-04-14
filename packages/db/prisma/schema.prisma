@@ -25,6 +25,11 @@ model User {
   businesses Membership[]
   sessions   Session[]
 
+  aiExecutionLogs    AiExecutionLog[]    @relation("UserAiExecutionLogs")
+  aiApprovalItems    AiApprovalItem[]    @relation("UserAiApprovalItems")
+  aiApprovalResolutions AiApprovalItem[] @relation("UserAiApprovalResolutions")
+  aiPlans            AiPlan[]            @relation("UserAiPlans")
+
   @@map("users")
 }
 
@@ -3439,6 +3444,8 @@ model AiExecutionLog {
   id         String   @id @default(cuid())
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId     String?  @map("user_id")
+  user       User?    @relation("UserAiExecutionLogs", fields: [userId], references: [id], onDelete: SetNull)
 
   action       String
   toolName     String?   @map("tool_name")
@@ -3468,6 +3475,8 @@ model AiApprovalItem {
   id         String   @id @default(cuid())
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId     String?  @map("user_id")
+  user       User?    @relation("UserAiApprovalItems", fields: [userId], references: [id], onDelete: SetNull)
 
   status       String   @default("pending")
   riskTier     Int      @default(2) @map("risk_tier")
@@ -3484,6 +3493,8 @@ model AiApprovalItem {
   planStepId   String?  @map("plan_step_id")
   resolvedAt   DateTime? @map("resolved_at")
   resolvedBy   String?   @map("resolved_by")
+  resolvedByUserId String? @map("resolved_by_user_id")
+  resolvedByUser User?    @relation("UserAiApprovalResolutions", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
   resolution   String?
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -3519,6 +3530,8 @@ model AiPlan {
   id         String   @id @default(cuid())
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId     String?  @map("user_id")
+  user       User?    @relation("UserAiPlans", fields: [userId], references: [id], onDelete: SetNull)
 
   status       String   @default("draft")
   objective    String
