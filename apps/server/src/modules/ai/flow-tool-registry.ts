@@ -527,7 +527,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
-    changedEntities: ['message', 'activity'],
+    changedEntities: ['contactNote', 'activity'],
     parameters: {
       type: 'object',
       properties: {
