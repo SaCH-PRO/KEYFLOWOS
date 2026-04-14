@@ -16,6 +16,7 @@ import { AiMemoryService } from './ai-memory.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { ProfileIntelligenceService } from './profile-intelligence.service';
+import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
@@ -37,6 +38,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     StrategicIntelligenceService,
     ProAutoMonitorService,
     ProfileIntelligenceService,
+    WorkspaceRecommendationsService,
   ],
   exports: [
     AiAdvisorService,
@@ -52,6 +54,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     StrategicIntelligenceService,
     ProAutoMonitorService,
     ProfileIntelligenceService,
+    WorkspaceRecommendationsService,
   ],
 })
 export class AiModule {}

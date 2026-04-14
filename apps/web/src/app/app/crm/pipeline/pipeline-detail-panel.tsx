@@ -51,6 +51,7 @@ export interface PipelineDetailPanelProps {
   onSelectRelatedContact?: (contactId: string) => void;
   invoices?: Array<{ id: string; status: string; total?: number | null; currency?: string | null; dueDate?: string | null; issueDate?: string | null; createdAt?: string; paidAt?: string | null }>;
   bookings?: Array<{ id: string; startTime: string; endTime: string; status: string; service?: { name: string; price: number } | null; contact?: { firstName?: string | null } | null }>;
+  businessId?: string | null;
 }
 
 function PipelineDetailPanelInner({
@@ -89,6 +90,7 @@ function PipelineDetailPanelInner({
   onSelectRelatedContact,
   invoices,
   bookings,
+  businessId,
 }: PipelineDetailPanelProps) {
   if (detailError && !loading) {
     return (
@@ -147,6 +149,7 @@ function PipelineDetailPanelInner({
         onSelectRelatedContact={onSelectRelatedContact}
         invoices={invoices}
         bookings={bookings}
+        businessId={businessId}
       />
     </div>
   );

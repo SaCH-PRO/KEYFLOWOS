@@ -10,6 +10,7 @@ import { AiMemoryService, MemoryCategory } from './ai-memory.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { ProfileIntelligenceService } from './profile-intelligence.service';
+import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -55,6 +56,7 @@ export class AiController {
     @Inject(StrategicIntelligenceService) private readonly strategic: StrategicIntelligenceService,
     @Inject(ProAutoMonitorService) private readonly proAutoMonitor: ProAutoMonitorService,
     @Inject(ProfileIntelligenceService) private readonly profileIntelligence: ProfileIntelligenceService,
+    @Inject(WorkspaceRecommendationsService) private readonly workspaceRecs: WorkspaceRecommendationsService,
   ) {}
 
   @Get('health')
@@ -746,6 +748,38 @@ export class AiController {
         storefront: snapshot.storefront,
       },
     };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/workspace-recommendations')
+  async workspaceRecommendations(
+    @Param('businessId') businessId: string,
+    @Query('module') module: string,
+  ) {
+    const validModules = ['crm', 'revenue', 'bookings', 'marketing', 'projects', 'expenses', 'automations'];
+    if (!module || !validModules.includes(module)) {
+      throw new BadRequestException(`Invalid module. Must be one of: ${validModules.join(', ')}`);
+    }
+    return this.workspaceRecs.getRecommendations(businessId, module as any);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/automation-coverage')
+  async automationCoverage(@Param('businessId') businessId: string) {
+    return this.workspaceRecs.getAutomationCoverage(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/cross-module-links')
+  async crossModuleLinks(
+    @Param('businessId') businessId: string,
+    @Query('entityType') entityType: string,
+    @Query('entityId') entityId: string,
+  ) {
+    if (!entityType || !entityId) {
+      throw new BadRequestException('entityType and entityId are required');
+    }
+    return this.workspaceRecs.getCrossModuleLinks(businessId, entityType, entityId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

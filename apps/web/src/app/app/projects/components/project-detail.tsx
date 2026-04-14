@@ -30,6 +30,7 @@ import { RevenueTab } from "./project-detail-tabs/revenue-tab";
 import { CalendarTab } from "./project-detail-tabs/calendar-tab";
 import { FlowsTab } from "./project-detail-tabs/flows-tab";
 import { DeliverablesTab, Deliverable } from "./project-detail-tabs/deliverables-tab";
+import { CrossModuleEntityLinks } from "@/components/ai/cross-module-links";
 
 const DETAIL_TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
@@ -353,6 +354,15 @@ export function ProjectDetail({
           </div>
         )}
       </div>
+
+      {businessId && project.contactId && (
+        <CrossModuleEntityLinks
+          businessId={businessId}
+          entityType="contact"
+          entityId={project.contactId}
+          className="mb-3"
+        />
+      )}
 
       <TabNav
         tabs={DETAIL_TABS}

@@ -47,6 +47,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { formatCurrencyCompact } from "@/lib/currency";
 import { usePlan } from "@/hooks/use-plan";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
+import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
+import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
 import type { BillingSlots } from "./utils/commerce-slots";
 import InvoicesPanel from "./invoices/invoices-panel";
 import QuotesPanel from "./quotes/quotes-panel";
@@ -77,6 +80,7 @@ export default function CommercePage() {
   const shell = useCommerceShell();
   const billing = useBillingWorkspace();
   const { checkLimit } = usePlan();
+  const intelligence = useWorkspaceIntelligence({ businessId: shell.businessId, module: "revenue" });
   const overview = useCommerceOverview(shell.invoices, shell.businessCurrency);
   const composer = useCommerceComposer({
     tab: overview.tab,
@@ -460,6 +464,24 @@ export default function CommercePage() {
       </div>
       }
     >
+      <div className="flex items-center justify-between gap-2 mb-2">
+        {intelligence.moduleCoverage && (
+          <AutomationCoverageIndicator
+            coveragePct={intelligence.moduleCoverage.coveragePct}
+            automatedCount={intelligence.moduleCoverage.automatedCount}
+            totalProcesses={intelligence.moduleCoverage.totalProcesses}
+          />
+        )}
+      </div>
+
+      <WorkspaceInsightsPanel
+        recommendations={intelligence.recommendations}
+        loading={intelligence.loading}
+        onDismiss={intelligence.dismiss}
+        onNavigate={(route) => router.push(route)}
+        className="mb-4"
+      />
+
       {mode === "operations" && (
         <div className="space-y-4">
           {actionQueue.length > 0 && (
