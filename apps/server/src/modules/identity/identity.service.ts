@@ -346,6 +346,12 @@ export class IdentityService {
 
   async inviteTeamMember(businessId: string, email: string, role: string, inviterId: string, scopes?: Record<string, string>, maxApprovalTier?: number) {
     await this.assertTeamAdmin(businessId, inviterId);
+    if (scopes || maxApprovalTier !== undefined) {
+      this.validateScopesPayload(
+        scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF),
+        maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0),
+      );
+    }
     let user = await this.prisma.client.user.findUnique({ where: { email } });
     if (!user) {
       user = await this.prisma.client.user.create({
@@ -413,8 +419,21 @@ export class IdentityService {
     return updated;
   }
 
+  private validateScopesPayload(scopes: Record<string, string>, tier: number): void {
+    const validLevels = new Set(['none', 'read', 'write', 'admin']);
+    const validModules = new Set(IdentityService.PERMISSION_MODULES as readonly string[]);
+    for (const [key, value] of Object.entries(scopes)) {
+      if (!validModules.has(key)) throw new BadRequestException(`Invalid module: ${key}`);
+      if (!validLevels.has(value)) throw new BadRequestException(`Invalid permission level: ${value} for module ${key}`);
+    }
+    if (typeof tier !== 'number' || tier < 0 || tier > 4 || !Number.isInteger(tier)) {
+      throw new BadRequestException('maxApprovalTier must be an integer between 0 and 4');
+    }
+  }
+
   async updateMemberPermissions(businessId: string, membershipId: string, scopes: Record<string, string>, maxApprovalTier: number, requesterId: string) {
     await this.assertTeamAdmin(businessId, requesterId);
+    this.validateScopesPayload(scopes, maxApprovalTier);
     const membership = await this.prisma.client.membership.findUnique({
       where: { id: membershipId },
     });
