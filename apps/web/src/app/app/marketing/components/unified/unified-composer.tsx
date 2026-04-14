@@ -412,8 +412,9 @@ export function UnifiedComposer({
     if (objective) score += 10;
     if (tone) score += 10;
     if (selectedDestinations.length > 0) score += 20;
-    if ((contentType === "email" || contentType === "multi") && subject.trim()) score += 10;
-    if (contentType !== "email" && contentType !== "multi") score += 10;
+    const needsSubject = contentType === "email" || (contentType === "multi" && selectedDestinations.some(d => { const p = d.platform.toUpperCase(); return p === "EMAIL" || p === "GOOGLE"; }));
+    if (needsSubject && subject.trim()) score += 10;
+    if (!needsSubject) score += 10;
     if (mediaUrls.length > 0) score += 10;
     if (scheduleMode === "later" && scheduledAt) score += 10;
     if (scheduleMode === "now") score += 10;
@@ -750,15 +751,20 @@ export function UnifiedComposer({
             </div>
             <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-xl border border-border/30 bg-card shadow-xl p-3 space-y-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-2">Content Readiness</div>
-              {[
-                { label: "Content body", done: body.trim().length > 0 },
-                { label: "Subject line", done: subject.trim().length > 0, hide: contentType !== "email" && contentType !== "multi" },
-                { label: "Objective set", done: !!objective },
-                { label: "Tone selected", done: !!tone },
-                { label: "Channels selected", done: selectedDestinations.length > 0 },
-                { label: "Media attached", done: mediaUrls.length > 0 },
-                { label: "Delivery scheduled", done: scheduleMode === "later" ? !!scheduledAt : true },
-              ].filter(item => !item.hide).map((item) => (
+              {(() => {
+                const hasEmailDest = selectedDestinations.some(d => { const p = d.platform.toUpperCase(); return p === "EMAIL" || p === "GOOGLE"; });
+                const showSubject = contentType === "email" || (contentType === "multi" && hasEmailDest);
+                return [
+                  { label: "Content body", done: body.trim().length > 0 },
+                  { label: "Subject line", done: subject.trim().length > 0, hide: !showSubject },
+                  { label: "Objective set", done: !!objective },
+                  { label: "Tone selected", done: !!tone },
+                  { label: "Channels selected", done: selectedDestinations.length > 0 },
+                  { label: "Audience targeted", done: audience !== "all" || segmentTags.length > 0 },
+                  { label: "Media attached", done: mediaUrls.length > 0 },
+                  { label: "Delivery scheduled", done: scheduleMode === "later" ? !!scheduledAt : true },
+                ];
+              })().filter(item => !item.hide).map((item) => (
                 <div key={item.label} className="flex items-center gap-2 text-[11px]">
                   {item.done ? (
                     <CheckCircle className="w-3 h-3 text-emerald-400 shrink-0" />
