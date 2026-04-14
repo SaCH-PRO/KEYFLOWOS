@@ -47,8 +47,8 @@ export class ModuleScopeGuard implements CanActivate {
     const requirement = this.reflector.get<ModuleScopeRequirement>(MODULE_SCOPE_KEY, context.getHandler());
     if (!requirement) return true;
 
-    const req = context.switchToHttp().getRequest() as any;
-    const user = req.user as { id?: string; role?: string } | undefined;
+    const req = context.switchToHttp().getRequest<{ user?: { id?: string; role?: string }; params?: Record<string, string>; body?: Record<string, string> }>();
+    const user = req.user;
     if (!user?.id) throw new ForbiddenException('Authentication required');
 
     if (user.role === 'SUPER_ADMIN') return true;
