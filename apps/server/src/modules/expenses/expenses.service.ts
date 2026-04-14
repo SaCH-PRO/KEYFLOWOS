@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpenseCreatedPayload } from '../../core/event-bus/events.types';
@@ -104,17 +104,17 @@ export class ExpensesService {
 
     if (input.projectId) {
       const proj = await this.prisma.client.project.findFirst({ where: { id: input.projectId, businessId: input.businessId } });
-      if (!proj) throw new Error(`Project not found or does not belong to this business`);
+      if (!proj) throw new BadRequestException(`Project not found or does not belong to this business`);
       validProjectId = input.projectId;
     }
     if (input.contactId) {
       const ct = await this.prisma.client.contact.findFirst({ where: { id: input.contactId, businessId: input.businessId } });
-      if (!ct) throw new Error(`Contact not found or does not belong to this business`);
+      if (!ct) throw new BadRequestException(`Contact not found or does not belong to this business`);
       validContactId = input.contactId;
     }
     if (input.serviceId) {
       const svc = await this.prisma.client.service.findFirst({ where: { id: input.serviceId, businessId: input.businessId } });
-      if (!svc) throw new Error(`Service not found or does not belong to this business`);
+      if (!svc) throw new BadRequestException(`Service not found or does not belong to this business`);
       validServiceId = input.serviceId;
     }
 
@@ -186,7 +186,7 @@ export class ExpensesService {
         updateData.projectId = null;
       } else {
         const proj = await this.prisma.client.project.findFirst({ where: { id: input.projectId, businessId: input.businessId } });
-        if (!proj) throw new Error(`Project not found or does not belong to this business`);
+        if (!proj) throw new BadRequestException(`Project not found or does not belong to this business`);
         updateData.projectId = input.projectId;
       }
     }
@@ -195,7 +195,7 @@ export class ExpensesService {
         updateData.contactId = null;
       } else {
         const ct = await this.prisma.client.contact.findFirst({ where: { id: input.contactId, businessId: input.businessId } });
-        if (!ct) throw new Error(`Contact not found or does not belong to this business`);
+        if (!ct) throw new BadRequestException(`Contact not found or does not belong to this business`);
         updateData.contactId = input.contactId;
       }
     }
@@ -204,7 +204,7 @@ export class ExpensesService {
         updateData.serviceId = null;
       } else {
         const svc = await this.prisma.client.service.findFirst({ where: { id: input.serviceId, businessId: input.businessId } });
-        if (!svc) throw new Error(`Service not found or does not belong to this business`);
+        if (!svc) throw new BadRequestException(`Service not found or does not belong to this business`);
         updateData.serviceId = input.serviceId;
       }
     }
