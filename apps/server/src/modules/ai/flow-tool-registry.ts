@@ -11,6 +11,7 @@ export interface ToolParamSchema {
     items?: { type: string };
   }>;
   required: string[];
+  [key: string]: unknown;
 }
 
 export interface ToolOutputSchema {
