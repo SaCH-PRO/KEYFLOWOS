@@ -412,8 +412,8 @@ export function UnifiedComposer({
     if (objective) score += 10;
     if (tone) score += 10;
     if (selectedDestinations.length > 0) score += 20;
-    if (contentType === "email" && subject.trim()) score += 10;
-    if (contentType !== "email") score += 10;
+    if ((contentType === "email" || contentType === "multi") && subject.trim()) score += 10;
+    if (contentType !== "email" && contentType !== "multi") score += 10;
     if (mediaUrls.length > 0) score += 10;
     if (scheduleMode === "later" && scheduledAt) score += 10;
     if (scheduleMode === "now") score += 10;
@@ -723,14 +723,52 @@ export function UnifiedComposer({
         ))}
 
         <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <div className="w-16 h-1.5 rounded-full bg-muted/20 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-[hsl(var(--kf-accent1))] transition-all duration-500"
-                style={{ width: `${readinessScore}%` }}
-              />
+          <div className="relative group">
+            <div className="flex items-center gap-1.5 cursor-default">
+              <svg width="24" height="24" viewBox="0 0 24 24" className="shrink-0">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" className="text-muted/20" />
+                <circle
+                  cx="12" cy="12" r="10" fill="none"
+                  stroke="url(#readinessGrad)"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeDasharray={`${(readinessScore / 100) * 62.83} 62.83`}
+                  transform="rotate(-90 12 12)"
+                  className="transition-all duration-700"
+                />
+                <defs>
+                  <linearGradient id="readinessGrad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="hsl(var(--kf-accent1))" />
+                    <stop offset="100%" stopColor="hsl(var(--kf-accent2))" />
+                  </linearGradient>
+                </defs>
+                <text x="12" y="12" textAnchor="middle" dominantBaseline="central" className="fill-current text-[7px] font-bold" fill="currentColor">
+                  {readinessScore}
+                </text>
+              </svg>
+              <span className="text-[9px] text-muted-foreground">Ready</span>
             </div>
-            <span className="text-[9px] text-muted-foreground">{readinessScore}%</span>
+            <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-xl border border-border/30 bg-card shadow-xl p-3 space-y-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-2">Content Readiness</div>
+              {[
+                { label: "Content body", done: body.trim().length > 0 },
+                { label: "Subject line", done: subject.trim().length > 0, hide: contentType !== "email" && contentType !== "multi" },
+                { label: "Objective set", done: !!objective },
+                { label: "Tone selected", done: !!tone },
+                { label: "Channels selected", done: selectedDestinations.length > 0 },
+                { label: "Media attached", done: mediaUrls.length > 0 },
+                { label: "Delivery scheduled", done: scheduleMode === "later" ? !!scheduledAt : true },
+              ].filter(item => !item.hide).map((item) => (
+                <div key={item.label} className="flex items-center gap-2 text-[11px]">
+                  {item.done ? (
+                    <CheckCircle className="w-3 h-3 text-emerald-400 shrink-0" />
+                  ) : (
+                    <div className="w-3 h-3 rounded-full border border-muted-foreground/30 shrink-0" />
+                  )}
+                  <span className={item.done ? "text-foreground" : "text-muted-foreground"}>{item.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
           <button
             onClick={() => setShowPreview(!showPreview)}
