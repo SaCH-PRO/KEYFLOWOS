@@ -92,7 +92,12 @@ export class ProfileIntelligenceService {
     return state;
   }
 
-  async chat(businessId: string, userMessage: string): Promise<{ reply: string; state: ProfileInterviewState }> {
+  async chat(businessId: string, userMessage: string): Promise<{
+    reply: string;
+    state: ProfileInterviewState;
+    pendingExtractions: ProfileExtraction[];
+    currentTopicUnlocks: string | null;
+  }> {
     const state = await this.getInterviewState(businessId);
 
     state.messages.push({ role: 'user', content: userMessage });
@@ -177,16 +182,12 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
         try {
           const rawExtractions: Array<{ topic?: string; category: MemoryCategory; key: string; value: string; confidence: number }> = JSON.parse(extractMatch[1]);
           for (const ext of rawExtractions) {
-            if (!SAFE_PROFILE_CATEGORIES.has(ext.category)) {
+            if (!SAFE_PROFILE_CATEGORIES.has(ext.category as string)) {
               this.logger.warn(`Profile extraction rejected: unsafe category "${ext.category}"`);
               continue;
             }
             if (BLOCKED_KEYS.has(ext.key)) {
               this.logger.warn(`Profile extraction rejected: blocked key "${ext.key}"`);
-              continue;
-            }
-            if (ext.category === 'settings') {
-              this.logger.warn(`Profile extraction rejected: reserved category "settings"`);
               continue;
             }
             pendingExtractions.push({
@@ -264,7 +265,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
         continue;
       }
 
-      if (!SAFE_PROFILE_CATEGORIES.has(ext.category) || BLOCKED_KEYS.has(ext.key)) {
+      if (!SAFE_PROFILE_CATEGORIES.has(ext.category as string) || BLOCKED_KEYS.has(ext.key)) {
         this.logger.warn(`Confirmation rejected: unsafe category/key "${ext.category}/${ext.key}"`);
         rejected++;
         ext.confirmed = true;
