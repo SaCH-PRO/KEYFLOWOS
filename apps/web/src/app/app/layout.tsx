@@ -51,8 +51,8 @@ import {
   Shield,
   Brain,
 } from "lucide-react";
-import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
-import { FlowChatPanel, FlowTriggerButton } from "./_command/flow-chat-panel";
+
+
 import { CopilotPanel, type CopilotModule } from "@/components/ai/copilot-panel";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
@@ -330,7 +330,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [isAdminUser, setIsAdminUser] = useState(false);
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
-  const [flowOpen, setFlowOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
 
   useEffect(() => {
@@ -644,9 +643,14 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 <span className="text-sm font-bold tracking-tight truncate">KEYFLOWOS</span>
               </div>
 
-              <div className="hidden md:flex flex-1 min-w-0 max-w-lg">
-                <AiCommandBar />
-              </div>
+              <button
+                onClick={() => setCopilotOpen(true)}
+                className="hidden md:flex flex-1 min-w-0 max-w-lg items-center gap-2 rounded-lg border border-border/40 bg-muted/20 px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/30 hover:text-foreground/70 transition-colors cursor-pointer"
+              >
+                <Brain className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
+                <span className="truncate">Ask AI anything...</span>
+                <kbd className="ml-auto px-1 py-0.5 rounded bg-muted text-[10px] font-mono shrink-0">⌘J</kbd>
+              </button>
               <button
                 onClick={() => setPaletteOpen(true)}
                 className="hidden md:flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:border-muted-foreground/30 transition-colors shrink-0"
@@ -849,7 +853,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           </div>
           <div data-scroll-root="app" className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6">{children}</div>
         </main>
-        <AiCopilotTrigger />
+        
       </div>
 
       {mobileDrawerOpen && (
@@ -1032,8 +1036,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <PlanLimitDialog planLimit={planLimitHit} onClose={clearPlanLimit} />
       <KeyflowOSStoreDrawer open={kfStoreOpen} onClose={() => setKfStoreOpen(false)} />
-      <FlowChatPanel open={flowOpen} onClose={() => setFlowOpen(false)} />
-      {!flowOpen && <FlowTriggerButton onClick={() => setFlowOpen(true)} />}
       <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} currentModule={copilotModule} />
     </div>
   );
