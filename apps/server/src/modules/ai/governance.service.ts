@@ -7,7 +7,9 @@ export type RiskTier = 1 | 2 | 3 | 4;
 
 export interface GovernanceDecision {
   allowed: boolean;
-  requiresApproval: boolean;
+  requiresQuickConfirm: boolean;
+  requiresFormalApproval: boolean;
+  requiresAdminApproval: boolean;
   tier: RiskTier;
   reason: string;
 }
@@ -92,35 +94,46 @@ export class GovernanceService {
     const tier = this.getToolTier(toolName);
     const settings = await this.getAutonomySettings(businessId);
 
+    const blocked = { allowed: false, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier };
+
     if (settings.blockedTools.includes(toolName)) {
-      return { allowed: false, requiresApproval: false, tier, reason: `Tool "${toolName}" is blocked by business settings` };
+      return { ...blocked, reason: `Tool "${toolName}" is blocked by business settings` };
     }
 
-    const toolDef = getToolByName(toolName);
     const module = this.inferModule(toolName);
     if (module && settings.blockedModules.includes(module)) {
-      return { allowed: false, requiresApproval: false, tier, reason: `Module "${module}" is blocked by business settings` };
+      return { ...blocked, reason: `Module "${module}" is blocked by business settings` };
     }
 
     const effectiveMode = (mode as AutonomySettings['mode']) || settings.mode;
 
     if (effectiveMode === 'restricted') {
-      return { allowed: false, requiresApproval: false, tier, reason: 'AI is in restricted mode — no actions allowed' };
+      return { ...blocked, reason: 'AI is in restricted mode — no actions allowed' };
     }
 
     if (effectiveMode === 'advisory') {
-      return { allowed: false, requiresApproval: false, tier, reason: 'AI is in advisory mode — suggestions only, no execution' };
+      return { ...blocked, reason: 'AI is in advisory mode — suggestions only, no execution' };
     }
 
+    const auto = { allowed: true, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier };
+
     if (tier <= settings.maxAutoTier) {
-      return { allowed: true, requiresApproval: false, tier, reason: `Tier ${tier} auto-approved (max auto tier: ${settings.maxAutoTier})` };
+      return { ...auto, reason: `Tier ${tier} auto-approved (max auto tier: ${settings.maxAutoTier})` };
+    }
+
+    if (tier === 2) {
+      return { ...auto, requiresQuickConfirm: true, reason: 'Tier 2 action requires quick confirmation before execution' };
+    }
+
+    if (tier === 3) {
+      return { ...auto, requiresFormalApproval: true, reason: 'Tier 3 action requires explicit approval before execution' };
     }
 
     if (tier === 4) {
-      return { allowed: true, requiresApproval: true, tier, reason: 'Tier 4 action requires explicit admin approval' };
+      return { ...auto, requiresAdminApproval: true, requiresFormalApproval: true, reason: 'Tier 4 action requires admin-level approval before execution' };
     }
 
-    return { allowed: true, requiresApproval: true, tier, reason: `Tier ${tier} exceeds auto-execute threshold (${settings.maxAutoTier}), requires confirmation` };
+    return { ...auto, requiresQuickConfirm: true, reason: `Tier ${tier} exceeds auto-execute threshold (${settings.maxAutoTier}), requires confirmation` };
   }
 
   async getAutonomySettings(businessId: string): Promise<AutonomySettings> {
