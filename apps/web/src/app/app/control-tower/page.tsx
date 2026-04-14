@@ -144,7 +144,7 @@ export default function ControlTowerPage() {
             healthIndicators={d.data.snapshot.healthIndicators}
           />
 
-          <PriorityQueue priorities={d.priorities} />
+          <PriorityQueue priorities={d.priorities} businessId={d.businessId} />
 
           {(d.data.risks?.length ?? 0) > 0 && (
             <RiskAlerts risks={d.data.risks} />
