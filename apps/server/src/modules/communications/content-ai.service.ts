@@ -459,7 +459,7 @@ Respond in valid JSON:
         },
         orderBy: { startTime: 'asc' },
         take: 5,
-        select: { serviceName: true, startTime: true, status: true },
+        select: { id: true, startTime: true, status: true },
       }).catch(() => []),
       this.prisma.client.outboundContent.findMany({
         where: { businessId, deletedAt: null },

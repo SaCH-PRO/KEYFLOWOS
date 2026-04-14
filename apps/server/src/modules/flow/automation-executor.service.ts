@@ -283,8 +283,7 @@ export class AutomationExecutorService {
                 contentType: 'whatsapp_message',
                 body: messageBody,
                 status: 'Queued',
-                contentMeta: { source: 'flow', playbookName, contactId: context.contactId },
-                tags: ['flow-action'],
+                contentMeta: { source: 'flow', playbookName, contactId: context.contactId, tags: ['flow-action'] },
               },
             });
 
@@ -374,8 +373,7 @@ export class AutomationExecutorService {
               subject: campaignSubject,
               body: campaignBody,
               status: 'Queued',
-              contentMeta: { segmentTags, source: 'flow', playbookName, campaignId: campaign.id },
-              tags: ['flow-action', 'campaign'],
+              contentMeta: { segmentTags, source: 'flow', playbookName, campaignId: campaign.id, tags: ['flow-action', 'campaign'] },
             },
           });
 

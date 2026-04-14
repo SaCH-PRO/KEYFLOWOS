@@ -129,7 +129,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       return {
         success: true,
         externalPostId: messageId,
-        raw: result,
+        raw: result as unknown as Record<string, unknown>,
       };
     } catch (err) {
       const normalized = this.normalizeError(err);

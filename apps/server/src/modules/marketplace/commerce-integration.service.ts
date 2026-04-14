@@ -227,6 +227,7 @@ export class CommerceIntegrationService {
       const subtotal = items.reduce((s: number, i: any) => s + i.total, 0);
 
       const contactId = await this.resolveContactId(businessId, order);
+      if (!contactId) throw new Error(`Cannot create invoice: no contact resolved for order ${order.id}`);
 
       await this.prisma.client.invoice.create({
         data: {

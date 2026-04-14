@@ -365,12 +365,12 @@ export class SiteController {
     },
   ) {
     return this.intakeService.submitIntake(slug, {
-      name: sanitize(body.name ?? ''),
-      email: sanitize(body.email ?? ''),
-      phone: body.phone ? sanitize(body.phone) : undefined,
-      category: sanitize(body.category ?? ''),
-      description: sanitize(body.description ?? ''),
-      budget: body.budget ? sanitize(body.budget) : undefined,
+      name: sanitize(body.name ?? '') ?? '',
+      email: sanitize(body.email ?? '') ?? '',
+      phone: body.phone ? (sanitize(body.phone) ?? undefined) : undefined,
+      category: sanitize(body.category ?? '') ?? '',
+      description: sanitize(body.description ?? '') ?? '',
+      budget: body.budget ? (sanitize(body.budget) ?? undefined) : undefined,
       urgency: body.urgency,
     });
   }

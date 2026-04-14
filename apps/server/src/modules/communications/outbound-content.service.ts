@@ -141,7 +141,7 @@ export class OutboundContentService {
           textBody: data.textBody ?? existing.textBody,
           htmlBody: data.htmlBody ?? existing.htmlBody,
           mediaUrls: data.mediaUrls ?? existing.mediaUrls,
-          variantMeta: Object.keys(meta).length > 0 ? meta : existing.variantMeta,
+          variantMeta: Object.keys(meta).length > 0 ? meta : (existing.variantMeta ?? undefined),
         },
       });
     }

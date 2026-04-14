@@ -240,8 +240,8 @@ Respond in valid JSON:
     const marginData = await this.marginAnalysis.analyzeProduct(productId, businessId);
     const salesHistory = await this.db.invoiceItem.findMany({
       where: { invoice: { businessId, deletedAt: null }, productId },
-      select: { quantity: true, createdAt: true },
-      orderBy: { createdAt: 'desc' },
+      select: { quantity: true, invoiceId: true },
+      orderBy: { invoiceId: 'desc' },
       take: 30,
     });
 
