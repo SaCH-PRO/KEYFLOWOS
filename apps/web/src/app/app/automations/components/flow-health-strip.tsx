@@ -10,7 +10,7 @@ interface FlowHealthStats {
   mostTriggered: string | null;
   maxRuns: number;
   neverRun: number;
-  successRate: number;
+  totalRuns: number;
   coveragePct: number;
 }
 
@@ -33,10 +33,10 @@ export function FlowHealthStrip({ stats }: FlowHealthStripProps) {
       color: "hsl(var(--kf-accent1))",
     },
     {
-      label: "Success Rate",
-      value: `${stats.successRate}%`,
+      label: "Total Runs",
+      value: stats.totalRuns,
       icon: Activity,
-      color: stats.successRate >= 80 ? "hsl(var(--kf-success))" : stats.successRate >= 50 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))",
+      color: stats.totalRuns > 0 ? "hsl(var(--kf-info))" : "hsl(var(--muted-foreground))",
     },
     {
       label: "Coverage",
