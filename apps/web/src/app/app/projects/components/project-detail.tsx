@@ -18,7 +18,7 @@ import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 import {
   PROJECT_STAGES, normalizeStatus, getStageInfo, PROJECT_COLORS,
-  getProjectProgress, getProjectRisk, RISK_STYLES,
+  getProjectProgress, getProjectRisk, RISK_STYLES, isOverdue, isDueSoon,
 } from "./project-constants";
 import { OverviewTab } from "./project-detail-tabs/overview-tab";
 import { TasksTab } from "./project-detail-tabs/tasks-tab";
@@ -85,6 +85,20 @@ export function ProjectDetail({
   const progress = getProjectProgress(project.tasks ?? []);
   const risk = getProjectRisk(project);
   const riskStyle = RISK_STYLES[risk];
+
+  const overdueTasks = (project.tasks ?? []).filter((t) => !t.isCompleted && isOverdue(t.dueDate)).length;
+  const blockedStatus = normalizeStatus(project.status) === "BLOCKED" || normalizeStatus(project.status) === "WAITING_ON_CLIENT";
+  const overdueMs = milestones.filter((m) => !m.completed && isOverdue(m.dueDate)).length;
+  const riskFlagCount = overdueTasks + (blockedStatus ? 1 : 0) + overdueMs + (project.dueDate && isOverdue(project.dueDate) && normalizeStatus(project.status) !== "COMPLETED" ? 1 : 0);
+
+  const timelineHealth = (() => {
+    const status = normalizeStatus(project.status);
+    if (status === "COMPLETED") return { label: "Delivered", color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.1)" };
+    if (project.dueDate && isOverdue(project.dueDate)) return { label: "Overdue", color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.1)" };
+    if (project.dueDate && isDueSoon(project.dueDate, 3) && progress < 70) return { label: "At Risk", color: "hsl(var(--kf-warning))", bg: "hsl(var(--kf-warning) / 0.1)" };
+    if (project.dueDate) return { label: "On Track", color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.1)" };
+    return null;
+  })();
 
   const handleSaveEdit = async () => {
     if (!businessId) return;
@@ -257,9 +271,9 @@ export function ProjectDetail({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3 mt-1">
+            <div className="flex items-center gap-3 mt-1 flex-wrap">
               {project.description && (
-                <p className="text-sm text-muted-foreground truncate">{project.description}</p>
+                <p className="text-sm text-muted-foreground truncate max-w-[200px]">{project.description}</p>
               )}
               <div className="flex items-center gap-2 shrink-0">
                 <div className="flex items-center gap-1.5">
@@ -268,6 +282,16 @@ export function ProjectDetail({
                   </div>
                   <span className="text-[10px] text-muted-foreground tabular-nums">{progress}%</span>
                 </div>
+                {timelineHealth && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium shrink-0" style={{ background: timelineHealth.bg, color: timelineHealth.color }}>
+                    {timelineHealth.label}
+                  </span>
+                )}
+                {riskFlagCount > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium shrink-0" style={{ background: "hsl(var(--kf-error) / 0.1)", color: "hsl(var(--kf-error))" }}>
+                    {riskFlagCount} risk flag{riskFlagCount > 1 ? "s" : ""}
+                  </span>
+                )}
               </div>
             </div>
           </div>
