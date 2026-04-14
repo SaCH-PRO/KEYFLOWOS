@@ -96,27 +96,34 @@ export default function FlowsPage() {
     const neverRun = playbooks.filter((p) => p.enabled && !(p.runCount ?? 0) && !p.lastRunAt).length
       + workflows.filter((w) => w.enabled && !w.runCount && !w.lastRunAt).length;
 
-    const totalFlows = playbooks.length + workflows.length;
-    const healthyFlows = [...playbooks, ...workflows].filter((f) => {
-      if (!f.enabled) return false;
-      const runs = "runCount" in f ? (f.runCount ?? 0) : 0;
-      return runs > 0 && f.lastRunAt;
-    }).length;
-    const enabledFlows = active;
-    const successRate = enabledFlows > 0 ? Math.round((healthyFlows / enabledFlows) * 100) : totalFlows > 0 ? 0 : 100;
+    const totalRuns = playbooks.reduce((s, p) => s + (p.runCount ?? 0), 0) + workflows.reduce((s, w) => s + w.runCount, 0);
 
     const allTriggers = new Set<string>();
-    for (const p of playbooks) { if (p.enabled) allTriggers.add(p.triggerEvent); }
-    for (const w of workflows) { if (w.enabled) allTriggers.add(w.triggerEvent); }
+    const allActions = new Set<string>();
+    for (const p of playbooks) {
+      if (p.enabled) {
+        allTriggers.add(p.triggerEvent);
+        if (Array.isArray(p.actions)) {
+          for (const a of p.actions as { type?: string }[]) {
+            if (a.type) allActions.add(a.type);
+          }
+        }
+      }
+    }
+    for (const w of workflows) {
+      if (w.enabled) allTriggers.add(w.triggerEvent);
+    }
     const moduleCoverages = COVERAGE_MODULES.map((m) => {
-      const covered = m.triggers.filter((t) => allTriggers.has(t)).length;
-      return m.triggers.length > 0 ? Math.round((covered / m.triggers.length) * 100) : 0;
+      const covTriggers = m.triggers.filter((t) => allTriggers.has(t)).length;
+      const covActions = m.actions.filter((a: string) => allActions.has(a)).length;
+      const total = m.triggers.length + m.actions.length;
+      return total > 0 ? Math.round(((covTriggers + covActions) / total) * 100) : 0;
     });
     const coveragePct = moduleCoverages.length > 0
       ? Math.round(moduleCoverages.reduce((a, b) => a + b, 0) / moduleCoverages.length)
       : 0;
 
-    return { active, paused, total, recentlyTriggered, mostTriggered, maxRuns, neverRun, successRate, coveragePct };
+    return { active, paused, total, recentlyTriggered, mostTriggered, maxRuns, neverRun, totalRuns, coveragePct };
   }, [playbooks, workflows]);
 
   const activeTriggers = useMemo(() => {
@@ -129,6 +136,18 @@ export default function FlowsPage() {
     }
     return triggers;
   }, [playbooks, workflows]);
+
+  const activeActions = useMemo(() => {
+    const actions = new Set<string>();
+    for (const p of playbooks) {
+      if (p.enabled && Array.isArray(p.actions)) {
+        for (const a of p.actions as { type?: string }[]) {
+          if (a.type) actions.add(a.type);
+        }
+      }
+    }
+    return actions;
+  }, [playbooks]);
 
   const upgradeBanner = isFreePlan && showUpgradeBanner ? (
     <div className="relative">
@@ -150,7 +169,7 @@ export default function FlowsPage() {
   const flowHealthContent = !loading && activeTab === "flows" ? (
     <div className="space-y-3">
       <FlowHealthStrip stats={healthStats} />
-      <CoverageMap activeTriggers={activeTriggers} />
+      <CoverageMap activeTriggers={activeTriggers} activeActions={activeActions} />
       <RecommendedFlows activeTriggers={activeTriggers} onSelect={handleRecommendedSelect} />
     </div>
   ) : null;

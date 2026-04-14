@@ -161,17 +161,21 @@ export function FlowList({
   }
 
   function getHealthIndicator(enabled: boolean, lastRunAt: string | null | undefined, runCount: number) {
-    if (!enabled) return { label: "Paused", color: "hsl(var(--muted-foreground))", icon: PowerOff, score: 0 };
-    if (runCount === 0 && !lastRunAt) return { label: "Never run", color: "hsl(var(--kf-warning))", icon: AlertTriangle, score: 20 };
+    if (!enabled) return { label: "Paused", color: "hsl(var(--muted-foreground))", icon: PowerOff, score: 0, detail: "Flow is paused — enable to start processing" };
+    if (runCount === 0 && !lastRunAt) return { label: "Never run", color: "hsl(var(--kf-warning))", icon: AlertTriangle, score: 15, detail: "Active but never triggered — verify trigger configuration" };
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    if (lastRunAt && new Date(lastRunAt).getTime() > weekAgo) {
-      return { label: "Healthy", color: "hsl(var(--kf-success))", icon: CheckCircle, score: 100 };
-    }
-    if (lastRunAt && new Date(lastRunAt).getTime() > thirtyDaysAgo) {
-      return { label: "Idle", color: "hsl(var(--muted-foreground))", icon: Clock, score: 60 };
-    }
-    return { label: "Stale", color: "hsl(var(--kf-warning))", icon: AlertTriangle, score: 30 };
+
+    let score = 40;
+    if (lastRunAt && new Date(lastRunAt).getTime() > weekAgo) score += 40;
+    else if (lastRunAt && new Date(lastRunAt).getTime() > thirtyDaysAgo) score += 20;
+    if (runCount >= 10) score += 20;
+    else if (runCount >= 3) score += 10;
+    score = Math.min(score, 100);
+
+    if (score >= 80) return { label: "Healthy", color: "hsl(var(--kf-success))", icon: CheckCircle, score, detail: `${runCount} total runs — actively processing` };
+    if (score >= 50) return { label: "Idle", color: "hsl(var(--muted-foreground))", icon: Clock, score, detail: `${runCount} runs — last active ${lastRunAt ? new Date(lastRunAt).toLocaleDateString() : "unknown"}` };
+    return { label: "Stale", color: "hsl(var(--kf-warning))", icon: AlertTriangle, score, detail: `Only ${runCount} runs — may need review` };
   }
 
   function getFlowWarnings(enabled: boolean, lastRunAt: string | null | undefined, runCount: number): string[] {
@@ -380,7 +384,7 @@ export function FlowList({
                   </div>
 
                   <div className="flex items-center gap-3 text-[11px]">
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1" title={health.detail}>
                       <HealthIcon className="w-3 h-3" style={{ color: health.color }} />
                       <span style={{ color: health.color }}>{health.label}</span>
                     </div>
@@ -484,7 +488,7 @@ export function FlowList({
                 <p className="text-[11px] text-muted-foreground leading-relaxed">{wf.description}</p>
 
                 <div className="flex items-center gap-3 text-[11px]">
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1" title={wfHealth.detail}>
                     <WfHealthIcon className="w-3 h-3" style={{ color: wfHealth.color }} />
                     <span style={{ color: wfHealth.color }}>{wfHealth.label}</span>
                   </div>

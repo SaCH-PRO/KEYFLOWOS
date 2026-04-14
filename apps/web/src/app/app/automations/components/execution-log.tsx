@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   Clock, Zap, RefreshCw, AlertTriangle, CheckCircle, Info, Search,
   SkipForward, ChevronDown, ChevronRight, FileText, ExternalLink,
-  RotateCcw, Workflow,
+  Workflow,
 } from "lucide-react";
 import { fetchActivityFeed, ActivityItem } from "@/lib/client";
 
@@ -368,12 +368,12 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                             className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[32px]"
                             style={{ background: "hsl(var(--muted) / 0.5)", color: "hsl(var(--muted-foreground))" }}
                             onClick={() => {
-                              console.log("Rerun flow execution:", item.id);
+                              navigator.clipboard.writeText(item.id).catch(() => {});
                             }}
-                            title="Re-execute this flow run"
+                            title="Copy execution run ID for debugging"
                           >
-                            <RotateCcw className="w-3 h-3" />
-                            Rerun
+                            <FileText className="w-3 h-3" />
+                            Copy Run ID
                           </button>
                         </div>
                       )}

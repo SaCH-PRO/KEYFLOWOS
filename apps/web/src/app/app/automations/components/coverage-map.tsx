@@ -2,9 +2,11 @@
 
 import { Shield, CheckCircle, AlertTriangle, Users, CreditCard, CalendarDays, Megaphone, UserCog, Timer } from "lucide-react";
 import { COVERAGE_MODULES } from "./automation-constants";
+import type { ActionStep } from "./automation-constants";
 
 interface CoverageMapProps {
   activeTriggers: Set<string>;
+  activeActions?: Set<string>;
 }
 
 const MODULE_ICONS: Record<string, typeof Users> = {
@@ -16,15 +18,27 @@ const MODULE_ICONS: Record<string, typeof Users> = {
   scheduled: Timer,
 };
 
-export function CoverageMap({ activeTriggers }: CoverageMapProps) {
+export function CoverageMap({ activeTriggers, activeActions }: CoverageMapProps) {
+  const usedActions = activeActions ?? new Set<string>();
+
   const coverageData = COVERAGE_MODULES.map((mod) => {
-    const covered = mod.triggers.filter((t) => activeTriggers.has(t)).length;
-    const total = mod.triggers.length;
-    const pct = total > 0 ? Math.round((covered / total) * 100) : 0;
+    const coveredTriggers = mod.triggers.filter((t) => activeTriggers.has(t)).length;
+    const totalTriggers = mod.triggers.length;
+    const triggerPct = totalTriggers > 0 ? Math.round((coveredTriggers / totalTriggers) * 100) : 0;
+
+    const coveredActions = mod.actions.filter((a) => usedActions.has(a)).length;
+    const totalActions = mod.actions.length;
+    const actionPct = totalActions > 0 ? Math.round((coveredActions / totalActions) * 100) : 0;
+
+    const combinedTotal = totalTriggers + totalActions;
+    const combinedCovered = coveredTriggers + coveredActions;
+    const pct = combinedTotal > 0 ? Math.round((combinedCovered / combinedTotal) * 100) : 0;
+
     let status: "full" | "partial" | "none" = "none";
     if (pct >= 75) status = "full";
     else if (pct > 0) status = "partial";
-    return { ...mod, covered, total, pct, status };
+
+    return { ...mod, coveredTriggers, totalTriggers, triggerPct, coveredActions, totalActions, actionPct, pct, status };
   });
 
   const overallCoverage = Math.round(
@@ -38,7 +52,7 @@ export function CoverageMap({ activeTriggers }: CoverageMapProps) {
           <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "hsl(var(--kf-info) / 0.15)" }}>
             <Shield className="w-3 h-3" style={{ color: "hsl(var(--kf-info))" }} />
           </div>
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Trigger Coverage by Module</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Trigger & Action Coverage</span>
         </div>
         <span
           className="text-xs font-semibold px-2 py-0.5 rounded-md"
@@ -65,12 +79,6 @@ export function CoverageMap({ activeTriggers }: CoverageMapProps) {
               : mod.status === "partial"
                 ? "hsl(var(--kf-warning) / 0.08)"
                 : "hsl(var(--muted) / 0.2)";
-          const statusLabel =
-            mod.status === "full"
-              ? "Covered"
-              : mod.status === "partial"
-                ? "Partial"
-                : "No coverage";
 
           return (
             <div
@@ -82,22 +90,21 @@ export function CoverageMap({ activeTriggers }: CoverageMapProps) {
                 <Icon className="w-3.5 h-3.5" style={{ color: statusColor }} />
                 <span className="text-xs font-medium truncate">{mod.label}</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                {mod.status === "full" ? (
-                  <CheckCircle className="w-3 h-3" style={{ color: statusColor }} />
-                ) : (
-                  <AlertTriangle className="w-3 h-3" style={{ color: statusColor }} />
-                )}
-                <span className="text-[10px]" style={{ color: statusColor }}>
-                  {statusLabel}
-                </span>
-                <span className="text-[10px] text-muted-foreground ml-auto">{mod.covered}/{mod.total}</span>
-              </div>
-              <div className="mt-1.5 h-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted) / 0.3)" }}>
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{ width: `${mod.pct}%`, background: statusColor }}
-                />
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[9px]">
+                  <span className="text-muted-foreground">Triggers</span>
+                  <span style={{ color: statusColor }}>{mod.coveredTriggers}/{mod.totalTriggers}</span>
+                </div>
+                <div className="h-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted) / 0.3)" }}>
+                  <div className="h-full rounded-full transition-all" style={{ width: `${mod.triggerPct}%`, background: statusColor }} />
+                </div>
+                <div className="flex items-center justify-between text-[9px]">
+                  <span className="text-muted-foreground">Actions</span>
+                  <span style={{ color: statusColor }}>{mod.coveredActions}/{mod.totalActions}</span>
+                </div>
+                <div className="h-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted) / 0.3)" }}>
+                  <div className="h-full rounded-full transition-all" style={{ width: `${mod.actionPct}%`, background: statusColor }} />
+                </div>
               </div>
             </div>
           );
