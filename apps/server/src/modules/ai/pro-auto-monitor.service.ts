@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, OnModuleInit, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BusinessGraphService, BusinessGraphSnapshot } from './business-graph.service';
 import { GovernanceService, type AutonomySettings } from './governance.service';
@@ -53,13 +53,10 @@ const TIER1_TOOLS = new Set([
   ...AUTO_EXECUTABLE_READ_TOOLS,
   'draft_followup_message',
   'draft_payment_reminder',
-  'tag_contact',
-  'create_task',
-  'segment_contacts',
 ]);
 
 @Injectable()
-export class ProAutoMonitorService implements OnModuleInit {
+export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ProAutoMonitorService.name);
   private intervalRef: ReturnType<typeof setInterval> | null = null;
   private readonly insightCache = new Map<string, { insights: ProAutoInsight[]; expiresAt: number }>();
@@ -81,6 +78,13 @@ export class ProAutoMonitorService implements OnModuleInit {
       );
     }, SCAN_INTERVAL_MS);
     this.logger.log(`Pro Auto monitoring scheduler started (${SCAN_INTERVAL_MS / 60000}min interval)`);
+  }
+
+  onModuleDestroy() {
+    if (this.intervalRef) {
+      clearInterval(this.intervalRef);
+      this.intervalRef = null;
+    }
   }
 
   private async runPeriodicScan() {
@@ -263,23 +267,6 @@ export class ProAutoMonitorService implements OnModuleInit {
       });
       if (!overdueInvoice) return null;
       return { invoiceId: overdueInvoice.id, urgency: 'gentle' };
-    }
-
-    if (tool === 'tag_contact') {
-      return { businessId };
-    }
-
-    if (tool === 'create_task') {
-      return {
-        businessId,
-        title: `Review: ${insight.title}`,
-        description: insight.description,
-        priority: insight.severity === 'critical' ? 'high' : 'medium',
-      };
-    }
-
-    if (tool === 'segment_contacts') {
-      return { businessId };
     }
 
     return null;
