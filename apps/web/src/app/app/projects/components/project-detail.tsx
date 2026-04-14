@@ -337,7 +337,7 @@ export function ProjectDetail({
           <ClientTab contactId={project.contactId} />
         )}
         {activeTab === "revenue" && (
-          <RevenueTab invoiceId={project.invoiceId} businessId={businessId} projectId={project.id} />
+          <RevenueTab invoiceId={project.invoiceId} businessId={businessId ?? undefined} projectId={project.id} />
         )}
         {activeTab === "calendar" && (
           <CalendarTab project={project} />
