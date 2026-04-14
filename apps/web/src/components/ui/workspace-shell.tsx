@@ -39,7 +39,6 @@ interface WorkspaceShellProps {
     onAction?: (actionKey: string) => void;
     toolResultRenderer?: (toolId: string, result: unknown) => React.ReactNode;
   };
-  skipReturnNavigation?: boolean;
   iconColor?: string;
   className?: string;
   children: React.ReactNode;
@@ -61,7 +60,6 @@ export function WorkspaceShell({
   metricStrip,
   banners,
   ai,
-  skipReturnNavigation = false,
   iconColor,
   className = "",
   children,
@@ -70,9 +68,7 @@ export function WorkspaceShell({
   const searchParams = useSearchParams();
   const tabRestored = useRef(false);
 
-  if (!skipReturnNavigation) {
-    useReturnNavigation({ restoreScrollOnMount: true });
-  }
+  const returnNav = useReturnNavigation({ restoreScrollOnMount: true });
 
   useEffect(() => {
     setCurrentMeta({ selectedEntityLabel: title });
@@ -155,4 +151,5 @@ export function WorkspaceShell({
   );
 }
 
+export { useReturnNavigation };
 export type { WorkspaceShellProps, WorkspaceTab };

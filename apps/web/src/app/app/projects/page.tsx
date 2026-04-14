@@ -177,7 +177,6 @@ export default function ProjectsPage() {
         </>
       }
       metricStrip={!loading ? <ProjectExecutionStrip projects={projects} /> : undefined}
-      skipReturnNavigation
     >
       <div data-walkthrough="projects-board">
         {activeTab === "board" && (
