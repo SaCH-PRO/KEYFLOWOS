@@ -1,6 +1,6 @@
 "use client";
 
-import { Shield, CheckCircle, AlertTriangle, Users, CreditCard, CalendarDays, Megaphone } from "lucide-react";
+import { Shield, CheckCircle, AlertTriangle, Users, CreditCard, CalendarDays, Megaphone, UserCog, Timer } from "lucide-react";
 import { COVERAGE_MODULES } from "./automation-constants";
 
 interface CoverageMapProps {
@@ -12,6 +12,8 @@ const MODULE_ICONS: Record<string, typeof Users> = {
   revenue: CreditCard,
   bookings: CalendarDays,
   content: Megaphone,
+  staff: UserCog,
+  scheduled: Timer,
 };
 
 export function CoverageMap({ activeTriggers }: CoverageMapProps) {
@@ -36,7 +38,7 @@ export function CoverageMap({ activeTriggers }: CoverageMapProps) {
           <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "hsl(var(--kf-info) / 0.15)" }}>
             <Shield className="w-3 h-3" style={{ color: "hsl(var(--kf-info))" }} />
           </div>
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Flow Coverage</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Trigger Coverage by Module</span>
         </div>
         <span
           className="text-xs font-semibold px-2 py-0.5 rounded-md"
@@ -48,7 +50,7 @@ export function CoverageMap({ activeTriggers }: CoverageMapProps) {
           {overallCoverage}% overall
         </span>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {coverageData.map((mod) => {
           const Icon = MODULE_ICONS[mod.key] ?? Shield;
           const statusColor =
@@ -78,13 +80,11 @@ export function CoverageMap({ activeTriggers }: CoverageMapProps) {
             >
               <div className="flex items-center gap-2 mb-1.5">
                 <Icon className="w-3.5 h-3.5" style={{ color: statusColor }} />
-                <span className="text-xs font-medium">{mod.label}</span>
+                <span className="text-xs font-medium truncate">{mod.label}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 {mod.status === "full" ? (
                   <CheckCircle className="w-3 h-3" style={{ color: statusColor }} />
-                ) : mod.status === "partial" ? (
-                  <AlertTriangle className="w-3 h-3" style={{ color: statusColor }} />
                 ) : (
                   <AlertTriangle className="w-3 h-3" style={{ color: statusColor }} />
                 )}

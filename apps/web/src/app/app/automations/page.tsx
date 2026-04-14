@@ -17,6 +17,7 @@ import { FlowHealthStrip } from "./components/flow-health-strip";
 import { CoverageMap } from "./components/coverage-map";
 import { RecommendedFlows } from "./components/recommended-flows";
 import type { AutomationTemplate } from "./components/automation-constants";
+import { COVERAGE_MODULES } from "./components/automation-constants";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { Playbook, CrossModuleWorkflow, fetchPlaybooks, fetchCrossModuleWorkflows } from "@/lib/client";
 
@@ -95,7 +96,27 @@ export default function FlowsPage() {
     const neverRun = playbooks.filter((p) => p.enabled && !(p.runCount ?? 0) && !p.lastRunAt).length
       + workflows.filter((w) => w.enabled && !w.runCount && !w.lastRunAt).length;
 
-    return { active, paused, total, recentlyTriggered, mostTriggered, maxRuns, neverRun };
+    const totalFlows = playbooks.length + workflows.length;
+    const healthyFlows = [...playbooks, ...workflows].filter((f) => {
+      if (!f.enabled) return false;
+      const runs = "runCount" in f ? (f.runCount ?? 0) : 0;
+      return runs > 0 && f.lastRunAt;
+    }).length;
+    const enabledFlows = active;
+    const successRate = enabledFlows > 0 ? Math.round((healthyFlows / enabledFlows) * 100) : totalFlows > 0 ? 0 : 100;
+
+    const allTriggers = new Set<string>();
+    for (const p of playbooks) { if (p.enabled) allTriggers.add(p.triggerEvent); }
+    for (const w of workflows) { if (w.enabled) allTriggers.add(w.triggerEvent); }
+    const moduleCoverages = COVERAGE_MODULES.map((m) => {
+      const covered = m.triggers.filter((t) => allTriggers.has(t)).length;
+      return m.triggers.length > 0 ? Math.round((covered / m.triggers.length) * 100) : 0;
+    });
+    const coveragePct = moduleCoverages.length > 0
+      ? Math.round(moduleCoverages.reduce((a, b) => a + b, 0) / moduleCoverages.length)
+      : 0;
+
+    return { active, paused, total, recentlyTriggered, mostTriggered, maxRuns, neverRun, successRate, coveragePct };
   }, [playbooks, workflows]);
 
   const activeTriggers = useMemo(() => {

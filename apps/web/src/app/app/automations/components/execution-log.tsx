@@ -333,6 +333,16 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                         </div>
                       </div>
 
+                      {(item.tone === "error" || item.action === "failed") && item.detail && (
+                        <div className="rounded-lg p-3 text-[11px] font-mono whitespace-pre-wrap leading-relaxed" style={{ background: "hsl(var(--kf-error) / 0.06)", border: "1px solid hsl(var(--kf-error) / 0.15)", color: "hsl(var(--kf-error))" }}>
+                          <div className="flex items-center gap-1.5 mb-1 text-[10px] font-sans font-medium uppercase tracking-wider">
+                            <AlertTriangle className="w-3 h-3" />
+                            Error Details
+                          </div>
+                          {item.detail}
+                        </div>
+                      )}
+
                       {item.entityId && (
                         <div className="flex items-center gap-2">
                           <button
