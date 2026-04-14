@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
+import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { AiHubTrigger, AiCommandHub } from "@/components/ai/ai-command-hub";
 import type { UseModuleAiReturn } from "@/hooks/use-module-ai";
-import { AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface WorkspaceTab {
   key: string;
@@ -39,9 +40,21 @@ interface WorkspaceShellProps {
     onAction?: (actionKey: string) => void;
     toolResultRenderer?: (toolId: string, result: unknown) => React.ReactNode;
   };
+  enableSwipe?: boolean;
+  enableSlideAnimation?: boolean;
   iconColor?: string;
   className?: string;
   children: React.ReactNode;
+}
+
+const slideVariants = {
+  enter: (dir: number) => ({ x: dir > 0 ? 80 : -80, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit: (dir: number) => ({ x: dir > 0 ? -80 : 80, opacity: 0 }),
+};
+
+export function useWorkspaceReturnNav() {
+  return useReturnNavigation({ restoreScrollOnMount: true });
 }
 
 export function WorkspaceShell({
@@ -60,6 +73,8 @@ export function WorkspaceShell({
   metricStrip,
   banners,
   ai,
+  enableSwipe = false,
+  enableSlideAnimation = false,
   iconColor,
   className = "",
   children,
@@ -68,7 +83,15 @@ export function WorkspaceShell({
   const searchParams = useSearchParams();
   const tabRestored = useRef(false);
 
-  const returnNav = useReturnNavigation({ restoreScrollOnMount: true });
+  useReturnNavigation({ restoreScrollOnMount: true });
+
+  const tabKeys = useMemo(() => (tabs ?? []).map((t) => t.key), [tabs]);
+
+  const { swipeHandlers, swipeDirection } = useSwipeTabs({
+    tabs: tabKeys,
+    activeTab: activeTab ?? "",
+    onTabChange: onTabChange ?? (() => {}),
+  });
 
   useEffect(() => {
     setCurrentMeta({ selectedEntityLabel: title });
@@ -76,7 +99,6 @@ export function WorkspaceShell({
 
   useEffect(() => {
     if (tabRestored.current || !tabs || !onTabChange) return;
-    const tabKeys = tabs.map((t) => t.key);
 
     const urlTab = searchParams.get("tab");
     if (urlTab && tabKeys.includes(urlTab) && urlTab !== activeTab) {
@@ -93,13 +115,42 @@ export function WorkspaceShell({
     }
 
     tabRestored.current = true;
-  }, [tabs, onTabChange, searchParams, current, activeTab]);
+  }, [tabs, onTabChange, searchParams, current, activeTab, tabKeys]);
 
   useEffect(() => {
     if (activeTab) {
       setCurrentMeta({ tab: activeTab });
     }
   }, [activeTab, setCurrentMeta]);
+
+  const contentWrapper = enableSwipe ? (
+    <div
+      {...swipeHandlers}
+      className="min-h-[200px]"
+    >
+      {enableSlideAnimation ? (
+        <AnimatePresence mode="wait" custom={swipeDirection.current}>
+          <motion.div
+            key={activeTab}
+            custom={swipeDirection.current}
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.18, ease: "easeOut" }}
+          >
+            {children}
+          </motion.div>
+        </AnimatePresence>
+      ) : (
+        children
+      )}
+    </div>
+  ) : (
+    <div className="min-h-[200px]">
+      {children}
+    </div>
+  );
 
   return (
     <div className={`space-y-0 ${className}`}>
@@ -128,9 +179,7 @@ export function WorkspaceShell({
         />
       )}
 
-      <div className="min-h-[200px]">
-        {children}
-      </div>
+      {contentWrapper}
 
       {ai && (
         <>
@@ -151,5 +200,4 @@ export function WorkspaceShell({
   );
 }
 
-export { useReturnNavigation };
 export type { WorkspaceShellProps, WorkspaceTab };

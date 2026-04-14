@@ -6,10 +6,9 @@ import {
   BarChart3, Download, Loader2, RefreshCw, ChevronDown, Send, Clock, FileSpreadsheet, GitCompare
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { PageHeader } from "@/components/ui/page-header";
+import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatCardSkeleton, ChartSkeleton } from "@/components/ui/skeleton";
-import { TabNav } from "@/components/ui/tab-nav";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { REPORTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactPickerDrawer } from "@/components/contacts";
@@ -139,49 +138,43 @@ export default function ReportsPage() {
   }));
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={BarChart3}
-        title="Reports"
-        subtitle="Generate intelligent business reports with AI-powered insights"
-        titleExtra={<PageGuideTrigger moduleKey="reports" />}
-        rightSlot={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={exportPDF}
-              disabled={!report || exporting}
-              className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-[hsl(var(--kf-accent1))]/20 hover:bg-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))] transition-colors disabled:opacity-50"
-            >
-              {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              PDF
-            </button>
-            <button
-              onClick={exportCSV}
-              disabled={!report || exportingCSV}
-              className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-[hsl(var(--kf-accent2))]/20 hover:bg-[hsl(var(--kf-accent2))]/30 text-[hsl(var(--kf-accent2))] transition-colors disabled:opacity-50"
-            >
-              {exportingCSV ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
-              CSV
-            </button>
-            <button
-              onClick={() => setShowContactPicker(true)}
-              className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Send className="w-4 h-4" />
-              Broadcast
-            </button>
-          </div>
-        }
-      />
-
-      <div data-walkthrough="reports-tabs">
-        <TabNav
-          tabs={tabs}
-          activeTab={activeTab}
-          onTabChange={(id) => setActiveTab(id as ReportType)}
-          layoutId="reports-tab-pill"
-        />
-      </div>
+    <WorkspaceShell
+      icon={BarChart3}
+      title="Reports"
+      subtitle="Generate intelligent business reports with AI-powered insights"
+      tabs={tabs}
+      activeTab={activeTab}
+      onTabChange={(id) => setActiveTab(id as ReportType)}
+      tabLayoutId="reports-tab-pill"
+      headerRight={
+        <div className="flex items-center gap-2">
+          <PageGuideTrigger moduleKey="reports" />
+          <button
+            onClick={exportPDF}
+            disabled={!report || exporting}
+            className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-[hsl(var(--kf-accent1))]/20 hover:bg-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))] transition-colors disabled:opacity-50"
+          >
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            PDF
+          </button>
+          <button
+            onClick={exportCSV}
+            disabled={!report || exportingCSV}
+            className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-[hsl(var(--kf-accent2))]/20 hover:bg-[hsl(var(--kf-accent2))]/30 text-[hsl(var(--kf-accent2))] transition-colors disabled:opacity-50"
+          >
+            {exportingCSV ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            CSV
+          </button>
+          <button
+            onClick={() => setShowContactPicker(true)}
+            className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Broadcast
+          </button>
+        </div>
+      }
+    >
 
       <div className="flex items-center gap-3 flex-wrap" data-walkthrough="reports-period">
         <div className="relative">
@@ -340,6 +333,6 @@ export default function ReportsPage() {
         moduleKey="reports"
         walkthroughSteps={REPORTS_WALKTHROUGH}
       />
-    </div>
+    </WorkspaceShell>
   );
 }

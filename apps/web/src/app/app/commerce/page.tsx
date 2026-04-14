@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigationContext } from "@/lib/navigation-context";
-import { useReturnNavigation } from "@/lib/use-return-navigation";
+import { WorkspaceShell, useWorkspaceReturnNav } from "@/components/ui/workspace-shell";
 import {
   CreditCard,
   FileText,
@@ -26,7 +26,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
-import { PageHeader } from "@/components/ui/page-header";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { useCommerceShell } from "./hooks/use-commerce-shell";
@@ -72,8 +71,8 @@ const OPS_SECTIONS: { key: string; label: string; icon: React.ElementType }[] = 
 ];
 
 export default function CommercePage() {
-  const { setCurrentMeta, getOriginContext } = useNavigationContext();
-  const { getReturnLabel, getReturnHref, navigateBack } = useReturnNavigation({ restoreScrollOnMount: true });
+  const { getOriginContext } = useNavigationContext();
+  const { getReturnLabel, navigateBack } = useWorkspaceReturnNav();
   const shell = useCommerceShell();
   const billing = useBillingWorkspace();
   const { checkLimit } = usePlan();
@@ -127,8 +126,7 @@ export default function CommercePage() {
     }
     overview.handleTabChange(t);
     setOpsSection(t);
-    setCurrentMeta({ tab: t });
-  }, [overview.handleTabChange, setCurrentMeta]);
+  }, [overview.handleTabChange]);
 
   useModuleEvent("commerce:create_quote_for_contact", useCallback((event: any) => {
     const { contactId, items } = event.data ?? {};
@@ -342,71 +340,75 @@ export default function CommercePage() {
   const showCrossModuleBanner = originContext && originContext.workspace && originContext.workspace !== "Revenue" && billing.pendingPrefill?.contactId;
 
   return (
-    <div className="space-y-5" aria-label="Revenue">
-      <ResumePrompt module="commerce" onResume={handleResumeCommerceTask} />
-      {showCrossModuleBanner && (
-        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border/60 bg-card/60 backdrop-blur-sm">
-          <button
-            onClick={() => navigateBack()}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 group"
-            title={getReturnLabel()}
-          >
-            <ArrowRight className="w-3.5 h-3.5 rotate-180 group-hover:-translate-x-0.5 transition-transform" />
-            <span className="max-w-[180px] truncate hidden sm:inline">{getReturnLabel()}</span>
-          </button>
-          <div className="w-px h-4 bg-border/60 shrink-0" />
-          <span className="text-sm font-medium text-foreground truncate">
-            {billing.pendingPrefill?.targetSegment === "quotes" ? "Creating quote" : "Creating invoice"} for client from {originContext!.workspace}
-          </span>
-        </div>
-      )}
-      <PageHeader
-        icon={TrendingUp}
-        title="Revenue"
-        subtitle="Invoices, quotes, payments, collections, and billing operations"
-        titleExtra={<PageGuideTrigger moduleKey="commerce" />}
-        rightSlot={
-          <div className="flex items-center gap-2">
-            <RichTooltip title="Revenue Pulse" description="Total payments collected this month across all invoices." side="bottom">
-              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/50 bg-white/[0.03] text-sm cursor-help">
-                <DollarSign className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="font-semibold text-xs text-emerald-400">{overview.revenuePulse}</span>
-                <span className="text-[10px] text-muted-foreground/50">collected</span>
-              </div>
-            </RichTooltip>
-            <div className="flex items-center gap-0.5">
-              <RichTooltip title="Help" description="Revenue workspace guide" shortcut="?">
-                <button
-                  onClick={() => setHelpOpen(true)}
-                  className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
-                  aria-label="Help"
-                  title="Help (?)"
-                  data-walkthrough="commerce-help"
-                >
-                  <BookOpen className="w-4 h-4 text-muted-foreground/60" />
-                </button>
-              </RichTooltip>
+    <WorkspaceShell
+      icon={TrendingUp}
+      title="Revenue"
+      subtitle="Invoices, quotes, payments, collections, and billing operations"
+      tabs={MODE_TABS}
+      activeTab={mode}
+      onTabChange={(key) => setMode(key as RevenueMode)}
+      tabLayoutId="commerce-mode-tabs"
+      actionLabel="+ New"
+      actionIcon={Plus}
+      onAction={composer.handleNewItem}
+      actionDataAttr="commerce-new"
+      headerRight={
+        <div className="flex items-center gap-2">
+          <PageGuideTrigger moduleKey="commerce" />
+          <RichTooltip title="Revenue Pulse" description="Total payments collected this month across all invoices." side="bottom">
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/50 bg-white/[0.03] text-sm cursor-help">
+              <DollarSign className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="font-semibold text-xs text-emerald-400">{overview.revenuePulse}</span>
+              <span className="text-[10px] text-muted-foreground/50">collected</span>
             </div>
+          </RichTooltip>
+          <div className="flex items-center gap-0.5">
+            <RichTooltip title="Help" description="Revenue workspace guide" shortcut="?">
+              <button
+                onClick={() => setHelpOpen(true)}
+                className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
+                aria-label="Help"
+                title="Help (?)"
+                data-walkthrough="commerce-help"
+              >
+                <BookOpen className="w-4 h-4 text-muted-foreground/60" />
+              </button>
+            </RichTooltip>
           </div>
-        }
-        actionLabel="+ New"
-        actionIcon={Plus}
-        onAction={composer.handleNewItem}
-        actionDataAttr="commerce-new"
-      />
-
-      {(() => {
-        const il = checkLimit("invoices");
-        return <PlanLimitBanner resourceKey="invoices" label="invoices" currentUsage={il.current} limit={il.limit} isUnlimited={il.isUnlimited} nearLimit={il.nearLimit} atLimit={il.atLimit} upgradeTo={il.upgradeTo} />;
-      })()}
-
-      {shell.error && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 flex items-center gap-2">
-          <span className="text-amber-400">!</span> {shell.error}
         </div>
-      )}
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2" data-walkthrough="commerce-kpi">
+      }
+      banners={
+        <>
+          <ResumePrompt module="commerce" onResume={handleResumeCommerceTask} />
+          {showCrossModuleBanner && (
+            <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border/60 bg-card/60 backdrop-blur-sm">
+              <button
+                onClick={() => navigateBack()}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 group"
+                title={getReturnLabel()}
+              >
+                <ArrowRight className="w-3.5 h-3.5 rotate-180 group-hover:-translate-x-0.5 transition-transform" />
+                <span className="max-w-[180px] truncate hidden sm:inline">{getReturnLabel()}</span>
+              </button>
+              <div className="w-px h-4 bg-border/60 shrink-0" />
+              <span className="text-sm font-medium text-foreground truncate">
+                {billing.pendingPrefill?.targetSegment === "quotes" ? "Creating quote" : "Creating invoice"} for client from {originContext!.workspace}
+              </span>
+            </div>
+          )}
+          {(() => {
+            const il = checkLimit("invoices");
+            return <PlanLimitBanner resourceKey="invoices" label="invoices" currentUsage={il.current} limit={il.limit} isUnlimited={il.isUnlimited} nearLimit={il.nearLimit} atLimit={il.atLimit} upgradeTo={il.upgradeTo} />;
+          })()}
+          {shell.error && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 flex items-center gap-2">
+              <span className="text-amber-400">!</span> {shell.error}
+            </div>
+          )}
+        </>
+      }
+      metricStrip={
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2" data-walkthrough="commerce-kpi">
         {[
           { label: "Outstanding", value: formatCurrencyCompact(financialSummary.outstanding, businessCurrency), color: "text-amber-400", bg: "bg-amber-500/10", icon: Clock },
           { label: "Overdue", value: formatCurrencyCompact(financialSummary.overdue, businessCurrency), color: financialSummary.overdue > 0 ? "text-red-400" : "text-muted-foreground/50", bg: financialSummary.overdue > 0 ? "bg-red-500/10" : "bg-muted/10", icon: AlertTriangle },
@@ -426,26 +428,8 @@ export default function CommercePage() {
           </div>
         ))}
       </div>
-
-      <div className="flex items-center gap-1 p-1 rounded-xl" data-walkthrough="commerce-tabs" style={{ background: "hsl(var(--muted) / 0.15)" }}>
-        {MODE_TABS.map((m) => (
-          <button
-            key={m.key}
-            onClick={() => setMode(m.key)}
-            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all min-h-[36px]"
-            style={{
-              background: mode === m.key ? "hsl(var(--kf-accent1) / 0.1)" : "transparent",
-              color: mode === m.key ? "hsl(var(--kf-accent1))" : "hsl(var(--muted-foreground))",
-              borderWidth: mode === m.key ? 1 : 0,
-              borderColor: mode === m.key ? "hsl(var(--kf-accent1) / 0.2)" : "transparent",
-            }}
-          >
-            <m.icon className="w-3.5 h-3.5" />
-            {m.label}
-          </button>
-        ))}
-      </div>
-
+      }
+    >
       {mode === "operations" && (
         <div className="space-y-4">
           {actionQueue.length > 0 && (
@@ -840,6 +824,6 @@ export default function CommercePage() {
         moduleKey="commerce"
         walkthroughSteps={COMMERCE_WALKTHROUGH}
       />
-    </div>
+    </WorkspaceShell>
   );
 }
