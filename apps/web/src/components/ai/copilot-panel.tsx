@@ -139,6 +139,10 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     return insights.filter(i => i.module === currentModule);
   }, [insights, currentModule]);
 
+  const queueInsights = useMemo(() => {
+    return insights.filter(i => i.severity === "critical" || i.severity === "warning");
+  }, [insights]);
+
   const loadSidebarData = useCallback(async () => {
     const biz = getStoredBusinessId();
     if (!biz) return;
@@ -312,7 +316,7 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
             <div className="flex items-center border-b border-border/20" role="tablist" aria-label="Copilot sections">
               {([
                 { id: "chat" as Tab, label: "Chat", icon: Sparkles },
-                { id: "queue" as Tab, label: `Queue${pendingApprovals.length > 0 ? ` (${pendingApprovals.length})` : ""}`, icon: Shield },
+                { id: "queue" as Tab, label: `Queue${(pendingApprovals.length + queueInsights.length) > 0 ? ` (${pendingApprovals.length + queueInsights.length})` : ""}`, icon: Shield },
                 { id: "activity" as Tab, label: "Activity", icon: Activity },
               ]).map(t => (
                 <button
@@ -472,23 +476,74 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
               )}
 
               {tab === "queue" && (
-                <div id="copilot-panel-queue" role="tabpanel" aria-labelledby="copilot-tab-queue" className="px-4 py-3 space-y-2">
-                  {pendingApprovals.length === 0 ? (
+                <div id="copilot-panel-queue" role="tabpanel" aria-labelledby="copilot-tab-queue" className="px-4 py-3 space-y-3">
+                  {pendingApprovals.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Pending Approvals</p>
+                      {pendingApprovals.map(item => (
+                        <VerificationCardCompact
+                          key={item.id}
+                          item={item}
+                          onApprove={handleApprove}
+                          onReject={handleReject}
+                          loading={resolvingId === item.id}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {queueInsights.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Monitoring Alerts</p>
+                      {queueInsights.map(insight => {
+                        const config = SEVERITY_CONFIG[insight.severity];
+                        const SevIcon = config.icon;
+                        const tierLabel = insight.riskTier <= 1 ? "Auto" : insight.riskTier === 2 ? "Confirm" : insight.riskTier === 3 ? "Approval" : "Admin";
+                        const tierColor = insight.riskTier <= 1 ? "text-emerald-400 bg-emerald-500/10" : insight.riskTier === 2 ? "text-blue-400 bg-blue-500/10" : insight.riskTier === 3 ? "text-amber-400 bg-amber-500/10" : "text-red-400 bg-red-500/10";
+                        return (
+                          <div
+                            key={insight.id}
+                            className={`p-3 rounded-xl border ${config.border} ${config.bg} space-y-2`}
+                          >
+                            <div className="flex items-start gap-2">
+                              <SevIcon className={`w-4 h-4 shrink-0 mt-0.5 ${config.color}`} />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <p className={`text-xs font-semibold ${config.color} leading-snug`}>{insight.title}</p>
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${tierColor}`}>
+                                    Tier {insight.riskTier} · {tierLabel}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-muted-foreground/60 mt-1 leading-relaxed">{insight.description}</p>
+                              </div>
+                            </div>
+                            {insight.suggestedAction && (
+                              <button
+                                onClick={() => { setTab("chat"); handleSend(insight.suggestedAction!); }}
+                                className="w-full flex items-center justify-between p-2 rounded-lg bg-muted/20 border border-border/20 text-xs text-foreground/70 hover:bg-muted/30 transition-all"
+                              >
+                                <span>{insight.suggestedAction}</span>
+                                <ChevronRight className="w-3 h-3 text-muted-foreground/40" />
+                              </button>
+                            )}
+                            {insight.escalated && (
+                              <div className="flex items-center gap-1.5 text-[10px] text-emerald-400">
+                                <Zap className="w-3 h-3" />
+                                <span>Auto-handled by Pro Auto</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {pendingApprovals.length === 0 && queueInsights.length === 0 && (
                     <div className="flex flex-col items-center py-8 gap-2">
                       <CheckCircle2 className="w-6 h-6 text-emerald-400/60" />
                       <span className="text-xs text-muted-foreground/50">All clear</span>
-                      <p className="text-[10px] text-muted-foreground/40 text-center">No pending approvals</p>
+                      <p className="text-[10px] text-muted-foreground/40 text-center">No pending approvals or alerts</p>
                     </div>
-                  ) : (
-                    pendingApprovals.map(item => (
-                      <VerificationCardCompact
-                        key={item.id}
-                        item={item}
-                        onApprove={handleApprove}
-                        onReject={handleReject}
-                        loading={resolvingId === item.id}
-                      />
-                    ))
                   )}
                 </div>
               )}

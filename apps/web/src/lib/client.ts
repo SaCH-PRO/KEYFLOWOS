@@ -4061,8 +4061,10 @@ export interface ProAutoInsight {
   metric?: string;
   suggestedAction?: string;
   suggestedTool?: string;
+  riskTier: number;
   module: string;
   timestamp: string;
+  escalated?: boolean;
 }
 
 export async function fetchProAutoInsights(businessId: string): Promise<ApiResult<{ insights: ProAutoInsight[] }>> {
