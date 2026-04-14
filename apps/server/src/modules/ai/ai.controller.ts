@@ -7,6 +7,7 @@ import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
 import { AiMemoryService, MemoryCategory } from './ai-memory.service';
+import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -49,6 +50,7 @@ export class AiController {
     @Inject(IntentParserService) private readonly intentParser: IntentParserService,
     @Inject(PlannerService) private readonly planner: PlannerService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
+    @Inject(StrategicIntelligenceService) private readonly strategic: StrategicIntelligenceService,
   ) {}
 
   @Get('health')
@@ -427,5 +429,58 @@ export class AiController {
   async summarizePatterns(@Param('businessId') businessId: string) {
     const patterns = await this.memory.summarizePatterns(businessId);
     return { patterns };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/strategic/dashboard')
+  async strategicDashboard(@Param('businessId') businessId: string) {
+    return this.strategic.getStrategicDashboard(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/strategic/revenue-forecast')
+  async revenueForecast(
+    @Param('businessId') businessId: string,
+    @Query('days') days?: string,
+  ) {
+    const horizon = safeInt(days, 90);
+    const clamped = Math.min(Math.max(horizon, 7), 365);
+    return this.strategic.forecastRevenue(businessId, { horizonDays: clamped });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/strategic/profitability')
+  async profitability(@Param('businessId') businessId: string) {
+    return this.strategic.analyzeProfitability(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/strategic/pricing-advisor')
+  async pricingAdvisor(@Param('businessId') businessId: string) {
+    return this.strategic.advisePricing(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/strategic/seasonal-patterns')
+  async seasonalPatterns(@Param('businessId') businessId: string) {
+    return this.strategic.detectSeasonalPatterns(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/strategic/opportunities')
+  async opportunities(@Param('businessId') businessId: string) {
+    return this.strategic.scanOpportunities(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/strategic/risks')
+  async risks(@Param('businessId') businessId: string) {
+    return this.strategic.scanRisks(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/strategic/weekly-plan')
+  async weeklyPlan(@Param('businessId') businessId: string) {
+    return this.strategic.generateWeeklyPlan(businessId);
   }
 }
