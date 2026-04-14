@@ -329,6 +329,8 @@ Total item revenue (3mo): $${invoiceItems.reduce((s, i) => s + Number(i.total), 
       productRecommendations: [],
       overallStrategy: '',
       quickWins: [],
+      bundleOpportunities: [],
+      pricingPrinciples: [],
     }, 'advisePricing');
   }
 
@@ -393,6 +395,7 @@ Trinidad & Tobago seasonal factors: Carnival season (Feb-Mar), back-to-school (A
       patterns: [],
       recommendations: [],
       monthlyData: seasonalBuckets,
+      localFactors: [],
     }, 'detectSeasonalPatterns');
   }
 
@@ -501,6 +504,9 @@ Momentum Score: ${snapshot.momentumScore}/100`;
       neglectedLeads: staleLeads.length,
       pendingQuoteValue: pendingQuotes.reduce((s, q) => s + Number(q.total), 0),
       priority: 'medium',
+      totalPotentialValue: 0,
+      reactivationTargets: [],
+      recommendations: [],
     }, 'scanOpportunities');
   }
 
@@ -591,11 +597,13 @@ Momentum: ${snapshot.momentumScore}/100`;
     return this.parseAiJson(result.content, {
       summary: result.content,
       riskLevel: 'medium',
+      riskScore: 0,
       risks: [],
       mitigations: [],
       overdueTotal,
       overdueCount,
       urgentActions: [],
+      cashFlowHealth: 'watch',
     }, 'scanRisks');
   }
 
