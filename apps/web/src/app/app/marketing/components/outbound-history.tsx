@@ -226,9 +226,15 @@ function DeliveryStatsStrip({ items }: { items: OutboundContent[] }) {
 
 export function OutboundHistory({ businessId, refreshTrigger }: OutboundHistoryProps) {
   const [items, setItems] = useState<OutboundContent[]>([]);
+  const [allItems, setAllItems] = useState<OutboundContent[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [showDeliveryLog, setShowDeliveryLog] = useState(false);
+
+  const loadAll = useCallback(async () => {
+    const res = await listOutboundContent(businessId, { limit: 50 });
+    if (res.data) setAllItems(res.data.filter(c => c.status !== "Draft"));
+  }, [businessId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -236,11 +242,16 @@ export function OutboundHistory({ businessId, refreshTrigger }: OutboundHistoryP
       status: statusFilter || undefined,
       limit: 50,
     });
-    if (res.data) setItems(res.data.filter(c => c.status !== "Draft"));
+    if (res.data) {
+      const filtered = res.data.filter(c => c.status !== "Draft");
+      setItems(filtered);
+      if (!statusFilter) setAllItems(filtered);
+    }
     setLoading(false);
   }, [businessId, statusFilter]);
 
   useEffect(() => { void load(); }, [load, refreshTrigger]);
+  useEffect(() => { if (statusFilter) void loadAll(); }, [statusFilter, loadAll]);
 
   const statuses = ["Sent", "Scheduled", "Queued", "Sending", "Failed", "PartiallyFailed", "Cancelled"];
 
@@ -279,7 +290,7 @@ export function OutboundHistory({ businessId, refreshTrigger }: OutboundHistoryP
         </div>
       </div>
 
-      <DeliveryStatsStrip items={items} />
+      <DeliveryStatsStrip items={allItems} />
 
       <div className="flex items-center gap-1 flex-wrap">
         <button
