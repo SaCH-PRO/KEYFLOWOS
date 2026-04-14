@@ -323,11 +323,12 @@ export class IdentityService {
       where: { userId_businessId: { userId: requesterId, businessId } },
     });
     if (!requester) throw new ForbiddenException('You are not a member of this business');
-    if (requester.role !== 'OWNER' && requester.role !== 'ADMIN') {
-      const scopes = this.resolveScopes(requester);
-      if (scopes.team !== 'admin' && scopes.team !== 'write') {
-        throw new ForbiddenException('You do not have permission to manage team members');
-      }
+    if (requester.role === 'OWNER') return;
+    const user = await this.prisma.client.user.findUnique({ where: { id: requesterId } });
+    if (user?.role === 'SUPER_ADMIN') return;
+    const scopes = this.resolveScopes(requester);
+    if (scopes.team !== 'admin' && scopes.team !== 'write') {
+      throw new ForbiddenException('You do not have permission to manage team members');
     }
   }
 
@@ -457,18 +458,19 @@ export class IdentityService {
 
   async logTeamActivity(businessId: string, userId: string, module: string, action: string, entityType?: string, entityId?: string, title?: string, detail?: string, meta?: Record<string, unknown>) {
     try {
-      const data: Record<string, unknown> = {
-        businessId,
-        userId,
-        module,
-        action,
-        title: title ?? action,
-      };
-      if (entityType !== undefined) data.entityType = entityType;
-      if (entityId !== undefined) data.entityId = entityId;
-      if (detail !== undefined) data.detail = detail;
-      if (meta !== undefined) data.meta = meta;
-      await this.prisma.client.teamActivityLog.create({ data: data as any });
+      await this.prisma.client.teamActivityLog.create({
+        data: {
+          businessId,
+          userId,
+          module,
+          action,
+          title: title ?? action,
+          ...(entityType !== undefined ? { entityType } : {}),
+          ...(entityId !== undefined ? { entityId } : {}),
+          ...(detail !== undefined ? { detail } : {}),
+          ...(meta !== undefined ? { meta } : {}),
+        },
+      });
     } catch (e) {
       this.logger.warn(`Failed to log team activity: ${e instanceof Error ? e.message : e}`);
     }
