@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap, Power, PowerOff, Brain, Settings2, Clock, Plus, Search, Pencil,
-  AlertTriangle, CheckCircle, TrendingUp, Workflow,
+  AlertTriangle, CheckCircle, TrendingUp, Workflow, Sparkles,
 } from "lucide-react";
 import {
   Playbook, updatePlaybook,
@@ -16,6 +16,7 @@ import {
   getFlowModules, getTriggerModule, MODULE_COLORS,
 } from "./automation-constants";
 import { PlaybookEditor } from "./playbook-editor";
+import { AiFlowGenerator } from "./ai-flow-generator";
 import type { AutomationTemplate, ActionStep } from "./automation-constants";
 
 interface FlowListProps {
@@ -47,6 +48,8 @@ export function FlowList({
   const [expandedWf, setExpandedWf] = useState<string | null>(null);
   const [updatingWf, setUpdatingWf] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
+  const [showAiGenerator, setShowAiGenerator] = useState(false);
+  const [aiGeneratedConfig, setAiGeneratedConfig] = useState<{ name: string; triggerEvent: string; actions: ActionStep[]; conditions: string[] } | null>(null);
   const activeTaskIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -158,27 +161,46 @@ export function FlowList({
   }
 
   function getHealthIndicator(enabled: boolean, lastRunAt: string | null | undefined, runCount: number) {
-    if (!enabled) return { label: "Paused", color: "hsl(var(--muted-foreground))", icon: PowerOff };
-    if (runCount === 0 && !lastRunAt) return { label: "Never run", color: "hsl(var(--kf-warning))", icon: AlertTriangle };
+    if (!enabled) return { label: "Paused", color: "hsl(var(--muted-foreground))", icon: PowerOff, score: 0 };
+    if (runCount === 0 && !lastRunAt) return { label: "Never run", color: "hsl(var(--kf-warning))", icon: AlertTriangle, score: 20 };
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
     if (lastRunAt && new Date(lastRunAt).getTime() > weekAgo) {
-      return { label: "Healthy", color: "hsl(var(--kf-success))", icon: CheckCircle };
+      return { label: "Healthy", color: "hsl(var(--kf-success))", icon: CheckCircle, score: 100 };
     }
-    return { label: "Idle", color: "hsl(var(--muted-foreground))", icon: Clock };
+    if (lastRunAt && new Date(lastRunAt).getTime() > thirtyDaysAgo) {
+      return { label: "Idle", color: "hsl(var(--muted-foreground))", icon: Clock, score: 60 };
+    }
+    return { label: "Stale", color: "hsl(var(--kf-warning))", icon: AlertTriangle, score: 30 };
   }
 
   function getFlowWarnings(enabled: boolean, lastRunAt: string | null | undefined, runCount: number): string[] {
     const warnings: string[] = [];
     if (enabled && runCount === 0 && !lastRunAt) {
-      warnings.push("This flow is active but has never run");
+      warnings.push("This flow is active but has never run — check the trigger configuration");
     }
     if (enabled && lastRunAt) {
       const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
       if (new Date(lastRunAt).getTime() < thirtyDaysAgo) {
-        warnings.push("Has not run in over 30 days");
+        warnings.push("Has not run in over 30 days — ensure the trigger event is still occurring");
       }
     }
+    if (enabled && runCount > 0 && runCount < 3) {
+      warnings.push("Low activity — consider reviewing whether this flow is relevant");
+    }
     return warnings;
+  }
+
+  function getHealthScoreBar(score: number) {
+    const color = score >= 80 ? "hsl(var(--kf-success))" : score >= 50 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))";
+    return (
+      <div className="flex items-center gap-1.5">
+        <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted) / 0.3)", maxWidth: "40px" }}>
+          <div className="h-full rounded-full transition-all" style={{ width: `${score}%`, background: color }} />
+        </div>
+        <span className="text-[9px] font-medium" style={{ color }}>{score}</span>
+      </div>
+    );
   }
 
   const filterButtons: { key: FilterStatus; label: string }[] = [
@@ -203,13 +225,26 @@ export function FlowList({
             />
           </div>
         </div>
-        <button
-          onClick={() => { setEditingPlaybook(null); setShowEditor(true); }}
-          className="kf-btn-primary px-4 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2 min-h-[44px]"
-        >
-          <Plus className="w-4 h-4" />
-          New Flow
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAiGenerator(!showAiGenerator)}
+            className="px-3 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2 min-h-[44px] transition-colors"
+            style={{
+              background: showAiGenerator ? "hsl(var(--kf-accent2) / 0.15)" : "hsl(var(--muted) / 0.5)",
+              color: showAiGenerator ? "hsl(var(--kf-accent2))" : "hsl(var(--muted-foreground))",
+            }}
+          >
+            <Sparkles className="w-4 h-4" />
+            AI Generate
+          </button>
+          <button
+            onClick={() => { setEditingPlaybook(null); setShowEditor(true); }}
+            className="kf-btn-primary px-4 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2 min-h-[44px]"
+          >
+            <Plus className="w-4 h-4" />
+            New Flow
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -229,6 +264,27 @@ export function FlowList({
         <span className="text-xs text-muted-foreground ml-auto">{activeCount} active / {unified.length} total</span>
       </div>
 
+      <AnimatePresence>
+        {showAiGenerator && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <AiFlowGenerator
+              onGenerated={(config) => {
+                setAiGeneratedConfig(config);
+                setEditingPlaybook(null);
+                setShowEditor(true);
+                setShowAiGenerator(false);
+              }}
+              onClose={() => setShowAiGenerator(false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {error && (
         <div className="rounded-xl px-3 py-2 text-xs" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))", border: "1px solid hsl(var(--kf-warning) / 0.3)" }}>
           {error}
@@ -237,9 +293,21 @@ export function FlowList({
 
       <PlaybookEditor
         open={showEditor}
-        onClose={handleEditorClose}
-        onSaved={handlePlaybookSaved}
-        template={templateToUse}
+        onClose={() => { handleEditorClose(); setAiGeneratedConfig(null); }}
+        onSaved={(pb) => { handlePlaybookSaved(pb); setAiGeneratedConfig(null); }}
+        template={aiGeneratedConfig ? {
+          id: "ai-generated",
+          name: aiGeneratedConfig.name,
+          description: "",
+          category: "AI Generated",
+          trigger: aiGeneratedConfig.triggerEvent,
+          actions: aiGeneratedConfig.actions,
+          businessProblem: "",
+          modulesTouched: [],
+          prerequisites: [],
+          expectedOutcome: "",
+          complexity: "easy" as const,
+        } : templateToUse}
         editingPlaybook={editingPlaybook}
         businessId={businessId}
       />
@@ -316,6 +384,7 @@ export function FlowList({
                       <HealthIcon className="w-3 h-3" style={{ color: health.color }} />
                       <span style={{ color: health.color }}>{health.label}</span>
                     </div>
+                    {getHealthScoreBar(health.score)}
                     {(pb.runCount ?? 0) > 0 && (
                       <span className="text-muted-foreground/60 flex items-center gap-1">
                         <TrendingUp className="w-3 h-3" /> {pb.runCount} runs
@@ -419,6 +488,7 @@ export function FlowList({
                     <WfHealthIcon className="w-3 h-3" style={{ color: wfHealth.color }} />
                     <span style={{ color: wfHealth.color }}>{wfHealth.label}</span>
                   </div>
+                  {getHealthScoreBar(wfHealth.score)}
                   {wf.runCount > 0 && (
                     <span className="text-muted-foreground/60 flex items-center gap-1">
                       <TrendingUp className="w-3 h-3" /> {wf.runCount} runs

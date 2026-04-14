@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Zap, Play, Eye, X, ArrowDown, Filter, Search, CheckCircle, Sparkles, Workflow } from "lucide-react";
-import { createPlaybook } from "@/lib/client";
+import { useState, useMemo, useEffect } from "react";
+import { Zap, Play, Eye, X, ArrowDown, Search, CheckCircle, Sparkles, Workflow, Star } from "lucide-react";
+import { createPlaybook, fetchPlaybooks } from "@/lib/client";
 import {
-  AUTOMATION_TEMPLATES, getTriggerLabel, getActionLabel,
+  AUTOMATION_TEMPLATES, COVERAGE_MODULES, getTriggerLabel, getActionLabel,
   MODULE_COLORS, type AutomationTemplate, type FlowComplexity,
 } from "./automation-constants";
 
@@ -29,6 +29,32 @@ interface TemplateGalleryProps {
 
 type FilterModule = "all" | "Commerce" | "Bookings" | "CRM" | "Marketing" | "Time-Based";
 type FilterComplexity = "all" | FlowComplexity;
+type SortMode = "relevance" | "category" | "complexity";
+
+function computeRelevanceScore(template: AutomationTemplate, activeTriggers: Set<string>): number {
+  let score = 0;
+
+  if (!activeTriggers.has(template.trigger)) {
+    score += 30;
+  }
+
+  const triggerModule = COVERAGE_MODULES.find((m) => m.triggers.includes(template.trigger));
+  if (triggerModule) {
+    const moduleCoverage = triggerModule.triggers.filter((t) => activeTriggers.has(t)).length / triggerModule.triggers.length;
+    if (moduleCoverage < 0.25) score += 25;
+    else if (moduleCoverage < 0.5) score += 15;
+  }
+
+  if (template.complexity === "easy") score += 20;
+  else if (template.complexity === "medium") score += 10;
+
+  if (template.modulesTouched.length >= 3) score += 10;
+
+  const criticalTriggers = ["invoice.overdue", "booking.cancelled", "contact.inactive", "form.submitted"];
+  if (criticalTriggers.includes(template.trigger)) score += 15;
+
+  return Math.min(score, 100);
+}
 
 export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) {
   const [activating, setActivating] = useState<string | null>(null);
@@ -37,37 +63,79 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
   const [searchQuery, setSearchQuery] = useState("");
   const [moduleFilter, setModuleFilter] = useState<FilterModule>("all");
   const [complexityFilter, setComplexityFilter] = useState<FilterComplexity>("all");
+  const [sortMode, setSortMode] = useState<SortMode>("relevance");
+  const [activeTriggers, setActiveTriggers] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!businessId) return;
+    Promise.all([
+      fetchPlaybooks(businessId),
+      import("@/lib/client").then((mod) => mod.fetchCrossModuleWorkflows(businessId)),
+    ]).then(([pbRes, wfRes]) => {
+      const triggers = new Set<string>();
+      if (pbRes.data) {
+        for (const p of pbRes.data) {
+          if (p.enabled) triggers.add(p.triggerEvent);
+        }
+      }
+      if (wfRes.data) {
+        for (const w of wfRes.data) {
+          if (w.enabled) triggers.add(w.triggerEvent);
+        }
+      }
+      setActiveTriggers(triggers);
+    });
+  }, [businessId]);
 
   const categories = useMemo(() => Array.from(new Set(AUTOMATION_TEMPLATES.map((t) => t.category))), []);
 
+  const templatesWithScores = useMemo(() => {
+    return AUTOMATION_TEMPLATES.map((t) => ({
+      template: t,
+      relevance: computeRelevanceScore(t, activeTriggers),
+    }));
+  }, [activeTriggers]);
+
   const filteredTemplates = useMemo(() => {
-    let result = AUTOMATION_TEMPLATES;
+    let result = templatesWithScores;
     if (moduleFilter !== "all") {
-      result = result.filter((t) => t.category === moduleFilter);
+      result = result.filter((t) => t.template.category === moduleFilter);
     }
     if (complexityFilter !== "all") {
-      result = result.filter((t) => t.complexity === complexityFilter);
+      result = result.filter((t) => t.template.complexity === complexityFilter);
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
         (t) =>
-          t.name.toLowerCase().includes(q) ||
-          t.description.toLowerCase().includes(q) ||
-          t.businessProblem.toLowerCase().includes(q)
+          t.template.name.toLowerCase().includes(q) ||
+          t.template.description.toLowerCase().includes(q) ||
+          t.template.businessProblem.toLowerCase().includes(q)
       );
     }
+
+    if (sortMode === "relevance") {
+      result = [...result].sort((a, b) => b.relevance - a.relevance);
+    } else if (sortMode === "complexity") {
+      const order: Record<string, number> = { easy: 0, medium: 1, advanced: 2 };
+      result = [...result].sort((a, b) => (order[a.template.complexity] ?? 0) - (order[b.template.complexity] ?? 0));
+    }
+
     return result;
-  }, [moduleFilter, complexityFilter, searchQuery]);
+  }, [templatesWithScores, moduleFilter, complexityFilter, searchQuery, sortMode]);
 
   const groupedTemplates = useMemo(() => {
-    const groups: Record<string, AutomationTemplate[]> = {};
+    if (sortMode !== "category") {
+      return { "All Templates": filteredTemplates };
+    }
+    const groups: Record<string, typeof filteredTemplates> = {};
     for (const t of filteredTemplates) {
-      if (!groups[t.category]) groups[t.category] = [];
-      groups[t.category].push(t);
+      const cat = t.template.category;
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(t);
     }
     return groups;
-  }, [filteredTemplates]);
+  }, [filteredTemplates, sortMode]);
 
   async function handleActivate(template: AutomationTemplate, e: React.MouseEvent) {
     e.stopPropagation();
@@ -84,11 +152,23 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
     }
   }
 
+  function getRelevanceBadge(score: number) {
+    if (score >= 60) return { label: "High Match", color: "hsl(var(--kf-success))" };
+    if (score >= 30) return { label: "Good Fit", color: "hsl(var(--kf-accent2))" };
+    return null;
+  }
+
+  const sortButtons: { key: SortMode; label: string }[] = [
+    { key: "relevance", label: "By Relevance" },
+    { key: "category", label: "By Category" },
+    { key: "complexity", label: "By Complexity" },
+  ];
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border/60 bg-card p-3">
         <p className="text-sm text-muted-foreground">
-          Strategic flow templates organized by business problem. <strong>Activate</strong> to create instantly, or click to customize.
+          Strategic flow templates organized by business problem. Templates are <strong>ranked by relevance</strong> to your current coverage gaps. <strong>Activate</strong> to create instantly, or click to customize.
         </p>
       </div>
 
@@ -138,6 +218,23 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
         </div>
       </div>
 
+      <div className="flex items-center gap-1.5">
+        {sortButtons.map((sb) => (
+          <button
+            key={sb.key}
+            onClick={() => setSortMode(sb.key)}
+            className="text-[10px] font-medium px-2.5 py-1 rounded-lg transition-colors min-h-[28px]"
+            style={{
+              background: sortMode === sb.key ? "hsl(var(--kf-info) / 0.15)" : "transparent",
+              color: sortMode === sb.key ? "hsl(var(--kf-info))" : undefined,
+            }}
+          >
+            {sb.label}
+          </button>
+        ))}
+        <span className="text-[10px] text-muted-foreground ml-auto">{filteredTemplates.length} templates</span>
+      </div>
+
       {filteredTemplates.length === 0 ? (
         <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
           <p className="text-sm font-medium mb-1">No matching templates</p>
@@ -146,16 +243,19 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
       ) : (
         Object.entries(groupedTemplates).map(([category, templates]) => (
           <div key={category} className="space-y-3">
-            <div className="flex items-center gap-2 px-1">
-              <div className="w-2 h-2 rounded-full" style={{ background: CATEGORY_STYLES[category] ?? "hsl(var(--kf-accent1))" }} />
-              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{category}</span>
-              <span className="text-[10px] text-muted-foreground/50">{templates.length} templates</span>
-            </div>
+            {sortMode === "category" && (
+              <div className="flex items-center gap-2 px-1">
+                <div className="w-2 h-2 rounded-full" style={{ background: CATEGORY_STYLES[category] ?? "hsl(var(--kf-accent1))" }} />
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{category}</span>
+                <span className="text-[10px] text-muted-foreground/50">{templates.length} templates</span>
+              </div>
+            )}
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-              {templates.map((template) => {
+              {templates.map(({ template, relevance }) => {
                 const isActivated = activated.has(template.id);
-                const catColor = CATEGORY_STYLES[category] ?? "hsl(var(--kf-accent1))";
+                const catColor = CATEGORY_STYLES[template.category] ?? "hsl(var(--kf-accent1))";
                 const cx = COMPLEXITY_BADGE[template.complexity];
+                const relevanceBadge = getRelevanceBadge(relevance);
                 return (
                   <div
                     key={template.id}
@@ -173,11 +273,17 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
                         <Workflow className="w-4 h-4" style={{ color: catColor }} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold group-hover:text-primary transition-colors truncate">{template.name}</span>
                           <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium shrink-0" style={{ background: `${cx.color}15`, color: cx.color }}>
                             {cx.label}
                           </span>
+                          {relevanceBadge && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium shrink-0 inline-flex items-center gap-0.5" style={{ background: `${relevanceBadge.color}15`, color: relevanceBadge.color }}>
+                              <Star className="w-2.5 h-2.5" />
+                              {relevanceBadge.label}
+                            </span>
+                          )}
                         </div>
 
                         <p className="text-[11px] mt-1 leading-relaxed" style={{ color: "hsl(var(--kf-warning))" }}>

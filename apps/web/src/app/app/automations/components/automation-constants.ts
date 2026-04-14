@@ -166,6 +166,9 @@ export const MODULE_COLORS: Record<string, string> = {
   Staff: "hsl(var(--kf-info))",
   Forms: "hsl(var(--kf-accent2))",
   Segments: "hsl(var(--kf-success))",
+  "Staff & Ops": "hsl(var(--kf-info))",
+  Scheduled: "hsl(var(--kf-warning))",
+  "Time-Based": "hsl(var(--kf-warning))",
 };
 
 export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
@@ -551,4 +554,6 @@ export const COVERAGE_MODULES = [
   { key: "revenue", label: "Revenue", triggers: ["invoice.paid", "invoice.sent", "invoice.overdue", "quote.sent", "quote.accepted", "quote.viewed", "quote.not_accepted_xdays", "payment.received", "recurring.failed"] },
   { key: "bookings", label: "Bookings", triggers: ["booking.created", "booking.confirmed", "booking.completed", "booking.cancelled", "booking.scheduled", "booking.reminder"] },
   { key: "content", label: "Content", triggers: ["campaign.sent", "campaign.opened", "campaign.not_opened_14d", "post.published", "form.submitted", "subscriber.joined", "segment.changed"] },
+  { key: "staff", label: "Staff & Ops", triggers: ["staff.assignment_missing"] },
+  { key: "scheduled", label: "Scheduled", triggers: ["schedule.daily", "schedule.weekly", "schedule.monthly"] },
 ];

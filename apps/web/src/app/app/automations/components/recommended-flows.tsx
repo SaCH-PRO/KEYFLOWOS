@@ -60,7 +60,22 @@ export function RecommendedFlows({ activeTriggers, onSelect }: RecommendedFlowsP
       if (t) recs.push({ template: t, reason: "New contacts receive no welcome — first impressions are lost" });
     }
 
-    return recs.slice(0, 3);
+    if (!activeTriggers.has("schedule.daily") && !activeTriggers.has("schedule.weekly")) {
+      const t = AUTOMATION_TEMPLATES.find((t) => t.id === "daily-summary");
+      if (t) recs.push({ template: t, reason: "You have no scheduled reports — track performance with automated daily briefings" });
+    }
+
+    if (!activeTriggers.has("invoice.paid") && !activeTriggers.has("payment.received")) {
+      const t = AUTOMATION_TEMPLATES.find((t) => t.id === "payment-received-thankyou");
+      if (t) recs.push({ template: t, reason: "Payments go unacknowledged — automate thank-you messages to build loyalty" });
+    }
+
+    if (!activeTriggers.has("quote.sent")) {
+      const t = AUTOMATION_TEMPLATES.find((t) => t.id === "quote-followup-reminder");
+      if (t) recs.push({ template: t, reason: "Quotes have no follow-up automation — potential revenue is slipping away" });
+    }
+
+    return recs.slice(0, 4);
   }, [activeTriggers]);
 
   if (recommendations.length === 0) return null;
@@ -74,7 +89,7 @@ export function RecommendedFlows({ activeTriggers, onSelect }: RecommendedFlowsP
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Recommended Flows</span>
         <span className="text-[10px] text-muted-foreground ml-auto">Based on your current coverage gaps</span>
       </div>
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {recommendations.map((rec) => {
           const cx = COMPLEXITY_LABELS[rec.template.complexity] ?? COMPLEXITY_LABELS.easy;
           return (
