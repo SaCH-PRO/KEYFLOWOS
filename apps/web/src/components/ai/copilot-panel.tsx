@@ -732,7 +732,7 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
               )}
             </div>
 
-            {tab === "chat" && (
+            {tab === "chat" && !profileMode && (
               <div className="px-4 py-3 border-t border-border/30">
                 <div className="flex items-center gap-2 bg-muted/20 border border-border/30 rounded-xl px-3 py-1">
                   <input
