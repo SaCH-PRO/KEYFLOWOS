@@ -455,7 +455,9 @@ export class FlowOrchestratorService {
     for (const [key, value] of Object.entries(args)) {
       const schema = tool.parameters.properties[key];
       if (!schema) continue;
-      if (schema.type === 'string' && typeof value !== 'string') continue;
+      if (schema.type === 'string' && typeof value !== 'string') {
+        throw new Error(`Field "${key}" for ${toolName} must be a string`);
+      }
       if (schema.type === 'number' && typeof value !== 'number') {
         const num = Number(value);
         if (isNaN(num)) throw new Error(`Field "${key}" for ${toolName} must be a number`);
