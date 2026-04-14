@@ -4018,7 +4018,9 @@ export async function fetchAiExecutionLogs(
   if (filters?.limit) params.set('limit', String(filters.limit));
   if (filters?.offset) params.set('offset', String(filters.offset));
   const qs = params.toString();
-  return apiGetSimple<AiExecutionLogEntry[]>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/execution-logs${qs ? `?${qs}` : ''}`);
+  const res = await apiGetSimple<{ logs: AiExecutionLogEntry[]; total: number; limit: number; offset: number }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/execution-logs${qs ? `?${qs}` : ''}`);
+  if (res.data) return { data: res.data.logs, error: null };
+  return { data: null, error: res.error };
 }
 
 export async function fetchAiExecutionStats(businessId: string, days?: number): Promise<ApiResult<AiExecutionStats>> {
