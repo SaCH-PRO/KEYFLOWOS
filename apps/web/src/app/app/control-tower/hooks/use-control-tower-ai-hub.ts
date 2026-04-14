@@ -86,6 +86,54 @@ async function generateTowerSuggestions(context: ModuleContext): Promise<AiSugge
 
 const towerTools: AiTool[] = [
   {
+    id: "explain_metric",
+    name: "Explain Metric",
+    description: "AI explains what a Control Tower metric means and suggests actions to improve it",
+    icon: "help-circle",
+    category: "analyze",
+    requiresSelection: false,
+    creditCost: 1,
+    execute: async (ctx) => {
+      const data = (ctx.customData ?? {}) as TowerCustomData;
+      const metrics = [
+        { name: "Monthly Revenue", value: data.monthlyRevenue ?? 0, unit: "TTD" },
+        { name: "Overdue Invoices", value: data.overdueInvoices ?? 0 },
+        { name: "Stale Leads", value: data.staleLeads ?? 0 },
+        { name: "Active Projects", value: data.activeProjects ?? 0 },
+        { name: "Overdue Tasks", value: data.overdueTaskCount ?? 0 },
+        { name: "Pending Approvals", value: data.pendingApprovals ?? 0 },
+        { name: "Momentum Score", value: data.momentumScore ?? 0, unit: "/100" },
+        { name: "Utilization Rate", value: data.utilizationRate ?? 0, unit: "%" },
+      ];
+      const flagged = metrics.filter((m) => {
+        if (m.name === "Momentum Score") return m.value < 60;
+        if (m.name === "Utilization Rate") return m.value < 50;
+        if (m.name === "Monthly Revenue") return m.value === 0;
+        if (["Overdue Invoices", "Stale Leads", "Overdue Tasks"].includes(m.name)) return m.value > 0;
+        return false;
+      });
+
+      return {
+        allMetrics: metrics,
+        flaggedMetrics: flagged,
+        summary: flagged.length === 0
+          ? "All metrics look healthy. Keep it up!"
+          : `${flagged.length} metric${flagged.length > 1 ? "s" : ""} need${flagged.length === 1 ? "s" : ""} attention: ${flagged.map((f) => f.name).join(", ")}`,
+        recommendations: flagged.map((f) => {
+          switch (f.name) {
+            case "Monthly Revenue": return "No revenue this month — focus on converting pending quotes and re-engaging stale leads.";
+            case "Overdue Invoices": return `${f.value} overdue invoices — send follow-up reminders to protect cash flow.`;
+            case "Stale Leads": return `${f.value} stale leads — a quick check-in message could re-activate them.`;
+            case "Overdue Tasks": return `${f.value} overdue tasks — prioritize clearing these to improve project delivery health.`;
+            case "Momentum Score": return `Momentum at ${f.value}/100 — clear overdue items and engage clients to boost it.`;
+            case "Utilization Rate": return `Only ${f.value}% utilization — consider promotions or outreach to fill capacity.`;
+            default: return `${f.name}: ${f.value} — review and take action.`;
+          }
+        }),
+      };
+    },
+  },
+  {
     id: "scan_risks",
     name: "Scan Risks",
     description: "AI scans for cash flow threats, churn signals, and overdue cascades",

@@ -16,6 +16,7 @@ import { PriorityQueue } from "./components/priority-queue";
 import { ModuleHealthGrid } from "./components/module-health-grid";
 import { GrowthOpsPanel } from "./components/growth-ops-panel";
 import { ApprovalsQueue } from "./components/approvals-queue";
+import { StorefrontIntel } from "./components/storefront-intel";
 
 function formatTTD(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -152,6 +153,12 @@ export default function ControlTowerPage() {
               />
             </div>
           )}
+
+          <StorefrontIntel
+            businessId={d.businessId}
+            storefront={d.data.modules.storefront}
+            monthlyRevenue={d.data.dashboard.monthlyRevenue}
+          />
 
           <GrowthOpsPanel
             businessId={d.businessId}
