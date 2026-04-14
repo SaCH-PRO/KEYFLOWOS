@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { getToolByName } from './flow-tool-registry';
@@ -223,6 +223,10 @@ export class GovernanceService {
       where: { id: approvalId, businessId },
     });
     if (!item) throw new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
+
+    if (item.status !== 'pending') {
+      throw new BadRequestException(`Approval item is already resolved (status: "${item.status}") — cannot re-resolve`);
+    }
 
     if (item.riskTier === 4) {
       const user = await this.prisma.client.user.findUnique({ where: { id: resolvedByUserId } });
