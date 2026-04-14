@@ -9,21 +9,30 @@ export interface ProfileInterviewMessage {
   content: string;
 }
 
+export interface ProfileExtraction {
+  value: string;
+  category: MemoryCategory;
+  key: string;
+  confidence: number;
+  confirmed: boolean;
+}
+
 export interface ProfileInterviewState {
   messages: ProfileInterviewMessage[];
-  extractedFields: Record<string, { value: string; category: MemoryCategory; key: string; confidence: number }>;
+  extractedFields: Record<string, ProfileExtraction>;
+  pendingConfirmations: ProfileExtraction[];
   completedTopics: string[];
   nextTopic: string | null;
 }
 
 const PROFILE_TOPICS = [
-  { topic: 'business_overview', label: 'Business Overview', category: 'goals' as MemoryCategory, questions: ['What does your business do?', 'Who are your typical customers?', 'How long have you been operating?'] },
-  { topic: 'brand_tone', label: 'Brand Voice', category: 'tone' as MemoryCategory, questions: ['How would you describe the tone you use with clients? (e.g., formal, friendly, casual, professional)'] },
-  { topic: 'goals', label: 'Business Goals', category: 'goals' as MemoryCategory, questions: ['What are your top 2-3 business goals right now?', 'Where do you want to be in 6 months?'] },
-  { topic: 'risk_tolerance', label: 'AI Autonomy', category: 'riskTolerance' as MemoryCategory, questions: ['How comfortable are you with the AI handling tasks automatically? (e.g., sending follow-ups, updating statuses)'] },
-  { topic: 'outreach_style', label: 'Outreach Preferences', category: 'outreachStyle' as MemoryCategory, questions: ['How do you prefer to reach out to clients? (email, WhatsApp, phone, social media)'] },
-  { topic: 'priorities', label: 'Current Priorities', category: 'priorities' as MemoryCategory, questions: ['What\'s keeping you busiest right now?', 'What\'s the biggest bottleneck in your operations?'] },
-  { topic: 'reporting', label: 'Reporting Preferences', category: 'reportingCadence' as MemoryCategory, questions: ['How often would you like business updates? (daily, weekly, on-demand)'] },
+  { topic: 'business_overview', label: 'Business Overview', category: 'goals' as MemoryCategory, unlocks: 'Smarter AI recommendations tailored to your industry, better client communication drafts, and accurate business summaries.' },
+  { topic: 'brand_tone', label: 'Brand Voice', category: 'tone' as MemoryCategory, unlocks: 'AI-drafted messages, emails, and content that match your brand personality — no more generic copy.' },
+  { topic: 'goals', label: 'Business Goals', category: 'goals' as MemoryCategory, unlocks: 'Prioritized daily action items, strategic insights aligned with your targets, and progress tracking toward your goals.' },
+  { topic: 'risk_tolerance', label: 'AI Autonomy', category: 'riskTolerance' as MemoryCategory, unlocks: 'Fine-tuned automation: the AI knows what it can handle alone vs. what needs your approval first.' },
+  { topic: 'outreach_style', label: 'Outreach Preferences', category: 'outreachStyle' as MemoryCategory, unlocks: 'Automated client outreach via your preferred channels, with the right tone and timing.' },
+  { topic: 'priorities', label: 'Current Priorities', category: 'priorities' as MemoryCategory, unlocks: 'Focused daily briefings, smart task ordering, and AI suggestions that tackle your biggest challenges first.' },
+  { topic: 'reporting', label: 'Reporting Preferences', category: 'reportingCadence' as MemoryCategory, unlocks: 'Business intelligence delivered on your schedule — daily snapshots, weekly summaries, or on-demand insights.' },
 ];
 
 @Injectable()
@@ -60,6 +69,7 @@ export class ProfileIntelligenceService {
     const state: ProfileInterviewState = {
       messages: [],
       extractedFields: {},
+      pendingConfirmations: [],
       completedTopics,
       nextTopic,
     };
@@ -90,6 +100,11 @@ export class ProfileIntelligenceService {
       .filter(t => !state.completedTopics.includes(t.topic))
       .map(t => t.label);
 
+    const topicUnlockInfo = PROFILE_TOPICS
+      .filter(t => !state.completedTopics.includes(t.topic))
+      .map(t => `- ${t.label}: ${t.unlocks}`)
+      .join('\n');
+
     const systemPrompt = `You are a friendly business intelligence assistant for a Caribbean business automation platform (KeyFlow OS). You're having a natural conversation to learn about the user's business so the AI can serve them better.
 
 ${businessContext}
@@ -97,11 +112,14 @@ ${memoryContext}
 
 REMAINING TOPICS TO COVER: ${remainingTopics.length > 0 ? remainingTopics.join(', ') : 'All topics covered!'}
 
+WHAT EACH TOPIC UNLOCKS:
+${topicUnlockInfo || 'All topics completed.'}
+
 INSTRUCTIONS:
 1. Be warm, concise, and conversational — not robotic or survey-like
 2. Ask ONE question at a time, naturally flowing from the user's response
 3. When the user shares information, acknowledge it specifically before moving on
-4. Explain briefly WHY knowing this helps the AI serve them better
+4. Before asking about a new topic, briefly explain what knowing this unlocks for them (use the WHAT EACH TOPIC UNLOCKS list above). For example: "Knowing your preferred tone helps the AI draft messages that sound like you."
 5. Extract information as structured JSON in a special block
 6. If all topics are covered, summarize what you've learned and thank them
 
@@ -132,36 +150,32 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
       const extractMatch = rawReply.match(/```extract\s*\n([\s\S]*?)\n```/);
       let reply = rawReply.replace(/```extract\s*\n[\s\S]*?\n```/g, '').trim();
 
+      let pendingExtractions: ProfileExtraction[] = [];
       if (extractMatch) {
         try {
-          const extractions: Array<{ category: MemoryCategory; key: string; value: string; confidence: number }> = JSON.parse(extractMatch[1]);
-
-          for (const ext of extractions) {
-            await this.memory.upsert(businessId, {
-              category: ext.category,
-              key: ext.key,
-              value: ext.value,
-              confidence: ext.confidence,
-              source: 'user',
-            });
-
-            state.extractedFields[`${ext.category}/${ext.key}`] = ext;
-
-            const topic = PROFILE_TOPICS.find(t => t.category === ext.category);
-            if (topic && !state.completedTopics.includes(topic.topic)) {
-              state.completedTopics.push(topic.topic);
-            }
-          }
+          const rawExtractions: Array<{ category: MemoryCategory; key: string; value: string; confidence: number }> = JSON.parse(extractMatch[1]);
+          pendingExtractions = rawExtractions.map(ext => ({
+            ...ext,
+            confirmed: false,
+          }));
+          state.pendingConfirmations = pendingExtractions;
         } catch (parseErr) {
           this.logger.warn(`Failed to parse extraction block: ${(parseErr as Error).message}`);
         }
       }
 
+      const currentTopicDef = state.nextTopic ? PROFILE_TOPICS.find(t => t.topic === state.nextTopic) : null;
+
       state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
       state.messages.push({ role: 'assistant', content: reply });
       this.sessionCache.set(businessId, state);
 
-      return { reply, state };
+      return {
+        reply,
+        state,
+        pendingExtractions,
+        currentTopicUnlocks: currentTopicDef?.unlocks || null,
+      };
     } catch (err) {
       this.logger.error(`Profile intelligence chat failed: ${(err as Error).message}`);
       const fallbackReply = "I'm having trouble processing that right now. Could you tell me a bit about what your business does?";
@@ -191,6 +205,48 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
       completionPercent: Math.round((state.completedTopics.length / PROFILE_TOPICS.length) * 100),
       memories: memories.map(m => ({ category: m.category, key: m.key, value: m.value, confidence: m.confidence })),
     };
+  }
+
+  async confirmExtractions(businessId: string, confirmedKeys?: string[]): Promise<{ saved: number; skipped: number }> {
+    const state = this.sessionCache.get(businessId);
+    if (!state || state.pendingConfirmations.length === 0) {
+      return { saved: 0, skipped: 0 };
+    }
+
+    let saved = 0;
+    let skipped = 0;
+
+    for (const ext of state.pendingConfirmations) {
+      const fieldKey = `${ext.category}/${ext.key}`;
+      if (confirmedKeys && !confirmedKeys.includes(fieldKey)) {
+        skipped++;
+        continue;
+      }
+
+      await this.memory.upsert(businessId, {
+        category: ext.category,
+        key: ext.key,
+        value: ext.value,
+        confidence: ext.confidence,
+        source: 'user',
+      });
+
+      ext.confirmed = true;
+      state.extractedFields[fieldKey] = ext;
+
+      const topic = PROFILE_TOPICS.find(t => t.category === ext.category);
+      if (topic && !state.completedTopics.includes(topic.topic)) {
+        state.completedTopics.push(topic.topic);
+      }
+
+      saved++;
+    }
+
+    state.pendingConfirmations = state.pendingConfirmations.filter(e => !e.confirmed);
+    state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
+    this.sessionCache.set(businessId, state);
+
+    return { saved, skipped };
   }
 
   resetSession(businessId: string): void {

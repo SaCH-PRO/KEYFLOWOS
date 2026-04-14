@@ -4076,9 +4076,18 @@ export interface ProfileInterviewMessage {
   content: string;
 }
 
+export interface ProfileExtraction {
+  value: string;
+  category: string;
+  key: string;
+  confidence: number;
+  confirmed: boolean;
+}
+
 export interface ProfileInterviewState {
   messages: ProfileInterviewMessage[];
-  extractedFields: Record<string, { value: string; category: string; key: string; confidence: number }>;
+  extractedFields: Record<string, ProfileExtraction>;
+  pendingConfirmations: ProfileExtraction[];
   completedTopics: string[];
   nextTopic: string | null;
 }
@@ -4091,8 +4100,19 @@ export interface ProfileStatus {
   memories: Array<{ category: string; key: string; value: string; confidence: number }>;
 }
 
-export async function sendProfileChat(businessId: string, message: string): Promise<ApiResult<{ reply: string; state: ProfileInterviewState }>> {
-  return apiPostSimple<{ reply: string; state: ProfileInterviewState }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/profile/chat`, { message });
+export interface ProfileChatResponse {
+  reply: string;
+  state: ProfileInterviewState;
+  pendingExtractions: ProfileExtraction[];
+  currentTopicUnlocks: string | null;
+}
+
+export async function sendProfileChat(businessId: string, message: string): Promise<ApiResult<ProfileChatResponse>> {
+  return apiPostSimple<ProfileChatResponse>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/profile/chat`, { message });
+}
+
+export async function confirmProfileExtractions(businessId: string, confirmedKeys?: string[]): Promise<ApiResult<{ saved: number; skipped: number }>> {
+  return apiPostSimple<{ saved: number; skipped: number }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/profile/confirm`, { confirmedKeys });
 }
 
 export async function fetchProfileStatus(businessId: string): Promise<ApiResult<ProfileStatus>> {

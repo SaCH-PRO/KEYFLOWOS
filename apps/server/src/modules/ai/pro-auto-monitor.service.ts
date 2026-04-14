@@ -38,7 +38,7 @@ const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 const INSIGHT_CACHE_TTL_MS = 10 * 60 * 1000;
 const BATCH_SIZE = 50;
 
-const AUTO_EXECUTABLE_TOOLS = new Set([
+const AUTO_EXECUTABLE_READ_TOOLS = new Set([
   'fetch_business_summary',
   'fetch_storefront_quality',
   'fetch_project_status',
@@ -46,6 +46,15 @@ const AUTO_EXECUTABLE_TOOLS = new Set([
   'fetch_schedule_health',
   'fetch_client_health',
   'fetch_revenue_risk',
+]);
+
+const TIER1_TOOLS = new Set([
+  ...AUTO_EXECUTABLE_READ_TOOLS,
+  'draft_followup_message',
+  'draft_payment_reminder',
+  'tag_contact',
+  'create_task',
+  'segment_contacts',
 ]);
 
 @Injectable()
@@ -168,22 +177,28 @@ export class ProAutoMonitorService implements OnModuleInit {
       if (existingTools.has(toolKey)) continue;
 
       if (insight.riskTier <= settings.maxAutoTier && settings.mode === 'pro_auto') {
-        if (insight.suggestedTool && AUTO_EXECUTABLE_TOOLS.has(insight.suggestedTool)) {
-          try {
-            const result = await this.orchestrator.autoExecuteToolForMonitoring(
-              businessId,
-              insight.suggestedTool,
-              { businessId },
-            );
-            if (result.success) {
-              insight.escalated = true;
-              insight.autoExecuteResult = result;
-              this.logger.log(`Auto-executed ${insight.suggestedTool} for ${businessId}: success`);
-              continue;
+        if (insight.suggestedTool && TIER1_TOOLS.has(insight.suggestedTool)) {
+          const args = await this.buildAutoExecArgs(businessId, insight);
+          if (args) {
+            try {
+              const result = await this.orchestrator.autoExecuteToolForMonitoring(
+                businessId,
+                insight.suggestedTool,
+                args,
+              );
+              if (result.blocked) {
+                this.logger.log(`Tool ${insight.suggestedTool} blocked by governance for ${businessId}, creating approval item`);
+              } else if (result.success) {
+                insight.escalated = true;
+                insight.autoExecuteResult = result;
+                this.logger.log(`Auto-executed ${insight.suggestedTool} for ${businessId}: success`);
+                continue;
+              } else {
+                this.logger.warn(`Auto-execution of ${insight.suggestedTool} returned error for ${businessId}: ${result.error}`);
+              }
+            } catch (err) {
+              this.logger.warn(`Auto-execution of ${insight.suggestedTool} failed for ${businessId}: ${(err as Error).message}`);
             }
-            this.logger.warn(`Auto-execution of ${insight.suggestedTool} returned error for ${businessId}: ${result.error}`);
-          } catch (err) {
-            this.logger.warn(`Auto-execution of ${insight.suggestedTool} failed for ${businessId}: ${(err as Error).message}`);
           }
         } else if (!insight.suggestedTool) {
           insight.escalated = true;
@@ -211,6 +226,54 @@ export class ProAutoMonitorService implements OnModuleInit {
       });
       existingTools.add(toolKey);
     }
+  }
+
+  private async buildAutoExecArgs(businessId: string, insight: ProAutoInsight): Promise<Record<string, any> | null> {
+    const tool = insight.suggestedTool;
+    if (!tool) return null;
+
+    if (AUTO_EXECUTABLE_READ_TOOLS.has(tool)) {
+      return { businessId };
+    }
+
+    if (tool === 'draft_followup_message') {
+      const staleContact = await this.prisma.client.contact.findFirst({
+        where: { businessId, deletedAt: null, status: 'LEAD' },
+        orderBy: { updatedAt: 'asc' },
+        select: { id: true },
+      });
+      if (!staleContact) return null;
+      return { contactId: staleContact.id, channel: 'email', tone: 'friendly' };
+    }
+
+    if (tool === 'draft_payment_reminder') {
+      const overdueInvoice = await this.prisma.client.invoice.findFirst({
+        where: { businessId, deletedAt: null, status: 'OVERDUE' },
+        orderBy: { dueDate: 'asc' },
+        select: { id: true },
+      });
+      if (!overdueInvoice) return null;
+      return { invoiceId: overdueInvoice.id, urgency: 'gentle' };
+    }
+
+    if (tool === 'tag_contact') {
+      return { businessId };
+    }
+
+    if (tool === 'create_task') {
+      return {
+        businessId,
+        title: `Review: ${insight.title}`,
+        description: insight.description,
+        priority: insight.severity === 'critical' ? 'high' : 'medium',
+      };
+    }
+
+    if (tool === 'segment_contacts') {
+      return { businessId };
+    }
+
+    return null;
   }
 
   private checkStaleLeads(snap: BusinessGraphSnapshot, out: ProAutoInsight[]) {
