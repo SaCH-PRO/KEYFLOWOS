@@ -514,9 +514,16 @@ export class ExpensesService {
       }
     }
 
+    const clientProjectCount: Record<string, number> = {};
     for (const [, projData] of Object.entries(byProject)) {
       for (const cid of projData.clientIds) {
-        projData.revenue += invoiceByContact[cid] || 0;
+        clientProjectCount[cid] = (clientProjectCount[cid] || 0) + 1;
+      }
+    }
+    for (const [, projData] of Object.entries(byProject)) {
+      for (const cid of projData.clientIds) {
+        const share = clientProjectCount[cid] > 0 ? 1 / clientProjectCount[cid] : 0;
+        projData.revenue += (invoiceByContact[cid] || 0) * share;
       }
     }
 
