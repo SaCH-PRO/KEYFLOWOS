@@ -277,6 +277,7 @@ export function FlowList({
             className="overflow-hidden"
           >
             <AiFlowGenerator
+              businessId={businessId}
               onGenerated={(config) => {
                 setAiGeneratedConfig(config);
                 setEditingPlaybook(null);

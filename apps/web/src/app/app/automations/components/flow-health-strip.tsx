@@ -1,8 +1,8 @@
 "use client";
 
-import { Zap, PauseCircle, AlertTriangle, TrendingUp, Shield, Activity } from "lucide-react";
+import { Zap, PauseCircle, AlertTriangle, TrendingUp, Shield, Activity, CheckCircle } from "lucide-react";
 
-interface FlowHealthStats {
+export interface FlowHealthStats {
   active: number;
   paused: number;
   total: number;
@@ -12,6 +12,8 @@ interface FlowHealthStats {
   neverRun: number;
   totalRuns: number;
   coveragePct: number;
+  successRate: number;
+  errorCount: number;
 }
 
 interface FlowHealthStripProps {
@@ -39,6 +41,12 @@ export function FlowHealthStrip({ stats }: FlowHealthStripProps) {
       color: stats.totalRuns > 0 ? "hsl(var(--kf-info))" : "hsl(var(--muted-foreground))",
     },
     {
+      label: "Success Rate",
+      value: stats.totalRuns > 0 ? `${stats.successRate}%` : "—",
+      icon: CheckCircle,
+      color: stats.successRate >= 80 ? "hsl(var(--kf-success))" : stats.successRate >= 50 ? "hsl(var(--kf-warning))" : stats.totalRuns > 0 ? "hsl(var(--kf-error))" : "hsl(var(--muted-foreground))",
+    },
+    {
       label: "Coverage",
       value: `${stats.coveragePct}%`,
       icon: Shield,
@@ -52,14 +60,14 @@ export function FlowHealthStrip({ stats }: FlowHealthStripProps) {
     },
     {
       label: "Needs Attention",
-      value: stats.neverRun,
+      value: stats.neverRun + stats.errorCount,
       icon: AlertTriangle,
-      color: stats.neverRun > 0 ? "hsl(var(--kf-warning))" : "hsl(var(--muted-foreground))",
+      color: (stats.neverRun + stats.errorCount) > 0 ? "hsl(var(--kf-warning))" : "hsl(var(--muted-foreground))",
     },
   ];
 
   return (
-    <div className="grid grid-cols-3 sm:grid-cols-6 gap-px rounded-xl overflow-hidden border border-border/40 bg-border/40">
+    <div className="grid grid-cols-4 sm:grid-cols-7 gap-px rounded-xl overflow-hidden border border-border/40 bg-border/40">
       {metrics.map((m) => (
         <div
           key={m.label}

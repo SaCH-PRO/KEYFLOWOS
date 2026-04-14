@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { Sparkles, ArrowRight, Loader2, X, Zap, CheckCircle } from "lucide-react";
 import { AiBadge } from "@/components/ui/ai-badge";
+import { aiGenerateFlow } from "@/lib/client";
 import {
   TRIGGER_OPTIONS, ACTION_OPTIONS, AUTOMATION_TEMPLATES,
   getTriggerLabel, getActionLabel,
@@ -10,6 +11,7 @@ import {
 } from "./automation-constants";
 
 interface AiFlowGeneratorProps {
+  businessId: string | null;
   onGenerated: (config: { name: string; triggerEvent: string; actions: ActionStep[]; conditions: string[] }) => void;
   onClose: () => void;
 }
@@ -132,7 +134,7 @@ function matchFlowFromPrompt(prompt: string): GeneratedFlow | null {
   };
 }
 
-export function AiFlowGenerator({ onGenerated, onClose }: AiFlowGeneratorProps) {
+export function AiFlowGenerator({ businessId, onGenerated, onClose }: AiFlowGeneratorProps) {
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<GeneratedFlow | null>(null);
@@ -145,13 +147,27 @@ export function AiFlowGenerator({ onGenerated, onClose }: AiFlowGeneratorProps) 
     setError(null);
     setResult(null);
 
-    await new Promise((r) => setTimeout(r, 600));
+    if (businessId) {
+      const aiRes = await aiGenerateFlow({ businessId, prompt: prompt.trim() });
+      if (aiRes.data?.success && aiRes.data.flow) {
+        const f = aiRes.data.flow;
+        setResult({
+          name: f.name,
+          triggerEvent: f.triggerEvent,
+          actions: f.actions.map((a) => ({ type: a.type, config: a.config })),
+          conditions: f.conditions,
+          reasoning: f.reasoning,
+        });
+        setGenerating(false);
+        return;
+      }
+    }
 
     const flow = matchFlowFromPrompt(prompt);
     if (flow) {
       setResult(flow);
     } else {
-      setError("I couldn't match a flow from that description. Try being more specific — e.g. \"When a booking is cancelled, send them a follow-up email and tag as at-risk\"");
+      setError("I couldn't generate a flow from that description. Try being more specific — e.g. \"When a booking is cancelled, send them a follow-up email and tag as at-risk\"");
     }
     setGenerating(false);
   }
@@ -260,6 +276,13 @@ export function AiFlowGenerator({ onGenerated, onClose }: AiFlowGeneratorProps) 
                 <span className="text-muted-foreground">Trigger:</span>
                 <span className="font-medium">{getTriggerLabel(result.triggerEvent)}</span>
               </div>
+              {result.conditions.length > 0 && result.conditions.map((c, i) => (
+                <div key={`c-${i}`} className="flex items-center gap-2 text-[11px]">
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "hsl(var(--kf-warning))" }} />
+                  <span className="text-muted-foreground">If:</span>
+                  <span className="font-medium">{c.replace(/\./g, " ").replace(/^\w/, (s) => s.toUpperCase())}</span>
+                </div>
+              ))}
               {result.actions.map((a, i) => (
                 <div key={i} className="flex items-center gap-2 text-[11px]">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "hsl(var(--kf-success))" }} />

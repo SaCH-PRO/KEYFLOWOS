@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { LayoutGrid, Clock, Workflow } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
@@ -14,12 +14,13 @@ import { FlowList } from "./components/flow-list";
 import { TemplateGallery } from "./components/template-gallery";
 import { ExecutionLog } from "./components/execution-log";
 import { FlowHealthStrip } from "./components/flow-health-strip";
+import type { FlowHealthStats } from "./components/flow-health-strip";
 import { CoverageMap } from "./components/coverage-map";
 import { RecommendedFlows } from "./components/recommended-flows";
 import type { AutomationTemplate } from "./components/automation-constants";
 import { COVERAGE_MODULES } from "./components/automation-constants";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
-import { Playbook, CrossModuleWorkflow, fetchPlaybooks, fetchCrossModuleWorkflows } from "@/lib/client";
+import { Playbook, CrossModuleWorkflow, fetchPlaybooks, fetchCrossModuleWorkflows, fetchActivityFeed } from "@/lib/client";
 
 const TABS = [
   { key: "flows", label: "My Flows", icon: Workflow, tooltip: "Active flows and playbooks running in your business." },
@@ -36,6 +37,7 @@ export default function FlowsPage() {
   const [workflows, setWorkflows] = useState<CrossModuleWorkflow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showUpgradeBanner, setShowUpgradeBanner] = useState(true);
+  const [executionStats, setExecutionStats] = useState({ total: 0, success: 0, failed: 0, skipped: 0, successRate: 0 });
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -46,12 +48,29 @@ export default function FlowsPage() {
     if (!businessId) return;
     const load = async () => {
       setLoading(true);
-      const [pbRes, wfRes] = await Promise.all([
+      const [pbRes, wfRes, actRes] = await Promise.all([
         fetchPlaybooks(businessId),
         fetchCrossModuleWorkflows(businessId),
+        fetchActivityFeed(businessId, { module: "automation", limit: 100 }),
       ]);
       setPlaybooks(pbRes.data ?? []);
       setWorkflows(wfRes.data ?? []);
+
+      const actItems = actRes.data ?? [];
+      const executionActions = new Set(["executed", "failed", "skipped"]);
+      const execItems = actItems.filter((i) => executionActions.has(i.action));
+      const success = execItems.filter((i) => i.tone === "success" || i.action === "executed").length;
+      const failed = execItems.filter((i) => i.tone === "error" || i.action === "failed").length;
+      const skipped = execItems.filter((i) => i.action === "skipped").length;
+      const total = execItems.length;
+      setExecutionStats({
+        total,
+        success,
+        failed,
+        skipped,
+        successRate: total > 0 ? Math.round((success / total) * 100) : 0,
+      });
+
       setLoading(false);
     };
     void load();
@@ -66,6 +85,10 @@ export default function FlowsPage() {
     setSelectedTemplate(template);
     setActiveTab("flows");
   }
+
+  const handleExecutionStatsChange = useCallback((stats: { total: number; success: number; failed: number; skipped: number; successRate: number }) => {
+    setExecutionStats(stats);
+  }, []);
 
   const healthStats = useMemo(() => {
     const active = playbooks.filter((p) => p.enabled).length + workflows.filter((w) => w.enabled).length;
@@ -123,8 +146,12 @@ export default function FlowsPage() {
       ? Math.round(moduleCoverages.reduce((a, b) => a + b, 0) / moduleCoverages.length)
       : 0;
 
-    return { active, paused, total, recentlyTriggered, mostTriggered, maxRuns, neverRun, totalRuns, coveragePct };
-  }, [playbooks, workflows]);
+    return {
+      active, paused, total, recentlyTriggered, mostTriggered, maxRuns, neverRun, totalRuns, coveragePct,
+      successRate: executionStats.successRate,
+      errorCount: executionStats.failed,
+    } satisfies FlowHealthStats;
+  }, [playbooks, workflows, executionStats]);
 
   const activeTriggers = useMemo(() => {
     const triggers = new Set<string>();
@@ -215,7 +242,7 @@ export default function FlowsPage() {
         )}
 
         {activeTab === "log" && (
-          <ExecutionLog businessId={businessId} />
+          <ExecutionLog businessId={businessId} onExecutionStatsChange={handleExecutionStatsChange} />
         )}
       </div>
 
