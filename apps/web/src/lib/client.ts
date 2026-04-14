@@ -3782,6 +3782,10 @@ export interface FlowToolResult {
   toolCallId: string;
   name: string;
   result: any;
+  changedEntities: string[];
+  followOnSuggestions: string[];
+  family: string;
+  riskTier: number;
   success: boolean;
   error?: string;
 }

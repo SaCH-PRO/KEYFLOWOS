@@ -7,7 +7,7 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { GovernanceService } from './governance.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
-import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily } from './flow-tool-registry';
+import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
@@ -28,6 +28,10 @@ export interface FlowToolResult {
   toolCallId: string;
   name: string;
   result: any;
+  changedEntities: string[];
+  followOnSuggestions: string[];
+  family: string;
+  riskTier: number;
   success: boolean;
   error?: string;
 }
@@ -389,10 +393,12 @@ export class FlowOrchestratorService {
     const id = toolCallId ?? `manual_${toolName}`;
     const startTime = Date.now();
     try {
-      const result = await this.executeToolAction(businessId, toolName, args);
+      this.validateToolInput(toolName, args);
+      const rawResult = await this.executeToolAction(businessId, toolName, args);
+      const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, result, true, durationMs, {
+      this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
@@ -400,7 +406,16 @@ export class FlowOrchestratorService {
         this.logger.error(`Failed to log tool execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
       this.businessGraph.invalidateCache(businessId);
-      return { toolCallId: id, name: toolName, result, success: true };
+      return {
+        toolCallId: id,
+        name: toolName,
+        result: envelope.result,
+        changedEntities: envelope.changedEntities,
+        followOnSuggestions: envelope.followOnSuggestions,
+        family: envelope.family,
+        riskTier: envelope.riskTier,
+        success: true,
+      };
     } catch (error) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
@@ -411,7 +426,46 @@ export class FlowOrchestratorService {
       }).catch((e: unknown) => {
         this.logger.error(`Failed to log tool execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
-      return { toolCallId: id, name: toolName, result: null, success: false, error: (error as Error).message };
+      const errorEnvelope = wrapToolResult(toolName, null);
+      return {
+        toolCallId: id,
+        name: toolName,
+        result: null,
+        changedEntities: errorEnvelope.changedEntities,
+        followOnSuggestions: errorEnvelope.followOnSuggestions,
+        family: errorEnvelope.family,
+        riskTier: errorEnvelope.riskTier,
+        success: false,
+        error: (error as Error).message,
+      };
+    }
+  }
+
+  private validateToolInput(toolName: string, args: Record<string, any>): void {
+    const tool = getToolByName(toolName);
+    if (!tool) return;
+
+    const missing = tool.parameters.required.filter(
+      (field) => args[field] === undefined || args[field] === null || args[field] === '',
+    );
+    if (missing.length > 0) {
+      throw new Error(`Missing required fields for ${toolName}: ${missing.join(', ')}`);
+    }
+
+    for (const [key, value] of Object.entries(args)) {
+      const schema = tool.parameters.properties[key];
+      if (!schema) continue;
+      if (schema.type === 'string' && typeof value !== 'string') continue;
+      if (schema.type === 'number' && typeof value !== 'number') {
+        const num = Number(value);
+        if (isNaN(num)) throw new Error(`Field "${key}" for ${toolName} must be a number`);
+      }
+      if (schema.type === 'array' && !Array.isArray(value)) {
+        throw new Error(`Field "${key}" for ${toolName} must be an array`);
+      }
+      if (schema.enum && typeof value === 'string' && !schema.enum.includes(value)) {
+        throw new Error(`Field "${key}" for ${toolName} must be one of: ${schema.enum.join(', ')}`);
+      }
     }
   }
 
@@ -1110,8 +1164,12 @@ export class FlowOrchestratorService {
           outputCategory: 'messages',
         });
 
-        try { return { draft: JSON.parse(result.content), contactName: name, channel }; }
-        catch { return { draft: { subject: `Follow up with ${name}`, body: result.content, callToAction: '' }, contactName: name, channel }; }
+        try {
+          const parsed = JSON.parse(result.content);
+          return { subject: parsed.subject ?? '', body: parsed.body ?? '', channel, contactName: name };
+        } catch {
+          return { subject: `Follow up with ${name}`, body: result.content, channel, contactName: name };
+        }
       }
 
       case 'draft_campaign_bundle': {
@@ -1136,8 +1194,12 @@ export class FlowOrchestratorService {
           outputCategory: 'messages',
         });
 
-        try { return { campaign: JSON.parse(result.content), objective, audience }; }
-        catch { return { campaign: { name: objective, subject: objective, body: result.content, callToAction: '', preheader: '', suggestedSendTime: '' }, objective, audience }; }
+        try {
+          const parsed = JSON.parse(result.content);
+          return { subject: parsed.subject ?? objective, body: parsed.body ?? '', cta: parsed.callToAction ?? '', audience };
+        } catch {
+          return { subject: objective, body: result.content, cta: '', audience };
+        }
       }
 
       case 'draft_payment_reminder': {
@@ -1167,8 +1229,12 @@ export class FlowOrchestratorService {
           outputCategory: 'messages',
         });
 
-        try { return { reminder: JSON.parse(result.content), invoiceNumber: invoice.invoiceNumber, amount: invoice.total, contactName, daysOverdue }; }
-        catch { return { reminder: { subject: `Payment Reminder - #${invoice.invoiceNumber}`, body: result.content, tone: urgency }, invoiceNumber: invoice.invoiceNumber, amount: invoice.total, contactName, daysOverdue }; }
+        try {
+          const parsed = JSON.parse(result.content);
+          return { subject: parsed.subject ?? `Payment Reminder - #${invoice.invoiceNumber}`, body: parsed.body ?? '', invoiceNumber: invoice.invoiceNumber, amountDue: Number(invoice.total) };
+        } catch {
+          return { subject: `Payment Reminder - #${invoice.invoiceNumber}`, body: result.content, invoiceNumber: invoice.invoiceNumber, amountDue: Number(invoice.total) };
+        }
       }
 
       case 'draft_storefront_copy': {
@@ -1191,8 +1257,12 @@ export class FlowOrchestratorService {
           outputCategory: 'general',
         });
 
-        try { return { copy: JSON.parse(result.content), productName: product.name, style }; }
-        catch { return { copy: { headline: product.name, description: result.content, bulletPoints: [], seoMetaDescription: '' }, productName: product.name, style }; }
+        try {
+          const parsed = JSON.parse(result.content);
+          return { productName: product.name, description: parsed.description ?? '', tagline: parsed.headline ?? product.name };
+        } catch {
+          return { productName: product.name, description: result.content, tagline: product.name };
+        }
       }
 
       case 'draft_project_update': {
@@ -1227,8 +1297,12 @@ export class FlowOrchestratorService {
           outputCategory: 'messages',
         });
 
-        try { return { update: JSON.parse(result.content), projectName: project.name, progress }; }
-        catch { return { update: { subject: `Update: ${project.name}`, body: result.content, nextSteps: [] }, projectName: project.name, progress }; }
+        try {
+          const parsed = JSON.parse(result.content);
+          return { subject: parsed.subject ?? `Update: ${project.name}`, body: parsed.body ?? '', projectName: project.name, progress };
+        } catch {
+          return { subject: `Update: ${project.name}`, body: result.content, projectName: project.name, progress };
+        }
       }
 
       // ========== ORGANIZE FAMILY ==========
@@ -1250,7 +1324,7 @@ export class FlowOrchestratorService {
             source: 'flow_ai',
           },
         });
-        return { task, id: task.id };
+        return { id: task.id, title: task.title, contactId: task.contactId };
       }
 
       case 'create_followup_queue': {
@@ -1283,7 +1357,7 @@ export class FlowOrchestratorService {
           createdTasks.push({ taskId: task.id, contactId: c.id, contactName: name });
         }
 
-        return { tasksCreated: createdTasks.length, tasks: createdTasks };
+        return { created: createdTasks.length, contacts: createdTasks };
       }
 
       case 'tag_contact': {
@@ -1303,7 +1377,7 @@ export class FlowOrchestratorService {
           select: { id: true, firstName: true, lastName: true, tags: true },
         });
 
-        return { contact: updated, addedTags: newTags, totalTags: mergedTags.length };
+        return { contactId: updated.id, tags: mergedTags };
       }
 
       case 'segment_contacts': {
@@ -1330,7 +1404,7 @@ export class FlowOrchestratorService {
         return {
           segmentName: args.name,
           criteria: args.criteria ?? `Status: ${args.status ?? 'any'}, Tag: ${args.tag ?? 'any'}, Min Spend: ${args.minSpend ?? 'any'}`,
-          matchedContacts: contacts.length,
+          matchedCount: contacts.length,
           contacts: contacts.slice(0, 50),
         };
       }
@@ -1385,7 +1459,7 @@ export class FlowOrchestratorService {
           data: { status: 'SCHEDULED', scheduledAt: sendDate },
         });
 
-        return { campaign: { id: updated.id, name: updated.name, status: updated.status, scheduledAt: updated.scheduledAt } };
+        return { id: updated.id, name: updated.name, status: updated.status, scheduledAt: updated.scheduledAt };
       }
 
       case 'send_message_with_approval': {
@@ -1418,11 +1492,10 @@ export class FlowOrchestratorService {
         });
 
         return {
-          status: 'queued',
-          noteId: note.id,
+          id: note.id,
           contactName: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim(),
           channel: args.channel,
-          message: 'Message saved as a note and queued for delivery.',
+          status: 'queued_for_review',
         };
       }
 
@@ -1445,7 +1518,8 @@ export class FlowOrchestratorService {
         });
 
         return {
-          product: { id: updated.id, name: updated.name, description: updated.description, price: updated.price, category: updated.category },
+          id: updated.id,
+          name: updated.name,
           fieldsUpdated: Object.keys(updateData),
         };
       }
@@ -1461,7 +1535,7 @@ export class FlowOrchestratorService {
           data: { enabled: true },
         });
 
-        return { playbook: { id: updated.id, name: updated.name, enabled: updated.enabled, trigger: updated.trigger } };
+        return { id: updated.id, name: updated.name, status: updated.enabled ? 'ACTIVE' : 'INACTIVE' };
       }
 
       case 'update_status_with_confirmation': {
@@ -1541,13 +1615,13 @@ export class FlowOrchestratorService {
       case 'crm_delete_contact':
         return `Contact deleted.`;
       case 'create_task':
-        return `Task created: "${result?.task?.title ?? ''}".`;
+        return `Task created: "${result?.title ?? ''}".`;
       case 'create_followup_queue':
-        return `Created ${result?.tasksCreated ?? 0} follow-up tasks.`;
+        return `Created ${result?.created ?? 0} follow-up tasks.`;
       case 'tag_contact':
-        return `Added ${result?.addedTags?.length ?? 0} tag(s) to contact.`;
+        return `Tags updated for contact.`;
       case 'segment_contacts':
-        return `Segment "${result?.segmentName ?? ''}" matched ${result?.matchedContacts ?? 0} contacts.`;
+        return `Segment "${result?.segmentName ?? ''}" matched ${result?.matchedCount ?? 0} contacts.`;
       case 'queue_campaign':
         return `Campaign queued for sending.`;
       case 'send_message_with_approval':
@@ -1555,7 +1629,7 @@ export class FlowOrchestratorService {
       case 'apply_storefront_recommendation':
         return `Product updated: ${result?.fieldsUpdated?.join(', ') ?? 'fields'} changed.`;
       case 'enable_flow_with_approval':
-        return `Playbook "${result?.playbook?.name ?? ''}" enabled.`;
+        return `Playbook "${result?.name ?? ''}" enabled.`;
       case 'update_status_with_confirmation':
         return `Updated ${result?.updatedCount ?? 0} ${result?.entityType ?? 'entity'}(s) to "${result?.newStatus ?? ''}".`;
       default:
