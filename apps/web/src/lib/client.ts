@@ -3589,9 +3589,9 @@ export interface MarginAnalysis {
   grossProfit: number;
   grossMargin: number;
   expenseToRevenueRatio: number;
-  byProject: { projectId: string; name: string; expenses: number; count: number }[];
+  byProject: { projectId: string; name: string; expenses: number; count: number; revenue: number; profit: number; margin: number }[];
   byClient: { contactId: string; name: string; expenses: number; revenue: number; profit: number; margin: number }[];
-  byService: { serviceId: string; name: string; expenses: number; count: number }[];
+  byService: { serviceId: string; name: string; expenses: number; count: number; revenue: number; profit: number; margin: number }[];
 }
 export interface VendorAnalytics {
   name: string;
