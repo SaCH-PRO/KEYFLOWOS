@@ -505,6 +505,17 @@ export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
       .nullable()
       .optional(),
     items: z.array(invoiceItemSchema).optional(),
+    payments: z.array(z.object({
+      id: z.string(),
+      amount: z.number(),
+      currency: z.string(),
+      status: z.string(),
+      provider: z.string(),
+      providerPaymentId: z.string(),
+      createdAt: z.string(),
+      businessId: z.string(),
+      invoiceId: z.string(),
+    })).optional(),
   });
   const envelopeSchema = z.object({
     data: z.array(invoiceSchema),
