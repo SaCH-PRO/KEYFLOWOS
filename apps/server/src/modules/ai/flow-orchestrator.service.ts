@@ -288,7 +288,9 @@ export class FlowOrchestratorService {
             description: `Tier ${decision.tier} action requested via Flow chat — requires ${decision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
             rationale: decision.reason,
             inputPayload: tc.arguments,
-          }).catch(() => {});
+          }).catch((e: unknown) => {
+            this.logger.error(`Failed to create approval item for ${tc.name}: ${e instanceof Error ? e.message : String(e)}`);
+          });
         }
 
         const approvalMessages = needsFormalApproval.map(({ tc, decision }) =>
@@ -376,7 +378,9 @@ export class FlowOrchestratorService {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
-      }).catch(() => {});
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log tool execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
       this.businessGraph.invalidateCache(businessId);
       return { toolCallId: id, name: toolName, result, success: true };
     } catch (error) {
@@ -386,7 +390,9 @@ export class FlowOrchestratorService {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
-      }).catch(() => {});
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log tool execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
       return { toolCallId: id, name: toolName, result: null, success: false, error: (error as Error).message };
     }
   }
