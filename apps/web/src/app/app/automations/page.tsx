@@ -41,6 +41,13 @@ export default function FlowsPage() {
   const [executionStats, setExecutionStats] = useState({ total: 0, success: 0, failed: 0, skipped: 0, successRate: 0 });
   const { aiHook: automationsAi, updateAutomationsContext } = useAutomationsAiHub();
 
+  const handleAutomationsAiAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("switch_tab:")) {
+      const tab = actionKey.replace("switch_tab:", "");
+      if (["flows", "templates", "log"].includes(tab)) setActiveTab(tab);
+    }
+  }, []);
+
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
@@ -230,7 +237,7 @@ export default function FlowsPage() {
       activeTab={activeTab}
       onTabChange={setActiveTab}
       tabLayoutId="flows-tab"
-      ai={{ hook: automationsAi, moduleName: "Flows" }}
+      ai={{ hook: automationsAi, moduleName: "Flows", onAction: handleAutomationsAiAction }}
       banners={
         <>
           <ResumePrompt module="automations" />

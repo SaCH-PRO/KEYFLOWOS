@@ -197,11 +197,7 @@ export function useProjectsAiHub() {
     });
   }, [ai.updateContext]);
 
-  const handleAction = useCallback((actionKey: string) => {
-    console.log("[ProjectsAI] action:", actionKey);
-  }, []);
-
-  return { aiHook: ai, updateProjectsContext, handleAction };
+  return { aiHook: ai, updateProjectsContext };
 }
 
 export type UseProjectsAiHubReturn = ReturnType<typeof useProjectsAiHub>;

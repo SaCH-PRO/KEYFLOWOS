@@ -93,7 +93,17 @@ export default function ExpensesPage() {
     }
   }, [showModal, editingExpense]);
 
-  const { aiHook: expensesAi, updateExpensesContext, handleAction: handleExpensesAiAction } = useExpensesAiHub();
+  const { aiHook: expensesAi, updateExpensesContext } = useExpensesAiHub();
+
+  const handleExpensesAiAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("switch_tab:")) {
+      const tab = actionKey.replace("switch_tab:", "");
+      if (["transactions", "budgets", "categories", "insights"].includes(tab)) setActiveTab(tab);
+    } else if (actionKey === "add_expense") {
+      setEditingExpense(null);
+      setShowModal(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (d.businessId) {

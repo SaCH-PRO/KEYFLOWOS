@@ -241,11 +241,7 @@ export function useExpensesAiHub() {
     });
   }, [ai.updateContext]);
 
-  const handleAction = useCallback((actionKey: string) => {
-    console.log("[ExpensesAI] action:", actionKey);
-  }, []);
-
-  return { aiHook: ai, updateExpensesContext, handleAction };
+  return { aiHook: ai, updateExpensesContext };
 }
 
 export type UseExpensesAiHubReturn = ReturnType<typeof useExpensesAiHub>;
