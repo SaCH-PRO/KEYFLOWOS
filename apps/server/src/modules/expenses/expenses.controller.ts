@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Header, Inject, Param, Patch, Post, Quer
 import { ExpensesService } from './expenses.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { Response } from 'express';
 
 @Controller('expenses')
@@ -10,7 +11,8 @@ export class ExpensesController {
     @Inject(ExpensesService) private readonly expenses: ExpensesService,
   ) {}
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses')
   listExpenses(
     @Param('businessId') businessId: string,
@@ -124,7 +126,8 @@ export class ExpensesController {
     return this.expenses.getExpense(businessId, expenseId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Post('businesses/:businessId/expenses')
   createExpense(
     @Param('businessId') businessId: string,
@@ -149,7 +152,8 @@ export class ExpensesController {
     return this.expenses.createExpense({ businessId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Patch('businesses/:businessId/expenses/:expenseId')
   updateExpense(
     @Param('businessId') businessId: string,
@@ -175,7 +179,8 @@ export class ExpensesController {
     return this.expenses.updateExpense({ businessId, expenseId, ...body });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Delete('businesses/:businessId/expenses/:expenseId')
   deleteExpense(
     @Param('businessId') businessId: string,

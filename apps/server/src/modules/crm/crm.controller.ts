@@ -12,6 +12,7 @@ import { CrmVisionService } from './crm-vision.service';
 import { CrmService } from './crm.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -58,7 +59,8 @@ export class CrmController {
     };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts')
   listContacts(
@@ -97,7 +99,8 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @RequirePlanLimit('contacts')
   @Post('businesses/:businessId/contacts')
@@ -132,7 +135,8 @@ export class CrmController {
     return this.crmStats.contactDetail({ businessId, contactId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Patch('businesses/:businessId/contacts/:contactId')
   updateContact(
@@ -147,7 +151,8 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @CrmRateLimit(10, 60_000)
   @Patch('businesses/:businessId/contacts/bulk')
   bulkUpdateContacts(
