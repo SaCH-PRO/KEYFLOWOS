@@ -71,6 +71,14 @@ const PERMISSION_MODULES = [
   { key: "team", label: "Team" },
 ];
 
+const DEFAULT_SCOPES: Record<string, Record<string, string>> = {
+  OWNER: Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, "admin"])),
+  ADMIN: Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, m.key === "team" ? "write" : "admin"])),
+  STAFF: Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, ["settings", "team", "ai"].includes(m.key) ? "none" : "read"])),
+};
+
+const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };
+
 const roleConfig: Record<string, { label: string; color: string; icon: typeof Shield }> = {
   OWNER: { label: "Owner", color: "bg-amber-500/20 text-amber-300 border-amber-500/30", icon: Crown },
   ADMIN: { label: "Admin", color: "bg-blue-500/20 text-blue-300 border-blue-500/30", icon: Shield },
@@ -473,7 +481,10 @@ export default function TeamSettingsPage() {
   const [inviting, setInviting] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("STAFF");
+  const [inviteScopes, setInviteScopes] = useState<Record<string, string>>({});
+  const [inviteTier, setInviteTier] = useState(0);
   const [showInvite, setShowInvite] = useState(false);
+  const [showAdvancedInvite, setShowAdvancedInvite] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<{ membershipId: string; name: string } | null>(null);
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [moduleFilter, setModuleFilter] = useState("");
@@ -507,6 +518,11 @@ export default function TeamSettingsPage() {
     if (activeTab === "activity") loadActivity(moduleFilter || undefined);
   }, [activeTab, moduleFilter, loadActivity]);
 
+  useEffect(() => {
+    setInviteScopes(DEFAULT_SCOPES[inviteRole] || DEFAULT_SCOPES.STAFF);
+    setInviteTier(DEFAULT_TIERS[inviteRole] ?? 0);
+  }, [inviteRole]);
+
   const handleInvite = async () => {
     const businessId = getStoredBusinessId();
     if (!businessId || !inviteEmail.trim()) return;
@@ -515,10 +531,13 @@ export default function TeamSettingsPage() {
       return;
     }
     setInviting(true);
-    const res = await apiPost(`/identity/businesses/${businessId}/team`, {
+    const payload: Record<string, unknown> = {
       email: inviteEmail.trim(),
       role: inviteRole,
-    });
+      scopes: inviteScopes,
+      maxApprovalTier: inviteTier,
+    };
+    const res = await apiPost(`/identity/businesses/${businessId}/team`, payload);
     setInviting(false);
     if (res.error) {
       toast.error(res.error || "Failed to invite team member");
@@ -526,6 +545,7 @@ export default function TeamSettingsPage() {
       toast.success("Team member invited");
       setInviteEmail("");
       setShowInvite(false);
+      setShowAdvancedInvite(false);
       loadDashboard();
     }
   };
@@ -646,9 +666,68 @@ export default function TeamSettingsPage() {
                   {inviting ? "Inviting..." : "Send Invite"}
                 </Button>
               </div>
-              <p className="text-[10px] text-muted-foreground">
-                New members get default permissions for their role. You can customize permissions after inviting.
-              </p>
+              <div className="pt-1">
+                <button
+                  onClick={() => setShowAdvancedInvite(!showAdvancedInvite)}
+                  className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-white transition-colors"
+                >
+                  <ChevronRight className={`h-3 w-3 transition-transform ${showAdvancedInvite ? "rotate-90" : ""}`} />
+                  {showAdvancedInvite ? "Hide" : "Set"} permissions &amp; approval tier
+                </button>
+              </div>
+
+              <AnimatePresence>
+                {showAdvancedInvite && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden space-y-3 pt-2 border-t border-border/30"
+                  >
+                    <div className="text-[10px] text-muted-foreground font-medium">Permission Preview</div>
+                    <div className="space-y-0.5">
+                      <div className="grid grid-cols-[1fr_repeat(4,48px)] gap-1 text-[10px] text-muted-foreground font-medium px-2 pb-1">
+                        <span>Module</span>
+                        {PERMISSION_LEVELS.map((level) => (
+                          <span key={level} className={`text-center ${levelColor[level]}`}>{level}</span>
+                        ))}
+                      </div>
+                      {PERMISSION_MODULES.map((mod) => (
+                        <div key={mod.key} className="grid grid-cols-[1fr_repeat(4,48px)] gap-1 items-center px-2 py-1 rounded hover:bg-muted/10">
+                          <span className="text-[11px]">{mod.label}</span>
+                          {PERMISSION_LEVELS.map((level) => (
+                            <button
+                              key={level}
+                              onClick={() => setInviteScopes((prev) => ({ ...prev, [mod.key]: level }))}
+                              className={`h-6 w-6 mx-auto rounded border transition-all ${
+                                inviteScopes[mod.key] === level
+                                  ? `${levelColor[level]} border-current bg-current/10 ring-1 ring-current/30`
+                                  : "border-border/30 hover:border-border/60"
+                              }`}
+                              aria-label={`Set ${mod.label} to ${level}`}
+                            >
+                              {inviteScopes[mod.key] === level && <CheckCircle2 className="h-3 w-3 mx-auto" />}
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Zap className="h-3.5 w-3.5 text-purple-400" />
+                      <span className="text-[11px]">Approval Tier</span>
+                      <select
+                        className="rounded-lg border border-border/60 bg-[#111113] px-2 py-1 text-[11px] ml-1 focus:outline-none focus:ring-1 focus:ring-purple-400/40"
+                        value={inviteTier}
+                        onChange={(e) => setInviteTier(parseInt(e.target.value))}
+                      >
+                        {APPROVAL_TIERS.map((t) => (
+                          <option key={t} value={t}>Tier {t}{t === 0 ? " (None)" : t === 4 ? " (All)" : ""}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
         )}
