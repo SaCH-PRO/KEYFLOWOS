@@ -15,6 +15,7 @@ export interface ProfileExtraction {
   key: string;
   confidence: number;
   confirmed: boolean;
+  topic?: string;
 }
 
 export interface ProfileInterviewState {
@@ -25,14 +26,25 @@ export interface ProfileInterviewState {
   nextTopic: string | null;
 }
 
+const SAFE_PROFILE_CATEGORIES = new Set<string>([
+  'goals', 'tone', 'riskTolerance', 'outreachStyle',
+  'reportingCadence', 'priorities', 'bottlenecks',
+  'corrections', 'patterns', 'preferences',
+]);
+
+const BLOCKED_KEYS = new Set<string>([
+  'autonomy', 'admin', 'mode', 'blockedTools', 'blockedModules',
+  'maxAutoTier', 'api_key', 'secret', 'token', 'password',
+]);
+
 const PROFILE_TOPICS = [
-  { topic: 'business_overview', label: 'Business Overview', category: 'goals' as MemoryCategory, unlocks: 'Smarter AI recommendations tailored to your industry, better client communication drafts, and accurate business summaries.' },
-  { topic: 'brand_tone', label: 'Brand Voice', category: 'tone' as MemoryCategory, unlocks: 'AI-drafted messages, emails, and content that match your brand personality — no more generic copy.' },
-  { topic: 'goals', label: 'Business Goals', category: 'goals' as MemoryCategory, unlocks: 'Prioritized daily action items, strategic insights aligned with your targets, and progress tracking toward your goals.' },
-  { topic: 'risk_tolerance', label: 'AI Autonomy', category: 'riskTolerance' as MemoryCategory, unlocks: 'Fine-tuned automation: the AI knows what it can handle alone vs. what needs your approval first.' },
-  { topic: 'outreach_style', label: 'Outreach Preferences', category: 'outreachStyle' as MemoryCategory, unlocks: 'Automated client outreach via your preferred channels, with the right tone and timing.' },
-  { topic: 'priorities', label: 'Current Priorities', category: 'priorities' as MemoryCategory, unlocks: 'Focused daily briefings, smart task ordering, and AI suggestions that tackle your biggest challenges first.' },
-  { topic: 'reporting', label: 'Reporting Preferences', category: 'reportingCadence' as MemoryCategory, unlocks: 'Business intelligence delivered on your schedule — daily snapshots, weekly summaries, or on-demand insights.' },
+  { topic: 'business_overview', label: 'Business Overview', category: 'goals' as MemoryCategory, keys: ['business_description', 'target_customers', 'years_operating'], unlocks: 'Smarter AI recommendations tailored to your industry, better client communication drafts, and accurate business summaries.' },
+  { topic: 'brand_tone', label: 'Brand Voice', category: 'tone' as MemoryCategory, keys: ['preferred'], unlocks: 'AI-drafted messages, emails, and content that match your brand personality — no more generic copy.' },
+  { topic: 'goals', label: 'Business Goals', category: 'goals' as MemoryCategory, keys: ['primary_goal', 'secondary_goal', 'six_month_target'], unlocks: 'Prioritized daily action items, strategic insights aligned with your targets, and progress tracking toward your goals.' },
+  { topic: 'risk_tolerance', label: 'AI Autonomy', category: 'riskTolerance' as MemoryCategory, keys: ['comfort_level'], unlocks: 'Fine-tuned automation: the AI knows what it can handle alone vs. what needs your approval first.' },
+  { topic: 'outreach_style', label: 'Outreach Preferences', category: 'outreachStyle' as MemoryCategory, keys: ['channel_preference'], unlocks: 'Automated client outreach via your preferred channels, with the right tone and timing.' },
+  { topic: 'priorities', label: 'Current Priorities', category: 'priorities' as MemoryCategory, keys: ['current_focus', 'main_bottleneck'], unlocks: 'Focused daily briefings, smart task ordering, and AI suggestions that tackle your biggest challenges first.' },
+  { topic: 'reporting', label: 'Reporting Preferences', category: 'reportingCadence' as MemoryCategory, keys: ['frequency'], unlocks: 'Business intelligence delivered on your schedule — daily snapshots, weekly summaries, or on-demand insights.' },
 ];
 
 @Injectable()
@@ -60,8 +72,10 @@ export class ProfileIntelligenceService {
     const completedTopics: string[] = [];
 
     for (const topic of PROFILE_TOPICS) {
-      const hasMemory = existingMemories.some(m => m.category === topic.category && m.confidence >= 0.7);
-      if (hasMemory) completedTopics.push(topic.topic);
+      const hasTopicMemory = existingMemories.some(
+        m => m.category === topic.category && topic.keys.includes(m.key) && m.confidence >= 0.7,
+      );
+      if (hasTopicMemory) completedTopics.push(topic.topic);
     }
 
     const nextTopic = PROFILE_TOPICS.find(t => !completedTopics.includes(t.topic))?.topic || null;
@@ -125,11 +139,19 @@ INSTRUCTIONS:
 
 When you extract information from the user's response, include it in a JSON block at the END of your response:
 \`\`\`extract
-[{"category": "tone", "key": "preferred", "value": "friendly and professional", "confidence": 0.9}]
+[{"topic": "brand_tone", "category": "tone", "key": "preferred", "value": "friendly and professional", "confidence": 0.9}]
 \`\`\`
 
-Categories: goals, tone, riskTolerance, outreachStyle, reportingCadence, priorities, bottlenecks, corrections, patterns, preferences
-Keys should be descriptive lowercase strings (e.g., "preferred", "primary_goal", "main_bottleneck", "channel_preference").
+TOPIC-to-CATEGORY mapping (you MUST use these exact topic and category values):
+- business_overview → category: goals, keys: business_description, target_customers, years_operating
+- brand_tone → category: tone, keys: preferred
+- goals → category: goals, keys: primary_goal, secondary_goal, six_month_target
+- risk_tolerance → category: riskTolerance, keys: comfort_level
+- outreach_style → category: outreachStyle, keys: channel_preference
+- priorities → category: priorities, keys: current_focus, main_bottleneck
+- reporting → category: reportingCadence, keys: frequency
+
+NEVER use category "settings" or keys like "autonomy", "admin", "mode", "blockedTools", "blockedModules".
 Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
     const openaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -153,11 +175,29 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
       let pendingExtractions: ProfileExtraction[] = [];
       if (extractMatch) {
         try {
-          const rawExtractions: Array<{ category: MemoryCategory; key: string; value: string; confidence: number }> = JSON.parse(extractMatch[1]);
-          pendingExtractions = rawExtractions.map(ext => ({
-            ...ext,
-            confirmed: false,
-          }));
+          const rawExtractions: Array<{ topic?: string; category: MemoryCategory; key: string; value: string; confidence: number }> = JSON.parse(extractMatch[1]);
+          for (const ext of rawExtractions) {
+            if (!SAFE_PROFILE_CATEGORIES.has(ext.category)) {
+              this.logger.warn(`Profile extraction rejected: unsafe category "${ext.category}"`);
+              continue;
+            }
+            if (BLOCKED_KEYS.has(ext.key)) {
+              this.logger.warn(`Profile extraction rejected: blocked key "${ext.key}"`);
+              continue;
+            }
+            if (ext.category === 'settings') {
+              this.logger.warn(`Profile extraction rejected: reserved category "settings"`);
+              continue;
+            }
+            pendingExtractions.push({
+              category: ext.category,
+              key: ext.key,
+              value: ext.value,
+              confidence: Math.min(ext.confidence, 1),
+              confirmed: false,
+              topic: ext.topic,
+            });
+          }
           state.pendingConfirmations = pendingExtractions;
         } catch (parseErr) {
           this.logger.warn(`Failed to parse extraction block: ${(parseErr as Error).message}`);
@@ -207,19 +247,27 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     };
   }
 
-  async confirmExtractions(businessId: string, confirmedKeys?: string[]): Promise<{ saved: number; skipped: number }> {
+  async confirmExtractions(businessId: string, confirmedKeys?: string[]): Promise<{ saved: number; skipped: number; rejected: number }> {
     const state = this.sessionCache.get(businessId);
     if (!state || state.pendingConfirmations.length === 0) {
-      return { saved: 0, skipped: 0 };
+      return { saved: 0, skipped: 0, rejected: 0 };
     }
 
     let saved = 0;
     let skipped = 0;
+    let rejected = 0;
 
     for (const ext of state.pendingConfirmations) {
       const fieldKey = `${ext.category}/${ext.key}`;
       if (confirmedKeys && !confirmedKeys.includes(fieldKey)) {
         skipped++;
+        continue;
+      }
+
+      if (!SAFE_PROFILE_CATEGORIES.has(ext.category) || BLOCKED_KEYS.has(ext.key)) {
+        this.logger.warn(`Confirmation rejected: unsafe category/key "${ext.category}/${ext.key}"`);
+        rejected++;
+        ext.confirmed = true;
         continue;
       }
 
@@ -234,9 +282,12 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
       ext.confirmed = true;
       state.extractedFields[fieldKey] = ext;
 
-      const topic = PROFILE_TOPICS.find(t => t.category === ext.category);
-      if (topic && !state.completedTopics.includes(topic.topic)) {
-        state.completedTopics.push(topic.topic);
+      const matchingTopic = ext.topic
+        ? PROFILE_TOPICS.find(t => t.topic === ext.topic)
+        : PROFILE_TOPICS.find(t => t.category === ext.category && t.keys.includes(ext.key));
+
+      if (matchingTopic && !state.completedTopics.includes(matchingTopic.topic)) {
+        state.completedTopics.push(matchingTopic.topic);
       }
 
       saved++;
@@ -246,7 +297,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
     this.sessionCache.set(businessId, state);
 
-    return { saved, skipped };
+    return { saved, skipped, rejected };
   }
 
   resetSession(businessId: string): void {
