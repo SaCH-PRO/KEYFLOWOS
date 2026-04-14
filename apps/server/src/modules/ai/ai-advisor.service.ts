@@ -1,6 +1,7 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from './ai-usage.service';
+import { StrategicIntelligenceService } from './strategic-intelligence.service';
 
 @Injectable()
 export class AiAdvisorService {
@@ -9,6 +10,7 @@ export class AiAdvisorService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(forwardRef(() => StrategicIntelligenceService)) private readonly strategic: StrategicIntelligenceService,
   ) {}
 
   async getBusinessContext(businessId: string) {
@@ -246,28 +248,42 @@ export class AiAdvisorService {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const revenueThisMonth = await this.prisma.client.invoice.aggregate({
-      where: {
-        businessId,
-        deletedAt: null,
-        status: 'PAID',
-        paidAt: { gte: startOfMonth },
-      },
-      _sum: { total: true },
-    });
+    const [revenueThisMonth, staleLeads, strategicDashboard] = await Promise.all([
+      this.prisma.client.invoice.aggregate({
+        where: {
+          businessId,
+          deletedAt: null,
+          status: 'PAID',
+          paidAt: { gte: startOfMonth },
+        },
+        _sum: { total: true },
+      }),
+      this.prisma.client.contact.count({
+        where: {
+          businessId,
+          deletedAt: null,
+          status: 'LEAD',
+          updatedAt: { lt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
+        },
+      }),
+      this.strategic.getStrategicDashboard(businessId).catch(() => null),
+    ]);
 
     const revenue = revenueThisMonth._sum.total ?? 0;
     const expenses = context.expenses.totalThisMonth;
     const net = revenue - expenses;
 
-    const staleLeads = await this.prisma.client.contact.count({
-      where: {
-        businessId,
-        deletedAt: null,
-        status: 'LEAD',
-        updatedAt: { lt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
-      },
-    });
+    let strategicBlock = '';
+    if (strategicDashboard) {
+      strategicBlock = `
+
+Strategic Intelligence:
+- Overdue invoices: ${strategicDashboard.overdueInvoices} ($${strategicDashboard.overdueAmount.toLocaleString()} at risk)
+- Pending quotes: ${strategicDashboard.pendingQuotes} (potential $${strategicDashboard.pendingQuoteValue.toLocaleString()})
+- Stale leads to re-engage: ${strategicDashboard.staleLeads}
+- Active projects: ${strategicDashboard.activeProjects} (${strategicDashboard.overdueTaskCount} overdue tasks)
+- Utilization rate: ${(strategicDashboard.utilizationRate * 100).toFixed(0)}%`;
+    }
 
     const briefingPrompt = `Generate a morning business briefing for ${businessName}. Here is the current data:
 
@@ -288,10 +304,12 @@ Cash flow this month:
 - Expenses: $${expenses.toLocaleString()} TTD
 - Net: $${net.toLocaleString()} TTD
 
-Momentum Score: ${context.momentumScore}/100
+Momentum Score: ${context.momentumScore}/100${strategicBlock}
+
+Include strategic insights in your briefing: highlight the top risk, top opportunity, and a revenue action for the day.
 
 Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
-{"summary":"...","highlights":["..."],"priorities":["..."],"cashFlow":{"revenue":${revenue},"expenses":${expenses},"net":${net}},"suggestion":"..."}`;
+{"summary":"...","highlights":["..."],"priorities":["..."],"cashFlow":{"revenue":${revenue},"expenses":${expenses},"net":${net}},"suggestion":"...","strategicInsights":{"topRisk":"...","topOpportunity":"...","revenueAction":"..."}}`;
 
     try {
       const result = await this.aiUsage.callAi({

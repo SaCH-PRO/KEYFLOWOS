@@ -4245,6 +4245,9 @@ export interface WeeklyPlan {
   dailyFocus: Array<{ day: string; theme: string; tasks: string[] }>;
   revenueActions: Array<{ action: string; expectedValue: number; urgency: string }>;
   clientActions: Array<{ action: string; client: string; type: string }>;
+  contentPlan: Array<{ action: string; channel: string; day: string }>;
+  projectMilestones: Array<{ project: string; milestone: string; dueDate: string }>;
+  expenseReview: { monthToDate: number; action: string };
   operationalTasks: string[];
   weeklyGoal: string;
 }

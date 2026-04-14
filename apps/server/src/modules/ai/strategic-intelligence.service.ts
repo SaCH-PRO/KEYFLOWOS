@@ -580,6 +580,7 @@ Momentum: ${snapshot.momentumScore}/100`;
     endOfWeek.setDate(endOfWeek.getDate() + 7);
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const [
       upcomingBookings,
@@ -587,6 +588,11 @@ Momentum: ${snapshot.momentumScore}/100`;
       pendingQuotes,
       activeTasks,
       staleLeads,
+      draftPosts,
+      scheduledPosts,
+      activeProjects,
+      recentExpenses,
+      monthRevenue,
       snapshot,
     ] = await Promise.all([
       this.db.booking.findMany({
@@ -629,10 +635,38 @@ Momentum: ${snapshot.momentumScore}/100`;
           createdAt: { lt: thirtyDaysAgo },
         },
       }),
+      this.db.socialPost.count({
+        where: { businessId, deletedAt: null, status: 'DRAFT' },
+      }).catch(() => 0),
+      this.db.socialPost.count({
+        where: { businessId, deletedAt: null, status: 'SCHEDULED' },
+      }).catch(() => 0),
+      this.db.project.findMany({
+        where: { businessId, deletedAt: null, status: { in: ['IN_PROGRESS', 'ACTIVE'] } },
+        select: { id: true, name: true, status: true, dueDate: true, contactId: true },
+        take: 10,
+      }).catch(() => []),
+      this.db.expense.aggregate({
+        where: { businessId, deletedAt: null, date: { gte: startOfMonth } },
+        _sum: { amount: true },
+        _count: true,
+      }).catch(() => ({ _sum: { amount: null }, _count: 0 })),
+      this.db.invoice.aggregate({
+        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: startOfMonth } },
+        _sum: { total: true },
+      }).catch(() => ({ _sum: { total: null } })),
       this.businessGraph.getSnapshot(businessId),
     ]);
 
+    const monthlyRevSoFar = Number(monthRevenue._sum.total) || 0;
+    const monthlyExpSoFar = Number(recentExpenses._sum.amount) || 0;
+
     const contextBlock = `WEEKLY PLANNING — Week of ${now.toISOString().split('T')[0]}
+
+REVENUE TARGETS:
+Month-to-date revenue: $${monthlyRevSoFar.toFixed(0)} TTD
+Month-to-date expenses: $${monthlyExpSoFar.toFixed(0)} TTD
+Net margin so far: $${(monthlyRevSoFar - monthlyExpSoFar).toFixed(0)} TTD
 
 UPCOMING BOOKINGS THIS WEEK (${upcomingBookings.length}):
 ${upcomingBookings.slice(0, 15).map(b => {
@@ -650,7 +684,19 @@ ${pendingQuotes.map(q => `  #${q.quoteNumber} $${Number(q.total).toFixed(0)} —
 OPEN TASKS (${activeTasks.length}):
 ${activeTasks.slice(0, 10).map(t => `  ${t.title} — ${t.priority ?? 'normal'} priority — due ${t.dueDate ? new Date(t.dueDate).toISOString().split('T')[0] : 'no date'}`).join('\n') || '  None'}
 
-STALE LEADS TO RE-ENGAGE: ${staleLeads}
+CONTENT SCHEDULE:
+Draft posts ready to publish: ${draftPosts}
+Scheduled posts this week: ${scheduledPosts}
+
+ACTIVE PROJECTS & MILESTONES (${activeProjects.length}):
+${activeProjects.map(p => `  ${p.name} — ${p.status} — due ${p.dueDate ? new Date(p.dueDate).toISOString().split('T')[0] : 'no date'}`).join('\n') || '  No active projects'}
+
+EXPENSE REVIEW:
+Expenses this month: $${monthlyExpSoFar.toFixed(0)} across ${recentExpenses._count} entries
+
+OUTREACH OPPORTUNITIES:
+Stale leads to re-engage: ${staleLeads}
+
 BUSINESS MOMENTUM: ${snapshot.momentumScore}/100`;
 
     const result = await this.aiUsage.callAi({
@@ -676,7 +722,11 @@ BUSINESS MOMENTUM: ${snapshot.momentumScore}/100`;
         dailyFocus: [],
         revenueActions: [],
         clientActions: [],
+        contentPlan: [],
+        projectMilestones: [],
+        expenseReview: { monthToDate: monthlyExpSoFar, action: '' },
         operationalTasks: [],
+        weeklyGoal: '',
       };
     }
   }
@@ -1040,7 +1090,13 @@ Respond in valid JSON:
 
   private weeklyPlanPrompt(context: string): string {
     return `You are a business productivity coach for a Caribbean entrepreneur.
-Create a structured weekly plan that prioritizes revenue-generating activities, client engagement, and operational efficiency.
+Create a structured weekly plan covering ALL of these dimensions:
+1. Revenue targets and collection actions (overdue invoices, quote follow-ups)
+2. Client outreach and engagement (stale leads, upsell opportunities, retention)
+3. Content schedule (draft posts to publish, content to create)
+4. Booking optimization (preparation, scheduling gaps)
+5. Project milestones and delivery tasks
+6. Expense review and budget check
 
 ${context}
 
@@ -1052,12 +1108,15 @@ Respond in valid JSON:
   "dailyFocus": [
     { "day": "Monday", "theme": "Revenue Recovery", "tasks": ["task 1", "task 2"] },
     { "day": "Tuesday", "theme": "Client Engagement", "tasks": ["task 1"] },
-    { "day": "Wednesday", "theme": "Operations", "tasks": ["task 1"] },
-    { "day": "Thursday", "theme": "Growth", "tasks": ["task 1"] },
-    { "day": "Friday", "theme": "Planning & Review", "tasks": ["task 1"] }
+    { "day": "Wednesday", "theme": "Content & Marketing", "tasks": ["task 1"] },
+    { "day": "Thursday", "theme": "Delivery & Projects", "tasks": ["task 1"] },
+    { "day": "Friday", "theme": "Review & Planning", "tasks": ["task 1"] }
   ],
   "revenueActions": [{ "action": "...", "expectedValue": 0, "urgency": "high|medium|low" }],
   "clientActions": [{ "action": "...", "client": "...", "type": "follow-up|upsell|retention" }],
+  "contentPlan": [{ "action": "...", "channel": "...", "day": "..." }],
+  "projectMilestones": [{ "project": "...", "milestone": "...", "dueDate": "..." }],
+  "expenseReview": { "monthToDate": 0, "action": "..." },
   "operationalTasks": ["task 1"],
   "weeklyGoal": "One sentence goal for the week"
 }`;
