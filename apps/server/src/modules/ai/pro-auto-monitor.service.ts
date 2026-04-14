@@ -459,7 +459,7 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
         description: 'None of your automations are currently active. Re-enable flows to maintain automated operations.',
         metric: `${disabledCount} disabled`,
         suggestedAction: 'Review and re-enable automations',
-        suggestedTool: 'enable_flow',
+        suggestedTool: 'enable_flow_with_approval',
         riskTier: 2,
         module: 'flows',
         timestamp: new Date().toISOString(),
