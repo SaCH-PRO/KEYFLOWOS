@@ -4,7 +4,8 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   ShoppingBag, Star, HelpCircle, Search, Wand2,
-  DollarSign, TrendingUp, ArrowUpRight, ArrowDownRight, Target, BarChart3,
+  DollarSign, Target, BarChart3,
+  Layers, Zap, AlertTriangle, CheckCircle2, Package,
 } from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { MerchandisingPanel } from "./merchandising-panel";
@@ -13,7 +14,6 @@ import { FaqManager } from "./faq-manager";
 import { PolicyEditor } from "./policy-editor";
 import { AiContentPanel } from "./ai-content-panel";
 import { SectionCard } from "@/components/ui/section-card";
-import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { formatPrice } from "@/lib/format";
 import type { Service, Product, StorefrontConfig, FaqEntry } from "@/lib/client";
@@ -201,6 +201,146 @@ function PricingSignals({ products, services }: { products: Product[]; services:
   );
 }
 
+function InventoryHealthPanel({ products, services }: { products: Product[]; services: Service[] }) {
+  const liveProducts = products.filter((p) => services.some((s) => s.name === p.name));
+  if (liveProducts.length === 0) return null;
+
+  const withImages = liveProducts.filter((p) => p.imageUrl).length;
+  const withDescriptions = liveProducts.filter((p) => p.description && p.description.length > 20).length;
+  const withPrices = liveProducts.filter((p) => p.price > 0).length;
+  const total = liveProducts.length;
+
+  const completeness = Math.round(((withImages + withDescriptions + withPrices) / (total * 3)) * 100);
+
+  const checks: { label: string; count: number; total: number; icon: React.ElementType; status: "good" | "warn" | "critical" }[] = [
+    { label: "Have images", count: withImages, total, icon: CheckCircle2, status: withImages === total ? "good" : withImages >= total / 2 ? "warn" : "critical" },
+    { label: "Have descriptions", count: withDescriptions, total, icon: CheckCircle2, status: withDescriptions === total ? "good" : withDescriptions >= total / 2 ? "warn" : "critical" },
+    { label: "Have pricing", count: withPrices, total, icon: CheckCircle2, status: withPrices === total ? "good" : withPrices >= total / 2 ? "warn" : "critical" },
+  ];
+
+  const statusColor: Record<string, string> = {
+    good: "hsl(var(--kf-success))",
+    warn: "hsl(var(--kf-warning))",
+    critical: "hsl(var(--kf-error))",
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="flex-1">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-medium" style={{ color: "hsl(var(--kf-foreground))" }}>Catalog Completeness</span>
+            <span className="text-xs font-bold" style={{ color: completeness >= 80 ? "hsl(var(--kf-success))" : completeness >= 50 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))" }}>{completeness}%</span>
+          </div>
+          <div className="h-2 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted)/0.2)" }}>
+            <div
+              className="h-full rounded-full transition-all duration-700"
+              style={{
+                width: `${completeness}%`,
+                background: completeness >= 80 ? "hsl(var(--kf-success))" : completeness >= 50 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))",
+              }}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        {checks.map((check) => {
+          const Icon = check.count === check.total ? CheckCircle2 : AlertTriangle;
+          return (
+            <div key={check.label} className="flex items-center gap-2 text-[11px]">
+              <Icon className="w-3 h-3 flex-shrink-0" style={{ color: statusColor[check.status] }} />
+              <span className="flex-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{check.label}</span>
+              <span className="font-medium" style={{ color: statusColor[check.status] }}>{check.count}/{check.total}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CrossSellRecommendations({ products, services }: { products: Product[]; services: Service[] }) {
+  const liveProducts = products.filter((p) => services.some((s) => s.name === p.name));
+  if (liveProducts.length < 2) return null;
+
+  const categories = [...new Set(liveProducts.map((p) => p.category).filter(Boolean))];
+  const pricedProducts = liveProducts.filter((p) => p.price > 0);
+  const avgPrice = pricedProducts.length > 0 ? pricedProducts.reduce((a, b) => a + b.price, 0) / pricedProducts.length : 0;
+
+  const recommendations: { type: string; title: string; description: string; icon: React.ElementType; color: string }[] = [];
+
+  if (categories.length > 1) {
+    recommendations.push({
+      type: "cross-sell",
+      title: "Cross-Category Bundles",
+      description: `You have ${categories.length} categories (${categories.join(", ")}). Consider creating bundles that combine items across categories for a premium offering.`,
+      icon: Layers,
+      color: "#a78bfa",
+    });
+  }
+
+  if (pricedProducts.length >= 3) {
+    const premium = pricedProducts.filter((p) => p.price > avgPrice * 1.3);
+    const budget = pricedProducts.filter((p) => p.price < avgPrice * 0.7);
+    if (premium.length > 0 && budget.length > 0) {
+      recommendations.push({
+        type: "upsell",
+        title: "Upsell Opportunity",
+        description: `Feature "${premium[0].name}" (${formatPrice(premium[0].price)}) alongside "${budget[0].name}" (${formatPrice(budget[0].price)}) to encourage upgrades. Price anchoring can boost AOV by 15%.`,
+        icon: Zap,
+        color: "hsl(var(--kf-accent1))",
+      });
+    }
+  }
+
+  const serviceProducts = liveProducts.filter((p) => p.category === "SERVICE");
+  const physicalProducts = liveProducts.filter((p) => p.category === "PRODUCT");
+  if (serviceProducts.length > 0 && physicalProducts.length > 0) {
+    recommendations.push({
+      type: "add-on",
+      title: "Service + Product Add-ons",
+      description: `Recommend "${physicalProducts[0].name}" as an add-on when customers book "${serviceProducts[0].name}". Add-on items can increase order value by 20-35%.`,
+      icon: Package,
+      color: "#14B8A6",
+    });
+  }
+
+  if (liveProducts.length >= 4 && recommendations.length === 0) {
+    recommendations.push({
+      type: "bundle",
+      title: "Create a Value Bundle",
+      description: `With ${liveProducts.length} items, consider creating a bundle pack at a slight discount. Bundles increase perceived value and average order size.`,
+      icon: Layers,
+      color: "#a78bfa",
+    });
+  }
+
+  if (recommendations.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {recommendations.map((rec) => {
+        const Icon = rec.icon;
+        return (
+          <div
+            key={rec.type}
+            className="flex items-start gap-2.5 rounded-xl p-3"
+            style={{ background: `${rec.color}08`, border: `1px solid ${rec.color}20` }}
+          >
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: `${rec.color}15` }}>
+              <Icon className="w-3.5 h-3.5" style={{ color: rec.color }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold" style={{ color: "hsl(var(--kf-foreground))" }}>{rec.title}</p>
+              <p className="text-[10px] mt-0.5 leading-relaxed" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{rec.description}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function MerchandisingMode({
   businessData,
   services,
@@ -221,7 +361,6 @@ export function MerchandisingMode({
   const faqEntries = storefrontConfig.faqEntries ?? [];
   const seo = storefrontConfig.seo as { metaTitle?: string; metaDescription?: string } | undefined;
   const liveItems = commerceProducts.filter((p) => services.some((s) => s.name === p.name));
-  const withImages = liveItems.filter((p) => p.imageUrl).length;
 
   const metrics: MetricStripItem[] = [
     {
@@ -292,7 +431,23 @@ export function MerchandisingMode({
         </motion.div>
       )}
 
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+      {liveItems.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
+          <SectionCard title="Inventory Health" subtitle="Catalog completeness and quality indicators" icon={CheckCircle2}>
+            <InventoryHealthPanel products={commerceProducts} services={services} />
+          </SectionCard>
+        </motion.div>
+      )}
+
+      {liveItems.length >= 2 && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}>
+          <SectionCard title="Cross-Sell & Upsell" subtitle="AI-powered revenue optimization recommendations" icon={Zap}>
+            <CrossSellRecommendations products={commerceProducts} services={services} />
+          </SectionCard>
+        </motion.div>
+      )}
+
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}>
         <AccordionGroup title="Merchandising" brandColor={pc}>
           <AccordionSection title="Featured Items" subtitle="Featured products & display" icon={ShoppingBag} accentColor={pc} badge={merchandisingBadge} defaultOpen>
             <MerchandisingPanel
