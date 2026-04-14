@@ -176,7 +176,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
           transition: "opacity 0.8s cubic-bezier(0.16,1,0.3,1), transform 0.8s cubic-bezier(0.16,1,0.3,1)",
         }}
       >
-        <div className={`${isLeftAligned ? "flex flex-col items-start" : "flex flex-col items-center text-center"} space-y-6`}>
+        <div className={`${isLeftAligned ? "flex flex-col items-start" : "flex flex-col items-center text-center"} space-y-4 sm:space-y-6`}>
           <div
             className="relative inline-block"
             style={{
@@ -191,7 +191,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                 <img
                   src={business.logoUrl}
                   alt={business.name}
-                  className={`relative h-20 w-20 sm:h-24 sm:w-24 object-cover border-2 shadow-2xl ${theme === "elegant" || theme === "luxury_editorial" ? "rounded-full" : "rounded-2xl"}`}
+                  className={`relative h-16 w-16 sm:h-24 sm:w-24 object-cover border-2 shadow-2xl ${theme === "elegant" || theme === "luxury_editorial" ? "rounded-full" : "rounded-2xl"}`}
                   style={{ borderColor: `${primaryColor}25` }}
                 />
                 <div
@@ -240,7 +240,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
             )}
 
             <h1
-              className={`text-3xl sm:text-4xl md:text-5xl lg:text-[3.25rem] tracking-tight leading-[1.1] ${ts.headerWeight} ${ts.textStyle}`}
+              className={`text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem] tracking-tight leading-[1.1] ${ts.headerWeight} ${ts.textStyle}`}
               style={{
                 background: coverUrl || coverVideoUrl
                   ? undefined
@@ -357,7 +357,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
 
           {(business.address || business.phone || business.email) && (
             <div
-              className={`flex items-center flex-wrap gap-3 sm:gap-5 text-xs text-gray-400 ${justify}`}
+              className={`flex items-center flex-wrap gap-2 sm:gap-5 text-[11px] sm:text-xs text-gray-500 ${justify}`}
               style={{
                 opacity: entered ? 1 : 0,
                 transition: "opacity 0.5s 0.6s",

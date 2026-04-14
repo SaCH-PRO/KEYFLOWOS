@@ -91,13 +91,13 @@ export function TestimonialsSection({ testimonials, primaryColor, secondaryColor
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center"
             style={{ background: `linear-gradient(135deg, ${primaryColor}18, ${secondaryColor}12)` }}
           >
-            <MessageCircle className="w-4.5 h-4.5" style={{ color: primaryColor }} />
+            <MessageCircle className="w-4 h-4 sm:w-[18px] sm:h-[18px]" style={{ color: primaryColor }} />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-gray-800 tracking-tight">What Our Clients Say</h3>
+            <h3 className="text-base sm:text-lg font-bold text-gray-800 tracking-tight">What Our Clients Say</h3>
             <div className="flex items-center gap-2 mt-0.5">
               <div className="flex gap-0.5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -109,7 +109,7 @@ export function TestimonialsSection({ testimonials, primaryColor, secondaryColor
                   />
                 ))}
               </div>
-              <span className="text-[11px] text-gray-400 font-medium">
+              <span className="text-[10px] sm:text-[11px] text-gray-500 font-medium">
                 {avgRating.toFixed(1)} from {testimonials.length} {testimonials.length === 1 ? "review" : "reviews"}
               </span>
             </div>
@@ -204,7 +204,7 @@ function TestimonialCard({
 
   return (
     <div
-      className={`${gridMode ? "" : "flex-shrink-0 w-[300px] sm:w-[340px] snap-start"} rounded-2xl p-5 space-y-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg group relative`}
+      className={`${gridMode ? "" : "flex-shrink-0 w-[260px] sm:w-[340px] snap-start"} rounded-2xl p-4 sm:p-5 space-y-3 sm:space-y-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg group relative`}
       style={{
         border: `1px solid ${primaryColor}0A`,
         background: `linear-gradient(135deg, ${primaryColor}03 0%, ${secondaryColor}02 100%)`,

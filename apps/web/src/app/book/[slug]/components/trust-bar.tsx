@@ -86,14 +86,14 @@ export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true
         transform: visible ? "translateY(0)" : "translateY(8px)",
       }}
     >
-      <div className="flex items-center justify-around py-4 px-4 gap-2 flex-wrap sm:flex-nowrap">
+      <div className="flex items-center justify-around py-3.5 sm:py-4 px-3 sm:px-4 gap-1.5 sm:gap-2 overflow-x-auto sm:overflow-visible sm:flex-wrap" style={{ scrollbarWidth: "none" }}>
         {visibleItems.map((item, idx) => {
           const Icon = item.icon;
           const color = idx % 2 === 0 ? primaryColor : secondaryColor;
           return (
             <div
               key={item.key}
-              className="flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all duration-200"
+              className="flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-all duration-200 flex-shrink-0"
               style={{
                 opacity: visible ? 1 : 0,
                 transform: visible ? "translateY(0)" : "translateY(6px)",
@@ -101,12 +101,12 @@ export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true
               }}
             >
               <div
-                className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl flex items-center justify-center flex-shrink-0"
                 style={{ background: `${color}12`, boxShadow: `0 2px 8px ${color}10` }}
               >
-                <Icon className="w-4 h-4" style={{ color }} />
+                <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" style={{ color }} />
               </div>
-              <span className="text-[11px] font-semibold text-gray-600 whitespace-nowrap">
+              <span className="text-[10px] sm:text-[11px] font-semibold text-gray-600 whitespace-nowrap">
                 {item.label}
               </span>
             </div>
@@ -139,10 +139,10 @@ export function SecurityFooter({ primaryColor, businessName }: FooterBadgeProps)
         ))}
       </div>
       <div className="space-y-1.5">
-        <p className="text-center text-[10px] text-gray-400 font-medium">
+        <p className="text-center text-[10px] text-gray-500 font-medium">
           &copy; {new Date().getFullYear()} {businessName}. All rights reserved.
         </p>
-        <p className="text-center text-[10px] text-gray-300">
+        <p className="text-center text-[10px] text-gray-500">
           Powered by KeyFlowOS
         </p>
       </div>
