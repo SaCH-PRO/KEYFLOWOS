@@ -174,11 +174,11 @@ export class FlowOrchestratorService {
             usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
           };
         }
-        if (confirmDecision.requiresApproval) {
+        if (confirmDecision.requiresFormalApproval) {
           await this.governance.createApprovalItem(businessId, {
             toolName: pendingConfirmation.toolName,
             title: `Chat action: ${pendingConfirmation.toolName}`,
-            description: `User confirmed action via chat. Governance requires formal approval (Tier ${confirmDecision.tier}).`,
+            description: `User confirmed action via chat. Governance requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval (Tier ${confirmDecision.tier}).`,
             rationale: confirmDecision.reason,
             inputPayload: pendingConfirmation.toolArgs as Record<string, any>,
           });
@@ -189,11 +189,13 @@ export class FlowOrchestratorService {
             riskTier: confirmDecision.tier,
             mode: 'assisted',
             actor: 'system',
-            rationale: `Chat confirmation routed to approval queue — Tier ${confirmDecision.tier} requires formal approval`,
+            rationale: `Chat confirmation routed to approval queue — Tier ${confirmDecision.tier} requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
             success: true,
           });
           return {
-            reply: `This action requires formal approval before it can be executed (risk tier ${confirmDecision.tier}). It has been added to your approval queue — an admin can review and approve it from the AI Approvals panel.`,
+            reply: confirmDecision.requiresAdminApproval
+              ? `This is a high-impact action (Tier ${confirmDecision.tier}) that requires admin approval. It has been added to your approval queue for an admin to review.`
+              : `This action requires formal approval before execution (Tier ${confirmDecision.tier}). It has been added to your approval queue.`,
             usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
           };
         }
@@ -267,8 +269,9 @@ export class FlowOrchestratorService {
         }),
       );
 
-      const needsApproval = governanceChecks.filter(({ decision }) => decision.requiresApproval);
       const blocked = governanceChecks.filter(({ decision }) => !decision.allowed);
+      const needsQuickConfirm = governanceChecks.filter(({ decision }) => decision.requiresQuickConfirm && !decision.requiresFormalApproval);
+      const needsFormalApproval = governanceChecks.filter(({ decision }) => decision.requiresFormalApproval);
 
       if (blocked.length > 0) {
         return {
@@ -277,8 +280,29 @@ export class FlowOrchestratorService {
         };
       }
 
-      if (needsApproval.length > 0) {
-        const pendingConfirmations: PendingConfirmation[] = needsApproval.map(({ tc, decision }) => ({
+      if (needsFormalApproval.length > 0) {
+        for (const { tc, decision } of needsFormalApproval) {
+          this.governance.createApprovalItem(businessId, {
+            toolName: tc.name,
+            title: this.describeToolCall(tc.name, tc.arguments),
+            description: `Tier ${decision.tier} action requested via Flow chat — requires ${decision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
+            rationale: decision.reason,
+            inputPayload: tc.arguments,
+          }).catch(() => {});
+        }
+
+        const approvalMessages = needsFormalApproval.map(({ tc, decision }) =>
+          `• ${this.describeToolCall(tc.name, tc.arguments)} (Tier ${decision.tier}${decision.requiresAdminApproval ? ', admin required' : ''})`
+        ).join('\n');
+
+        return {
+          reply: `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`,
+          usage,
+        };
+      }
+
+      if (needsQuickConfirm.length > 0) {
+        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc, decision }) => ({
           toolCallId: tc.id,
           name: tc.name,
           arguments: tc.arguments,
@@ -286,18 +310,8 @@ export class FlowOrchestratorService {
           riskLevel: tc.riskLevel,
         }));
 
-        for (const { tc, decision } of needsApproval) {
-          this.governance.createApprovalItem(businessId, {
-            toolName: tc.name,
-            title: this.describeToolCall(tc.name, tc.arguments),
-            description: `Tier ${decision.tier} action requested via Flow chat`,
-            rationale: decision.reason,
-            inputPayload: tc.arguments,
-          }).catch(() => {});
-        }
-
         return {
-          reply: assistantMessage.content || 'I need your confirmation before proceeding with this action.',
+          reply: assistantMessage.content || 'I need your quick confirmation before proceeding with this action.',
           toolCalls,
           pendingConfirmations,
           requiresConfirmation: true,
@@ -873,11 +887,11 @@ export class FlowOrchestratorService {
           results.push({ stepId: step.id, action: step.action, status: 'blocked', error: decision.reason });
           continue;
         }
-        if (decision.requiresApproval) {
+        if (decision.requiresFormalApproval) {
           await this.governance.createApprovalItem(businessId, {
             toolName: step.toolName,
             title: step.action,
-            description: step.description ?? step.action,
+            description: `${step.description ?? step.action} — requires ${decision.requiresAdminApproval ? 'admin' : 'formal'} approval (Tier ${decision.tier})`,
             rationale: decision.reason,
             inputPayload: step.inputPayload as Record<string, any> | undefined,
             planId,
