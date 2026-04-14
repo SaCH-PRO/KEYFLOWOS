@@ -503,6 +503,141 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/control-tower')
+  async controlTower(@Param('businessId') businessId: string) {
+    const [snapshot, dashboard, insightsRes, approvals] = await Promise.all([
+      this.businessGraph.getSnapshot(businessId),
+      this.strategic.getStrategicDashboard(businessId),
+      this.proAutoMonitor.scanInsights(businessId),
+      this.prisma.client.aiApprovalItem.findMany({
+        where: { businessId, status: 'pending' },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+    ]);
+
+    const insights = insightsRes ?? [];
+    const healthIndicators = snapshot.healthIndicators ?? [];
+
+    type PriorityItem = {
+      id: string;
+      type: 'risk' | 'approval' | 'action' | 'opportunity';
+      severity: 'critical' | 'warning' | 'info' | 'opportunity';
+      title: string;
+      description: string;
+      module: string;
+      urgency: number;
+      actionLabel?: string;
+      actionRoute?: string;
+    };
+
+    const priorities: PriorityItem[] = [];
+    let priorityIdx = 0;
+
+    for (const h of healthIndicators) {
+      if (h.status === 'good') continue;
+      priorities.push({
+        id: `health-${priorityIdx++}`,
+        type: 'risk',
+        severity: h.status === 'critical' ? 'critical' : 'warning',
+        title: h.detail,
+        description: `${h.area} health alert`,
+        module: h.area,
+        urgency: h.status === 'critical' ? 100 : 70,
+      });
+    }
+
+    if (dashboard.overdueInvoices > 0) {
+      priorities.push({
+        id: `overdue-inv-${priorityIdx++}`,
+        type: 'action',
+        severity: 'critical',
+        title: `Collect ${dashboard.overdueInvoices} overdue invoices`,
+        description: `$${dashboard.overdueAmount.toFixed(0)} TTD at risk`,
+        module: 'revenue',
+        urgency: 95,
+        actionLabel: 'Review Invoices',
+        actionRoute: '/app/commerce?tab=operations',
+      });
+    }
+
+    if (dashboard.pendingQuotes > 0) {
+      priorities.push({
+        id: `pending-quotes-${priorityIdx++}`,
+        type: 'opportunity',
+        severity: 'opportunity',
+        title: `${dashboard.pendingQuotes} pending quotes worth $${dashboard.pendingQuoteValue.toFixed(0)}`,
+        description: 'Follow up to convert to revenue',
+        module: 'revenue',
+        urgency: 60,
+        actionLabel: 'View Quotes',
+        actionRoute: '/app/commerce?tab=operations',
+      });
+    }
+
+    if (dashboard.staleLeads > 0) {
+      priorities.push({
+        id: `stale-leads-${priorityIdx++}`,
+        type: 'opportunity',
+        severity: 'warning',
+        title: `${dashboard.staleLeads} stale leads need attention`,
+        description: 'Leads inactive for 30+ days',
+        module: 'crm',
+        urgency: 50,
+        actionLabel: 'View Leads',
+        actionRoute: '/app/crm/pipeline',
+      });
+    }
+
+    for (const insight of insights.slice(0, 10)) {
+      priorities.push({
+        id: `insight-${insight.id}`,
+        type: insight.severity === 'opportunity' ? 'opportunity' : 'risk',
+        severity: insight.severity,
+        title: insight.title,
+        description: insight.description,
+        module: insight.module,
+        urgency: insight.severity === 'critical' ? 90 : insight.severity === 'warning' ? 65 : 40,
+      });
+    }
+
+    for (const a of approvals) {
+      priorities.push({
+        id: `approval-${a.id}`,
+        type: 'approval',
+        severity: a.riskTier >= 3 ? 'warning' : 'info',
+        title: a.title,
+        description: a.description ?? 'AI action awaiting your decision',
+        module: 'ai',
+        urgency: 80,
+      });
+    }
+
+    priorities.sort((a, b) => b.urgency - a.urgency);
+
+    return {
+      snapshot: {
+        business: snapshot.business,
+        momentumScore: snapshot.momentumScore,
+        healthIndicators: snapshot.healthIndicators,
+      },
+      dashboard,
+      priorities: priorities.slice(0, 25),
+      pendingApprovals: approvals.length,
+      modules: {
+        contacts: snapshot.contacts,
+        revenue: snapshot.revenue,
+        bookings: snapshot.bookings,
+        expenses: snapshot.expenses,
+        projects: snapshot.projects,
+        content: snapshot.content,
+        automations: snapshot.automations,
+        storefront: snapshot.storefront,
+      },
+    };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai/profile/chat')
   async profileChat(
     @Param('businessId') businessId: string,
