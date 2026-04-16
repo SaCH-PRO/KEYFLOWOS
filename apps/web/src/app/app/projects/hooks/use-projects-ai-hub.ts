@@ -170,6 +170,7 @@ export function useProjectsAiHub() {
     moduleName: "Projects",
     generateSuggestions: generateProjectSuggestions,
     tools,
+    useGlobalCopilot: true,
     executeAction: async (actionKey, context) => {
       if (actionKey.startsWith("tool:")) {
         const toolId = actionKey.replace("tool:", "");

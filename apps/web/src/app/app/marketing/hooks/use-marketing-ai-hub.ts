@@ -431,6 +431,7 @@ export function useMarketingAiHub() {
     moduleName: "Marketing",
     generateSuggestions: generateMarketingSuggestions,
     tools,
+    useGlobalCopilot: true,
     executeAction: async (actionKey, context) => {
       if (actionKey.startsWith("tool:")) {
         const toolId = actionKey.replace("tool:", "");

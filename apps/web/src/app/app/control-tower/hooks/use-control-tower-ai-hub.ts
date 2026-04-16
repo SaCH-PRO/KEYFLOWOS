@@ -212,6 +212,7 @@ export function useControlTowerAiHub(customData: TowerCustomData) {
     moduleName: "Control Tower",
     generateSuggestions: generateTowerSuggestions,
     tools: towerTools,
+    useGlobalCopilot: true,
   });
 
   useEffect(() => {

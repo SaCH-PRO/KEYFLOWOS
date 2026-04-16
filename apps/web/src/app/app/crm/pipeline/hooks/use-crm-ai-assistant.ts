@@ -120,6 +120,7 @@ export function useCrmAiAssistant() {
     moduleId: "crm",
     moduleName: "Contacts",
     generateSuggestions: generateCrmSuggestions,
+    useGlobalCopilot: true,
   });
 
   const updateCrmContext = useCallback((params: {
