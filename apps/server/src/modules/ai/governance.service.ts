@@ -299,6 +299,7 @@ export class GovernanceService {
     if (toolName.startsWith('marketing_')) return 'marketing';
     if (toolName.startsWith('social_')) return 'content';
     if (toolName.startsWith('automations_')) return 'automations';
+    if (toolName.startsWith('delegation_')) return 'autopilot';
     if (toolName.startsWith('fetch_')) return 'intelligence';
     if (toolName.startsWith('draft_')) return 'drafts';
     if (toolName.startsWith('create_') || toolName.startsWith('tag_') || toolName.startsWith('segment_') || toolName.startsWith('schedule_')) return 'organize';

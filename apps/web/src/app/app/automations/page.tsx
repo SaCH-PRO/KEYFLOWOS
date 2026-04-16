@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { LayoutGrid, Clock, Workflow } from "lucide-react";
+import { LayoutGrid, Clock, Workflow, Bot } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { AiBadge } from "@/components/ui/ai-badge";
@@ -26,9 +26,11 @@ import { useAutomationsAiHub } from "./hooks/use-automations-ai-hub";
 import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
 import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
+import { AutopilotLoops } from "./components/autopilot-loops";
 
 const TABS = [
   { key: "flows", label: "My Flows", icon: Workflow, tooltip: "Active flows and playbooks running in your business." },
+  { key: "autopilot", label: "Autopilot", icon: Bot, tooltip: "Delegation loops that continuously scan and act on your behalf." },
   { key: "templates", label: "Templates", icon: LayoutGrid, tooltip: "Pre-built flow recipes you can activate with one click." },
   { key: "log", label: "Activity Log", icon: Clock, tooltip: "History of all flow executions, triggers, and outcomes." },
 ];
@@ -50,7 +52,7 @@ export default function FlowsPage() {
   const handleAutomationsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
       const tab = actionKey.replace("switch_tab:", "");
-      if (["flows", "templates", "log"].includes(tab)) setActiveTab(tab);
+      if (["flows", "autopilot", "templates", "log"].includes(tab)) setActiveTab(tab);
     }
   }, []);
 
@@ -282,6 +284,10 @@ export default function FlowsPage() {
             onPlaybooksChange={setPlaybooks}
             onWorkflowsChange={setWorkflows}
           />
+        )}
+
+        {activeTab === "autopilot" && (
+          <AutopilotLoops businessId={businessId} />
         )}
 
         {activeTab === "templates" && (
