@@ -89,7 +89,7 @@ const towerTools: AiTool[] = [
   {
     id: "explain_metric",
     name: "Explain Metric",
-    description: "AI explains what a Command Tower metric means and suggests actions to improve it",
+    description: "AI explains what a Command Flow metric means and suggests actions to improve it",
     icon: "help-circle",
     category: "analyze",
     requiresSelection: false,
@@ -210,7 +210,7 @@ export function useControlTowerAiHub(customData: TowerCustomData) {
 
   const ai = useModuleAi({
     moduleId: "control-tower",
-    moduleName: "Command Tower",
+    moduleName: "Command Flow",
     generateSuggestions: generateTowerSuggestions,
     tools: towerTools,
     useGlobalCopilot: true,

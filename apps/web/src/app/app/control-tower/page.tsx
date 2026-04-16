@@ -118,12 +118,12 @@ export default function ControlTowerPage() {
   return (
     <WorkspaceShell
       icon={Radar}
-      title="Command Tower"
+      title="Command Flow"
       subtitle="Your operational headquarters"
       iconColor="#F97316"
       ai={{
         hook: aiHub,
-        moduleName: "Command Tower",
+        moduleName: "Command Flow",
         onAction: handleAiAction,
       }}
       metricStrip={metricItems.length > 0 ? <WorkspaceMetricStrip items={metricItems} columns={7} compact /> : undefined}

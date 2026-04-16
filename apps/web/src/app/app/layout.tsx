@@ -195,7 +195,7 @@ interface PrimaryNavItem {
 }
 
 const primaryNav: PrimaryNavItem[] = [
-  { id: "tower", label: "Command Tower", icon: Radar, href: "/app/control-tower" },
+  { id: "tower", label: "Command Flow", icon: Radar, href: "/app/control-tower" },
   { id: "store", label: "Store", icon: Store, href: "/app/store" },
   { id: "workspaces", label: "Workspaces", icon: LayoutGrid },
   { id: "studio", label: "Studio", icon: Wrench },
@@ -346,12 +346,12 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         const isUuid = /^[0-9a-f-]{20,}$/i.test(last || "");
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
-          app: "Command Tower", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
+          app: "Command Flow", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
           bookings: "Calendar", marketing: "Content", expenses: "Expenses",
           projects: "Projects", documents: "Documents", automations: "Automations", reports: "Reports",
           store: "Presence", settings: "Studio", learn: "Learn",
           community: "Community", marketplace: "Marketplace",
-          "control-tower": "Command Tower",
+          "control-tower": "Command Flow",
         };
         const label = labelMap[labelSegment || ""] || (labelSegment ? labelSegment.charAt(0).toUpperCase() + labelSegment.slice(1) : "");
         if (label) {
@@ -937,7 +937,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 )}
               >
                 <Radar className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                <span>Command Tower</span>
+                <span>Command Flow</span>
               </Link>
 
               {(["workspaces", "studio", "public"] as const).map((sectionId) => {
