@@ -135,8 +135,11 @@ export class StoreReadinessService {
     return backfilled;
   }
 
+  async runBackfillIfNeeded(businessId: string): Promise<number> {
+    return this.backfillSourceProductIds(businessId);
+  }
+
   async buildStoreGraph(businessId: string): Promise<StoreGraph> {
-    await this.backfillSourceProductIds(businessId);
 
     const [products, services] = await Promise.all([
       this.db.product.findMany({
