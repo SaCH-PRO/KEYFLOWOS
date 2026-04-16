@@ -245,7 +245,7 @@ export default function FlowsPage() {
       activeTab={activeTab}
       onTabChange={setActiveTab}
       tabLayoutId="flows-tab"
-      ai={{ hook: automationsAi, moduleName: "Autopilot", onAction: handleAutomationsAiAction }}
+      ai={{ hook: automationsAi, moduleName: "Automations", onAction: handleAutomationsAiAction }}
       banners={
         <>
           <ResumePrompt module="automations" />
