@@ -115,17 +115,44 @@ export interface ModelStrategy {
   fallbacks: Array<{ provider: AiProvider; model: string }>;
 }
 
+export interface BudgetCaps {
+  monthlyOverall?: number;
+  monthlyOpenai?: number;
+  monthlyAnthropic?: number;
+  monthlyXai?: number;
+}
+
+export interface ProviderBudgetStatus {
+  provider: AiProvider;
+  budgetCap: number | null;
+  spent: number;
+  remaining: number | null;
+  utilizationPct: number | null;
+  isOverBudget: boolean;
+  isNearLimit: boolean;
+}
+
+export interface BudgetStatus {
+  overall: { budgetCap: number | null; spent: number; remaining: number | null; utilizationPct: number | null; isOverBudget: boolean; isNearLimit: boolean };
+  byProvider: ProviderBudgetStatus[];
+  periodStart: Date;
+  periodEnd: Date;
+}
+
 export interface AiPreferences {
   aiMode: AiMode;
   preferredWritingStyle?: string;
   byokOpenai?: string;
   byokAnthropic?: string;
   byokXai?: string;
+  budgetCaps?: BudgetCaps;
 }
 
 const DEFAULT_PREFERENCES: AiPreferences = {
   aiMode: 'balanced',
 };
+
+const BUDGET_NEAR_LIMIT_THRESHOLD = 0.85;
 
 const TOKEN_COST_PER_1K: Record<string, { input: number; output: number }> = {
   'gpt-4o': { input: 0.005, output: 0.015 },
@@ -346,20 +373,45 @@ export class ModelGatewayService {
     const mode = preferences.aiMode;
     const strategy = this.resolveStrategy(request, mode, preferences);
 
+    const budgetCaps = preferences.budgetCaps;
+    let spendByProvider: Record<string, number> | undefined;
+    let totalSpend: number | undefined;
+
+    if (budgetCaps && this.hasBudgetCaps(budgetCaps)) {
+      const spendData = await this.getCurrentMonthSpend(request.businessId);
+      spendByProvider = spendData.byProvider;
+      totalSpend = spendData.total;
+    }
+
     const candidates = [strategy.primary, ...strategy.fallbacks];
+    const budgetFilteredCandidates = this.filterCandidatesByBudget(
+      candidates, budgetCaps, spendByProvider, totalSpend,
+    );
 
     let lastError: Error | null = null;
     let fallbackUsed = false;
     let fallbackProvider: AiProvider | undefined;
+    let budgetDegraded = false;
 
-    for (let i = 0; i < candidates.length; i++) {
-      const candidate = candidates[i];
+    const effectiveCandidates = budgetFilteredCandidates.length > 0
+      ? budgetFilteredCandidates
+      : candidates;
+
+    if (budgetFilteredCandidates.length === 0 && candidates.length > 0) {
+      this.logger.warn(
+        `All providers over budget for business ${request.businessId}, allowing request with degraded routing`,
+      );
+      budgetDegraded = true;
+    }
+
+    for (let i = 0; i < effectiveCandidates.length; i++) {
+      const candidate = effectiveCandidates[i];
 
       if (!this.isProviderAvailable(candidate.provider, preferences)) {
         continue;
       }
 
-      if (i > 0) {
+      if (i > 0 || (budgetDegraded && candidate !== candidates[0])) {
         fallbackUsed = true;
         fallbackProvider = candidate.provider;
         this.logger.warn(
@@ -427,10 +479,34 @@ export class ModelGatewayService {
     const strategy = this.resolveStrategy(request, mode, preferences);
     const candidates = [strategy.primary, ...strategy.fallbacks];
 
+    const budgetCaps = preferences.budgetCaps;
+    let spendByProvider: Record<string, number> | undefined;
+    let totalSpend: number | undefined;
+
+    if (budgetCaps && this.hasBudgetCaps(budgetCaps)) {
+      const spendData = await this.getCurrentMonthSpend(request.businessId);
+      spendByProvider = spendData.byProvider;
+      totalSpend = spendData.total;
+    }
+
+    const budgetFilteredCandidates = this.filterCandidatesByBudget(
+      candidates, budgetCaps, spendByProvider, totalSpend,
+    );
+
+    const effectiveCandidates = budgetFilteredCandidates.length > 0
+      ? budgetFilteredCandidates
+      : candidates;
+
+    if (budgetFilteredCandidates.length === 0 && candidates.length > 0) {
+      this.logger.warn(
+        `All providers over budget for streaming business ${request.businessId}, allowing request with degraded routing`,
+      );
+    }
+
     let lastError: Error | null = null;
 
-    for (let i = 0; i < candidates.length; i++) {
-      const candidate = candidates[i];
+    for (let i = 0; i < effectiveCandidates.length; i++) {
+      const candidate = effectiveCandidates[i];
 
       if (!this.isProviderAvailable(candidate.provider, preferences)) {
         continue;
@@ -773,6 +849,122 @@ export class ModelGatewayService {
     }
 
     yield { type: 'done' };
+  }
+
+  private hasBudgetCaps(caps?: BudgetCaps): boolean {
+    if (!caps) return false;
+    return !!(caps.monthlyOverall || caps.monthlyOpenai || caps.monthlyAnthropic || caps.monthlyXai);
+  }
+
+  private getProviderBudgetCap(provider: AiProvider, caps?: BudgetCaps): number | undefined {
+    if (!caps) return undefined;
+    switch (provider) {
+      case 'openai': return caps.monthlyOpenai;
+      case 'anthropic': return caps.monthlyAnthropic;
+      case 'xai': return caps.monthlyXai;
+      default: return undefined;
+    }
+  }
+
+  private filterCandidatesByBudget(
+    candidates: Array<{ provider: AiProvider; model: string }>,
+    budgetCaps?: BudgetCaps,
+    spendByProvider?: Record<string, number>,
+    totalSpend?: number,
+  ): Array<{ provider: AiProvider; model: string }> {
+    if (!budgetCaps || !this.hasBudgetCaps(budgetCaps) || !spendByProvider) {
+      return candidates;
+    }
+
+    if (budgetCaps.monthlyOverall && totalSpend !== undefined && totalSpend >= budgetCaps.monthlyOverall) {
+      this.logger.warn(`Overall monthly budget cap ($${budgetCaps.monthlyOverall}) reached. Total spend: $${totalSpend.toFixed(4)}`);
+      return [];
+    }
+
+    return candidates.filter(candidate => {
+      const providerCap = this.getProviderBudgetCap(candidate.provider, budgetCaps);
+      if (providerCap === undefined) return true;
+      const providerSpend = spendByProvider[candidate.provider] || 0;
+      if (providerSpend >= providerCap) {
+        this.logger.warn(
+          `Provider ${candidate.provider} over budget cap ($${providerCap}). Spend: $${providerSpend.toFixed(4)}`,
+        );
+        return false;
+      }
+      return true;
+    });
+  }
+
+  async getCurrentMonthSpend(businessId: string): Promise<{ total: number; byProvider: Record<string, number> }> {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const [totalAgg, byProviderRaw] = await Promise.all([
+      this.prisma.client.aiUsageLog.aggregate({
+        where: { businessId, createdAt: { gte: startOfMonth } },
+        _sum: { estimatedCost: true },
+      }),
+      (this.prisma.client.aiUsageLog.groupBy as any)({
+        by: ['provider'],
+        where: { businessId, createdAt: { gte: startOfMonth } },
+        _sum: { estimatedCost: true },
+      }),
+    ]);
+
+    const byProvider: Record<string, number> = {};
+    for (const row of byProviderRaw as any[]) {
+      byProvider[row.provider] = row._sum?.estimatedCost ?? 0;
+    }
+
+    return {
+      total: totalAgg._sum.estimatedCost ?? 0,
+      byProvider,
+    };
+  }
+
+  async getBudgetStatus(businessId: string): Promise<BudgetStatus> {
+    const preferences = await this.getPreferences(businessId);
+    const budgetCaps = preferences.budgetCaps;
+    const spend = await this.getCurrentMonthSpend(businessId);
+
+    const now = new Date();
+    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    const overallCap = budgetCaps?.monthlyOverall ?? null;
+    const overallUtilization = overallCap ? (spend.total / overallCap) * 100 : null;
+
+    const byProvider: ProviderBudgetStatus[] = (['openai', 'anthropic', 'xai'] as AiProvider[]).map(provider => {
+      const cap = this.getProviderBudgetCap(provider, budgetCaps) ?? null;
+      const providerSpend = spend.byProvider[provider] || 0;
+      const remaining = cap !== null ? Math.max(0, cap - providerSpend) : null;
+      const utilizationPct = cap !== null && cap > 0 ? (providerSpend / cap) * 100 : null;
+
+      return {
+        provider,
+        budgetCap: cap,
+        spent: Math.round(providerSpend * 10000) / 10000,
+        remaining: remaining !== null ? Math.round(remaining * 10000) / 10000 : null,
+        utilizationPct: utilizationPct !== null ? Math.round(utilizationPct * 100) / 100 : null,
+        isOverBudget: cap !== null && providerSpend >= cap,
+        isNearLimit: cap !== null && utilizationPct !== null && utilizationPct >= BUDGET_NEAR_LIMIT_THRESHOLD * 100,
+      };
+    });
+
+    return {
+      overall: {
+        budgetCap: overallCap,
+        spent: Math.round(spend.total * 10000) / 10000,
+        remaining: overallCap !== null ? Math.round(Math.max(0, overallCap - spend.total) * 10000) / 10000 : null,
+        utilizationPct: overallUtilization !== null ? Math.round(overallUtilization * 100) / 100 : null,
+        isOverBudget: overallCap !== null && spend.total >= overallCap,
+        isNearLimit: overallCap !== null && overallUtilization !== null && overallUtilization >= BUDGET_NEAR_LIMIT_THRESHOLD * 100,
+      },
+      byProvider,
+      periodStart,
+      periodEnd,
+    };
   }
 
   private resolveStrategy(

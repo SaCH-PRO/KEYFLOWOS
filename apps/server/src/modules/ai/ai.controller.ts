@@ -11,7 +11,7 @@ import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { ProfileIntelligenceService } from './profile-intelligence.service';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
-import { ModelGatewayService, AiMode } from './model-gateway.service';
+import { ModelGatewayService, AiMode, BudgetCaps } from './model-gateway.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -829,6 +829,7 @@ export class AiController {
       byokOpenai: prefs.byokOpenai ? '••••••••' : null,
       byokAnthropic: prefs.byokAnthropic ? '••••••••' : null,
       byokXai: prefs.byokXai ? '••••••••' : null,
+      budgetCaps: prefs.budgetCaps || null,
     };
   }
 
@@ -842,11 +843,21 @@ export class AiController {
       byokOpenai?: string | null;
       byokAnthropic?: string | null;
       byokXai?: string | null;
+      budgetCaps?: BudgetCaps | null;
     },
   ) {
     const validModes: AiMode[] = ['balanced', 'premium', 'fast'];
     if (body.mode !== undefined && !validModes.includes(body.mode)) {
       throw new BadRequestException(`Invalid AI mode. Must be one of: ${validModes.join(', ')}`);
+    }
+
+    if (body.budgetCaps !== undefined && body.budgetCaps !== null) {
+      const caps = body.budgetCaps;
+      for (const [key, val] of Object.entries(caps)) {
+        if (val !== undefined && val !== null && (typeof val !== 'number' || val < 0)) {
+          throw new BadRequestException(`Budget cap "${key}" must be a non-negative number`);
+        }
+      }
     }
 
     const updates: Record<string, unknown> = {};
@@ -855,13 +866,21 @@ export class AiController {
     if (body.byokOpenai !== undefined) updates.byokOpenai = body.byokOpenai === null ? '' : body.byokOpenai;
     if (body.byokAnthropic !== undefined) updates.byokAnthropic = body.byokAnthropic === null ? '' : body.byokAnthropic;
     if (body.byokXai !== undefined) updates.byokXai = body.byokXai === null ? '' : body.byokXai;
+    if (body.budgetCaps !== undefined) updates.budgetCaps = body.budgetCaps === null ? undefined : body.budgetCaps;
 
     const merged = await this.gateway.updatePreferences(businessId, updates);
     return {
       success: true,
       mode: merged.aiMode,
       writingStyle: merged.preferredWritingStyle || 'professional',
+      budgetCaps: merged.budgetCaps || null,
     };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/budget-status')
+  async getBudgetStatus(@Param('businessId') businessId: string) {
+    return this.gateway.getBudgetStatus(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
