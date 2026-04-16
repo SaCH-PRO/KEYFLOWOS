@@ -5378,6 +5378,8 @@ export interface DirectoryBusiness {
   products?: { id: string; name: string; price: number; currency: string; category: string }[];
   services?: { id: string; name: string; price: number; currency: string }[];
   _count?: { communityPosts: number; cohortMembers: number; networkConnectionsTo: number; endorsementsReceived?: number };
+  reputationScore?: number;
+  badges?: { id: string; label: string; icon: string }[];
 }
 export interface NetworkConnectionStatus {
   following: boolean;

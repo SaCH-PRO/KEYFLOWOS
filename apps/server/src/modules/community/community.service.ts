@@ -18,6 +18,44 @@ const BADGE_DEFINITIONS = [
   { id: 'cohort_member', label: 'Cohort Member', icon: 'graduation-cap', minCohorts: 1 },
 ] as const;
 
+type Badge = { id: string; label: string; icon: string };
+
+interface BadgeComputeInput {
+  profileCompleteness: number;
+  productCount: number;
+  serviceCount: number;
+  postCount: number;
+  followerCount: number;
+  endorsementCount: number;
+  cohortCount: number;
+}
+
+function computeBadgesAndReputation(input: BadgeComputeInput): { badges: Badge[]; reputationScore: number } {
+  const badges: Badge[] = [];
+  for (const def of BADGE_DEFINITIONS) {
+    let earned = false;
+    if ('minCompleteness' in def) earned = input.profileCompleteness >= def.minCompleteness;
+    if ('requiresProducts' in def) earned = (input.productCount + input.serviceCount) > 0;
+    if ('minPosts' in def) earned = input.postCount >= def.minPosts;
+    if ('minFollowers' in def) earned = input.followerCount >= def.minFollowers;
+    if ('minEndorsements' in def) earned = input.endorsementCount >= def.minEndorsements;
+    if ('minCohorts' in def) earned = input.cohortCount >= def.minCohorts;
+    if (earned) badges.push({ id: def.id, label: def.label, icon: def.icon });
+  }
+
+  const completenessScore = Math.min(input.profileCompleteness, 100) * 0.25;
+  const activityScore = Math.min(input.postCount * 3, 25);
+  const connectionScore = Math.min(input.followerCount * 2, 20);
+  const endorsementScore = Math.min(input.endorsementCount * 5, 20);
+  const badgeScore = Math.min(badges.length * (10 / BADGE_DEFINITIONS.length), 10);
+  const reputationScore = Math.min(
+    Math.round(completenessScore + activityScore + connectionScore + endorsementScore + badgeScore),
+    100,
+  );
+
+  return { badges, reputationScore };
+}
+
 @Injectable()
 export class CommunityService {
   constructor(
@@ -321,7 +359,20 @@ export class CommunityService {
       this.prisma.client.business.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    const enriched = data.map((biz) => {
+      const { badges, reputationScore } = computeBadgesAndReputation({
+        profileCompleteness: biz.profileCompleteness,
+        productCount: biz.products?.length ?? 0,
+        serviceCount: biz.services?.length ?? 0,
+        postCount: biz._count.communityPosts,
+        followerCount: biz._count.networkConnectionsTo,
+        endorsementCount: biz._count.endorsementsReceived ?? 0,
+        cohortCount: biz._count.cohortMembers,
+      });
+      return { ...biz, reputationScore, badges };
+    });
+
+    return { data: enriched, total, page, limit };
   }
 
   async createConnection(fromBusinessId: string, toBusinessId: string, type: string = 'FOLLOW') {
@@ -486,30 +537,18 @@ export class CommunityService {
 
     const endorsementData = await this.getEndorsements(businessId);
 
-    const badges: { id: string; label: string; icon: string }[] = [];
-    for (const def of BADGE_DEFINITIONS) {
-      let earned = false;
-      if ('minCompleteness' in def) earned = business.profileCompleteness >= def.minCompleteness;
-      if ('requiresProducts' in def) earned = (business._count.products + business._count.services) > 0;
-      if ('minPosts' in def) earned = business._count.communityPosts >= def.minPosts;
-      if ('minFollowers' in def) earned = business._count.networkConnectionsTo >= def.minFollowers;
-      if ('minEndorsements' in def) earned = endorsementData.total >= def.minEndorsements;
-      if ('minCohorts' in def) earned = business._count.cohortMembers >= def.minCohorts;
-      if (earned) badges.push({ id: def.id, label: def.label, icon: def.icon });
-    }
-
-    const completenessScore = Math.min(business.profileCompleteness, 100) * 0.25;
-    const activityScore = Math.min(business._count.communityPosts * 3, 25);
-    const connectionScore = Math.min(business._count.networkConnectionsTo * 2, 20);
-    const endorsementScore = Math.min(endorsementData.total * 5, 20);
-    const badgeScore = Math.min(badges.length * (10 / BADGE_DEFINITIONS.length), 10);
-
-    const reputationScore = Math.round(
-      completenessScore + activityScore + connectionScore + endorsementScore + badgeScore,
-    );
+    const { badges, reputationScore } = computeBadgesAndReputation({
+      profileCompleteness: business.profileCompleteness,
+      productCount: business._count.products,
+      serviceCount: business._count.services,
+      postCount: business._count.communityPosts,
+      followerCount: business._count.networkConnectionsTo,
+      endorsementCount: endorsementData.total,
+      cohortCount: business._count.cohortMembers,
+    });
 
     return {
-      reputationScore: Math.min(reputationScore, 100),
+      reputationScore,
       badges,
       endorsementCount: endorsementData.total,
       topEndorsedSkills: endorsementData.topSkills.slice(0, 5),
