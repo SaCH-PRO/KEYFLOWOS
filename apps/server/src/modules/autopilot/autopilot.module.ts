@@ -5,9 +5,10 @@ import { AutopilotAiService } from './autopilot-ai.service';
 import { DelegationLoopService } from './delegation-loop.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule, AiModule],
+  imports: [PrismaModule, AiModule, NotificationsModule],
   controllers: [AutopilotController],
   providers: [AutopilotService, AutopilotAiService, DelegationLoopService],
   exports: [AutopilotService, AutopilotAiService, DelegationLoopService],
