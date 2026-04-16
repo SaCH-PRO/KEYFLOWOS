@@ -285,6 +285,7 @@ export default function StorePage() {
                 businessData={s.businessData}
                 services={s.services}
                 commerceProducts={s.commerceProducts}
+                liveProductIds={s.liveProductIds}
                 storefrontConfig={cfg}
                 onConfigChange={s.handleConfigChange}
                 onSaveConfig={s.handleSaveConfig}
@@ -297,7 +298,8 @@ export default function StorePage() {
             {activeTab === "catalog" && (
               <CatalogMode
                 commerceProducts={s.commerceProducts}
-                storeServiceNames={s.storeServiceNames}
+                liveProductIds={s.liveProductIds}
+                graphProductToServiceMap={s.graphProductToServiceMap}
                 storeItemCount={s.storeItemCount}
                 processingItems={s.processingItems}
                 confirmRemove={s.confirmRemove}

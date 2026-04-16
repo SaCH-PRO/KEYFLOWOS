@@ -153,7 +153,7 @@ export class BookingsController {
   @Post('businesses/:businessId/services')
   createService(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; duration: number; price: number; description?: string },
+    @Body() body: { name: string; duration: number; price: number; description?: string; sourceProductId?: string },
   ) {
     return this.prisma.client.service.create({
       data: {
@@ -162,6 +162,7 @@ export class BookingsController {
         duration: body.duration,
         price: body.price,
         description: body.description ?? null,
+        sourceProductId: body.sourceProductId ?? null,
       },
     });
   }

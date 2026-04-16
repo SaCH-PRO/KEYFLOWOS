@@ -6,7 +6,8 @@ import type { Product, Service, CatalogItemOverride } from "@/lib/client";
 
 type Props = {
   commerceProducts: Product[];
-  storeServiceNames: Set<string>;
+  liveProductIds: Set<string>;
+  graphProductToServiceMap: Map<string, string>;
   storeItemCount: number;
   processingItems: Set<string>;
   confirmRemove: string | null;
@@ -29,7 +30,8 @@ type Props = {
 
 export function ProductsHoursTab({
   commerceProducts,
-  storeServiceNames,
+  liveProductIds,
+  graphProductToServiceMap,
   storeItemCount,
   processingItems,
   confirmRemove,
@@ -53,7 +55,8 @@ export function ProductsHoursTab({
     <div className="space-y-6">
       <CatalogManager
         products={commerceProducts}
-        storeServiceNames={storeServiceNames}
+        liveProductIds={liveProductIds}
+        graphProductToServiceMap={graphProductToServiceMap}
         storeItemCount={storeItemCount}
         processingItems={processingItems}
         confirmRemove={confirmRemove}

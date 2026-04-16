@@ -100,13 +100,17 @@ export class StoreReadinessService {
       }),
       this.db.service.findMany({
         where: { businessId, deletedAt: null },
-        select: { id: true, name: true, price: true, duration: true },
+        select: { id: true, name: true, price: true, duration: true, sourceProductId: true },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
 
+    const serviceByProductId = new Map<string, typeof services[0]>();
     const serviceByNormalizedName = new Map<string, typeof services[0]>();
     for (const svc of services) {
+      if (svc.sourceProductId) {
+        serviceByProductId.set(svc.sourceProductId, svc);
+      }
       serviceByNormalizedName.set(svc.name.toLowerCase().trim(), svc);
     }
 
@@ -120,8 +124,8 @@ export class StoreReadinessService {
     let driftCount = 0;
 
     for (const product of products) {
-      const normalizedName = product.name.toLowerCase().trim();
-      const matchedService = serviceByNormalizedName.get(normalizedName);
+      const matchedService = serviceByProductId.get(product.id)
+        ?? serviceByNormalizedName.get(product.name.toLowerCase().trim());
       const isLive = !!matchedService;
 
       const priceDrift = isLive
@@ -208,14 +212,33 @@ export class StoreReadinessService {
     const liveWithImagesCount = graph.mappings.filter(m => m.isLive && m.imageUrl).length;
     const liveWithImagesPct = graph.liveCount > 0 ? (liveWithImagesCount / graph.liveCount) * 100 : 100;
 
+    const deliveryConfig = meta.deliveryConfig ?? {};
+    const hasDeliveryMethod = Object.values(deliveryConfig).some((m: any) => m?.enabled);
+
+    const paymentConfig = meta.paymentConfig ?? {};
+    const hasPaymentMethod = !!(paymentConfig.wipay?.enabled || paymentConfig.paypal?.enabled
+      || paymentConfig.googlepay?.enabled || paymentConfig.cash?.enabled || paymentConfig.bankTransfer?.enabled);
+
+    const hasBranding = !!business?.primaryColor;
+    const hasDescription = !!(hero.subheadline && hero.subheadline.trim().length > 10);
+
+    const liveWithDescCount = graph.mappings.filter(m => m.isLive).length > 0
+      ? graph.mappings.filter(m => m.isLive && m.productName.length > 0).length : 0;
+    const liveActiveCount = graph.mappings.filter(m => m.isLive && m.isActive).length;
+    const hasInactiveItems = graph.liveCount > 0 && liveActiveCount < graph.liveCount;
+
     const checks: CheckDef[] = [
       { id: 'store-offline', category: 'launch', severity: 'blocker', title: 'Store is Offline', failDetail: 'Your storefront is in draft mode. Customers cannot see or order from it.', actionLabel: 'Go Live', actionTab: 'launch', passed: storeEnabled },
       { id: 'no-slug', category: 'launch', severity: 'blocker', title: 'No Store URL', failDetail: 'Set a custom URL slug so customers can find your store.', actionLabel: 'Set URL', actionTab: 'launch', passed: hasSlug },
       { id: 'no-products', category: 'launch', severity: 'blocker', title: 'Empty Catalog', failDetail: 'Your store has no live products or services. Add items so visitors can browse and purchase.', actionLabel: 'Add Items', actionTab: 'catalog', passed: hasProducts },
+      { id: 'no-payment', category: 'launch', severity: 'blocker', title: 'No Payment Method', failDetail: 'Customers cannot pay without a payment method. Configure WiPay, PayPal, or bank transfer.', actionLabel: 'Setup Payments', actionTab: 'operations', passed: hasPaymentMethod },
+      { id: 'no-delivery', category: 'launch', severity: 'warning', title: 'No Delivery Method', failDetail: 'Set up at least one delivery or pickup method so customers can receive their orders.', actionLabel: 'Setup Delivery', actionTab: 'operations', passed: hasDeliveryMethod },
       { id: 'no-hero-image', category: 'conversion', severity: 'warning', title: 'No Hero Image', failDetail: 'Stores with hero banners see up to 40% higher engagement. Upload one in Design.', actionLabel: 'Add Hero', actionTab: 'design', passed: hasHeroImage },
       { id: 'no-hero-headline', category: 'conversion', severity: 'warning', title: 'Missing Hero Headline', failDetail: 'A compelling headline is the first thing visitors read. AI can generate one for you.', actionLabel: 'Write Headline', actionTab: 'design', passed: hasHeroHeadline },
       { id: 'no-hero-cta', category: 'conversion', severity: 'warning', title: 'No Call-to-Action', failDetail: 'Add a CTA button to guide visitors toward purchasing or booking.', actionLabel: 'Add CTA', actionTab: 'design', passed: hasHeroCta },
+      { id: 'no-description', category: 'conversion', severity: 'warning', title: 'No Store Description', failDetail: 'A sub-headline or description tells visitors what you offer in seconds.', actionLabel: 'Add Description', actionTab: 'design', passed: hasDescription },
       { id: 'no-logo', category: 'merchandising', severity: 'warning', title: 'No Logo', failDetail: 'A branded logo builds trust and recognition with customers.', actionLabel: 'Upload Logo', actionTab: 'design', passed: hasLogo },
+      { id: 'no-branding', category: 'merchandising', severity: 'tip', title: 'No Brand Colors', failDetail: 'Custom brand colors make your store memorable and professional.', actionLabel: 'Set Colors', actionTab: 'design', passed: hasBranding },
       { id: 'no-testimonials', category: 'conversion', severity: 'warning', title: 'No Social Proof', failDetail: '92% of consumers read reviews before purchasing. Add testimonials to boost trust.', actionLabel: 'Add Testimonials', actionTab: 'merchandising', passed: hasTestimonials },
       { id: 'weak-seo', category: 'promotion', severity: 'warning', title: 'SEO Not Configured', failDetail: 'Missing meta title or description reduces search visibility.', actionLabel: 'Configure SEO', actionTab: 'merchandising', passed: hasMetaTitle && hasMetaDescription },
       { id: 'no-hours', category: 'merchandising', severity: 'tip', title: 'Business Hours Not Set', failDetail: 'Business hours help customers plan visits and improve local SEO.', actionLabel: 'Set Hours', actionTab: 'operations', passed: hoursConfigured },
@@ -224,6 +247,7 @@ export class StoreReadinessService {
       { id: 'no-faq', category: 'merchandising', severity: 'tip', title: 'No FAQ Content', failDetail: 'FAQ reduces support load and improves SEO with long-tail keywords.', actionLabel: 'Generate FAQ', actionTab: 'merchandising', passed: hasFaq },
       { id: 'price-drift', category: 'merchandising', severity: 'warning', title: `${graph.driftCount} Price/Duration Drift${graph.driftCount > 1 ? 's' : ''}`, failDetail: 'Some store items have different prices than their catalog source. Sync to fix.', actionLabel: 'Sync Catalog', actionTab: 'catalog', passed: graph.driftCount === 0 },
       { id: 'low-images', category: 'merchandising', severity: 'warning', title: 'Low Image Coverage', failDetail: `Only ${Math.round(liveWithImagesPct)}% of live items have images. Products with images convert 2× better.`, actionLabel: 'Add Images', actionTab: 'catalog', passed: liveWithImagesPct >= 50 || graph.liveCount === 0 },
+      { id: 'inactive-items', category: 'merchandising', severity: 'warning', title: 'Inactive Items in Store', failDetail: 'Some store items are marked inactive in your catalog. Deactivated items confuse customers.', actionLabel: 'Review Catalog', actionTab: 'catalog', passed: !hasInactiveItems },
     ];
 
     const items: ReadinessItem[] = checks.map(c => ({

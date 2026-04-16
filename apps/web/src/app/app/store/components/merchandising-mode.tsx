@@ -136,6 +136,7 @@ type Props = {
   } | null;
   services: Service[];
   commerceProducts: Product[];
+  liveProductIds: Set<string>;
   storefrontConfig: StorefrontConfig;
   onConfigChange: (section: string, updates: Record<string, any>) => void;
   onSaveConfig: () => Promise<void>;
@@ -145,8 +146,8 @@ type Props = {
   activeDeliveryMethodsCount?: number;
 };
 
-function PricingSignals({ products, services }: { products: Product[]; services: Service[] }) {
-  const liveProducts = products.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
+function PricingSignals({ products, liveProductIds }: { products: Product[]; liveProductIds: Set<string> }) {
+  const liveProducts = products.filter((p) => liveProductIds.has(p.id));
   if (liveProducts.length === 0) return null;
 
   const prices = liveProducts.map((p) => p.price).filter((p) => p > 0);
@@ -201,8 +202,8 @@ function PricingSignals({ products, services }: { products: Product[]; services:
   );
 }
 
-function InventoryHealthPanel({ products, services }: { products: Product[]; services: Service[] }) {
-  const liveProducts = products.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
+function InventoryHealthPanel({ products, liveProductIds }: { products: Product[]; liveProductIds: Set<string> }) {
+  const liveProducts = products.filter((p) => liveProductIds.has(p.id));
   if (liveProducts.length === 0) return null;
 
   const withImages = liveProducts.filter((p) => p.imageUrl).length;
@@ -259,8 +260,8 @@ function InventoryHealthPanel({ products, services }: { products: Product[]; ser
   );
 }
 
-function CrossSellRecommendations({ products, services }: { products: Product[]; services: Service[] }) {
-  const liveProducts = products.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
+function CrossSellRecommendations({ products, liveProductIds }: { products: Product[]; liveProductIds: Set<string> }) {
+  const liveProducts = products.filter((p) => liveProductIds.has(p.id));
   if (liveProducts.length < 2) return null;
 
   const categories = [...new Set(liveProducts.map((p) => p.category).filter(Boolean))];
@@ -345,6 +346,7 @@ export function MerchandisingMode({
   businessData,
   services,
   commerceProducts,
+  liveProductIds,
   storefrontConfig,
   onConfigChange,
   onSaveConfig,
@@ -360,7 +362,7 @@ export function MerchandisingMode({
   const testimonials = (storefrontConfig.socialProof as any)?.testimonials ?? [];
   const faqEntries = storefrontConfig.faqEntries ?? [];
   const seo = storefrontConfig.seo as { metaTitle?: string; metaDescription?: string } | undefined;
-  const liveItems = commerceProducts.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
+  const liveItems = commerceProducts.filter((p) => liveProductIds.has(p.id));
 
   const metrics: MetricStripItem[] = [
     {
@@ -426,7 +428,7 @@ export function MerchandisingMode({
       {liveItems.length > 0 && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
           <SectionCard title="Pricing Intelligence" subtitle="Price distribution and catalog quality signals" icon={DollarSign}>
-            <PricingSignals products={commerceProducts} services={services} />
+            <PricingSignals products={commerceProducts} liveProductIds={liveProductIds} />
           </SectionCard>
         </motion.div>
       )}
@@ -434,7 +436,7 @@ export function MerchandisingMode({
       {liveItems.length > 0 && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
           <SectionCard title="Inventory Health" subtitle="Catalog completeness and quality indicators" icon={CheckCircle2}>
-            <InventoryHealthPanel products={commerceProducts} services={services} />
+            <InventoryHealthPanel products={commerceProducts} liveProductIds={liveProductIds} />
           </SectionCard>
         </motion.div>
       )}
@@ -442,7 +444,7 @@ export function MerchandisingMode({
       {liveItems.length >= 2 && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}>
           <SectionCard title="Cross-Sell & Upsell" subtitle="AI-powered revenue optimization recommendations" icon={Zap}>
-            <CrossSellRecommendations products={commerceProducts} services={services} />
+            <CrossSellRecommendations products={commerceProducts} liveProductIds={liveProductIds} />
           </SectionCard>
         </motion.div>
       )}

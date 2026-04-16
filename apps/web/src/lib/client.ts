@@ -1637,11 +1637,11 @@ export async function fetchServices(businessId: string = DEFAULT_BUSINESS_ID) {
   );
 }
 
-export async function createService(input: { businessId?: string; name: string; durationMins: number; price: number; description?: string; currency?: string }) {
+export async function createService(input: { businessId?: string; name: string; durationMins: number; price: number; description?: string; currency?: string; sourceProductId?: string }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Service>({
     path: `/bookings/businesses/${encodeURIComponent(businessId)}/services`,
-    body: { name: input.name, duration: input.durationMins, price: input.price, description: input.description, currency: input.currency ?? "TTD" },
+    body: { name: input.name, duration: input.durationMins, price: input.price, description: input.description, currency: input.currency ?? "TTD", sourceProductId: input.sourceProductId },
   });
 }
 
