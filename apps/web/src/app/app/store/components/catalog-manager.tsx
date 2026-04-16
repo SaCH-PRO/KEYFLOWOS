@@ -464,7 +464,7 @@ export function CatalogManager({
                 onToggle={() => onToggleItem(p)}
                 onConfirmRemoveChange={onConfirmRemoveChange}
                 onDeleteFromStore={onDeleteFromStore}
-                services={services}
+                matchedServiceId={graphProductToServiceMap.get(p.id)}
                 onDragEnd={handleReorderComplete}
                 onSelect={() => toggleSelectItem(p.id)}
                 onOverrideChange={onItemOverrideChange ? (upd) => onItemOverrideChange(p.id, upd) : undefined}
@@ -513,7 +513,7 @@ function CatalogItem({
   onToggle,
   onConfirmRemoveChange,
   onDeleteFromStore,
-  services,
+  matchedServiceId,
   onDragEnd,
   onSelect,
   onOverrideChange,
@@ -530,7 +530,7 @@ function CatalogItem({
   onToggle: () => void;
   onConfirmRemoveChange: (id: string | null) => void;
   onDeleteFromStore: (serviceId: string, productName?: string) => void;
-  services: { id: string; name: string }[];
+  matchedServiceId?: string;
   onDragEnd: () => void;
   onSelect: () => void;
   onOverrideChange?: (upd: Partial<CatalogItemOverride>) => void;
@@ -580,8 +580,7 @@ function CatalogItem({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                const serviceId = graphProductToServiceMap.get(p.id);
-                if (serviceId) onDeleteFromStore(serviceId, p.name);
+                if (matchedServiceId) onDeleteFromStore(matchedServiceId, p.name);
               }}
               className="px-3 py-1.5 rounded-lg text-xs font-medium min-h-[44px] transition-colors"
               style={{ background: "hsl(var(--kf-error) / 0.2)", border: "1px solid hsl(var(--kf-error) / 0.3)", color: "hsl(var(--kf-error))" }}
