@@ -616,7 +616,7 @@ export default function ProfessionalProfileSection({
         </AccordionSection>
 
         <AccordionSection
-          title="Transactional Presence"
+          title="Store Settings"
           subtitle="Your availability, capacity, and what you offer"
           icon={Store}
           accentColor="hsl(var(--kf-success))"
