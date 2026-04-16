@@ -21,6 +21,7 @@ import {
   CatalogItemOverride,
   fetchStoreGraph,
   fetchStoreReadiness,
+  backfillStoreLinks,
   StoreGraph,
   StoreReadinessResult,
 } from "@/lib/client";
@@ -117,11 +118,17 @@ export function useStoreData() {
     void initWorkspace();
   }, []);
 
+  const backfillRan = useRef(false);
+
   const loadData = useCallback(async (showLoader = false) => {
     if (!businessId) return;
     if (showLoader) setLoading(true);
     setLoadError(null);
     try {
+      if (!backfillRan.current) {
+        backfillRan.current = true;
+        backfillStoreLinks(businessId);
+      }
       const [servicesRes, staffRes, bizRes, productsRes, graphRes] = await Promise.all([
         fetchServices(businessId),
         fetchStaff(businessId),

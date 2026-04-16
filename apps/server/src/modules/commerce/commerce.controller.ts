@@ -755,4 +755,11 @@ export class CommerceController {
   getStoreGraph(@Param('businessId') businessId: string) {
     return this.storeReadiness.buildStoreGraph(businessId);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/store/backfill-links')
+  backfillStoreLinks(@Param('businessId') businessId: string) {
+    return this.storeReadiness.runBackfillIfNeeded(businessId);
+  }
 }

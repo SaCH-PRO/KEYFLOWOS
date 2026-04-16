@@ -3491,6 +3491,13 @@ export interface StoreReadinessResult {
   graph: StoreGraph;
 }
 
+export async function backfillStoreLinks(businessId: string): Promise<void> {
+  fetch(`${API_BASE}/commerce/businesses/${encodeURIComponent(businessId)}/store/backfill-links`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  }).catch(() => {});
+}
+
 export async function fetchStoreGraph(businessId: string): Promise<ApiResult<StoreGraph>> {
   return apiGetSimple<StoreGraph>(`/commerce/businesses/${encodeURIComponent(businessId)}/store/graph`);
 }
