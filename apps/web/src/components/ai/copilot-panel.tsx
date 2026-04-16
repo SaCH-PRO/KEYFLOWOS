@@ -100,8 +100,8 @@ const MODULE_LABELS: Record<string, { label: string; icon: typeof Sparkles; colo
   content: { label: "Content", icon: FileText, color: "text-pink-400" },
   projects: { label: "Projects", icon: Layers, color: "text-cyan-400" },
   expenses: { label: "Expenses", icon: BarChart3, color: "text-amber-400" },
-  flows: { label: "Autopilot", icon: Zap, color: "text-teal-400" },
-  automations: { label: "Autopilot", icon: Zap, color: "text-teal-400" },
+  flows: { label: "Automations", icon: Zap, color: "text-teal-400" },
+  automations: { label: "Automations", icon: Zap, color: "text-teal-400" },
   store: { label: "Store", icon: Package, color: "text-orange-400" },
   cockpit: { label: "Cockpit", icon: Target, color: "text-foreground/70" },
 };

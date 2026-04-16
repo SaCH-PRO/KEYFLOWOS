@@ -41,7 +41,7 @@ const DETAIL_TABS = [
   { key: "client", label: "Client", icon: User },
   { key: "revenue", label: "Revenue", icon: DollarSign },
   { key: "calendar", label: "Calendar", icon: Calendar },
-  { key: "flows", label: "Autopilot", icon: Zap },
+  { key: "flows", label: "Automations", icon: Zap },
   { key: "deliverables", label: "Deliverables", icon: FileText },
 ];
 
