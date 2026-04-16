@@ -67,7 +67,7 @@ const MODULE_LABELS: Record<string, string> = {
   marketing: "Marketing",
   projects: "Projects",
   expenses: "Expenses",
-  automations: "Flows",
+  automations: "Autopilot",
 };
 
 export function AiRecommendationCard({

@@ -5,7 +5,6 @@ import { BookingCompletedPayload, BookingConfirmedPayload, BookingCreatedPayload
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
-import { AutomationService } from '../automation/automation.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 
@@ -34,7 +33,6 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(CommerceService) private readonly commerce: CommerceService,
-    @Inject(AutomationService) private readonly automation: AutomationService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
   ) {}
@@ -511,15 +509,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         source: 'bookings',
       });
     }
-    if (booking.contactId) {
-      await this.automation.handle({
-        type: 'booking.status_changed',
-        businessId: booking.businessId,
-        contactId: booking.contactId,
-        bookingId: booking.id,
-        status: 'CONFIRMED',
-      });
-    }
+    
     return booking;
   }
 

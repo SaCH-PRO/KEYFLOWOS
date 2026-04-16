@@ -208,7 +208,7 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Calendar", href: "/app/bookings", icon: Calendar },
     { label: "Revenue", href: "/app/commerce", icon: CreditCard },
     { label: "Content", href: "/app/marketing", icon: Megaphone },
-    { label: "Flows", href: "/app/automations", icon: Zap },
+    { label: "Autopilot", href: "/app/automations", icon: Zap },
     { label: "Projects", href: "/app/projects", icon: FolderKanban },
     { label: "Expenses", href: "/app/expenses", icon: Receipt },
     { label: "Reports", href: "/app/reports", icon: BarChart3 },
@@ -349,7 +349,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         const labelMap: Record<string, string> = {
           app: "Cockpit", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
           bookings: "Calendar", marketing: "Content", expenses: "Expenses",
-          projects: "Projects", documents: "Documents", automations: "Flows", reports: "Reports",
+          projects: "Projects", documents: "Documents", automations: "Autopilot", reports: "Reports",
           store: "Presence", settings: "Studio", learn: "Learn",
           community: "Community", marketplace: "Marketplace",
           "control-tower": "Control Tower",

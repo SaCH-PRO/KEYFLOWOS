@@ -484,6 +484,36 @@ export class AutomationExecutorService {
       toStatus: payload.toStatus,
       trigger: 'contact.updated',
     });
+
+    if (payload.fromStatus && payload.toStatus && payload.fromStatus !== payload.toStatus) {
+      await this.runBuiltInStageChanged(payload.businessId, payload.contact.id, payload.fromStatus, payload.toStatus);
+      await this.executePlaybooks(payload.businessId, 'contact.stage_changed', {
+        contactId: payload.contact.id,
+        fromStatus: payload.fromStatus,
+        toStatus: payload.toStatus,
+        trigger: 'contact.stage_changed',
+      });
+    }
+  }
+
+  private async runBuiltInStageChanged(businessId: string, contactId: string, from: string, to: string) {
+    try {
+      const due = new Date(Date.now() + 2 * 86400000).toISOString();
+      await this.crm.addTask({
+        businessId,
+        contactId,
+        title: 'Follow up after stage change',
+        priority: 'HIGH',
+        dueDate: due,
+        source: 'autopilot',
+      });
+      const contact = await this.crm.contactDetail({ businessId, contactId });
+      const tags = new Set<string>(contact.contact?.tags ?? []);
+      tags.add('stage-changed');
+      await this.crm.updateContact({ businessId, contactId, tags: Array.from(tags) });
+    } catch (e) {
+      this.logger.warn(`Built-in stage-changed rule failed: ${(e as Error).message}`);
+    }
   }
 
   @OnEvent('booking.created')
@@ -528,6 +558,21 @@ export class AutomationExecutorService {
       bookingId: payload.booking.id,
       trigger: 'booking.confirmed',
     });
+
+    if (payload.contact?.id) {
+      try {
+        await this.crm.logContactEvent({
+          businessId: payload.businessId,
+          contactId: payload.contact.id,
+          type: 'booking.status.followup',
+          data: { trigger: { type: 'booking.status_changed', bookingId: payload.booking.id, status: 'CONFIRMED' } },
+          source: 'autopilot',
+          actorType: 'SYSTEM',
+        });
+      } catch (e) {
+        this.logger.warn(`Built-in booking status rule failed: ${(e as Error).message}`);
+      }
+    }
   }
 
   @OnEvent('invoice.paid')
@@ -552,6 +597,22 @@ export class AutomationExecutorService {
       total: inv.total,
       trigger: 'invoice.paid',
     });
+
+    if (inv.contact?.id) {
+      try {
+        const due = new Date(Date.now() + 1 * 86400000).toISOString();
+        await this.crm.addTask({
+          businessId: payload.businessId,
+          contactId: inv.contact.id,
+          title: 'Send thank-you note',
+          priority: 'NORMAL',
+          dueDate: due,
+          source: 'autopilot',
+        });
+      } catch (e) {
+        this.logger.warn(`Built-in invoice-paid rule failed: ${(e as Error).message}`);
+      }
+    }
 
     try {
       const lineItems = await this.prisma.client.invoiceItem.findMany({
@@ -630,6 +691,26 @@ export class AutomationExecutorService {
       invoiceId: payload.invoice.id,
       trigger: 'invoice.overdue',
     });
+
+    if (payload.invoice.contact?.id) {
+      try {
+        const due = new Date(Date.now() + 1 * 86400000).toISOString();
+        await this.crm.addTask({
+          businessId: payload.businessId,
+          contactId: payload.invoice.contact.id,
+          title: 'Collect overdue invoice',
+          priority: 'HIGH',
+          dueDate: due,
+          source: 'autopilot',
+        });
+        const contact = await this.crm.contactDetail({ businessId: payload.businessId, contactId: payload.invoice.contact.id });
+        const tags = new Set<string>(contact.contact?.tags ?? []);
+        tags.add('overdue');
+        await this.crm.updateContact({ businessId: payload.businessId, contactId: payload.invoice.contact.id, tags: Array.from(tags) });
+      } catch (e) {
+        this.logger.warn(`Built-in invoice-overdue rule failed: ${(e as Error).message}`);
+      }
+    }
   }
 
   @OnEvent('post.published')

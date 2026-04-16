@@ -97,7 +97,7 @@ const MODULE_IMPACT = [
   { icon: Users, label: "Clients", fields: ["Industry", "Stage", "Skills"], color: "--kf-accent1", description: "Customer insights and relationship guidance" },
   { icon: DollarSign, label: "Revenue", fields: ["Name", "Description", "Team Size"], color: "--kf-success", description: "Financial assumptions and pricing intelligence" },
   { icon: BarChart3, label: "Content", fields: ["Industry", "Description", "Tagline"], color: "--kf-accent2", description: "Audience framing and positioning" },
-  { icon: Zap, label: "Flows", fields: ["Stage", "Team Size", "Industry"], color: "--kf-warning", description: "Automation and workflow recommendations" },
+  { icon: Zap, label: "Autopilot", fields: ["Stage", "Team Size", "Industry"], color: "--kf-warning", description: "Automation and workflow recommendations" },
   { icon: Target, label: "Projects", fields: ["Skills", "Team Size", "Stage"], color: "--kf-info", description: "Delivery templates and role structure" },
   { icon: FileText, label: "Documents", fields: ["Name", "Industry", "Description"], color: "--kf-accent1", description: "Generation quality and legal readiness" },
   { icon: Calendar, label: "Calendar", fields: ["Hours", "Location", "Stage"], color: "--kf-accent2", description: "Scheduling and availability context" },

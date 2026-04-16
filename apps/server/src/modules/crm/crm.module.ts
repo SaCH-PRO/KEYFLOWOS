@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { CrmController } from './crm.controller';
 import { CrmAiController } from './crm-ai.controller';
 import { CrmGoogleController } from './crm-google.controller';
@@ -22,11 +22,10 @@ import { CrmRateLimitGuard } from './guards/rate-limit.guard';
 import { FeatureFlagGuard } from './guards/feature-flag.guard';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import { AiModule } from '../ai/ai.module';
-import { AutomationModule } from '../automation/automation.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
-  imports: [forwardRef(() => AutomationModule), SubscriptionsModule, AiModule],
+  imports: [SubscriptionsModule, AiModule],
   controllers: [CrmController, CrmAiController, CrmGoogleController, CrmSequenceController],
   providers: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard],
   exports: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService],

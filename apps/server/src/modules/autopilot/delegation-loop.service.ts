@@ -1,10 +1,13 @@
-import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, OnModuleInit, OnModuleDestroy, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GovernanceService } from '../ai/governance.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
 import { AiExecutionLogService } from '../ai/ai-execution-log.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { ClientMomentumService } from '../momentum/client-momentum.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+
+const MOMENTUM_SWEEP_HOUR = 6;
 
 export type LoopType =
   | 'payment_recovery'
@@ -88,6 +91,7 @@ const LOOP_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DelegationLoopService.name);
   private intervalRef: ReturnType<typeof setInterval> | null = null;
+  private readonly momentumSweepTracker = new Map<string, string>();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -96,6 +100,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Optional() @Inject(ClientMomentumService) private readonly momentumService: ClientMomentumService | null,
   ) {}
 
   onModuleInit() {
@@ -103,8 +108,18 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       this.processDueLoops().catch(err =>
         this.logger.error(`Loop processing failed: ${(err as Error).message}`),
       );
+      this.processMomentumSweeps().catch(err =>
+        this.logger.error(`Momentum sweep check failed: ${(err as Error).message}`),
+      );
     }, LOOP_CHECK_INTERVAL_MS);
-    this.logger.log('Delegation loop scheduler started (5min check interval)');
+
+    setTimeout(() => {
+      this.processMomentumSweeps().catch(err =>
+        this.logger.error(`Initial momentum sweep check failed: ${(err as Error).message}`),
+      );
+    }, 10_000);
+
+    this.logger.log('Delegation loop scheduler started (5min check interval, includes momentum sweeps)');
   }
 
   onModuleDestroy() {
@@ -227,6 +242,57 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         });
       } catch (err) {
         this.logger.error(`Loop ${loop.loopType} failed for business ${loop.businessId}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private getLocalHourAndDate(tz: string): { hour: number; dateKey: string } {
+    try {
+      const now = new Date();
+      const hourFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false });
+      const dateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+      return { hour: parseInt(hourFormatter.format(now), 10), dateKey: dateFormatter.format(now) };
+    } catch {
+      const now = new Date();
+      return { hour: now.getHours(), dateKey: now.toISOString().split('T')[0] };
+    }
+  }
+
+  private async processMomentumSweeps() {
+    if (!this.momentumService) return;
+
+    const businesses = await this.prisma.client.business.findMany({
+      select: { id: true, timezone: true },
+    });
+
+    for (const business of businesses) {
+      const tz = business.timezone || 'America/Port_of_Spain';
+      const { hour: localHour, dateKey } = this.getLocalHourAndDate(tz);
+
+      if (localHour !== MOMENTUM_SWEEP_HOUR) continue;
+
+      const trackerKey = `${business.id}:${dateKey}`;
+      if (this.momentumSweepTracker.has(trackerKey)) continue;
+
+      this.momentumSweepTracker.set(trackerKey, 'running');
+
+      try {
+        this.logger.log(`[Autopilot] Running momentum sweep for business ${business.id} (tz: ${tz})`);
+        const sweepResult = await this.momentumService.runDailySweep(business.id);
+        this.momentumSweepTracker.set(trackerKey, 'done');
+        this.logger.log(`[Autopilot] Momentum sweep complete for ${business.id}: ${sweepResult.contactsProcessed} contacts, ${sweepResult.recommendationsGenerated} recs`);
+      } catch (err) {
+        this.momentumSweepTracker.set(trackerKey, 'failed');
+        this.logger.error(`[Autopilot] Momentum sweep failed for ${business.id}: ${(err as Error).message}`);
+      }
+    }
+
+    const todayUtc = new Date().toISOString().split('T')[0];
+    for (const [key] of this.momentumSweepTracker) {
+      const parts = key.split(':');
+      const keyDate = parts.slice(1).join(':');
+      if (keyDate < todayUtc) {
+        this.momentumSweepTracker.delete(key);
       }
     }
   }
@@ -567,7 +633,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
           await this.prisma.client.autopilotTask.update({
             where: { id: task.id },
-            data: { status: 'AUTO_EXECUTED', completedAt: new Date() },
+            data: { status: 'AUTO_EXECUTED', executedAt: new Date(), executedBy: 'AI' },
           });
 
           this.events.emit('autopilot.task.auto_executed', {
@@ -1314,11 +1380,11 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       }
 
       await this.memory.upsert(businessId, {
-        category: 'governance',
+        category: 'patterns',
         key: `${toolName}_trust_signal`,
         value: `Loop "${loopType}" has a ${Math.round(approvalRate * 100)}% approval rate over ${total} actions. Auto-execute tier promoted.`,
         confidence: Math.min(approvalRate, 0.95),
-        source: 'learning_loop',
+        source: 'pattern_analysis',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
 
@@ -1342,11 +1408,11 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       }
 
       await this.memory.upsert(businessId, {
-        category: 'governance',
+        category: 'patterns',
         key: `${toolName}_distrust_signal`,
         value: `Loop "${loopType}" has a ${Math.round(approvalRate * 100)}% approval rate over ${total} actions. Auto-execute tier demoted.`,
         confidence: Math.min(1 - approvalRate, 0.9),
-        source: 'learning_loop',
+        source: 'pattern_analysis',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
 

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Contact, Prisma } from '@prisma/client';
 import {
@@ -10,7 +10,6 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { sanitize } from '../../core/utils/sanitize';
 import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './crm.constants';
-import { AutomationService } from '../automation/automation.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmStatsService } from './crm-stats.service';
@@ -81,7 +80,6 @@ export class CrmService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
-    @Inject(forwardRef(() => AutomationService)) private readonly automation: AutomationService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
     @Inject(CrmStatsService) private readonly stats: CrmStatsService,
@@ -628,15 +626,7 @@ export class CrmService {
     };
     this.events.emit('contact.updated', payload);
 
-    if (this.automation && input.status && existing?.status !== input.status) {
-      await this.automation.handle({
-        type: 'contact.stage_changed',
-        businessId: input.businessId,
-        contactId: input.contactId,
-        from: existing?.status,
-        to: input.status,
-      });
-    }
+    
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     const duration = Date.now() - start;

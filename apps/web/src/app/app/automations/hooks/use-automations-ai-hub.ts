@@ -147,7 +147,7 @@ export function useAutomationsAiHub() {
 
   const ai = useModuleAi({
     moduleId: "automations",
-    moduleName: "Flows",
+    moduleName: "Autopilot",
     generateSuggestions: generateAutomationSuggestions,
     tools,
     useGlobalCopilot: true,

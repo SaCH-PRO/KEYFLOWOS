@@ -63,8 +63,7 @@ describe('CommerceService', () => {
     const events = { emit } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const automation = { handle: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, automation, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
 
     const invoice = await service.markInvoicePaid('inv_1');
 
@@ -82,8 +81,7 @@ describe('CommerceService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const automation = { handle: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, automation, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
 
     await service.createProduct({ businessId: 'biz_1', name: 'Plan', price: 10 });
     const products = await service.listProducts('biz_1');
@@ -96,8 +94,7 @@ describe('CommerceService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const automation = { handle: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, automation, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
 
     const invoice = await service.createInvoiceForService('biz_1', 'contact_1', {
       id: 'service_1',
@@ -120,8 +117,7 @@ describe('CommerceService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const automation = { handle: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, automation, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
 
     const quote = await service.updateQuoteStatus({ quoteId: 'quote_1', status: 'ACCEPTED', actorId: 'user_1' });
 

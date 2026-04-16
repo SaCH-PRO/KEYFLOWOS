@@ -34,7 +34,7 @@ const MODULE_PROMPTS: Record<string, ModuleQuickPrompts> = {
   "/app/expenses": { module: "Expenses", prompts: ["Spending summary", "Over budget alerts", "Tax estimate"] },
   "/app/projects": { module: "Projects", prompts: ["Task priorities", "Automation ideas", "Project status"] },
   "/app/reports": { module: "Reports", prompts: ["Executive brief", "Cash flow forecast", "Revenue trends"] },
-  "/app/automations": { module: "Flows", prompts: ["Suggest flows", "Check coverage gaps", "Recent failures", "Optimization tips"] },
+  "/app/automations": { module: "Autopilot", prompts: ["Suggest flows", "Check coverage gaps", "Recent failures", "Optimization tips"] },
   "/app/learn": { module: "Learn", prompts: ["Recommended courses", "Track progress", "Skill assessment"] },
   "/app/community": { module: "Community", prompts: ["Trending topics", "My engagement", "Find collaborators"] },
   "/app/settings": { module: "Settings", prompts: ["Setup checklist", "Security review", "Integration status"] },

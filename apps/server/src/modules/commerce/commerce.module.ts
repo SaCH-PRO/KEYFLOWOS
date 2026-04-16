@@ -20,13 +20,12 @@ import { CommerceIntelligenceService } from './commerce-intelligence.service';
 import { MarginSnapshotSchedulerService } from './margin-snapshot-scheduler.service';
 import { StoreReadinessService } from './store-readiness.service';
 import { CrmModule } from '../crm/crm.module';
-import { AutomationModule } from '../automation/automation.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 
 @Module({
-  imports: [CrmModule, AutomationModule, SubscriptionsModule, AiModule],
+  imports: [CrmModule, SubscriptionsModule, AiModule],
   controllers: [CommerceController, CommerceAiController, CommerceInsightsController, FinancialCopilotController],
   providers: [
     CommerceService,

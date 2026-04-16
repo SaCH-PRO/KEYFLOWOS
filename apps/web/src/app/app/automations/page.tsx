@@ -23,8 +23,8 @@ import { COVERAGE_MODULES } from "./components/automation-constants";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { Playbook, CrossModuleWorkflow, fetchPlaybooks, fetchCrossModuleWorkflows, fetchActivityFeed } from "@/lib/client";
 import { useAutomationsAiHub } from "./hooks/use-automations-ai-hub";
-import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
-import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
+import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 import { AutopilotLoops } from "./components/autopilot-loops";
 
@@ -47,7 +47,7 @@ export default function FlowsPage() {
   const [showUpgradeBanner, setShowUpgradeBanner] = useState(true);
   const [executionStats, setExecutionStats] = useState({ total: 0, success: 0, failed: 0, skipped: 0, successRate: 0 });
   const { aiHook: automationsAi, updateAutomationsContext } = useAutomationsAiHub();
-  const intelligence = useWorkspaceIntelligence({ businessId, module: "automations" });
+  const intelligence = useGraphIntelligence({ businessId, module: "automations" });
 
   const handleAutomationsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
@@ -239,13 +239,13 @@ export default function FlowsPage() {
   return (
     <WorkspaceShell
       icon={Workflow}
-      title="Flows"
+      title="Autopilot"
       subtitle={<span className="inline-flex items-center gap-1.5">Automate and orchestrate how your business reacts across every module <AiBadge label="AI-Powered" compact /></span>}
       tabs={TABS}
       activeTab={activeTab}
       onTabChange={setActiveTab}
       tabLayoutId="flows-tab"
-      ai={{ hook: automationsAi, moduleName: "Flows", onAction: handleAutomationsAiAction }}
+      ai={{ hook: automationsAi, moduleName: "Autopilot", onAction: handleAutomationsAiAction }}
       banners={
         <>
           <ResumePrompt module="automations" />
@@ -265,7 +265,7 @@ export default function FlowsPage() {
         />
       )}
 
-      <WorkspaceInsightsPanel
+      <GraphInsightsPanel
         recommendations={intelligence.recommendations}
         loading={intelligence.loading}
         onDismiss={intelligence.dismiss}
