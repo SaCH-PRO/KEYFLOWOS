@@ -78,7 +78,7 @@ function deriveGraphPriorities(snap: BusinessGraphSnapshot): ControlTowerPriorit
       module: "revenue",
       urgency: Math.min(100, 60 + snap.revenue.overdueCount * 10),
       actionLabel: "View Invoices",
-      actionRoute: "/app/revenue",
+      actionRoute: "/app/commerce",
     });
   }
 
@@ -119,8 +119,8 @@ function deriveGraphPriorities(snap: BusinessGraphSnapshot): ControlTowerPriorit
       description: `Only ${snap.bookings.upcomingCount} upcoming bookings. Consider promotions or outreach.`,
       module: "bookings",
       urgency: 35,
-      actionLabel: "View Calendar",
-      actionRoute: "/app/calendar",
+      actionLabel: "View Bookings",
+      actionRoute: "/app/bookings",
     });
   }
 
@@ -191,9 +191,9 @@ function buildActionSet(p: ControlTowerPriority, snap: BusinessGraphSnapshot | n
 
   acts.push({
     key: "delegate_ai",
-    toolName: "delegate_task",
+    toolName: "create_task",
     label: "Delegate to AI",
-    args: { context: p.title, module: p.module },
+    args: { title: `[AI] ${p.title}`, description: p.description, priority: "high", module: p.module },
     tier: 2,
     variant: "ai",
   });

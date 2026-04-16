@@ -148,12 +148,15 @@ export function PriorityQueue({
   }, [businessId]);
 
   const handleDismiss = useCallback(async (priorityId: string, reason: string) => {
+    let apiLogged = false;
     try {
-      await executeAction(businessId, "dismiss_priority", {
-        priorityId,
-        reason,
-        module: priorities.find((p) => p.id === priorityId)?.module,
+      const res = await executeAction(businessId, "create_task", {
+        title: `Dismissed priority: ${priorities.find((p) => p.id === priorityId)?.title ?? priorityId}`,
+        description: `Dismiss reason: ${reason}`,
+        priority: "low",
+        module: priorities.find((p) => p.id === priorityId)?.module ?? "general",
       });
+      apiLogged = !!res.data?.success;
     } catch {}
 
     setDismissedIds((prev) => {
@@ -164,7 +167,7 @@ export function PriorityQueue({
     });
     setDismissPrompt(null);
     setExpandedItem(null);
-    toast.success(`Dismissed: ${reason}`);
+    toast.success(`Dismissed: ${reason}${apiLogged ? "" : " (logged locally)"}`);
     window.dispatchEvent(new CustomEvent("kf:action.executed"));
     onActionExecuted?.();
   }, [businessId, priorities, onActionExecuted]);
