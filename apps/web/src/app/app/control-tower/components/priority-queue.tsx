@@ -7,10 +7,11 @@ import { toast } from "sonner";
 import {
   AlertTriangle, ShieldAlert, Zap, TrendingUp,
   ChevronDown, ChevronUp, ArrowRight, Pin, PinOff,
-  Eye, EyeOff, Clock,
+  Eye, EyeOff, Clock, Loader2, Bot, Send,
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
-import type { ControlTowerPriority } from "@/lib/client";
+import { executeAction } from "@/lib/client";
+import type { EnrichedPriority } from "./use-control-tower-data";
 
 const TYPE_CONFIG = {
   risk: { icon: ShieldAlert, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.08)" },
@@ -26,11 +27,23 @@ const SEVERITY_DOT: Record<string, string> = {
   opportunity: "hsl(var(--kf-success))",
 };
 
-const CONSEQUENCE_MAP: Record<string, (p: ControlTowerPriority) => string> = {
+const CONSEQUENCE_MAP: Record<string, (p: EnrichedPriority) => string> = {
   risk: (p) => {
+    const amt = p.graphContext?.overdueAmount;
+    if (p.module === "revenue" && amt) return `$${amt.toFixed(0)} TTD at risk. Delayed collection increases bad debt risk and weakens cash flow.`;
     if (p.module === "revenue") return "Delayed collection increases bad debt risk and weakens cash flow position.";
-    if (p.module === "crm") return "Unattended leads decay rapidly — response time directly impacts conversion rates.";
-    if (p.module === "projects") return "Delivery delays cascade into client dissatisfaction and potential contract penalties.";
+    if (p.module === "crm") {
+      const count = p.graphContext?.staleLeadCount;
+      return count
+        ? `${count} leads inactive 30+ days. Response time directly impacts conversion rates.`
+        : "Unattended leads decay rapidly — response time directly impacts conversion rates.";
+    }
+    if (p.module === "projects") {
+      const tasks = p.graphContext?.overdueTaskCount;
+      return tasks
+        ? `${tasks} overdue tasks cascading into client dissatisfaction and potential contract penalties.`
+        : "Delivery delays cascade into client dissatisfaction and potential contract penalties.";
+    }
     return "Unresolved risks compound over time and affect overall business health.";
   },
   action: (p) => {
@@ -40,6 +53,12 @@ const CONSEQUENCE_MAP: Record<string, (p: ControlTowerPriority) => string> = {
   approval: () => "AI actions are waiting for your decision. Delayed approvals block automation workflows.",
   opportunity: (p) => {
     if (p.module === "revenue") return "Revenue opportunities have a limited window — early action maximizes conversion.";
+    if (p.module === "bookings") {
+      const util = p.graphContext?.utilizationRate;
+      return util !== undefined
+        ? `Only ${util.toFixed(0)}% capacity used. Promotions or outreach could fill ${(100 - util).toFixed(0)}% of available slots.`
+        : "Opportunities lose value over time. Acting early gives you the best chance of capturing this.";
+    }
     return "Opportunities lose value over time. Acting early gives you the best chance of capturing this.";
   },
 };
@@ -72,19 +91,19 @@ function savePinnedIds(businessId: string, ids: Set<string>) {
   } catch {}
 }
 
-function getDismissedIds(businessId: string): Set<string> {
-  if (typeof window === "undefined") return new Set();
+function getDismissedIds(businessId: string): Map<string, string> {
+  if (typeof window === "undefined") return new Map();
   try {
     const raw = localStorage.getItem(getDismissKey(businessId));
-    return raw ? new Set(JSON.parse(raw)) : new Set();
+    return raw ? new Map(Object.entries(JSON.parse(raw))) : new Map();
   } catch {
-    return new Set();
+    return new Map();
   }
 }
 
-function saveDismissedIds(businessId: string, ids: Set<string>) {
+function saveDismissedIds(businessId: string, ids: Map<string, string>) {
   try {
-    localStorage.setItem(getDismissKey(businessId), JSON.stringify([...ids]));
+    localStorage.setItem(getDismissKey(businessId), JSON.stringify(Object.fromEntries(ids)));
   } catch {}
 }
 
@@ -92,7 +111,7 @@ function getSnoozedIds(businessId: string): Map<string, number> {
   if (typeof window === "undefined") return new Map();
   try {
     const raw = localStorage.getItem(getSnoozedKey(businessId));
-    return raw ? new Map(Object.entries(JSON.parse(raw))) : new Map();
+    return raw ? new Map(Object.entries(JSON.parse(raw)).map(([k, v]) => [k, Number(v)])) : new Map();
   } catch {
     return new Map();
   }
@@ -104,21 +123,30 @@ function saveSnoozedIds(businessId: string, ids: Map<string, number>) {
   } catch {}
 }
 
+const DISMISS_REASONS = [
+  "Already handled",
+  "Not relevant",
+  "Will address later",
+  "Not my responsibility",
+];
+
 export function PriorityQueue({
   priorities,
   businessId,
   onActionExecuted,
 }: {
-  priorities: ControlTowerPriority[];
+  priorities: EnrichedPriority[];
   businessId: string;
   onActionExecuted?: () => void;
 }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [dismissedIds, setDismissedIds] = useState<Map<string, string>>(new Map());
   const [snoozedIds, setSnoozedIds] = useState<Map<string, number>>(new Map());
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [executingAction, setExecutingAction] = useState<string | null>(null);
+  const [dismissPrompt, setDismissPrompt] = useState<string | null>(null);
 
   useEffect(() => {
     setPinnedIds(getPinnedIds(businessId));
@@ -147,15 +175,16 @@ export function PriorityQueue({
     });
   }, [businessId]);
 
-  const handleDismiss = useCallback((id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDismiss = useCallback((id: string, reason: string) => {
     setDismissedIds((prev) => {
-      const next = new Set(prev);
-      next.add(id);
+      const next = new Map(prev);
+      next.set(id, reason);
       saveDismissedIds(businessId, next);
       return next;
     });
-    toast.success("Priority dismissed");
+    setDismissPrompt(null);
+    setExpandedItem(null);
+    toast.success(`Dismissed: ${reason}`);
   }, [businessId]);
 
   const handleSnooze = useCallback((id: string, e: React.MouseEvent) => {
@@ -170,18 +199,52 @@ export function PriorityQueue({
     toast.success("Snoozed for 2 hours");
   }, [businessId]);
 
-  const handleAction = useCallback((p: ControlTowerPriority, e: React.MouseEvent) => {
+  const handleNavigate = useCallback((p: EnrichedPriority, e: React.MouseEvent) => {
     e.stopPropagation();
     if (p.actionRoute) {
       router.push(p.actionRoute);
     }
-    window.dispatchEvent(new CustomEvent("kf:action.executed"));
-    onActionExecuted?.();
-  }, [router, onActionExecuted]);
+  }, [router]);
+
+  const handleSuggestedAction = useCallback(async (p: EnrichedPriority, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!p.suggestedAction || !businessId) return;
+
+    if (p.suggestedAction.toolName === "_approve") {
+      router.push("/app/control-tower#tower-approvals");
+      return;
+    }
+
+    setExecutingAction(p.id);
+    try {
+      const res = await executeAction(
+        businessId,
+        p.suggestedAction.toolName,
+        p.suggestedAction.args,
+      );
+      if (res.data?.success) {
+        toast.success(`${p.suggestedAction.label} completed`);
+        window.dispatchEvent(new CustomEvent("kf:action.executed"));
+        onActionExecuted?.();
+      } else if (res.data?.blocked) {
+        toast.info(res.data.requiresApproval
+          ? "Queued for approval"
+          : "Action blocked by governance");
+        window.dispatchEvent(new CustomEvent("kf:action.blocked"));
+      } else {
+        toast.error("Action failed");
+      }
+    } catch {
+      toast.error("Failed to execute action");
+    } finally {
+      setExecutingAction(null);
+    }
+  }, [businessId, router, onActionExecuted]);
 
   const toggleExpand = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setExpandedItem((prev) => (prev === id ? null : id));
+    setDismissPrompt(null);
   }, []);
 
   const activePriorities = priorities.filter(
@@ -235,6 +298,9 @@ export function PriorityQueue({
             const isExpanded = expandedItem === p.id;
             const consequenceFn = CONSEQUENCE_MAP[p.type] ?? CONSEQUENCE_MAP.action;
             const consequence = consequenceFn(p);
+            const hasSuggestedAction = !!p.suggestedAction;
+            const isExecuting = executingAction === p.id;
+            const showDismissPrompt = dismissPrompt === p.id;
 
             return (
               <motion.div
@@ -285,9 +351,25 @@ export function PriorityQueue({
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {p.actionLabel && (
+                    {hasSuggestedAction && (
                       <button
-                        onClick={(e) => handleAction(p, e)}
+                        onClick={(e) => handleSuggestedAction(p, e)}
+                        disabled={isExecuting}
+                        className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-semibold transition-all hover:opacity-80 min-h-[24px]"
+                        style={{ background: `${cfg.color}15`, color: cfg.color }}
+                        title={p.suggestedAction!.label}
+                      >
+                        {isExecuting ? (
+                          <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        ) : (
+                          <Bot className="w-2.5 h-2.5" />
+                        )}
+                        {p.suggestedAction!.label}
+                      </button>
+                    )}
+                    {!hasSuggestedAction && p.actionLabel && (
+                      <button
+                        onClick={(e) => handleNavigate(p, e)}
                         className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-semibold transition-all hover:opacity-80 min-h-[24px]"
                         style={{ background: `${cfg.color}15`, color: cfg.color }}
                       >
@@ -340,19 +422,52 @@ export function PriorityQueue({
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 pt-1">
-                          {p.actionLabel && p.actionRoute && (
+                        {p.graphContext?.topClients && p.graphContext.topClients.length > 0 && (
+                          <div className="flex items-start gap-2">
+                            <TrendingUp className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-muted-foreground) / 0.5)" }} />
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "hsl(var(--kf-muted-foreground) / 0.6)" }}>
+                                Related entities
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {p.graphContext.topClients.slice(0, 3).map((c) => (
+                                  <span
+                                    key={c.id}
+                                    className="text-[9px] px-1.5 py-0.5 rounded-md"
+                                    style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-foreground) / 0.7)" }}
+                                  >
+                                    {c.name} (${c.revenue.toFixed(0)})
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2 pt-1 flex-wrap">
+                          {hasSuggestedAction && (
                             <button
-                              onClick={(e) => handleAction(p, e)}
+                              onClick={(e) => handleSuggestedAction(p, e)}
+                              disabled={isExecuting}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80 min-h-[28px]"
                               style={{ background: `${cfg.color}15`, color: cfg.color }}
+                            >
+                              {isExecuting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bot className="w-3 h-3" />}
+                              {p.suggestedAction!.label}
+                            </button>
+                          )}
+                          {p.actionLabel && p.actionRoute && (
+                            <button
+                              onClick={(e) => handleNavigate(p, e)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80 min-h-[28px]"
+                              style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-foreground) / 0.8)" }}
                             >
                               {p.actionLabel}
                               <ArrowRight className="w-3 h-3" />
                             </button>
                           )}
                           <button
-                            onClick={(e) => handleSnooze(p.id, e)}
+                            onClick={(e) => { e.stopPropagation(); handleSnooze(p.id, e); }}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80 min-h-[28px]"
                             style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}
                           >
@@ -360,7 +475,7 @@ export function PriorityQueue({
                             Snooze
                           </button>
                           <button
-                            onClick={(e) => handleDismiss(p.id, e)}
+                            onClick={(e) => { e.stopPropagation(); setDismissPrompt(showDismissPrompt ? null : p.id); }}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80 min-h-[28px]"
                             style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground) / 0.7)" }}
                           >
@@ -368,6 +483,38 @@ export function PriorityQueue({
                             Dismiss
                           </button>
                         </div>
+
+                        <AnimatePresence>
+                          {showDismissPrompt && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div
+                                className="rounded-lg p-2.5 space-y-1.5"
+                                style={{ background: "hsl(var(--kf-muted) / 0.06)", border: "1px solid hsl(var(--kf-border) / 0.2)" }}
+                              >
+                                <p className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-muted-foreground) / 0.6)" }}>
+                                  Why are you dismissing this?
+                                </p>
+                                <div className="flex flex-wrap gap-1">
+                                  {DISMISS_REASONS.map((reason) => (
+                                    <button
+                                      key={reason}
+                                      onClick={(e) => { e.stopPropagation(); handleDismiss(p.id, reason); }}
+                                      className="px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all hover:opacity-80 min-h-[24px]"
+                                      style={{ background: "hsl(var(--kf-muted) / 0.12)", color: "hsl(var(--kf-foreground) / 0.7)" }}
+                                    >
+                                      {reason}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </motion.div>
                   )}
