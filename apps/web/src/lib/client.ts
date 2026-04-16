@@ -5319,6 +5319,7 @@ export interface Cohort {
 export interface CommunityProfile {
   id: string;
   name: string;
+  slug?: string;
   logoUrl?: string;
   headline?: string;
   bio?: string;
@@ -5330,8 +5331,44 @@ export interface CommunityProfile {
   interests: string[];
   profileCompleteness: number;
   tagline?: string;
+  acceptingWork: boolean;
+  currentCapacity?: string;
+  leadTime?: string;
+  preferredProjectTypes: string[];
+  budgetFit?: string;
+  positioningStatement?: string;
+  products?: { id: string; name: string; price: number; currency: string; category: string; imageUrl?: string; description?: string }[];
+  services?: { id: string; name: string; price: number; currency: string; durationMins?: number; description?: string }[];
   createdAt: string;
-  _count?: { communityPosts: number; cohortMembers: number };
+  _count?: { communityPosts: number; cohortMembers: number; networkConnectionsTo: number };
+}
+export interface DirectoryBusiness {
+  id: string;
+  name: string;
+  slug?: string;
+  logoUrl?: string;
+  headline?: string;
+  bio?: string;
+  industry?: string;
+  skills: string[];
+  businessStage?: string;
+  city?: string;
+  country?: string;
+  tagline?: string;
+  acceptingWork: boolean;
+  currentCapacity?: string;
+  leadTime?: string;
+  preferredProjectTypes: string[];
+  budgetFit?: string;
+  positioningStatement?: string;
+  profileCompleteness: number;
+  products?: { id: string; name: string; price: number; currency: string; category: string }[];
+  services?: { id: string; name: string; price: number; currency: string }[];
+  _count?: { communityPosts: number; cohortMembers: number; networkConnectionsTo: number };
+}
+export interface NetworkConnectionStatus {
+  following: boolean;
+  saved: boolean;
 }
 export interface DocumentRecommendation {
   category: 'Legal' | 'Financial' | 'Creative' | 'Constitutional';
@@ -5369,6 +5406,19 @@ export async function fetchMyCohorts(businessId: string): Promise<ApiResult<Coho
 }
 export async function fetchCommunityProfile(businessId: string): Promise<ApiResult<CommunityProfile>> {
   return apiGetSimple<CommunityProfile>(`/identity/businesses/community-profile/${encodeURIComponent(businessId)}`);
+}
+export async function searchDirectory(params?: Record<string, string>): Promise<ApiResult<{ data: DirectoryBusiness[]; total: number; page: number; limit: number }>> {
+  const q = params ? '?' + new URLSearchParams(params).toString() : '';
+  return apiGetSimple<{ data: DirectoryBusiness[]; total: number; page: number; limit: number }>(`/community/directory${q}`);
+}
+export async function createNetworkConnection(businessId: string, toBusinessId: string, type: string = 'FOLLOW'): Promise<ApiResult<void>> {
+  return apiPost<void>({ path: `/businesses/${encodeURIComponent(businessId)}/community/connections`, body: { toBusinessId, type } });
+}
+export async function removeNetworkConnection(businessId: string, toBusinessId: string, type: string = 'FOLLOW'): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/community/connections`, { toBusinessId, type });
+}
+export async function getConnectionStatus(businessId: string, targetId: string): Promise<ApiResult<NetworkConnectionStatus>> {
+  return apiGetSimple<NetworkConnectionStatus>(`/businesses/${encodeURIComponent(businessId)}/community/connection-status/${encodeURIComponent(targetId)}`);
 }
 export async function generateAiProfile(businessId: string, data: { name?: string; industry?: string; skills?: string[]; businessStage?: string; description?: string }): Promise<ApiResult<{ headline: string; bio: string }>> {
   return apiPost<{ headline: string; bio: string }>({ path: `/identity/businesses/${encodeURIComponent(businessId)}/generate-profile`, body: data });

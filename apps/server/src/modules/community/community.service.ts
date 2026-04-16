@@ -21,7 +21,12 @@ export class CommunityService {
         where,
         orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
         include: {
-          business: { select: { id: true, name: true, logoUrl: true, headline: true, bio: true, industry: true } },
+          business: {
+            select: {
+              id: true, name: true, logoUrl: true, headline: true, bio: true, industry: true,
+              acceptingWork: true, currentCapacity: true, skills: true,
+            },
+          },
           _count: { select: { comments: true } },
         },
         skip,
@@ -171,5 +176,189 @@ export class CommunityService {
     }
 
     return { seeded: true, count: cohorts.length };
+  }
+
+  async searchDirectory(filters: {
+    search?: string;
+    industry?: string;
+    city?: string;
+    country?: string;
+    skills?: string[];
+    businessStage?: string;
+    acceptingWork?: boolean;
+    currentCapacity?: string;
+    budgetFit?: string;
+    serviceType?: string;
+    priceMin?: number;
+    priceMax?: number;
+    page?: number;
+    limit?: number;
+    sort?: string;
+  }) {
+    const where: any = { deletedAt: null };
+    const andClauses: any[] = [];
+
+    if (filters.search) {
+      andClauses.push({
+        OR: [
+          { name: { contains: filters.search, mode: 'insensitive' } },
+          { headline: { contains: filters.search, mode: 'insensitive' } },
+          { bio: { contains: filters.search, mode: 'insensitive' } },
+          { positioningStatement: { contains: filters.search, mode: 'insensitive' } },
+          { skills: { hasSome: [filters.search] } },
+        ],
+      });
+    }
+
+    if (filters.industry) where.industry = { contains: filters.industry, mode: 'insensitive' };
+    if (filters.city) where.city = { contains: filters.city, mode: 'insensitive' };
+    if (filters.country) where.country = { contains: filters.country, mode: 'insensitive' };
+    if (filters.businessStage) where.businessStage = filters.businessStage;
+    if (filters.acceptingWork !== undefined) where.acceptingWork = filters.acceptingWork;
+    if (filters.currentCapacity) where.currentCapacity = filters.currentCapacity;
+    if (filters.budgetFit) where.budgetFit = filters.budgetFit;
+    if (filters.skills?.length) where.skills = { hasSome: filters.skills };
+
+    if (filters.serviceType) {
+      andClauses.push({
+        OR: [
+          { products: { some: { category: { contains: filters.serviceType, mode: 'insensitive' }, isActive: true } } },
+          { services: { some: { name: { contains: filters.serviceType, mode: 'insensitive' } } } },
+          { preferredProjectTypes: { hasSome: [filters.serviceType] } },
+        ],
+      });
+    }
+
+    if (filters.priceMin !== undefined || filters.priceMax !== undefined) {
+      const priceWhere: any = {};
+      if (filters.priceMin !== undefined) priceWhere.price = { ...priceWhere.price, gte: filters.priceMin };
+      if (filters.priceMax !== undefined) priceWhere.price = { ...priceWhere.price, lte: filters.priceMax };
+      andClauses.push({
+        OR: [
+          { products: { some: { ...priceWhere, isActive: true } } },
+          { services: { some: priceWhere } },
+        ],
+      });
+    }
+
+    if (andClauses.length > 0) {
+      where.AND = andClauses;
+    }
+
+    const page = filters.page ?? 1;
+    const limit = filters.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    let orderBy: any = { profileCompleteness: 'desc' };
+    if (filters.sort === 'newest') orderBy = { createdAt: 'desc' };
+    if (filters.sort === 'name') orderBy = { name: 'asc' };
+
+    const [data, total] = await Promise.all([
+      this.prisma.client.business.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          logoUrl: true,
+          headline: true,
+          bio: true,
+          industry: true,
+          skills: true,
+          businessStage: true,
+          city: true,
+          country: true,
+          tagline: true,
+          acceptingWork: true,
+          currentCapacity: true,
+          leadTime: true,
+          preferredProjectTypes: true,
+          budgetFit: true,
+          positioningStatement: true,
+          profileCompleteness: true,
+          products: {
+            where: { isActive: true },
+            select: { id: true, name: true, price: true, currency: true, category: true },
+            take: 3,
+            orderBy: { createdAt: 'desc' },
+          },
+          services: {
+            select: { id: true, name: true, price: true, currency: true },
+            take: 3,
+            orderBy: { createdAt: 'desc' },
+          },
+          _count: {
+            select: {
+              communityPosts: true,
+              cohortMembers: true,
+              networkConnectionsTo: true,
+            },
+          },
+        },
+        skip,
+        take: limit,
+        orderBy,
+      }),
+      this.prisma.client.business.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
+  }
+
+  async createConnection(fromBusinessId: string, toBusinessId: string, type: string = 'FOLLOW') {
+    if (fromBusinessId === toBusinessId) return { error: 'Cannot connect to yourself' };
+
+    const existing = await this.prisma.client.networkConnection.findUnique({
+      where: {
+        fromBusinessId_toBusinessId_type: { fromBusinessId, toBusinessId, type },
+      },
+    });
+    if (existing) return existing;
+
+    return this.prisma.client.networkConnection.create({
+      data: { fromBusinessId, toBusinessId, type },
+    });
+  }
+
+  async removeConnection(fromBusinessId: string, toBusinessId: string, type: string = 'FOLLOW') {
+    try {
+      return await this.prisma.client.networkConnection.delete({
+        where: {
+          fromBusinessId_toBusinessId_type: { fromBusinessId, toBusinessId, type },
+        },
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async getConnections(businessId: string, direction: 'from' | 'to' = 'from', type?: string) {
+    const where: any = direction === 'from'
+      ? { fromBusinessId: businessId }
+      : { toBusinessId: businessId };
+    if (type) where.type = type;
+
+    return this.prisma.client.networkConnection.findMany({
+      where,
+      include: {
+        fromBusiness: {
+          select: { id: true, name: true, logoUrl: true, headline: true, industry: true, acceptingWork: true, currentCapacity: true, slug: true },
+        },
+        toBusiness: {
+          select: { id: true, name: true, logoUrl: true, headline: true, industry: true, acceptingWork: true, currentCapacity: true, slug: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getConnectionStatus(fromBusinessId: string, toBusinessId: string) {
+    const connections = await this.prisma.client.networkConnection.findMany({
+      where: { fromBusinessId, toBusinessId },
+    });
+    return {
+      following: connections.some((c) => c.type === 'FOLLOW'),
+      saved: connections.some((c) => c.type === 'SAVE'),
+    };
   }
 }

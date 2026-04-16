@@ -110,6 +110,12 @@ function ProfessionalCompletionStrip({ businessData, hasName, hasPhone }: { busi
       completed: [businessData?.city, businessData?.country].filter(Boolean).length > 0 ? 1 : 0,
       total: 1,
     },
+    {
+      label: "Presence",
+      icon: Briefcase,
+      completed: [businessData?.positioningStatement, businessData?.currentCapacity, (businessData?.preferredProjectTypes?.length ?? 0) > 0].filter(Boolean).length,
+      total: 3,
+    },
   ], [businessData, hasName, hasPhone]);
 
   const totalCompleted = sections.reduce((a, s) => a + s.completed, 0);

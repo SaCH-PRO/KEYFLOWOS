@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Briefcase, Sparkles, FileText, Tag, MapPin, Heart, Shield,
   Wand2, RefreshCw, AlertCircle, ChevronRight, X,
-  Scale, DollarSign, Palette, Building2,
+  Scale, DollarSign, Palette, Building2, CheckCircle, Clock, Store,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
 import { apiPatch, apiPost } from "@/lib/api";
@@ -40,6 +40,20 @@ const CATEGORY_CONFIG: Record<string, { icon: typeof Scale; color: string; bg: s
   Constitutional: { icon: Building2, color: "hsl(var(--kf-warning))", bg: "hsl(var(--kf-warning) / 0.1)" },
 };
 
+const CAPACITY_OPTIONS = [
+  { value: "OPEN", label: "Open for Work" },
+  { value: "LIMITED", label: "Limited Availability" },
+  { value: "FULL", label: "At Capacity" },
+];
+
+const BUDGET_OPTIONS = [
+  { value: "", label: "Not specified" },
+  { value: "Budget-Friendly", label: "Budget-Friendly" },
+  { value: "Mid-Range", label: "Mid-Range" },
+  { value: "Premium", label: "Premium" },
+  { value: "Enterprise", label: "Enterprise" },
+];
+
 interface BizForm {
   headline: string;
   bio: string;
@@ -49,6 +63,12 @@ interface BizForm {
   interests: string[];
   city: string;
   country: string;
+  acceptingWork: boolean;
+  currentCapacity: string;
+  leadTime: string;
+  preferredProjectTypes: string[];
+  budgetFit: string;
+  positioningStatement: string;
 }
 
 interface BusinessProfile {
@@ -68,6 +88,8 @@ interface BusinessProfile {
 const EMPTY_BIZ_FORM: BizForm = {
   headline: "", bio: "", industry: "", skills: [], businessStage: "",
   interests: [], city: "", country: "",
+  acceptingWork: true, currentCapacity: "OPEN", leadTime: "",
+  preferredProjectTypes: [], budgetFit: "", positioningStatement: "",
 };
 
 function isBizFormDirty(current: BizForm, initial: BizForm): boolean {
@@ -81,7 +103,14 @@ function isBizFormDirty(current: BizForm, initial: BizForm): boolean {
     current.skills.length !== initial.skills.length ||
     current.skills.some((s, i) => s !== initial.skills[i]) ||
     current.interests.length !== initial.interests.length ||
-    current.interests.some((s, i) => s !== initial.interests[i])
+    current.interests.some((s, i) => s !== initial.interests[i]) ||
+    current.acceptingWork !== initial.acceptingWork ||
+    current.currentCapacity !== initial.currentCapacity ||
+    current.leadTime !== initial.leadTime ||
+    current.budgetFit !== initial.budgetFit ||
+    current.positioningStatement !== initial.positioningStatement ||
+    current.preferredProjectTypes.length !== initial.preferredProjectTypes.length ||
+    current.preferredProjectTypes.some((s, i) => s !== initial.preferredProjectTypes[i])
   );
 }
 
@@ -97,6 +126,12 @@ interface ProfessionalProfileSectionProps {
     city?: string | null;
     country?: string | null;
     profileCompleteness?: number;
+    acceptingWork?: boolean;
+    currentCapacity?: string | null;
+    leadTime?: string | null;
+    preferredProjectTypes?: string[];
+    budgetFit?: string | null;
+    positioningStatement?: string | null;
   } | null;
   businessLoading?: boolean;
   userName: string;
@@ -124,6 +159,7 @@ export default function ProfessionalProfileSection({
 
   const [skillInput, setSkillInput] = useState("");
   const [interestInput, setInterestInput] = useState("");
+  const [projectTypeInput, setProjectTypeInput] = useState("");
   const [generatingProfile, setGeneratingProfile] = useState(false);
   const [generatingSkills, setGeneratingSkills] = useState(false);
   const [recommendations, setRecommendations] = useState<DocumentRecommendation[]>([]);
@@ -142,6 +178,12 @@ export default function ProfessionalProfileSection({
       interests: businessData.interests || [],
       city: businessData.city || "",
       country: businessData.country || "",
+      acceptingWork: businessData.acceptingWork ?? true,
+      currentCapacity: businessData.currentCapacity || "OPEN",
+      leadTime: businessData.leadTime || "",
+      preferredProjectTypes: businessData.preferredProjectTypes || [],
+      budgetFit: businessData.budgetFit || "",
+      positioningStatement: businessData.positioningStatement || "",
     };
     setBizForm(bf);
     setInitialBizForm(bf);
@@ -258,6 +300,14 @@ export default function ProfessionalProfileSection({
       setBizForm((f) => ({ ...f, interests: [...f.interests, interest] }));
     }
     setInterestInput("");
+  };
+
+  const addProjectType = () => {
+    const pt = projectTypeInput.trim();
+    if (pt && !bizForm.preferredProjectTypes.includes(pt)) {
+      setBizForm((f) => ({ ...f, preferredProjectTypes: [...f.preferredProjectTypes, pt] }));
+    }
+    setProjectTypeInput("");
   };
 
   if (businessLoading) {
@@ -562,6 +612,155 @@ export default function ProfessionalProfileSection({
               </label>
             </div>
             <DataUsageHint text="Used on invoices, tax compliance guidance, and local business permits" />
+          </div>
+        </AccordionSection>
+
+        <AccordionSection
+          title="Transactional Presence"
+          subtitle="Your availability, capacity, and what you offer"
+          icon={Store}
+          accentColor="hsl(var(--kf-success))"
+        >
+          <div className="space-y-4 p-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+                <CheckCircle className="h-3 w-3" aria-hidden="true" />
+                Accepting Work
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={bizForm.acceptingWork}
+                aria-label="Toggle accepting work"
+                onClick={() => setBizForm((f) => ({ ...f, acceptingWork: !f.acceptingWork }))}
+                className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors min-h-[44px] min-w-[44px]"
+                style={{
+                  background: bizForm.acceptingWork ? "hsl(var(--kf-success))" : "hsl(var(--kf-muted))",
+                }}
+              >
+                <span
+                  className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
+                  style={{ transform: bizForm.acceptingWork ? "translateX(1.375rem)" : "translateX(0.25rem)" }}
+                />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5 mb-1.5 font-medium">
+                  <Store className="h-3 w-3" aria-hidden="true" />
+                  Current Capacity
+                </div>
+                <select
+                  value={bizForm.currentCapacity}
+                  onChange={(e) => setBizForm((f) => ({ ...f, currentCapacity: e.target.value }))}
+                  aria-label="Current capacity"
+                  className="w-full bg-transparent border border-border rounded-xl px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30"
+                >
+                  {CAPACITY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5 mb-1.5 font-medium">
+                  <Clock className="h-3 w-3" aria-hidden="true" />
+                  Lead Time
+                </div>
+                <Input
+                  value={bizForm.leadTime}
+                  onChange={(e) => setBizForm((f) => ({ ...f, leadTime: e.target.value }))}
+                  placeholder="e.g., 2-3 weeks, Immediate"
+                />
+              </label>
+            </div>
+
+            <label className="block text-xs text-muted-foreground">
+              <div className="flex items-center gap-1.5 mb-1.5 font-medium">
+                <DollarSign className="h-3 w-3" aria-hidden="true" />
+                Budget Fit
+              </div>
+              <select
+                value={bizForm.budgetFit}
+                onChange={(e) => setBizForm((f) => ({ ...f, budgetFit: e.target.value }))}
+                aria-label="Budget fit"
+                className="w-full bg-transparent border border-border rounded-xl px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30"
+              >
+                {BUDGET_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block text-xs text-muted-foreground">
+              <div className="flex items-center gap-1.5 mb-1.5 font-medium">
+                <Sparkles className="h-3 w-3" aria-hidden="true" />
+                Positioning Statement
+                {!bizForm.positioningStatement && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                )}
+              </div>
+              <textarea
+                value={bizForm.positioningStatement}
+                onChange={(e) => setBizForm((f) => ({ ...f, positioningStatement: e.target.value }))}
+                placeholder="What makes your business unique? e.g., We help Caribbean SMBs go digital with affordable, culturally-aware solutions."
+                maxLength={300}
+                rows={2}
+                aria-label="Positioning statement"
+                className="w-full bg-transparent border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 resize-none"
+                style={!bizForm.positioningStatement ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
+              />
+              <div className="flex justify-between mt-1">
+                <DataUsageHint text="Displayed prominently on your community profile and directory listing" />
+                <p className="text-[10px]" aria-label={`${bizForm.positioningStatement.length} of 300 characters`}>{bizForm.positioningStatement.length}/300</p>
+              </div>
+            </label>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+                <Tag className="h-3 w-3" aria-hidden="true" />
+                Preferred Project Types
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={projectTypeInput}
+                  onChange={(e) => setProjectTypeInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addProjectType(); } }}
+                  placeholder="e.g., Branding, Web Development"
+                  aria-label="New project type"
+                  className="flex-1"
+                />
+                <Button onClick={addProjectType} disabled={!projectTypeInput.trim()} className="px-3 min-h-[44px]">
+                  Add
+                </Button>
+              </div>
+              {bizForm.preferredProjectTypes.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2" role="list" aria-label="Preferred project types">
+                  {bizForm.preferredProjectTypes.map((pt) => (
+                    <span
+                      key={pt}
+                      role="listitem"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium"
+                      style={{
+                        background: "hsl(var(--kf-success) / 0.1)",
+                        color: "hsl(var(--kf-success))",
+                      }}
+                    >
+                      {pt}
+                      <button
+                        type="button"
+                        onClick={() => setBizForm((f) => ({ ...f, preferredProjectTypes: f.preferredProjectTypes.filter((p) => p !== pt) }))}
+                        aria-label={`Remove project type: ${pt}`}
+                        className="hover:opacity-60 transition-opacity"
+                      >
+                        <X className="w-3 h-3" aria-hidden="true" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </AccordionSection>
       </AccordionGroup>
