@@ -155,6 +155,12 @@ export class IdentityService {
     businessStage?: string;
     interests?: string[];
     teamSize?: string;
+    acceptingWork?: boolean;
+    currentCapacity?: string;
+    leadTime?: string;
+    preferredProjectTypes?: string[];
+    budgetFit?: string;
+    positioningStatement?: string;
   }) {
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
@@ -166,7 +172,12 @@ export class IdentityService {
     const oldBusiness = await this.prisma.client.business.findUnique({ where: { id: businessId } });
     if (!oldBusiness) throw new NotFoundException('Business not found');
 
-    const { lastHealthCheck, metaData, ...rest } = input;
+    const {
+      lastHealthCheck, metaData,
+      skills, interests, preferredProjectTypes,
+      acceptingWork, currentCapacity, leadTime, budgetFit, positioningStatement,
+      ...rest
+    } = input;
 
     const stringFields: (keyof typeof rest)[] = [
       'name', 'slug', 'timezone', 'currency', 'logoUrl', 'address', 'phone',
@@ -184,6 +195,11 @@ export class IdentityService {
       }
     }
 
+    if (currentCapacity !== undefined) data.currentCapacity = currentCapacity?.trim();
+    if (leadTime !== undefined) data.leadTime = leadTime?.trim();
+    if (budgetFit !== undefined) data.budgetFit = budgetFit?.trim();
+    if (positioningStatement !== undefined) data.positioningStatement = positioningStatement?.trim();
+
     const nonStringFields: (keyof typeof rest)[] = [
       'defaultTaxRate', 'complianceData', 'storeEnabled', 'businessHours', 'onboardingComplete',
     ];
@@ -193,11 +209,18 @@ export class IdentityService {
       }
     }
 
-    if (rest.skills !== undefined) {
-      data.skills = rest.skills.map((s) => s.trim());
+    if (acceptingWork !== undefined) {
+      data.acceptingWork = acceptingWork;
     }
-    if (rest.interests !== undefined) {
-      data.interests = rest.interests.map((s) => s.trim());
+
+    if (skills !== undefined) {
+      data.skills = skills.map((s) => s.trim());
+    }
+    if (interests !== undefined) {
+      data.interests = interests.map((s) => s.trim());
+    }
+    if (preferredProjectTypes !== undefined) {
+      data.preferredProjectTypes = preferredProjectTypes.map((s) => s.trim());
     }
 
     if (lastHealthCheck) {
@@ -230,6 +253,9 @@ export class IdentityService {
       interests: getStrArr('interests'),
       tagline: getStr('tagline'),
       description: getStr('description'),
+      positioningStatement: getStr('positioningStatement'),
+      currentCapacity: getStr('currentCapacity'),
+      preferredProjectTypes: getStrArr('preferredProjectTypes'),
     });
 
     const result = await this.prisma.client.business.update({
@@ -261,6 +287,7 @@ export class IdentityService {
       select: {
         id: true,
         name: true,
+        slug: true,
         logoUrl: true,
         headline: true,
         bio: true,
@@ -272,11 +299,29 @@ export class IdentityService {
         interests: true,
         profileCompleteness: true,
         tagline: true,
+        acceptingWork: true,
+        currentCapacity: true,
+        leadTime: true,
+        preferredProjectTypes: true,
+        budgetFit: true,
+        positioningStatement: true,
         createdAt: true,
+        products: {
+          where: { isActive: true },
+          select: { id: true, name: true, price: true, currency: true, category: true, imageUrl: true, description: true },
+          take: 6,
+          orderBy: { createdAt: 'desc' },
+        },
+        services: {
+          select: { id: true, name: true, price: true, currency: true, durationMins: true, description: true },
+          take: 6,
+          orderBy: { createdAt: 'desc' },
+        },
         _count: {
           select: {
             communityPosts: true,
             cohortMembers: true,
+            networkConnectionsTo: true,
           },
         },
       },

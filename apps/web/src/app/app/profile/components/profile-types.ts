@@ -15,6 +15,12 @@ export interface ProfileBusinessData {
   skills?: string[];
   interests?: string[];
   profileCompleteness?: number;
+  acceptingWork?: boolean;
+  currentCapacity?: string | null;
+  leadTime?: string | null;
+  preferredProjectTypes?: string[];
+  budgetFit?: string | null;
+  positioningStatement?: string | null;
   primaryColor?: string | null;
   facebook?: string | null;
   instagram?: string | null;

@@ -15,6 +15,9 @@ export const PROFILE_COMPLETENESS_FIELDS: ProfileCompletenessField[] = [
   { key: 'location', label: 'Location', description: 'Your city or country.' },
   { key: 'interests', label: 'Interests', description: 'Topics and areas your business is interested in.' },
   { key: 'taglineOrDescription', label: 'Tagline or Description', description: 'A tagline or description of your business.' },
+  { key: 'positioningStatement', label: 'Positioning Statement', description: 'A statement explaining your unique value and what sets you apart.' },
+  { key: 'currentCapacity', label: 'Availability Status', description: 'Whether you are currently accepting new work and your capacity level.' },
+  { key: 'preferredProjectTypes', label: 'Preferred Project Types', description: 'The types of projects or work you prefer to take on.' },
 ];
 
 export function computeProfileCompleteness(biz: {
@@ -30,6 +33,9 @@ export function computeProfileCompleteness(biz: {
   interests?: string[] | null;
   tagline?: string | null;
   description?: string | null;
+  positioningStatement?: string | null;
+  currentCapacity?: string | null;
+  preferredProjectTypes?: string[] | null;
 }): number {
   const checks = [
     !!biz.name,
@@ -42,6 +48,9 @@ export function computeProfileCompleteness(biz: {
     !!biz.city || !!biz.country,
     biz.interests != null && biz.interests.length > 0,
     !!biz.tagline || !!biz.description,
+    !!biz.positioningStatement,
+    !!biz.currentCapacity,
+    biz.preferredProjectTypes != null && biz.preferredProjectTypes.length > 0,
   ];
   return Math.round((checks.filter(Boolean).length / checks.length) * 100);
 }
@@ -82,7 +91,7 @@ export const COMPLETENESS_TIERS: TierDefinition[] = [
       'Brand-consistent copywriting',
     ],
     subProfiles: ['offer', 'customer', 'identity'],
-    basicFields: ['headline', 'bio', 'skills'],
+    basicFields: ['headline', 'bio', 'skills', 'positioningStatement', 'currentCapacity', 'preferredProjectTypes'],
   },
   {
     id: 'operations',
@@ -184,6 +193,9 @@ export function computeTieredCompleteness(
     interests?: string[] | null;
     tagline?: string | null;
     description?: string | null;
+    positioningStatement?: string | null;
+    currentCapacity?: string | null;
+    preferredProjectTypes?: string[] | null;
   },
   guidanceSubProfiles: Record<string, SubProfileData | null | undefined>,
 ): TieredCompletenessResult {
@@ -198,6 +210,9 @@ export function computeTieredCompleteness(
     location: !!(biz.city || biz.country),
     interests: (biz.interests?.length ?? 0) > 0,
     taglineOrDescription: !!(biz.tagline || biz.description),
+    positioningStatement: !!biz.positioningStatement,
+    currentCapacity: !!biz.currentCapacity,
+    preferredProjectTypes: (biz.preferredProjectTypes?.length ?? 0) > 0,
   };
 
   const EXPECTED_FIELD_COUNTS: Record<string, number> = {

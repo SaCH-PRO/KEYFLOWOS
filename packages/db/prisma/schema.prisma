@@ -67,6 +67,14 @@ model Business {
   skills            String[] @default([])
   businessStage     String?  @map("business_stage")       // IDEA, STARTUP, GROWTH, ESTABLISHED, SCALING
   interests         String[] @default([])
+
+  // Transactional Presence
+  acceptingWork          Boolean  @default(true) @map("accepting_work")
+  currentCapacity        String?  @map("current_capacity")        // OPEN, LIMITED, FULL
+  leadTime               String?  @map("lead_time")
+  preferredProjectTypes  String[] @default([]) @map("preferred_project_types")
+  budgetFit              String?  @map("budget_fit")
+  positioningStatement   String?  @map("positioning_statement")
   profileCompleteness Int    @default(0) @map("profile_completeness")
 
   // Brand Settings
@@ -191,6 +199,10 @@ model Business {
 
   // Mission 2: Supplier connections
   supplierConnections  SupplierConnection[]
+
+  // Network Connections (Community Phase 1)
+  networkConnectionsFrom NetworkConnection[] @relation("NetworkConnectionFrom")
+  networkConnectionsTo   NetworkConnection[] @relation("NetworkConnectionTo")
 
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
@@ -1831,6 +1843,22 @@ model CommunityComment {
 
   @@index([postId])
   @@map("community_comments")
+}
+
+model NetworkConnection {
+  id             String   @id @default(cuid())
+  fromBusinessId String   @map("from_business_id")
+  toBusinessId   String   @map("to_business_id")
+  type           String   @default("FOLLOW") // FOLLOW, SAVE
+  fromBusiness   Business @relation("NetworkConnectionFrom", fields: [fromBusinessId], references: [id], onDelete: Cascade)
+  toBusiness     Business @relation("NetworkConnectionTo", fields: [toBusinessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([fromBusinessId, toBusinessId, type])
+  @@index([fromBusinessId])
+  @@index([toBusinessId])
+  @@map("network_connections")
 }
 
 // ---

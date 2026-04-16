@@ -215,4 +215,33 @@ export class UpdateBusinessDto {
   @IsEnum(TeamSize, { message: `teamSize must be one of: ${Object.values(TeamSize).join(', ')}` })
   @IsOptional()
   teamSize?: TeamSize;
+
+  @IsBoolean()
+  @IsOptional()
+  acceptingWork?: boolean;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(20)
+  currentCapacity?: 'OPEN' | 'LIMITED' | 'FULL';
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  leadTime?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  preferredProjectTypes?: string[];
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  budgetFit?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(1000)
+  positioningStatement?: string;
 }

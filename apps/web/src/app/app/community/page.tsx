@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Lightbulb,
   X,
+  Search,
 } from "lucide-react";
 import {
   fetchCommunityPosts,
@@ -28,9 +29,12 @@ import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-s
 import { Feed } from "./components/feed";
 import { CohortList } from "./components/cohort-list";
 import { ProfileCard } from "./components/profile-card";
+import { Directory } from "./components/directory";
+import { useRouter } from "next/navigation";
 
 const COMMUNITY_TABS = [
   { key: "feed", label: "Feed", icon: MessageSquare, tooltip: "Community posts, discussions, and updates from other business owners." },
+  { key: "directory", label: "Directory", icon: Search, tooltip: "Search and discover businesses in the network by industry, skills, and availability." },
   { key: "cohorts", label: "Cohorts", icon: Users, tooltip: "Join or browse peer groups organized by industry or business stage." },
 ];
 const TAB_KEYS = COMMUNITY_TABS.map((t) => t.key);
@@ -48,6 +52,7 @@ export default function CommunityPage() {
   const [joiningCohort, setJoiningCohort] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [profileCardBusinessId, setProfileCardBusinessId] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -82,7 +87,7 @@ export default function CommunityPage() {
   useEffect(() => {
     if (tab === "feed") {
       void loadFeed();
-    } else {
+    } else if (tab === "cohorts") {
       void loadCohorts();
     }
   }, [tab, loadFeed, loadCohorts]);
@@ -172,14 +177,19 @@ export default function CommunityPage() {
     setTab(t);
   }, []);
 
+  const handleViewProfile = useCallback((bizId: string) => {
+    router.push(`/app/community/profile/${bizId}`);
+  }, [router]);
+
   const communityShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
       groupName: "Community Navigation",
       shortcuts: [
         { key: "1", description: "Feed tab", action: () => handleTabChange("feed") },
-        { key: "2", description: "Cohorts tab", action: () => handleTabChange("cohorts") },
+        { key: "2", description: "Directory tab", action: () => handleTabChange("directory") },
+        { key: "3", description: "Cohorts tab", action: () => handleTabChange("cohorts") },
         { key: "n", description: "New post", action: () => { handleTabChange("feed"); } },
-        { key: "r", description: "Refresh", action: () => { if (tab === "feed") void loadFeed(); else void loadCohorts(); } },
+        { key: "r", description: "Refresh", action: () => { if (tab === "feed") void loadFeed(); else if (tab === "cohorts") void loadCohorts(); } },
         { key: "g", description: "Toggle guide", action: () => setShowGuide((p) => !p) },
         { key: "Escape", description: "Close expanded post", action: () => { if (expandedPost) setExpandedPost(null); if (showGuide) setShowGuide(false); } },
       ],
@@ -240,9 +250,9 @@ export default function CommunityPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
                   { step: "1", title: "Browse the Feed", desc: "Read posts from other business owners covering discussions, questions, wins, and resources." },
-                  { step: "2", title: "Create a Post", desc: "Share your experience, ask for advice, or celebrate a business milestone." },
-                  { step: "3", title: "Engage", desc: "Like and comment on posts to build connections and help other founders." },
-                  { step: "4", title: "Join Cohorts", desc: "Browse founder circles and join groups of entrepreneurs in similar industries." },
+                  { step: "2", title: "Discover Businesses", desc: "Use the Directory to find businesses by industry, skills, availability, and location." },
+                  { step: "3", title: "Engage", desc: "Like and comment on posts, follow businesses, and save them to your shortlist." },
+                  { step: "4", title: "Complete Your Presence", desc: "Set your availability status, positioning statement, and preferred project types to attract opportunities." },
                 ].map((item) => (
                   <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
                     <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
@@ -275,6 +285,10 @@ export default function CommunityPage() {
           submittingComment={submittingComment}
           onAuthorClick={setProfileCardBusinessId}
         />
+      )}
+
+      {tab === "directory" && (
+        <Directory onViewProfile={handleViewProfile} />
       )}
 
       {tab === "cohorts" && (
