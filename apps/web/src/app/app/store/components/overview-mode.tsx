@@ -7,14 +7,14 @@ import {
   TrendingUp, AlertTriangle, CheckCircle2, ArrowRight,
   Image as ImageIcon, Shield, Search, ShoppingCart,
   Zap, ArrowUpRight, Clock, BarChart3, Users, RefreshCw, Loader2,
-  Sparkles, Eye, Target,
+  Sparkles, Eye, Target, DollarSign, Percent, Send, UserPlus, Megaphone,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import { apiGet } from "@/lib/api";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { SectionCard } from "@/components/ui/section-card";
 import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
-import type { StoreAnalytics, Product, Service, StorefrontConfig, StorefrontPolicies } from "@/lib/client";
+import type { StoreAnalytics, Product, Service, StorefrontConfig, StorefrontPolicies, StoreGraph, StoreReadinessResult, ReadinessItem } from "@/lib/client";
 
 type SocialProofSection = { testimonials?: unknown[] };
 type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string };
@@ -42,6 +42,9 @@ type Props = {
   businessHours: Record<string, { enabled?: boolean }>;
   onModeChange: (mode: string) => void;
   activeDeliveryMethodsCount: number;
+  storeGraph: StoreGraph | null;
+  readiness: StoreReadinessResult | null;
+  onCopilotAction?: (prompt: string) => void;
 };
 
 function ScoreRing({ score, label, color, size = 72 }: { score: number; label: string; color: string; size?: number }) {
@@ -206,8 +209,8 @@ function RecentOrdersList({ businessId, onViewAll }: { businessId: string; onVie
   );
 }
 
-function TopProductsGrid({ products, services }: { products: Product[]; services: Service[] }) {
-  const liveProducts = products.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
+function TopProductsGrid({ products, liveProductIds }: { products: Product[]; liveProductIds: Set<string> }) {
+  const liveProducts = products.filter((p) => liveProductIds.has(p.id));
   const sorted = [...liveProducts].sort((a, b) => (b.price ?? 0) - (a.price ?? 0)).slice(0, 4);
   if (sorted.length === 0) return null;
 
@@ -236,6 +239,79 @@ function TopProductsGrid({ products, services }: { products: Product[]; services
   );
 }
 
+function RevenueCockpit({ readiness, pc, sc }: { readiness: StoreReadinessResult; pc: string; sc: string }) {
+  const rev = readiness.revenue;
+  if (rev.totalOrders30d === 0 && rev.totalRevenue30d === 0) return null;
+
+  return (
+    <SectionCard title="Revenue Cockpit" subtitle="30-day store performance" icon={DollarSign}>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl p-3 text-center" style={{ background: "hsl(var(--kf-muted)/0.06)", border: "1px solid hsl(var(--kf-border)/0.25)" }}>
+          <p className="text-lg font-bold" style={{ color: pc }}>{formatPrice(rev.totalRevenue30d)}</p>
+          <p className="text-[10px] mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Revenue</p>
+        </div>
+        <div className="rounded-xl p-3 text-center" style={{ background: "hsl(var(--kf-muted)/0.06)", border: "1px solid hsl(var(--kf-border)/0.25)" }}>
+          <p className="text-lg font-bold" style={{ color: sc }}>{rev.totalOrders30d}</p>
+          <p className="text-[10px] mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Orders</p>
+        </div>
+        <div className="rounded-xl p-3 text-center" style={{ background: "hsl(var(--kf-muted)/0.06)", border: "1px solid hsl(var(--kf-border)/0.25)" }}>
+          <p className="text-lg font-bold" style={{ color: "hsl(var(--kf-foreground))" }}>{formatPrice(rev.avgOrderValue)}</p>
+          <p className="text-[10px] mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Avg Order</p>
+        </div>
+      </div>
+      {rev.conversionRate != null && (
+        <div className="flex items-center gap-2 mt-3 rounded-xl px-3 py-2" style={{ background: "hsl(var(--kf-muted)/0.06)" }}>
+          <Percent className="w-3.5 h-3.5" style={{ color: sc }} />
+          <span className="text-xs" style={{ color: "hsl(var(--kf-foreground))" }}>
+            <span className="font-bold">{rev.conversionRate.toFixed(1)}%</span> visitor-to-order conversion
+          </span>
+        </div>
+      )}
+      {rev.topProductRevenue.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: "hsl(var(--kf-muted-foreground)/0.6)" }}>Top Sellers</p>
+          {rev.topProductRevenue.slice(0, 3).map((tp) => (
+            <div key={tp.productId} className="flex items-center justify-between rounded-lg px-3 py-1.5" style={{ background: "hsl(var(--kf-muted)/0.04)" }}>
+              <span className="text-xs truncate flex-1" style={{ color: "hsl(var(--kf-foreground))" }}>{tp.productName}</span>
+              <span className="text-xs font-bold ml-2" style={{ color: pc }}>{formatPrice(tp.revenue)}</span>
+              <span className="text-[10px] ml-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{tp.orders} sold</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function CrmActionBar({ onCopilotAction }: { onCopilotAction?: (prompt: string) => void }) {
+  if (!onCopilotAction) return null;
+
+  const actions = [
+    { label: "Promote Store", icon: Megaphone, prompt: "Create a promotional campaign for my store. Draft social media posts and a WhatsApp message to announce it to my audience." },
+    { label: "Target Segment", icon: UserPlus, prompt: "Identify my top customer segments from CRM contacts and suggest a targeted offer for each segment to drive store traffic." },
+    { label: "Send Launch Offer", icon: Send, prompt: "Draft a store launch announcement message with a special offer. Include email subject line and WhatsApp message versions." },
+  ];
+
+  return (
+    <div className="flex items-center gap-2">
+      {actions.map((action) => {
+        const Icon = action.icon;
+        return (
+          <button
+            key={action.label}
+            onClick={() => onCopilotAction(action.prompt)}
+            className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-medium transition-all hover:scale-[1.02] flex-1 justify-center min-h-[40px]"
+            style={{ background: "hsl(var(--kf-muted)/0.08)", border: "1px solid hsl(var(--kf-border)/0.3)", color: "hsl(var(--kf-foreground))" }}
+          >
+            <Icon className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
+            {action.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function OverviewMode({
   businessId,
   storeEnabled,
@@ -248,6 +324,9 @@ export function OverviewMode({
   businessHours,
   onModeChange,
   activeDeliveryMethodsCount,
+  storeGraph,
+  readiness,
+  onCopilotAction,
 }: Props) {
   const pc = (storefrontConfig.appearance as AppearanceSection | undefined)?.primaryColor || businessData?.primaryColor || "#F97316";
   const sc = (storefrontConfig.appearance as AppearanceSection | undefined)?.secondaryColor || businessData?.secondaryColor || "#14B8A6";
@@ -264,7 +343,14 @@ export function OverviewMode({
   const hoursConfigured = Object.values(businessHours).some((h) => h?.enabled);
   const hasMetaSeo = !!(seo?.metaTitle && seo?.metaDescription);
   const hasContact = !!(businessData?.phone || businessData?.email || contact?.whatsapp);
-  const liveProducts = commerceProducts.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim())).length;
+
+  const liveProductIds = new Set<string>();
+  if (storeGraph) {
+    for (const m of storeGraph.mappings) {
+      if (m.isLive) liveProductIds.add(m.productId);
+    }
+  }
+  const liveProducts = liveProductIds.size;
   const liveServices = services.length;
   const totalCatalog = commerceProducts.length;
 
@@ -278,81 +364,35 @@ export function OverviewMode({
   ].filter(Boolean).length;
   const policyCompleteness = Math.round((policyItems / 3) * 100);
 
-  const healthFactors = [
-    hasHeroImage ? 20 : 0,
-    hasLogo ? 15 : 0,
-    hoursConfigured ? 10 : 0,
-    hasTestimonials ? 10 : 0,
-    (liveProducts > 0 || liveServices > 0) ? 20 : 0,
-    hasSlug ? 10 : 0,
-    hasMetaSeo ? 10 : 0,
-    hasContact ? 5 : 0,
-  ];
-  const healthScore = Math.min(healthFactors.reduce((a, b) => a + b, 0), 100);
+  const scores = readiness?.scores;
+  const healthScore = scores?.overall ?? 0;
+  const conversionScore = scores?.conversion ?? 0;
+  const launchScore = scores?.launch ?? 0;
 
-  const readinessFactors = [
-    storeEnabled ? 25 : 0,
-    hasSlug ? 15 : 0,
-    (liveProducts > 0 || liveServices > 0) ? 25 : 0,
-    hasHeroImage ? 15 : 0,
-    hoursConfigured ? 10 : 0,
-    hasContact ? 10 : 0,
-  ];
-  const readinessScore = Math.min(readinessFactors.reduce((a, b) => a + b, 0), 100);
+  const quickCards: QuickCard[] = [];
+  if (readiness) {
+    const unresolvedItems = readiness.items.filter((i) => !i.resolved);
+    for (const item of unresolvedItems.slice(0, 6)) {
+      quickCards.push({
+        title: item.title,
+        icon: item.severity === "blocker" ? AlertTriangle : item.severity === "warning" ? Zap : CheckCircle2,
+        status: item.severity === "blocker" ? "missing" : item.severity === "warning" ? "warn" : "good",
+        detail: item.detail,
+        action: item.actionLabel,
+        mode: item.actionTab,
+      });
+    }
+  }
+  if (quickCards.length === 0) {
+    quickCards.push(
+      { title: "Hero Quality", icon: ImageIcon, status: hasHeroImage ? "good" : "missing", detail: hasHeroImage ? "Hero image set" : "No hero configured", action: "Add Hero Image", mode: "design" },
+      { title: "Trust Coverage", icon: Shield, status: trustAssetsCount >= 2 ? "good" : trustAssetsCount === 1 ? "warn" : "missing", detail: `${trustAssetsCount}/3 trust assets`, action: "Add Testimonials", mode: "merchandising" },
+      { title: "Catalog Readiness", icon: Package, status: totalCatalog >= 5 ? "good" : totalCatalog > 0 ? "warn" : "missing", detail: `${totalCatalog} products, ${liveServices} services live`, action: "Grow Catalog", mode: "catalog" },
+    );
+  }
 
-  const quickCards: QuickCard[] = [
-    {
-      title: "Hero Quality",
-      icon: ImageIcon,
-      status: hasHeroImage ? "good" : hasLogo ? "warn" : "missing",
-      detail: hasHeroImage ? "Hero image set" : hasLogo ? "Logo set, no hero image" : "No hero or logo configured",
-      action: "Add Hero Image",
-      mode: "design",
-    },
-    {
-      title: "Trust Coverage",
-      icon: Shield,
-      status: trustAssetsCount >= 2 ? "good" : trustAssetsCount === 1 ? "warn" : "missing",
-      detail: `${trustAssetsCount}/3 trust assets — logo, hero, testimonials`,
-      action: "Add Testimonials",
-      mode: "merchandising",
-    },
-    {
-      title: "Catalog Readiness",
-      icon: Package,
-      status: totalCatalog >= 5 ? "good" : totalCatalog > 0 ? "warn" : "missing",
-      detail: `${totalCatalog} product${totalCatalog !== 1 ? "s" : ""} in catalog, ${liveServices} service${liveServices !== 1 ? "s" : ""} live`,
-      action: "Grow Catalog",
-      mode: "catalog",
-    },
-    {
-      title: "SEO Readiness",
-      icon: Search,
-      status: hasMetaSeo ? "good" : seo?.metaTitle ? "warn" : "missing",
-      detail: hasMetaSeo ? "Meta title & description set" : seo?.metaTitle ? "Meta title set, add description" : "No SEO metadata configured",
-      action: "Set SEO Meta",
-      mode: "merchandising",
-    },
-    {
-      title: "Contact Setup",
-      icon: Phone,
-      status: hasContact ? "good" : "missing",
-      detail: hasContact ? "Contact info configured" : "No phone, email, or WhatsApp set",
-      action: "Configure Contact",
-      mode: "operations",
-    },
-    {
-      title: "Order Readiness",
-      icon: ShoppingCart,
-      status: storeEnabled && hasSlug ? "good" : hasSlug ? "warn" : "missing",
-      detail: storeEnabled ? "Store live, accepting orders" : hasSlug ? "Store URL set but store is offline" : "Store not live — set URL and enable",
-      action: "Go Live",
-      mode: "launch",
-    },
-  ];
-
-  const recentOrders = analytics?.bookings?.inPeriod ?? 0;
-  const revenue = analytics?.revenue?.inPeriod ?? null;
+  const recentOrders = analytics?.bookings?.inPeriod ?? readiness?.revenue.totalOrders30d ?? 0;
+  const revenue = analytics?.revenue?.inPeriod ?? (readiness?.revenue.totalRevenue30d || null);
   const pageViews = analytics?.storefrontEvents?.page_view ?? null;
 
   const metricItems: MetricStripItem[] = [
@@ -410,11 +450,20 @@ export function OverviewMode({
   ];
 
   const aiRecommendations: { type: "action" | "insight" | "risk" | "opportunity"; priority: "high" | "medium" | "low"; title: string; description: string; explanation?: string; actionLabel: string; mode: string }[] = [];
-  if (!storeEnabled) aiRecommendations.push({ type: "risk", priority: "high", title: "Store is Offline", description: "Your storefront is in draft mode. Customers can't see or order from it.", explanation: "Publishing your store is the most impactful step you can take right now.", actionLabel: "Go to Launch", mode: "launch" });
-  if (!hasHeroImage) aiRecommendations.push({ type: "action", priority: "high", title: "Add a Hero Image", description: "Stores with hero banners see up to 40% higher engagement.", explanation: "Visual first impressions drive whether visitors stay or leave within 3 seconds.", actionLabel: "Customize Design", mode: "design" });
-  if (totalCatalog === 0) aiRecommendations.push({ type: "risk", priority: "high", title: "Empty Catalog", description: "Your store has no products. Add items so visitors have something to browse.", actionLabel: "Add Items", mode: "catalog" });
-  if (!hasTestimonials) aiRecommendations.push({ type: "insight", priority: "medium", title: "Add Social Proof", description: "92% of consumers read reviews before purchasing. Aim for 3+ testimonials.", actionLabel: "Add Testimonials", mode: "merchandising" });
-  if (!hasMetaSeo) aiRecommendations.push({ type: "opportunity", priority: "medium", title: "Improve SEO", description: "Missing meta title and description hurts search visibility. AI can generate them.", actionLabel: "Configure SEO", mode: "merchandising" });
+  if (readiness) {
+    const blockers = readiness.items.filter((i) => !i.resolved && i.severity === "blocker");
+    const warnings = readiness.items.filter((i) => !i.resolved && i.severity === "warning");
+    for (const b of blockers.slice(0, 2)) {
+      aiRecommendations.push({ type: "risk", priority: "high", title: b.title, description: b.detail, actionLabel: b.actionLabel, mode: b.actionTab });
+    }
+    for (const w of warnings.slice(0, 2)) {
+      aiRecommendations.push({ type: "action", priority: "medium", title: w.title, description: w.detail, actionLabel: w.actionLabel, mode: w.actionTab });
+    }
+  } else {
+    if (!storeEnabled) aiRecommendations.push({ type: "risk", priority: "high", title: "Store is Offline", description: "Your storefront is in draft mode. Customers can't see or order from it.", actionLabel: "Go to Launch", mode: "launch" });
+    if (!hasHeroImage) aiRecommendations.push({ type: "action", priority: "high", title: "Add a Hero Image", description: "Stores with hero banners see up to 40% higher engagement.", actionLabel: "Customize Design", mode: "design" });
+    if (totalCatalog === 0) aiRecommendations.push({ type: "risk", priority: "high", title: "Empty Catalog", description: "Your store has no products. Add items so visitors have something to browse.", actionLabel: "Add Items", mode: "catalog" });
+  }
 
   return (
     <div className="space-y-4">
@@ -422,14 +471,30 @@ export function OverviewMode({
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <SectionCard title="Storefront Health" subtitle="Overall readiness and quality scores" icon={Target}>
+        <SectionCard title="Storefront Health" subtitle="Readiness scores from store intelligence" icon={Target}>
           <div className="flex items-center justify-around gap-4">
-            <ScoreRing score={healthScore} label="Health Score" color={pc} />
+            <ScoreRing score={healthScore} label="Overall" color={pc} />
             <div className="h-12 w-px" style={{ background: "hsl(var(--kf-border)/0.3)" }} />
-            <ScoreRing score={readinessScore} label="Launch Ready" color={sc} />
+            <ScoreRing score={launchScore} label="Launch" color={sc} />
             <div className="h-12 w-px" style={{ background: "hsl(var(--kf-border)/0.3)" }} />
-            <ScoreRing score={Math.min(trustAssetsCount * 33, 100)} label="Trust Score" color="#a78bfa" />
+            <ScoreRing score={conversionScore} label="Conversion" color="#a78bfa" />
           </div>
+          {readiness && (
+            <div className="flex items-center justify-center gap-4 mt-3">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-success))" }} />
+                <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{readiness.items.filter((i) => i.resolved).length} passed</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-error))" }} />
+                <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{readiness.items.filter((i) => !i.resolved && i.severity === "blocker").length} blockers</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-warning))" }} />
+                <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{readiness.items.filter((i) => !i.resolved && i.severity === "warning").length} warnings</span>
+              </div>
+            </div>
+          )}
         </SectionCard>
       </motion.div>
 
@@ -440,6 +505,12 @@ export function OverviewMode({
       >
         <WorkspaceMetricStrip items={metricItems} columns={3} compact />
       </motion.div>
+
+      {readiness && readiness.revenue.totalOrders30d > 0 && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
+          <RevenueCockpit readiness={readiness} pc={pc} sc={sc} />
+        </motion.div>
+      )}
 
       {aiRecommendations.length > 0 && (
         <motion.div
@@ -467,6 +538,10 @@ export function OverviewMode({
         </motion.div>
       )}
 
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
+        <CrmActionBar onCopilotAction={onCopilotAction} />
+      </motion.div>
+
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -493,7 +568,7 @@ export function OverviewMode({
             icon={Star}
             action={{ label: "Manage Catalog", onClick: () => onModeChange("catalog") }}
           >
-            <TopProductsGrid products={commerceProducts} services={services} />
+            <TopProductsGrid products={commerceProducts} liveProductIds={liveProductIds} />
           </SectionCard>
         </motion.div>
       )}

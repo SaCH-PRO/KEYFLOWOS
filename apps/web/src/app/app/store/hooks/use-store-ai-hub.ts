@@ -23,6 +23,10 @@ type StoreCustomData = {
   hasPolicies?: boolean;
   hasFaq?: boolean;
   activeDeliveryCount?: number;
+  readinessScores?: { overall: number; launch: number; conversion: number; merchandising: number; promotion: number };
+  readinessItems?: { id: string; category: string; severity: string; title: string; detail: string; actionLabel: string; actionTab: string; resolved: boolean }[];
+  revenueSnapshot?: { totalRevenue30d: number; totalOrders30d: number; avgOrderValue: number; conversionRate: number | null };
+  graphStats?: { liveCount: number; draftCount: number; driftCount: number; totalProducts: number };
 };
 
 async function generateStoreSuggestions(context: ModuleContext): Promise<AiSuggestion[]> {
@@ -46,6 +50,72 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   const hasPolicies = data.hasPolicies ?? false;
   const hasFaq = data.hasFaq ?? false;
   const activeDeliveryCount = data.activeDeliveryCount ?? 0;
+  const readinessScores = data.readinessScores;
+  const readinessItems = data.readinessItems;
+  const revenueSnapshot = data.revenueSnapshot;
+  const graphStats = data.graphStats;
+
+  if (readinessItems && readinessItems.length > 0) {
+    const unresolvedByView = readinessItems.filter((i) => !i.resolved);
+    const viewItems = activeView
+      ? unresolvedByView.filter((i) => i.actionTab === activeView)
+      : [];
+    const globalItems = unresolvedByView.filter((i) => i.severity === "blocker");
+
+    const itemsToShow = viewItems.length > 0 ? viewItems : globalItems;
+
+    for (const item of itemsToShow.slice(0, 3)) {
+      suggestions.push({
+        id: `readiness-${item.id}-${Date.now()}`,
+        type: item.severity === "blocker" ? "risk" : item.severity === "warning" ? "action" : "insight",
+        title: item.title,
+        description: item.detail,
+        explanation: `Store readiness: ${readinessScores?.overall ?? 0}%. This ${item.category} issue affects your store's ability to convert visitors.`,
+        priority: item.severity === "blocker" ? "high" : "medium",
+        actionLabel: item.actionLabel,
+        actionKey: `switch_tab:${item.actionTab}`,
+      });
+    }
+
+    if (revenueSnapshot && revenueSnapshot.totalOrders30d > 0 && activeView === "overview") {
+      suggestions.push({
+        id: `revenue-insight-${Date.now()}`,
+        type: "insight",
+        title: `${revenueSnapshot.totalOrders30d} Orders · $${revenueSnapshot.totalRevenue30d.toFixed(0)} Revenue (30d)`,
+        description: `Average order value is $${revenueSnapshot.avgOrderValue.toFixed(2)}.${revenueSnapshot.conversionRate != null ? ` Conversion rate: ${revenueSnapshot.conversionRate.toFixed(1)}%.` : ""} Use the Pricing Advisor tool for optimization.`,
+        explanation: "Revenue data from your store graph. Use conversion audit and pricing tools to optimize.",
+        priority: "low",
+        actionLabel: "Run Pricing Advisor",
+        actionKey: "tool:pricing-advisor",
+      });
+    }
+
+    if (graphStats && graphStats.driftCount > 0) {
+      suggestions.push({
+        id: `drift-alert-${Date.now()}`,
+        type: "risk",
+        title: `${graphStats.driftCount} Price/Duration Drift${graphStats.driftCount !== 1 ? "s" : ""} Detected`,
+        description: "Some store items have different prices or durations than their Commerce products. Sync them to maintain consistency.",
+        explanation: "Price drift confuses customers and can lead to billing disputes. The graph detected mismatches between your Commerce catalog and store services.",
+        priority: "high",
+        actionLabel: "Review Drift",
+        actionKey: "switch_tab:catalog",
+      });
+    }
+
+    if (readinessScores && readinessScores.overall >= 80 && suggestions.length === 0) {
+      suggestions.push({
+        id: `healthy-store-${Date.now()}`,
+        type: "opportunity",
+        title: "Store Health: Strong",
+        description: `Overall readiness ${readinessScores.overall}%. Your store is well-configured. Focus on marketing and conversion optimization.`,
+        explanation: "Your store has passed most readiness checks. Shift focus to growth strategies.",
+        priority: "low",
+      });
+    }
+
+    return suggestions;
+  }
 
   if (!storeEnabled) {
     suggestions.push({
@@ -1067,6 +1137,10 @@ export function useStoreAiHub() {
     hasPolicies?: boolean;
     hasFaq?: boolean;
     activeDeliveryCount?: number;
+    readinessScores?: StoreCustomData["readinessScores"];
+    readinessItems?: StoreCustomData["readinessItems"];
+    revenueSnapshot?: StoreCustomData["revenueSnapshot"];
+    graphStats?: StoreCustomData["graphStats"];
   }) => {
     ai.updateContext({
       businessId: params.businessId,
@@ -1091,6 +1165,10 @@ export function useStoreAiHub() {
         hasPolicies: params.hasPolicies,
         hasFaq: params.hasFaq,
         activeDeliveryCount: params.activeDeliveryCount,
+        readinessScores: params.readinessScores,
+        readinessItems: params.readinessItems,
+        revenueSnapshot: params.revenueSnapshot,
+        graphStats: params.graphStats,
       },
     });
   }, [ai.updateContext]);

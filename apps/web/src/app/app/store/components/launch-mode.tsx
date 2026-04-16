@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Rocket, Link2, Eye, Monitor, Smartphone, ExternalLink, Globe } from "lucide-react";
+import { Rocket, Link2, Eye, Monitor, Smartphone, ExternalLink, Globe, Send, Megaphone, UserPlus } from "lucide-react";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { SectionCard } from "@/components/ui/section-card";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { LaunchAdvisor } from "./launch-advisor";
 import { StoreSettings } from "./store-settings";
-import type { Service, Product, StorefrontConfig, StorefrontPolicies } from "@/lib/client";
+import type { Service, Product, StorefrontConfig, StorefrontPolicies, StoreReadinessResult, ReadinessItem as ApiReadinessItem } from "@/lib/client";
 
 type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string; subheadline?: string; ctaLabel?: string };
 type SeoSection = { metaTitle?: string; metaDescription?: string };
@@ -41,6 +41,8 @@ type Props = {
   hasTestimonials: boolean;
   activeDeliveryMethodsCount?: number;
   onModeChange: (mode: string) => void;
+  readiness?: StoreReadinessResult | null;
+  onCopilotAction?: (prompt: string) => void;
 };
 
 function StorefrontPreview({ slug, previewMode }: { slug: string | null; previewMode: "desktop" | "mobile" }) {
@@ -112,6 +114,8 @@ export function LaunchMode({
   hasTestimonials,
   activeDeliveryMethodsCount = 0,
   onModeChange,
+  readiness,
+  onCopilotAction,
 }: Props) {
   const pc = businessData?.primaryColor || "#F97316";
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
@@ -133,7 +137,8 @@ export function LaunchMode({
   const itemCount = services.length + commerceProducts.length;
   const completedChecks = [storeEnabled, hasSlug, itemCount > 0, hasHeroImage, hasHeroHeadline, hasLogo, hoursConfigured, hasTestimonials, hasMetaTitle, activeDeliveryMethodsCount > 0].filter(Boolean).length;
   const totalChecks = 10;
-  const readinessPercent = Math.round((completedChecks / totalChecks) * 100);
+  const readinessPercent = readiness?.scores?.launch ?? Math.round((completedChecks / totalChecks) * 100);
+  const blockerCount = readiness?.items.filter((i) => !i.resolved && i.severity === "blocker").length ?? 0;
 
   const metrics: MetricStripItem[] = [
     {
@@ -226,6 +231,33 @@ export function LaunchMode({
           </AccordionSection>
         </AccordionGroup>
       </motion.div>
+
+      {onCopilotAction && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
+          <SectionCard title="Launch Actions" subtitle="Marketing & CRM connections" icon={Megaphone}>
+            <div className="flex items-center gap-2">
+              {[
+                { label: "Send Launch Offer", icon: Send, prompt: "Draft a store launch announcement with a special opening offer. Create an email subject line and a WhatsApp message version for my contacts." },
+                { label: "Promote to Segment", icon: UserPlus, prompt: "Identify my best customer segments from CRM contacts and create a targeted promotion for each to drive store launch traffic." },
+                { label: "Generate Campaign", icon: Megaphone, prompt: "Create a complete launch campaign with social media posts, WhatsApp broadcast messages, and email copy to announce my store going live." },
+              ].map((action) => {
+                const Icon = action.icon;
+                return (
+                  <button
+                    key={action.label}
+                    onClick={() => onCopilotAction(action.prompt)}
+                    className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-medium transition-all hover:scale-[1.02] flex-1 justify-center min-h-[40px]"
+                    style={{ background: "hsl(var(--kf-muted)/0.08)", border: "1px solid hsl(var(--kf-border)/0.3)", color: "hsl(var(--kf-foreground))" }}
+                  >
+                    <Icon className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
+                    {action.label}
+                  </button>
+                );
+              })}
+            </div>
+          </SectionCard>
+        </motion.div>
+      )}
 
       {(currentSlug || businessData?.slug) && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>

@@ -88,8 +88,12 @@ export default function StorePage() {
       hasPolicies: Object.values(_policies).some((p: any) => p?.enabled),
       hasFaq: Array.isArray(_faqEntries) && _faqEntries.length > 0,
       activeDeliveryCount: deliveryCount,
+      readinessScores: s.readiness?.scores,
+      readinessItems: s.readiness?.items,
+      revenueSnapshot: s.readiness?.revenue,
+      graphStats: s.storeGraph ? { liveCount: s.storeGraph.liveCount, draftCount: s.storeGraph.draftCount, driftCount: s.storeGraph.driftCount, totalProducts: s.storeGraph.totalProducts } : undefined,
     });
-  }, [s.businessId, activeTab, productCount, serviceCount, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, deliveryCount]);
+  }, [s.businessId, activeTab, productCount, serviceCount, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, deliveryCount, s.readiness, s.storeGraph]);
 
   const handleTabChange = useCallback((key: string) => {
     if (!TAB_KEYS.includes(key as TabKey)) return;
@@ -257,6 +261,11 @@ export default function StorePage() {
                 businessHours={s.businessHours as Record<string, { enabled?: boolean }>}
                 onModeChange={handleTabChange}
                 activeDeliveryMethodsCount={s.activeDeliveryMethodsCount}
+                storeGraph={s.storeGraph}
+                readiness={s.readiness}
+                onCopilotAction={(prompt) => {
+                  window.dispatchEvent(new CustomEvent("kf:open-copilot", { detail: { prompt } }));
+                }}
               />
             )}
             {activeTab === "design" && (
@@ -343,6 +352,10 @@ export default function StorePage() {
                 hasTestimonials={hasTestimonials}
                 activeDeliveryMethodsCount={s.activeDeliveryMethodsCount}
                 onModeChange={handleTabChange}
+                readiness={s.readiness}
+                onCopilotAction={(prompt) => {
+                  window.dispatchEvent(new CustomEvent("kf:open-copilot", { detail: { prompt } }));
+                }}
               />
             )}
           </motion.div>
