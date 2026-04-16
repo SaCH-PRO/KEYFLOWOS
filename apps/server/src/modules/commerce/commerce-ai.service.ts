@@ -1283,4 +1283,113 @@ Funnel rates: Contact→Quote ${funnel.contactToQuoteRate}%, Quote→Invoice ${f
       };
     }
   }
+
+  async quoteFromConversation(businessId: string, conversationText: string) {
+    const start = Date.now();
+    const sanitized = this.sanitizeAiInput(conversationText, 5000);
+    if (!sanitized.trim()) {
+      throw new Error('Conversation text is required');
+    }
+
+    const products = await this.db.product.findMany({
+      where: { businessId, deletedAt: null, isActive: true },
+      select: {
+        id: true, name: true, price: true, category: true, currency: true,
+        description: true, duration: true, executionModel: true, executionMeta: true,
+      },
+    });
+
+    const contacts = await this.db.contact.findMany({
+      where: { businessId, deletedAt: null },
+      select: { id: true, firstName: true, lastName: true, email: true },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    const productList = products.map(p =>
+      `- ${p.name} (${p.category}, $${p.price} ${p.currency}${p.executionModel ? `, ${p.executionModel}` : ''}): ${p.description?.slice(0, 100) || 'No description'}`
+    ).join('\n');
+
+    const contactList = contacts.slice(0, 20).map(c =>
+      `- ${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() + ` (${c.email || 'no email'}) [ID: ${c.id}]`
+    ).join('\n');
+
+    const prompt = `You are a business intelligence assistant for a Caribbean service business. Analyze the following client conversation/message and extract structured information for creating a quote.
+
+Available Products/Services:
+${productList}
+
+Known Contacts:
+${contactList}
+
+Analyze the conversation and return a JSON object with:
+{
+  "analysis": {
+    "detectedNeeds": ["list of identified needs/services requested"],
+    "budgetSignals": { "mentioned": true/false, "range": "low/medium/high/premium", "specificAmount": null or number, "currency": "TTD" },
+    "urgency": "low/medium/high/critical",
+    "objections": ["any hesitations or concerns mentioned"],
+    "intent": "inquiry/ready_to_buy/comparing/negotiating",
+    "sentiment": "positive/neutral/cautious/negative"
+  },
+  "matchedContact": { "id": "contact_id or null", "name": "detected name", "email": "detected email or null" },
+  "draftQuote": {
+    "items": [
+      { "productId": "matched_product_id or null", "description": "line item description", "quantity": 1, "unitPrice": 0.00 }
+    ],
+    "currency": "TTD",
+    "notes": "any special notes or conditions",
+    "suggestedDiscount": { "type": "PERCENT or FIXED or null", "value": 0, "reason": "why this discount" },
+    "expiryDays": 14
+  },
+  "followUpSuggestions": ["actionable next steps for the business owner"]
+}
+
+Only include items that directly match the conversation. Map to existing products when possible. If a need doesn't match an existing product, create a custom line item with a reasonable price estimate.`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'commerce_quote_from_conversation',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: `Analyze this conversation and generate a draft quote:\n\n${sanitized}` },
+      ],
+      maxTokens: 2000,
+      temperature: 0.3,
+      outputCategory: 'general',
+      responseMode: 'structured_json',
+    });
+
+    const duration = Date.now() - start;
+    if (duration > 1000) this.logger.warn(`Quote from conversation took ${duration}ms`);
+
+    try {
+      const parsed = JSON.parse(result.content);
+      if (parsed.draftQuote?.items) {
+        for (const item of parsed.draftQuote.items) {
+          if (item.productId) {
+            const product = products.find(p => p.id === item.productId);
+            if (product && item.unitPrice === 0) {
+              item.unitPrice = product.price;
+            }
+          }
+        }
+      }
+      return parsed;
+    } catch {
+      return {
+        analysis: {
+          detectedNeeds: [],
+          budgetSignals: { mentioned: false, range: 'medium', specificAmount: null, currency: 'TTD' },
+          urgency: 'medium',
+          objections: [],
+          intent: 'inquiry',
+          sentiment: 'neutral',
+        },
+        matchedContact: null,
+        draftQuote: { items: [], currency: 'TTD', notes: result.content, suggestedDiscount: null, expiryDays: 14 },
+        followUpSuggestions: ['Review the conversation manually and create a quote.'],
+      };
+    }
+  }
 }

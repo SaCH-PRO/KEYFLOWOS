@@ -42,6 +42,8 @@ import { useWishlist } from "./components/use-wishlist";
 import { WishlistDrawer } from "./components/wishlist-drawer";
 import { ShareStoreButton } from "./components/share-buttons";
 import { Heart } from "lucide-react";
+import { GuidedSelector } from "./components/guided-selector";
+import { AssetIntake } from "./components/asset-intake";
 
 const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
   "hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact", "policies",
@@ -102,6 +104,8 @@ export default function PublicBookingPage() {
   const [wishlistOpen, setWishlistOpen] = useState(false);
   const [reviewAggregates, setReviewAggregates] = useState<Record<string, { averageRating: number; reviewCount: number }>>({});
   const [completedOrdersCount, setCompletedOrdersCount] = useState<number>(0);
+  const [showGuidedSelector, setShowGuidedSelector] = useState(false);
+  const [guidedIntake, setGuidedIntake] = useState<{ journeyId: string; productId: string; productName: string } | null>(null);
 
   const wishlist = useWishlist(slug);
 
@@ -1225,6 +1229,47 @@ export default function PublicBookingPage() {
           </div>
         )}
 
+        {showGuidedSelector && !guidedIntake && (
+          <div className="rounded-2xl border border-gray-100 bg-white/80 backdrop-blur-sm p-6 shadow-lg">
+            <GuidedSelector
+              slug={slug}
+              primaryColor={primaryColor}
+              secondaryColor={secondaryColor}
+              onClose={() => setShowGuidedSelector(false)}
+              onSelectPackage={(product) => {
+                const ci = catalogItems.find(i => i.id === product.id);
+                if (ci) addToCart(ci);
+                setShowGuidedSelector(false);
+              }}
+              onStartIntake={(journeyId, productId) => {
+                const p = products.find(pr => pr.id === productId);
+                setGuidedIntake({ journeyId, productId, productName: p?.name ?? "Package" });
+                setShowGuidedSelector(false);
+              }}
+            />
+          </div>
+        )}
+
+        {guidedIntake && (
+          <div className="rounded-2xl border border-gray-100 bg-white/80 backdrop-blur-sm p-6 shadow-lg">
+            <AssetIntake
+              journeyId={guidedIntake.journeyId}
+              productName={guidedIntake.productName}
+              primaryColor={primaryColor}
+              secondaryColor={secondaryColor}
+              onComplete={() => {
+                const ci = catalogItems.find(i => i.id === guidedIntake.productId);
+                if (ci) addToCart(ci);
+                setGuidedIntake(null);
+              }}
+              onBack={() => {
+                setGuidedIntake(null);
+                setShowGuidedSelector(true);
+              }}
+            />
+          </div>
+        )}
+
         {sectionOrder.map((key) => renderSection(key))}
 
         {(storefrontConfig?.merchandising?.collections ?? []).filter((col) => col.itemIds?.length > 0).map((col) => {
@@ -1331,7 +1376,17 @@ export default function PublicBookingPage() {
         />
       </div>
 
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex items-center gap-2">
+        {!showGuidedSelector && !guidedIntake && !checkoutMode && !success && (
+          <button
+            onClick={() => setShowGuidedSelector(true)}
+            className="pointer-events-auto inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-[11px] font-medium text-white backdrop-blur-xl shadow-lg transition-all hover:shadow-xl hover:scale-105 active:scale-95"
+            style={{ background: `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})` }}
+          >
+            <Sparkles className="w-3 h-3" />
+            Find Your Match
+          </button>
+        )}
         <div
           className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-[11px] text-gray-500 backdrop-blur-xl border shadow-lg pointer-events-auto hover:text-gray-600 transition-all hover:shadow-xl"
           style={{ backgroundColor: `${ts.pageBg}e6`, borderColor: `${primaryColor}10` }}

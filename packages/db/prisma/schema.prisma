@@ -173,6 +173,9 @@ model Business {
   // Intake Submissions
   intakeSubmissions    IntakeSubmission[]
 
+  // Qualification Journeys
+  qualificationJourneys QualificationJourney[]
+
   // Flow AI Bot Sessions
   flowSessions         FlowSession[]
 
@@ -542,6 +545,10 @@ model Product {
   imageUrl    String?  @map("image_url")
   sku         String?  // Stock keeping unit
   isActive    Boolean  @default(true) @map("is_active")
+
+  // Execution model tiers (DIY, AI_ASSISTED, HYBRID, FULL_SERVICE)
+  executionModel    String?  @map("execution_model")
+  executionMeta     Json?    @map("execution_meta")      // { deliverables, whatYouGet, pricingNote } per tier
 
   // Mission 2: Fulfillment & inventory extensions
   fulfillmentModel  String?  @map("fulfillment_model")   // local_stock, dropship, preorder, manual, hybrid
@@ -3334,6 +3341,46 @@ model IntakeSubmission {
   @@index([businessId, status, createdAt])
   @@index([businessId, category])
   @@map("intake_submissions")
+}
+
+// ---
+// QUALIFICATION JOURNEYS (Store guided qualification + conversion tracking)
+// ---
+model QualificationJourney {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  sessionId    String?  @map("session_id")
+  customerName String?  @map("customer_name")
+  customerEmail String? @map("customer_email")
+
+  answers      Json     @default("[]")
+  scores       Json?
+  recommendedProductIds String[] @map("recommended_product_ids")
+  selectedProductId     String?  @map("selected_product_id")
+  executionModelChosen  String?  @map("execution_model_chosen")
+
+  quoteId      String?  @map("quote_id")
+  invoiceId    String?  @map("invoice_id")
+  projectId    String?  @map("project_id")
+  intakeId     String?  @map("intake_id")
+
+  intakeStatus    String   @default("pending") @map("intake_status")
+  intakeData      Json?    @map("intake_data")
+  intakeCompleted Boolean  @default(false) @map("intake_completed")
+
+  status       String   @default("started")
+  source       String   @default("guided_flow")
+  convertedAt  DateTime? @map("converted_at")
+
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@index([businessId, customerEmail])
+  @@map("qualification_journeys")
 }
 
 // ---

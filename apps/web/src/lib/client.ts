@@ -7363,4 +7363,81 @@ export async function retryAllFailedDeliveries(contentId: string, businessId?: s
   return apiPost<{ retried: number }>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/retry-all`, body: {} });
 }
 
+export interface QualificationFlowConfig {
+  enabled: boolean;
+  title?: string;
+  subtitle?: string;
+  showBudgetQuestion?: boolean;
+  showUrgencyQuestion?: boolean;
+  showExecutionPreference?: boolean;
+  questions?: QualificationQuestion[];
+  packageMappings?: { productId: string; answerWeights: Record<string, Record<string, number>> }[];
+  intakeChecklist?: { id: string; label: string; type: 'text' | 'file' | 'color' | 'textarea'; required?: boolean }[];
+}
+
+export interface QualificationQuestion {
+  id: string;
+  label: string;
+  type: 'single' | 'multi';
+  options: { value: string; label: string; tags?: string[] }[];
+}
+
+export interface QualificationRecommendation {
+  productId: string;
+  productName: string;
+  score: number;
+  executionModel?: string;
+  price: number;
+  currency: string;
+  matchReasons: string[];
+}
+
+export interface QualificationJourneyAnalytics {
+  total: number;
+  statusCounts: Record<string, number>;
+  conversionFunnel: {
+    started: number;
+    recommended: number;
+    packageSelected: number;
+    intakeCompleted: number;
+    converted: number;
+  };
+  completionRate: number;
+  recentJourneys: {
+    id: string;
+    status: string;
+    customerName?: string;
+    customerEmail?: string;
+    selectedProductId?: string;
+    executionModelChosen?: string;
+    intakeCompleted: boolean;
+    source: string;
+    createdAt: string;
+    recommendedProductIds: string[];
+  }[];
+}
+
+export async function fetchQualificationConfig(businessId: string): Promise<ApiResult<QualificationFlowConfig | null>> {
+  return apiGetSimple<QualificationFlowConfig | null>(`/site/businesses/${encodeURIComponent(businessId)}/qualification-config`);
+}
+
+export async function updateQualificationConfig(businessId: string, config: QualificationFlowConfig): Promise<ApiResult<QualificationFlowConfig>> {
+  const res = await fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/qualification-config`, {
+    method: 'PUT',
+    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) return { data: null, error: data?.message || 'Failed to update' };
+  return { data, error: null };
+}
+
+export async function fetchQualificationAnalytics(businessId: string): Promise<ApiResult<QualificationJourneyAnalytics>> {
+  return apiGetSimple<QualificationJourneyAnalytics>(`/site/businesses/${encodeURIComponent(businessId)}/qualification-analytics`);
+}
+
+export async function quoteFromConversation(businessId: string, conversationText: string): Promise<ApiResult<any>> {
+  return apiPost<any>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/ai-quote-from-conversation`, body: { conversationText } });
+}
+
 export { DEFAULT_BUSINESS_ID };

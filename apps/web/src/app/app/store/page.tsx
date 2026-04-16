@@ -333,6 +333,7 @@ export default function StorePage() {
                 onSaveHours={s.handleSaveHours}
                 hoursSaving={s.hoursSaving}
                 onToggleStoreEnabled={s.toggleStoreEnabled}
+                commerceProducts={s.commerceProducts}
               />
             )}
             {activeTab === "launch" && (
