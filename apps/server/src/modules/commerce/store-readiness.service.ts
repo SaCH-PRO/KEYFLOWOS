@@ -88,7 +88,52 @@ export class StoreReadinessService {
     return this.prisma.client;
   }
 
+  async backfillSourceProductIds(businessId: string): Promise<number> {
+    const services = await this.db.service.findMany({
+      where: { businessId, deletedAt: null, sourceProductId: null },
+      select: { id: true, name: true },
+    });
+    if (services.length === 0) return 0;
+
+    const products = await this.db.product.findMany({
+      where: { businessId, deletedAt: null },
+      select: { id: true, name: true },
+    });
+
+    const productByName = new Map<string, string>();
+    for (const p of products) {
+      productByName.set(p.name.toLowerCase().trim(), p.id);
+    }
+
+    const alreadyLinked = new Set(
+      (await this.db.service.findMany({
+        where: { businessId, deletedAt: null, sourceProductId: { not: null } },
+        select: { sourceProductId: true },
+      })).map(s => s.sourceProductId!),
+    );
+
+    let backfilled = 0;
+    for (const svc of services) {
+      const productId = productByName.get(svc.name.toLowerCase().trim());
+      if (productId && !alreadyLinked.has(productId)) {
+        await this.db.service.update({
+          where: { id: svc.id },
+          data: { sourceProductId: productId },
+        });
+        alreadyLinked.add(productId);
+        backfilled++;
+      }
+    }
+
+    if (backfilled > 0) {
+      this.logger.log(`Backfilled sourceProductId for ${backfilled} services in business ${businessId}`);
+    }
+    return backfilled;
+  }
+
   async buildStoreGraph(businessId: string): Promise<StoreGraph> {
+    await this.backfillSourceProductIds(businessId);
+
     const [products, services] = await Promise.all([
       this.db.product.findMany({
         where: { businessId, deletedAt: null },
@@ -106,12 +151,10 @@ export class StoreReadinessService {
     ]);
 
     const serviceByProductId = new Map<string, typeof services[0]>();
-    const serviceByNormalizedName = new Map<string, typeof services[0]>();
     for (const svc of services) {
       if (svc.sourceProductId) {
         serviceByProductId.set(svc.sourceProductId, svc);
       }
-      serviceByNormalizedName.set(svc.name.toLowerCase().trim(), svc);
     }
 
     const serviceNameIndex: Record<string, string> = {};
@@ -124,8 +167,7 @@ export class StoreReadinessService {
     let driftCount = 0;
 
     for (const product of products) {
-      const matchedService = serviceByProductId.get(product.id)
-        ?? serviceByNormalizedName.get(product.name.toLowerCase().trim());
+      const matchedService = serviceByProductId.get(product.id) ?? null;
       const isLive = !!matchedService;
 
       const priceDrift = isLive
