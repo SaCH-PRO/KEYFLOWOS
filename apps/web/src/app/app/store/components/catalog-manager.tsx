@@ -142,7 +142,7 @@ export function CatalogManager({
     orderDirty.current = false;
   }, [onReorder, orderedProducts]);
 
-  const notAddedCount = products.filter((p) => !storeServiceNames.has(p.name)).length;
+  const notAddedCount = products.filter((p) => !storeServiceNames.has(p.name.toLowerCase().trim())).length;
   const inStoreCount = storeItemCount;
 
   const isFiltering = categoryFilter !== "ALL" || searchInput.trim() !== "";
@@ -373,13 +373,13 @@ export function CatalogManager({
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleBulkAdd}
-              disabled={products.every((p) => storeServiceNames.has(p.name))}
+              disabled={products.every((p) => storeServiceNames.has(p.name.toLowerCase().trim()))}
               className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all ${
                 bulkConfirm === "add"
                   ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
                   : "kf-btn-secondary"
               }`}
-              style={{ opacity: products.every((p) => storeServiceNames.has(p.name)) ? 0.3 : 1 }}
+              style={{ opacity: products.every((p) => storeServiceNames.has(p.name.toLowerCase().trim())) ? 0.3 : 1 }}
             >
               <CheckCircle2 className="w-3 h-3 inline mr-1" />
               {bulkConfirm === "add" ? "Confirm Add All?" : "Add All"}
@@ -453,7 +453,7 @@ export function CatalogManager({
               <CatalogItem
                 key={p.id}
                 product={p}
-                isOnStore={storeServiceNames.has(p.name)}
+                isOnStore={storeServiceNames.has(p.name.toLowerCase().trim())}
                 isProcessing={processingItems.has(p.id)}
                 isConfirming={confirmRemove === p.id}
                 isDraggable={!isFiltering}
@@ -578,7 +578,7 @@ function CatalogItem({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                const matched = services.find((s) => s.name === p.name);
+                const matched = services.find((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim());
                 if (matched) onDeleteFromStore(matched.id, p.name);
               }}
               className="px-3 py-1.5 rounded-lg text-xs font-medium min-h-[44px] transition-colors"

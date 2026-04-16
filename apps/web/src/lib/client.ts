@@ -4023,6 +4023,234 @@ export async function executeAiPlan(businessId: string, planId: string): Promise
   });
 }
 
+export interface GraphEntityLink {
+  fromType: string;
+  fromId: string;
+  toType: string;
+  toId: string;
+  relation: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface GraphContactSummary {
+  id: string;
+  name: string;
+  email: string | null;
+  status: string;
+  revenue: number;
+  invoiceIds: string[];
+  bookingIds: string[];
+  projectIds: string[];
+}
+
+export interface GraphInvoiceSummary {
+  id: string;
+  number: string | null;
+  status: string;
+  total: number;
+  dueDate: string | null;
+  contactId: string | null;
+  contactName: string | null;
+}
+
+export interface GraphProductSummary {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+  isActive: boolean;
+  serviceId: string | null;
+  storefrontListed: boolean;
+}
+
+export interface BusinessGraphSnapshot {
+  businessId: string;
+  timestamp: string;
+  business: {
+    name: string;
+    industry: string | null;
+    archetype: string | null;
+    revenueModel: string | null;
+    currency: string;
+    stage: string | null;
+    teamSize: string | null;
+  };
+  contacts: {
+    total: number;
+    byStatus: Record<string, number>;
+    recentCount: number;
+    staleLeadCount: number;
+    topClients: Array<{ id: string; name: string; revenue: number }>;
+  };
+  revenue: {
+    totalCollected: number;
+    outstandingAmount: number;
+    outstandingCount: number;
+    overdueCount: number;
+    overdueAmount: number;
+    monthlyRevenue: number;
+    averageInvoiceValue: number;
+  };
+  bookings: {
+    upcomingCount: number;
+    completedThisMonth: number;
+    cancelledThisMonth: number;
+    utilizationRate: number;
+  };
+  expenses: {
+    totalThisMonth: number;
+    topCategories: Array<{ name: string; amount: number }>;
+    budgetUtilization: number;
+  };
+  projects: {
+    activeCount: number;
+    overdueTaskCount: number;
+    completionRate: number;
+  };
+  content: {
+    draftPostCount: number;
+    scheduledPostCount: number;
+    draftCampaignCount: number;
+  };
+  automations: {
+    activeCount: number;
+    disabledCount: number;
+    totalRuns: number;
+  };
+  storefront: {
+    activeProductCount: number;
+    averagePrice: number;
+  };
+  momentumScore: number;
+  healthIndicators: Array<{ area: string; status: 'good' | 'warning' | 'critical'; detail: string }>;
+  links: GraphEntityLink[];
+  entities: {
+    topContacts: GraphContactSummary[];
+    overdueInvoices: GraphInvoiceSummary[];
+    catalogProducts: GraphProductSummary[];
+  };
+}
+
+export interface GraphResponse {
+  snapshot: BusinessGraphSnapshot;
+  generatedAt: string;
+  linkCount: number;
+  entityCounts: {
+    topContacts: number;
+    overdueInvoices: number;
+    catalogProducts: number;
+  };
+}
+
+export interface ActionPlanResponse {
+  intent: AiParsedIntent;
+  plan: AiPlan | null;
+  clarificationNeeded: boolean;
+  riskAssessment?: {
+    maxTier: number;
+    requiresApproval: boolean;
+    affectedModules: string[];
+    estimatedImpact: string;
+  };
+}
+
+export interface ActionExecuteResponse {
+  success: boolean;
+  blocked?: boolean;
+  requiresApproval?: boolean;
+  approvalId?: string;
+  result?: unknown;
+  changedEntities?: string[];
+  followOnSuggestions?: string[];
+  tier: number;
+  reason?: string;
+  error?: string;
+}
+
+export interface ActionQueueItem {
+  id: string;
+  type: 'pending_approval' | 'executed';
+  toolName: string;
+  title: string;
+  description: string | null;
+  riskTier: number;
+  module: string | null;
+  status: string;
+  createdAt: string;
+}
+
+export interface ActionQueueResponse {
+  items: ActionQueueItem[];
+  counts: {
+    pending: number;
+    completed: number;
+    failed: number;
+  };
+  plans: unknown;
+}
+
+export interface AutopilotCoverageModule {
+  module: string;
+  coveragePct: number;
+  automatedCount: number;
+  totalProcesses: number;
+}
+
+export interface AutopilotCoverageResponse {
+  overallCoverage: number;
+  modules: AutopilotCoverageModule[];
+  gaps: Array<{ module: string; gap: string; severity: 'high' | 'medium' | 'low' }>;
+  governance: {
+    mode: string;
+    maxAutoTier: number;
+    blockedToolCount: number;
+    blockedModuleCount: number;
+  };
+  activity: {
+    executionsLast7Days: number;
+    pendingApprovals: number;
+    activeFlows: number;
+    disabledFlows: number;
+  };
+}
+
+export async function fetchBusinessGraph(businessId: string, refresh?: boolean): Promise<ApiResult<GraphResponse>> {
+  const qs = refresh ? '?refresh=true' : '';
+  return apiGetSimple<GraphResponse>(`/graph/business/${encodeURIComponent(businessId)}${qs}`);
+}
+
+export async function planAction(businessId: string, input: string): Promise<ApiResult<ActionPlanResponse>> {
+  return apiPost<ActionPlanResponse>({
+    path: `/actions/businesses/${encodeURIComponent(businessId)}/plan`,
+    body: { input },
+  });
+}
+
+export async function executeAction(
+  businessId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  planId?: string,
+  planStepId?: string,
+): Promise<ApiResult<ActionExecuteResponse>> {
+  return apiPost<ActionExecuteResponse>({
+    path: `/actions/businesses/${encodeURIComponent(businessId)}/execute`,
+    body: { toolName, args, planId, planStepId },
+  });
+}
+
+export async function fetchActionQueue(businessId: string, status?: string, limit?: number): Promise<ApiResult<ActionQueueResponse>> {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (limit) params.set('limit', String(limit));
+  const qs = params.toString();
+  return apiGetSimple<ActionQueueResponse>(`/actions/businesses/${encodeURIComponent(businessId)}/queue${qs ? `?${qs}` : ''}`);
+}
+
+export async function fetchAutopilotCoverage(businessId: string): Promise<ApiResult<AutopilotCoverageResponse>> {
+  return apiGetSimple<AutopilotCoverageResponse>(`/autopilot/businesses/${encodeURIComponent(businessId)}/coverage`);
+}
+
 export async function fetchAiExecutionLogs(
   businessId: string,
   filters?: { module?: string; toolName?: string; limit?: number; offset?: number },

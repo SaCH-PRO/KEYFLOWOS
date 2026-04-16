@@ -7,6 +7,7 @@ import { OutputTemplateService } from './output-template.service';
 import { OutputTemplateController } from './output-template.controller';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { FlowController } from './flow.controller';
+import { GraphActionsController } from './graph-actions.controller';
 import { BusinessGraphService } from './business-graph.service';
 import { GovernanceService } from './governance.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
@@ -22,7 +23,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
   imports: [PrismaModule, SubscriptionsModule],
-  controllers: [AiController, OutputTemplateController, FlowController],
+  controllers: [AiController, OutputTemplateController, FlowController, GraphActionsController],
   providers: [
     AiListener,
     AiAdvisorService,

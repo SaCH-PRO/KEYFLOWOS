@@ -269,6 +269,28 @@ export class DeliveryFailedPayload {
   businessId!: string;
 }
 
+export class GraphCacheInvalidatedPayload {
+  businessId!: string;
+  reason!: string;
+  sourceEvent?: string;
+}
+
+export class ActionExecutedPayload {
+  businessId!: string;
+  toolName!: string;
+  module!: string | null;
+  riskTier!: number;
+  success!: boolean;
+  changedEntities?: string[];
+}
+
+export class ActionBlockedPayload {
+  businessId!: string;
+  toolName!: string;
+  reason!: string;
+  riskTier!: number;
+}
+
 // Master event map for reference and typing
 export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
@@ -313,4 +335,7 @@ export interface KeyFlowEventMap {
   'content.failed': ContentFailedPayload;
   'delivery.completed': DeliveryCompletedPayload;
   'delivery.failed': DeliveryFailedPayload;
+  'graph.cache_invalidated': GraphCacheInvalidatedPayload;
+  'action.executed': ActionExecutedPayload;
+  'action.blocked': ActionBlockedPayload;
 }

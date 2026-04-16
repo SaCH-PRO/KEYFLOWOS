@@ -137,9 +137,14 @@ export function useStoreData() {
           setBusinessHours({ ...DEFAULT_HOURS, ...(bizRes.data as any).businessHours });
         }
       }
+      const productByNameKey = new Map<string, Product>();
+      for (const p of loadedProducts) {
+        productByNameKey.set(p.name.toLowerCase().trim(), p);
+      }
+
       const drifts: DriftedItem[] = [];
       for (const svc of loadedServices) {
-        const product = loadedProducts.find((p: Product) => p.name === svc.name);
+        const product = productByNameKey.get(svc.name.toLowerCase().trim());
         if (!product) continue;
         const priceDiff = Math.abs(svc.price - product.price) > 0.01;
         const svcDuration = (svc as any).durationMins ?? (svc as any).duration ?? null;
@@ -276,7 +281,7 @@ export function useStoreData() {
 
   async function handleQuickAddProduct(product: Product) {
     if (!businessId) return;
-    const existingService = services.find((s) => s.name === product.name);
+    const existingService = services.find((s) => s.name.toLowerCase().trim() === product.name.toLowerCase().trim());
     if (existingService) {
       toast.warning(`A service named '${product.name}' already exists in your store.`);
       return;
@@ -308,8 +313,9 @@ export function useStoreData() {
 
   async function handleDeleteServiceFromStore(serviceId: string, productName?: string) {
     if (!businessId) return;
+    const lookupName = (productName ?? services.find((s) => s.id === serviceId)?.name ?? "").toLowerCase().trim();
     const matchedProduct = commerceProducts.find(
-      (p) => p.name === (productName ?? services.find((s) => s.id === serviceId)?.name)
+      (p) => p.name.toLowerCase().trim() === lookupName
     );
     const productId = matchedProduct?.id;
     if (productId && confirmRemove !== productId) {
@@ -337,7 +343,7 @@ export function useStoreData() {
   }
 
   async function handleToggleStoreItem(product: Product) {
-    const matchedService = services.find((s) => s.name === product.name);
+    const matchedService = services.find((s) => s.name.toLowerCase().trim() === product.name.toLowerCase().trim());
     if (matchedService) {
       await handleDeleteServiceFromStore(matchedService.id, product.name);
     } else {
@@ -346,14 +352,14 @@ export function useStoreData() {
   }
 
   async function handleSelectAll() {
-    const notAdded = commerceProducts.filter((p) => !services.some((s) => s.name === p.name));
+    const notAdded = commerceProducts.filter((p) => !services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
     for (const p of notAdded) {
       await handleQuickAddProduct(p);
     }
   }
 
   async function handleDeselectAll() {
-    const toRemove = services.filter((s) => commerceProducts.some((p) => p.name === s.name));
+    const toRemove = services.filter((s) => commerceProducts.some((p) => p.name.toLowerCase().trim() === s.name.toLowerCase().trim()));
     for (const s of toRemove) {
       setConfirmRemove(null);
       await handleDeleteServiceFromStore(s.id);
@@ -413,8 +419,8 @@ export function useStoreData() {
     setConfigSaving(false);
   }
 
-  const storeServiceNames = new Set(services.map((s) => s.name));
-  const storeItemCount = services.filter((s) => commerceProducts.some((p) => p.name === s.name)).length;
+  const storeServiceNames = new Set(services.map((s) => s.name.toLowerCase().trim()));
+  const storeItemCount = services.filter((s) => commerceProducts.some((p) => p.name.toLowerCase().trim() === s.name.toLowerCase().trim())).length;
 
   return {
     businessId,
