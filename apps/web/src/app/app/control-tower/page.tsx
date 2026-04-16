@@ -6,13 +6,15 @@ import { Radar, RefreshCw } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import {
-  DollarSign, Users, Calendar, FolderKanban, ShieldCheck, TrendingUp,
+  DollarSign, Users, Calendar, FolderKanban, ShieldCheck, TrendingUp, Link2,
 } from "lucide-react";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { useControlTowerData } from "./components/use-control-tower-data";
 import { useControlTowerAiHub } from "./hooks/use-control-tower-ai-hub";
+import { CommandEntry } from "./components/command-entry";
 import { HealthOverview } from "./components/health-overview";
 import { PriorityQueue } from "./components/priority-queue";
+import { DailyPlan } from "./components/daily-plan";
 import { ModuleHealthGrid } from "./components/module-health-grid";
 import { GrowthOpsPanel } from "./components/growth-ops-panel";
 import { ApprovalsQueue } from "./components/approvals-queue";
@@ -56,6 +58,7 @@ export default function ControlTowerPage() {
 
   const db = d.data?.dashboard;
   const mods = d.data?.modules;
+  const graphData = d.graph;
 
   const metricItems: MetricStripItem[] = db && mods ? [
     {
@@ -100,6 +103,12 @@ export default function ControlTowerPage() {
           : (d.data?.snapshot.momentumScore ?? 0) >= 40 ? "warn" : "critical",
       },
     },
+    ...(graphData ? [{
+      label: "Entity Links",
+      value: graphData.linkCount ?? 0,
+      icon: Link2,
+      iconColor: "#6366f1",
+    }] : []),
   ] : [];
 
   return (
@@ -113,7 +122,7 @@ export default function ControlTowerPage() {
         moduleName: "Control Tower",
         onAction: handleAiAction,
       }}
-      metricStrip={metricItems.length > 0 ? <WorkspaceMetricStrip items={metricItems} columns={6} compact /> : undefined}
+      metricStrip={metricItems.length > 0 ? <WorkspaceMetricStrip items={metricItems} columns={7} compact /> : undefined}
       headerRight={
         <button
           onClick={d.refresh}
@@ -139,12 +148,21 @@ export default function ControlTowerPage() {
 
       {d.data && (
         <div className="space-y-4">
+          <CommandEntry
+            businessId={d.businessId}
+            onActionExecuted={d.refreshSilent}
+          />
+
           <HealthOverview
             momentumScore={d.data.snapshot.momentumScore}
             healthIndicators={d.data.snapshot.healthIndicators}
           />
 
-          <PriorityQueue priorities={d.priorities} businessId={d.businessId} />
+          <PriorityQueue
+            priorities={d.priorities}
+            businessId={d.businessId}
+            onActionExecuted={d.refreshSilent}
+          />
 
           {(d.data.risks?.length ?? 0) > 0 && (
             <RiskAlerts risks={d.data.risks} />
@@ -155,10 +173,12 @@ export default function ControlTowerPage() {
               <ApprovalsQueue
                 businessId={d.businessId}
                 pendingCount={d.data.pendingApprovals}
-                onResolve={d.refresh}
+                onResolve={d.refreshSilent}
               />
             </div>
           )}
+
+          <DailyPlan businessId={d.businessId} />
 
           <StorefrontIntel
             businessId={d.businessId}
