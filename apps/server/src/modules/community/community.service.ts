@@ -475,6 +475,25 @@ export class CommunityService {
     return endorsement;
   }
 
+  async updateEndorsement(fromBusinessId: string, toBusinessId: string, skill: string, message: string) {
+    const endorsement = await this.prisma.client.endorsement.findUnique({
+      where: {
+        fromBusinessId_toBusinessId_skill: { fromBusinessId, toBusinessId, skill },
+      },
+    });
+    if (!endorsement) return { error: 'Endorsement not found' };
+
+    return this.prisma.client.endorsement.update({
+      where: {
+        fromBusinessId_toBusinessId_skill: { fromBusinessId, toBusinessId, skill },
+      },
+      data: { message: message || null },
+      include: {
+        fromBusiness: { select: { id: true, name: true, logoUrl: true, headline: true } },
+      },
+    });
+  }
+
   async removeEndorsement(fromBusinessId: string, toBusinessId: string, skill: string) {
     try {
       return await this.prisma.client.endorsement.delete({
@@ -510,7 +529,7 @@ export class CommunityService {
   async getMyEndorsementsGiven(fromBusinessId: string, toBusinessId: string) {
     return this.prisma.client.endorsement.findMany({
       where: { fromBusinessId, toBusinessId },
-      select: { skill: true },
+      select: { skill: true, message: true },
     });
   }
 

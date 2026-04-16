@@ -237,6 +237,15 @@ export class CommunityController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/endorsements')
+  updateEndorsement(
+    @Param('businessId') businessId: string,
+    @Body() body: { toBusinessId: string; skill: string; message: string },
+  ) {
+    return this.community.updateEndorsement(businessId, body.toBusinessId, body.skill, body.message);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/community/endorsements')
   removeEndorsement(
     @Param('businessId') businessId: string,
