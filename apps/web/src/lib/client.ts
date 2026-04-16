@@ -5453,11 +5453,14 @@ export async function fetchTrustSignals(businessId: string): Promise<ApiResult<T
 export async function fetchEndorsements(businessId: string): Promise<ApiResult<{ endorsements: EndorsementData[]; topSkills: { skill: string; count: number }[]; total: number }>> {
   return apiGetSimple<{ endorsements: EndorsementData[]; topSkills: { skill: string; count: number }[]; total: number }>(`/community/endorsements/${encodeURIComponent(businessId)}`);
 }
-export async function fetchMyEndorsementsGiven(businessId: string, targetId: string): Promise<ApiResult<{ skill: string }[]>> {
+export async function fetchMyEndorsementsGiven(businessId: string, targetId: string): Promise<ApiResult<{ skill: string; message?: string }[]>> {
   return apiGetSimple<{ skill: string }[]>(`/businesses/${encodeURIComponent(businessId)}/community/endorsements-given/${encodeURIComponent(targetId)}`);
 }
 export async function createEndorsement(businessId: string, toBusinessId: string, skill: string, message?: string): Promise<ApiResult<EndorsementData>> {
   return apiPost<EndorsementData>({ path: `/businesses/${encodeURIComponent(businessId)}/community/endorsements`, body: { toBusinessId, skill, message } });
+}
+export async function updateEndorsement(businessId: string, toBusinessId: string, skill: string, message: string): Promise<ApiResult<EndorsementData>> {
+  return apiPatch<EndorsementData>(`/businesses/${encodeURIComponent(businessId)}/community/endorsements`, { toBusinessId, skill, message });
 }
 export async function removeEndorsement(businessId: string, toBusinessId: string, skill: string): Promise<ApiResult<void>> {
   return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/community/endorsements`, { toBusinessId, skill });

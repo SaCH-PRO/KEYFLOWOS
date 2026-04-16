@@ -28,6 +28,7 @@ import {
   Award,
   Star,
   ThumbsUp,
+  Pencil,
 } from "lucide-react";
 import {
   fetchCommunityProfile,
@@ -39,6 +40,7 @@ import {
   fetchEndorsements,
   fetchMyEndorsementsGiven,
   createEndorsement,
+  updateEndorsement,
   removeEndorsement,
   type CommunityProfile,
   type CommunityPost,
@@ -142,10 +144,14 @@ export default function PublicProfilePage() {
   const [endorsements, setEndorsements] = useState<EndorsementData[]>([]);
   const [topSkills, setTopSkills] = useState<{ skill: string; count: number }[]>([]);
   const [myEndorsedSkills, setMyEndorsedSkills] = useState<string[]>([]);
+  const [myEndorsementMessages, setMyEndorsementMessages] = useState<Record<string, string>>({});
   const [endorsingSkill, setEndorsingSkill] = useState<string | null>(null);
   const [endorseModalSkill, setEndorseModalSkill] = useState<string | null>(null);
   const [endorseMessage, setEndorseMessage] = useState("");
   const [endorseError, setEndorseError] = useState<string | null>(null);
+  const [editingEndorsement, setEditingEndorsement] = useState<{ skill: string; toBusinessId: string } | null>(null);
+  const [editMessage, setEditMessage] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -184,7 +190,12 @@ export default function PublicProfilePage() {
     ])
       .then(([connRes, endorseRes]) => {
         if (connRes.data) setConnectionStatus(connRes.data);
-        if (endorseRes.data) setMyEndorsedSkills(endorseRes.data.map(e => e.skill));
+        if (endorseRes.data) {
+          setMyEndorsedSkills(endorseRes.data.map(e => e.skill));
+          const msgMap: Record<string, string> = {};
+          endorseRes.data.forEach(e => { if (e.message) msgMap[e.skill] = e.message; });
+          setMyEndorsementMessages(msgMap);
+        }
       })
       .catch(() => {});
   }, [myBusinessId, businessId]);
@@ -270,6 +281,24 @@ export default function PublicProfilePage() {
     }
     setEndorsingSkill(null);
   }, [myBusinessId, businessId, endorseModalSkill, endorseMessage, endorsingSkill, closeEndorseModal]);
+
+  const handleEditEndorsement = useCallback(async () => {
+    if (!myBusinessId || !editingEndorsement || savingEdit) return;
+    setSavingEdit(true);
+    try {
+      const res = await updateEndorsement(myBusinessId, editingEndorsement.toBusinessId, editingEndorsement.skill, editMessage);
+      if (res.data) {
+        setMyEndorsementMessages(prev => ({ ...prev, [editingEndorsement.skill]: editMessage }));
+        setEndorsements(prev => prev.map(e =>
+          e.skill === editingEndorsement.skill && e.fromBusiness.id === myBusinessId
+            ? { ...e, message: editMessage || undefined }
+            : e
+        ));
+        setEditingEndorsement(null);
+      }
+    } catch {}
+    setSavingEdit(false);
+  }, [myBusinessId, editingEndorsement, editMessage, savingEdit]);
 
   const resolvedLogo = profile?.logoUrl
     ? profile.logoUrl.startsWith("http") ? profile.logoUrl : `${API_BASE}${profile.logoUrl}`
@@ -673,11 +702,64 @@ export default function PublicProfilePage() {
                     )}
                     <span className="text-[9px] text-muted-foreground">{timeAgo(endorsement.createdAt)}</span>
                   </div>
+                  {myBusinessId && endorsement.fromBusiness.id === myBusinessId && (
+                    <button
+                      onClick={() => {
+                        setEditingEndorsement({ skill: endorsement.skill, toBusinessId: businessId });
+                        setEditMessage(endorsement.message || myEndorsementMessages[endorsement.skill] || "");
+                      }}
+                      className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+                      title="Edit testimonial"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               );
             })}
           </div>
         </motion.div>
+      )}
+
+      {editingEndorsement && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setEditingEndorsement(null)}>
+          <div className="w-full max-w-md mx-4 kf-card rounded-2xl border border-border/50 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Pencil className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                Edit Testimonial
+              </h3>
+              <button onClick={() => setEditingEndorsement(null)} className="p-1 rounded-lg hover:bg-white/10 transition-colors">
+                <X className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Update your testimonial for the <span className="font-medium text-amber-400">{editingEndorsement.skill}</span> endorsement.
+            </p>
+            <textarea
+              value={editMessage}
+              onChange={e => setEditMessage(e.target.value)}
+              placeholder="Write your testimonial..."
+              rows={4}
+              className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50 resize-none"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setEditingEndorsement(null)}
+                className="px-4 py-2 rounded-xl text-xs font-medium text-muted-foreground hover:bg-white/5 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditEndorsement}
+                disabled={savingEdit}
+                className="px-4 py-2 rounded-xl text-xs font-medium kf-btn-primary disabled:opacity-50"
+              >
+                {savingEdit ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {profile.interests.length > 0 && (
