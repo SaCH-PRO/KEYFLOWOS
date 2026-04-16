@@ -1115,6 +1115,90 @@ export const FLOW_TOOLS: FlowTool[] = [
     },
     outputSchema: { type: 'object', description: 'Toggle result', fields: { playbook: { type: 'object', description: 'Updated playbook' }, enabled: { type: 'boolean', description: 'New enabled state' } } },
   },
+
+  // ================================================================
+  //  DELEGATION LOOPS — Autopilot governed delegation engine tools
+  // ================================================================
+  {
+    name: 'delegation_payment_recovery',
+    description: 'Scan overdue invoices and create escalating payment recovery tasks with reminders.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    changedEntities: ['autopilotTask', 'invoice'],
+    parameters: {
+      type: 'object',
+      properties: {
+        businessId: { type: 'string', description: 'The business ID' },
+      },
+      required: ['businessId'],
+    },
+    outputSchema: { type: 'object', description: 'Recovery run result', fields: { itemsMatched: { type: 'number', description: 'Overdue invoices found' }, actionsCreated: { type: 'number', description: 'Recovery tasks created' } } },
+  },
+  {
+    name: 'delegation_lead_reactivation',
+    description: 'Identify stale leads and create re-engagement tasks with lifecycle stage updates.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    changedEntities: ['autopilotTask', 'contact'],
+    parameters: {
+      type: 'object',
+      properties: {
+        businessId: { type: 'string', description: 'The business ID' },
+      },
+      required: ['businessId'],
+    },
+    outputSchema: { type: 'object', description: 'Reactivation run result', fields: { itemsMatched: { type: 'number', description: 'Stale leads found' }, actionsCreated: { type: 'number', description: 'Re-engagement tasks created' } } },
+  },
+  {
+    name: 'delegation_post_purchase',
+    description: 'Send thank-you messages, review requests, and cross-sell prompts after purchases.',
+    family: 'execute',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    changedEntities: ['autopilotTask'],
+    parameters: {
+      type: 'object',
+      properties: {
+        businessId: { type: 'string', description: 'The business ID' },
+      },
+      required: ['businessId'],
+    },
+    outputSchema: { type: 'object', description: 'Post-purchase run result', fields: { itemsMatched: { type: 'number', description: 'Recent purchases found' }, actionsCreated: { type: 'number', description: 'Follow-up tasks created' } } },
+  },
+  {
+    name: 'delegation_booking_prep',
+    description: 'Send preparation reminders before appointments and follow-up messages after completion.',
+    family: 'execute',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    changedEntities: ['autopilotTask'],
+    parameters: {
+      type: 'object',
+      properties: {
+        businessId: { type: 'string', description: 'The business ID' },
+      },
+      required: ['businessId'],
+    },
+    outputSchema: { type: 'object', description: 'Booking prep run result', fields: { itemsMatched: { type: 'number', description: 'Bookings needing prep/followup' }, actionsCreated: { type: 'number', description: 'Prep/follow-up tasks created' } } },
+  },
+  {
+    name: 'delegation_weekly_hygiene',
+    description: 'Clean up stale data, flag overdue items, incomplete profiles, and automation gaps.',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    changedEntities: ['autopilotTask'],
+    parameters: {
+      type: 'object',
+      properties: {
+        businessId: { type: 'string', description: 'The business ID' },
+      },
+      required: ['businessId'],
+    },
+    outputSchema: { type: 'object', description: 'Hygiene run result', fields: { itemsMatched: { type: 'number', description: 'Issues found' }, actionsCreated: { type: 'number', description: 'Cleanup tasks created' } } },
+  },
 ];
 
 export function getOpenAiToolDefinitions() {

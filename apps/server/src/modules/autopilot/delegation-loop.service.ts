@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GovernanceService } from '../ai/governance.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
@@ -20,11 +20,28 @@ interface LoopDefinition {
   defaultConfig: Record<string, unknown>;
 }
 
+interface LoopRecord {
+  id: string;
+  businessId: string;
+  loopType: string;
+  config: Record<string, unknown> | null;
+  intervalMin: number;
+  riskTier: number;
+}
+
+interface ScanResult {
+  itemsScanned: number;
+  itemsMatched: number;
+  actionsCreated: number;
+  actionsBlocked: number;
+  results: Array<Record<string, unknown>>;
+}
+
 const LOOP_DEFINITIONS: LoopDefinition[] = [
   {
     loopType: 'payment_recovery',
     name: 'Payment Recovery',
-    description: 'Automatically follows up on overdue invoices with escalating reminders and payment link re-sends.',
+    description: 'Automatically follows up on overdue invoices with 3/7/14-day escalating cadence, marks invoices overdue, and creates recovery tasks.',
     riskTier: 2,
     defaultIntervalMin: 360,
     defaultConfig: { graceDays: 3, maxReminders: 3, escalateAfterDays: 14 },
@@ -32,7 +49,7 @@ const LOOP_DEFINITIONS: LoopDefinition[] = [
   {
     loopType: 'lead_reactivation',
     name: 'Lead Reactivation',
-    description: 'Re-engages stale leads who haven\'t interacted in a configurable window with personalized outreach.',
+    description: 'Re-engages stale leads who haven\'t interacted in a configurable window, updates lifecycle stage, and creates outreach tasks.',
     riskTier: 2,
     defaultIntervalMin: 1440,
     defaultConfig: { staleDays: 30, maxPerRun: 10, excludeTags: ['do-not-contact'] },
@@ -40,10 +57,10 @@ const LOOP_DEFINITIONS: LoopDefinition[] = [
   {
     loopType: 'post_purchase',
     name: 'Post-Purchase Follow-up',
-    description: 'Sends thank-you messages, review requests, and reorder prompts after completed purchases.',
+    description: 'Sends thank-you messages (2h), review requests (7d), and cross-sell prompts (30d) after completed purchases.',
     riskTier: 1,
     defaultIntervalMin: 720,
-    defaultConfig: { thankYouDelayHours: 2, reviewRequestDelayDays: 7, reorderPromptDays: 30 },
+    defaultConfig: { thankYouDelayHours: 2, reviewRequestDelayDays: 7, crossSellDelayDays: 30 },
   },
   {
     loopType: 'booking_prep',
@@ -56,7 +73,7 @@ const LOOP_DEFINITIONS: LoopDefinition[] = [
   {
     loopType: 'weekly_hygiene',
     name: 'Weekly Hygiene',
-    description: 'Cleans up stale data, archives old drafts, flags duplicate contacts, and summarizes weekly patterns.',
+    description: 'Scans overdue items, stale leads, incomplete profiles, stale drafts, automation gaps, and summarizes weekly patterns.',
     riskTier: 1,
     defaultIntervalMin: 10080,
     defaultConfig: { archiveDraftsDays: 30, flagDuplicates: true, summarizePatterns: true },
@@ -144,7 +161,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
     const data: Record<string, unknown> = {};
     if (typeof updates.enabled === 'boolean') data.enabled = updates.enabled;
-    if (updates.config) data.config = { ...(loop.config as Record<string, unknown> || {}), ...updates.config };
+    if (updates.config) data.config = { ...((loop.config as Record<string, unknown>) || {}), ...updates.config };
     if (typeof updates.intervalMin === 'number') data.intervalMin = updates.intervalMin;
 
     if (updates.enabled && !loop.nextRunAt) {
@@ -153,7 +170,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
     return this.prisma.client.delegationLoop.update({
       where: { id: loopId },
-      data: data as any,
+      data,
     });
   }
 
@@ -171,7 +188,14 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
     });
     if (!loop) throw new NotFoundException('Delegation loop not found');
 
-    return this.executeLoop(loop as any);
+    return this.executeLoop({
+      id: loop.id,
+      businessId: loop.businessId,
+      loopType: loop.loopType,
+      config: loop.config as Record<string, unknown> | null,
+      intervalMin: loop.intervalMin,
+      riskTier: loop.riskTier,
+    });
   }
 
   private async processDueLoops() {
@@ -189,21 +213,21 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
     for (const loop of dueLoops) {
       try {
-        await this.executeLoop(loop as any);
+        await this.executeLoop({
+          id: loop.id,
+          businessId: loop.businessId,
+          loopType: loop.loopType,
+          config: loop.config as Record<string, unknown> | null,
+          intervalMin: loop.intervalMin,
+          riskTier: loop.riskTier,
+        });
       } catch (err) {
         this.logger.error(`Loop ${loop.loopType} failed for business ${loop.businessId}: ${(err as Error).message}`);
       }
     }
   }
 
-  private async executeLoop(loop: {
-    id: string;
-    businessId: string;
-    loopType: string;
-    config: Record<string, unknown> | null;
-    intervalMin: number;
-    riskTier: number;
-  }) {
+  private async executeLoop(loop: LoopRecord) {
     const run = await this.prisma.client.delegationLoopRun.create({
       data: {
         loopId: loop.id,
@@ -212,17 +236,34 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    const result = { itemsScanned: 0, itemsMatched: 0, actionsCreated: 0, actionsBlocked: 0, results: [] as unknown[] };
+    const result: ScanResult = { itemsScanned: 0, itemsMatched: 0, actionsCreated: 0, actionsBlocked: 0, results: [] };
 
     try {
-      const decision = await this.governance.evaluate(loop.businessId, `delegation_${loop.loopType}`);
+      const toolName = `delegation_${loop.loopType}`;
+      const decision = await this.governance.evaluate(loop.businessId, toolName);
+
+      this.events.emit('delegation_loop.started', {
+        businessId: loop.businessId,
+        loopType: loop.loopType,
+        runId: run.id,
+        governanceTier: decision.tier,
+        allowed: decision.allowed,
+      });
 
       if (!decision.allowed) {
         result.results.push({ blocked: true, reason: decision.reason });
         result.actionsBlocked++;
+
+        this.events.emit('delegation_loop.blocked', {
+          businessId: loop.businessId,
+          loopType: loop.loopType,
+          runId: run.id,
+          reason: decision.reason,
+          tier: decision.tier,
+        });
       } else if (decision.requiresFormalApproval || decision.requiresAdminApproval) {
         await this.governance.createApprovalItem(loop.businessId, {
-          toolName: `delegation_${loop.loopType}`,
+          toolName,
           title: `Run delegation loop: ${loop.loopType}`,
           description: `Autopilot wants to run the "${loop.loopType}" delegation loop. ${decision.reason}`,
           rationale: `Scheduled delegation loop execution (tier ${decision.tier})`,
@@ -230,9 +271,16 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         });
         result.actionsBlocked++;
         result.results.push({ requiresApproval: true, tier: decision.tier, reason: decision.reason });
+
+        this.events.emit('delegation_loop.approval_required', {
+          businessId: loop.businessId,
+          loopType: loop.loopType,
+          runId: run.id,
+          tier: decision.tier,
+        });
       } else {
         const config = (loop.config || {}) as Record<string, unknown>;
-        const requiresConfirm = decision.requiresQuickConfirm;
+        const requiresConfirm = !!decision.requiresQuickConfirm;
 
         switch (loop.loopType) {
           case 'payment_recovery':
@@ -262,7 +310,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           itemsMatched: result.itemsMatched,
           actionsCreated: result.actionsCreated,
           actionsBlocked: result.actionsBlocked,
-          results: result.results as any,
+          results: result.results,
         },
       });
 
@@ -283,6 +331,16 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
             totalItemsMatched: statsRaw._sum.itemsMatched || 0,
           },
         },
+      });
+
+      this.events.emit('delegation_loop.completed', {
+        businessId: loop.businessId,
+        loopType: loop.loopType,
+        runId: run.id,
+        itemsScanned: result.itemsScanned,
+        itemsMatched: result.itemsMatched,
+        actionsCreated: result.actionsCreated,
+        actionsBlocked: result.actionsBlocked,
       });
 
       if (result.actionsCreated > 0) {
@@ -307,6 +365,13 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         },
       });
 
+      this.events.emit('delegation_loop.failed', {
+        businessId: loop.businessId,
+        loopType: loop.loopType,
+        runId: run.id,
+        error: (err as Error).message,
+      });
+
       throw err;
     }
   }
@@ -314,8 +379,8 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
   private async runPaymentRecovery(
     businessId: string,
     config: Record<string, unknown>,
-    result: { itemsScanned: number; itemsMatched: number; actionsCreated: number; actionsBlocked: number; results: unknown[] },
-    requiresConfirm = false,
+    result: ScanResult,
+    requiresConfirm: boolean,
   ) {
     const graceDays = (config.graceDays as number) || 3;
     const maxReminders = (config.maxReminders as number) || 3;
@@ -354,17 +419,44 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
       if (existingReminders >= maxReminders) continue;
 
+      if (invoice.status === 'SENT' && daysPastDue >= graceDays) {
+        await this.prisma.client.invoice.update({
+          where: { id: invoice.id },
+          data: { status: 'OVERDUE' },
+        });
+
+        this.events.emit('invoice.overdue', {
+          businessId,
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          daysPastDue,
+          source: 'delegation_loop',
+        });
+      }
+
       result.itemsMatched++;
 
-      const priority = daysPastDue >= escalateAfterDays ? 'URGENT' : daysPastDue >= 7 ? 'HIGH' : 'NORMAL';
+      let cadenceLabel: string;
+      let priority: string;
+      if (daysPastDue >= escalateAfterDays) {
+        cadenceLabel = 'Final escalation';
+        priority = 'URGENT';
+      } else if (daysPastDue >= 7) {
+        cadenceLabel = 'Second reminder (7d+)';
+        priority = 'HIGH';
+      } else {
+        cadenceLabel = 'First reminder (3d+)';
+        priority = 'NORMAL';
+      }
+
       const contactName = [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(' ') || 'Customer';
       const needsApproval = requiresConfirm || priority === 'URGENT';
 
-      await this.prisma.client.autopilotTask.create({
+      const task = await this.prisma.client.autopilotTask.create({
         data: {
           businessId,
           title: `Payment reminder: ${invoice.invoiceNumber} — TTD ${Number(invoice.total).toFixed(2)}`,
-          description: `Invoice ${invoice.invoiceNumber} is ${daysPastDue} days overdue for ${contactName}. Total: TTD ${Number(invoice.total).toFixed(2)}.`,
+          description: `${cadenceLabel}: Invoice ${invoice.invoiceNumber} is ${daysPastDue} days overdue for ${contactName}. Total: TTD ${Number(invoice.total).toFixed(2)}. Re-send invoice with payment link.`,
           category: 'PAYMENT_RECOVERY',
           priority,
           autoExecutable: !needsApproval,
@@ -373,14 +465,37 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           relatedId: invoice.id,
           aiContext: {
             loopType: 'payment_recovery',
+            cadence: cadenceLabel,
             contactId: invoice.contact.id,
             contactName,
+            contactEmail: invoice.contact.email,
             invoiceNumber: invoice.invoiceNumber,
             total: Number(invoice.total),
             daysPastDue,
             reminderCount: existingReminders + 1,
+            maxReminders,
+            escalateAfterDays,
           },
         },
+      });
+
+      await this.prisma.client.contactEvent.create({
+        data: {
+          contactId: invoice.contact.id,
+          businessId,
+          type: 'autopilot.payment_recovery',
+          data: { description: `${cadenceLabel} created for invoice ${invoice.invoiceNumber} (${daysPastDue} days overdue)`, taskId: task.id, invoiceId: invoice.id, daysPastDue, cadence: cadenceLabel },
+          source: 'delegation_loop',
+        },
+      });
+
+      this.events.emit('autopilot.task.created', {
+        businessId,
+        taskId: task.id,
+        category: 'PAYMENT_RECOVERY',
+        loopType: 'payment_recovery',
+        relatedId: invoice.id,
+        priority,
       });
 
       result.actionsCreated++;
@@ -390,6 +505,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         invoiceNumber: invoice.invoiceNumber,
         contactName,
         daysPastDue,
+        cadence: cadenceLabel,
         priority,
       });
     }
@@ -398,8 +514,8 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
   private async runLeadReactivation(
     businessId: string,
     config: Record<string, unknown>,
-    result: { itemsScanned: number; itemsMatched: number; actionsCreated: number; actionsBlocked: number; results: unknown[] },
-    requiresConfirm = false,
+    result: ScanResult,
+    requiresConfirm: boolean,
   ) {
     const staleDays = (config.staleDays as number) || 30;
     const maxPerRun = (config.maxPerRun as number) || 10;
@@ -419,7 +535,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           tags: { hasSome: excludeTags },
         },
       },
-      select: { id: true, firstName: true, lastName: true, email: true, phone: true, updatedAt: true, leadScore: true },
+      select: { id: true, firstName: true, lastName: true, email: true, phone: true, updatedAt: true, leadScore: true, lifecycleStage: true },
       orderBy: { leadScore: 'desc' },
       take: maxPerRun + 20,
     });
@@ -446,11 +562,26 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       const contactName = [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.email || 'Lead';
       const daysSince = Math.ceil((Date.now() - new Date(lead.updatedAt).getTime()) / (24 * 60 * 60 * 1000));
 
-      await this.prisma.client.autopilotTask.create({
+      if (lead.lifecycleStage !== 'STALE' && lead.lifecycleStage !== 'LOST') {
+        await this.prisma.client.contact.update({
+          where: { id: lead.id },
+          data: { lifecycleStage: 'STALE' },
+        });
+
+        this.events.emit('contact.lifecycle_updated', {
+          businessId,
+          contactId: lead.id,
+          previousStage: lead.lifecycleStage,
+          newStage: 'STALE',
+          source: 'delegation_loop',
+        });
+      }
+
+      const task = await this.prisma.client.autopilotTask.create({
         data: {
           businessId,
           title: `Re-engage: ${contactName}`,
-          description: `${contactName} hasn't interacted in ${daysSince} days. Score: ${lead.leadScore ?? 'unscored'}.`,
+          description: `${contactName} hasn't interacted in ${daysSince} days. Score: ${lead.leadScore ?? 'unscored'}. Send a personalized re-engagement message.`,
           category: 'LEAD_REACTIVATION',
           priority: (lead.leadScore ?? 0) >= 70 ? 'HIGH' : 'NORMAL',
           autoExecutable: !requiresConfirm,
@@ -461,12 +592,32 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
             loopType: 'lead_reactivation',
             contactId: lead.id,
             contactName,
+            contactEmail: lead.email,
             daysSinceLastActivity: daysSince,
             leadScore: lead.leadScore,
             hasEmail: !!lead.email,
             hasPhone: !!lead.phone,
+            previousLifecycleStage: lead.lifecycleStage,
           },
         },
+      });
+
+      await this.prisma.client.contactEvent.create({
+        data: {
+          contactId: lead.id,
+          businessId,
+          type: 'autopilot.lead_reactivation',
+          data: { description: `Re-engagement task created — ${daysSince} days inactive, score: ${lead.leadScore ?? 'unscored'}`, taskId: task.id, daysSince, leadScore: lead.leadScore },
+          source: 'delegation_loop',
+        },
+      });
+
+      this.events.emit('autopilot.task.created', {
+        businessId,
+        taskId: task.id,
+        category: 'LEAD_REACTIVATION',
+        loopType: 'lead_reactivation',
+        relatedId: lead.id,
       });
 
       result.actionsCreated++;
@@ -476,6 +627,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         contactId: lead.id,
         contactName,
         daysSince,
+        leadScore: lead.leadScore,
       });
     }
   }
@@ -483,17 +635,90 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
   private async runPostPurchase(
     businessId: string,
     config: Record<string, unknown>,
-    result: { itemsScanned: number; itemsMatched: number; actionsCreated: number; actionsBlocked: number; results: unknown[] },
-    requiresConfirm = false,
+    result: ScanResult,
+    requiresConfirm: boolean,
   ) {
+    const thankYouDelayHours = (config.thankYouDelayHours as number) || 2;
     const reviewRequestDelayDays = (config.reviewRequestDelayDays as number) || 7;
+    const crossSellDelayDays = (config.crossSellDelayDays as number) || 30;
+
+    const thankYouWindowStart = new Date(Date.now() - (thankYouDelayHours + 4) * 60 * 60 * 1000);
+    const thankYouWindowEnd = new Date(Date.now() - thankYouDelayHours * 60 * 60 * 1000);
+
+    const recentPaidForThankYou = await this.prisma.client.invoice.findMany({
+      where: {
+        businessId,
+        status: 'PAID',
+        paidAt: { gte: thankYouWindowStart, lt: thankYouWindowEnd },
+        deletedAt: null,
+      },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true, doNotContact: true } },
+      },
+      take: 30,
+    });
+
+    result.itemsScanned += recentPaidForThankYou.length;
+
+    for (const invoice of recentPaidForThankYou) {
+      if (!invoice.contact || invoice.contact.doNotContact) continue;
+
+      const existing = await this.prisma.client.autopilotTask.findFirst({
+        where: {
+          businessId,
+          relatedType: 'INVOICE',
+          relatedId: invoice.id,
+          category: 'POST_PURCHASE',
+          aiContext: { path: ['subType'], equals: 'thank_you' },
+        },
+      });
+      if (existing) continue;
+
+      result.itemsMatched++;
+      const contactName = [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(' ') || 'Customer';
+
+      const task = await this.prisma.client.autopilotTask.create({
+        data: {
+          businessId,
+          title: `Thank-you: ${contactName}`,
+          description: `${contactName} just paid invoice ${invoice.invoiceNumber} (TTD ${Number(invoice.total).toFixed(2)}). Send a personalized thank-you message.`,
+          category: 'POST_PURCHASE',
+          priority: 'NORMAL',
+          autoExecutable: !requiresConfirm,
+          requiresApproval: requiresConfirm,
+          relatedType: 'INVOICE',
+          relatedId: invoice.id,
+          aiContext: {
+            loopType: 'post_purchase',
+            subType: 'thank_you',
+            contactId: invoice.contact.id,
+            contactName,
+            invoiceNumber: invoice.invoiceNumber,
+            paidAt: invoice.paidAt?.toISOString(),
+            total: Number(invoice.total),
+          },
+        },
+      });
+
+      this.events.emit('autopilot.task.created', {
+        businessId,
+        taskId: task.id,
+        category: 'POST_PURCHASE',
+        loopType: 'post_purchase',
+        subType: 'thank_you',
+        relatedId: invoice.id,
+      });
+
+      result.actionsCreated++;
+      result.results.push({ type: 'thank_you', contactName, invoiceId: invoice.id });
+    }
 
     const reviewCutoffStart = new Date();
     reviewCutoffStart.setDate(reviewCutoffStart.getDate() - reviewRequestDelayDays - 1);
     const reviewCutoffEnd = new Date();
     reviewCutoffEnd.setDate(reviewCutoffEnd.getDate() - reviewRequestDelayDays);
 
-    const recentlyPaidInvoices = await this.prisma.client.invoice.findMany({
+    const reviewInvoices = await this.prisma.client.invoice.findMany({
       where: {
         businessId,
         status: 'PAID',
@@ -506,9 +731,9 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       take: 30,
     });
 
-    result.itemsScanned = recentlyPaidInvoices.length;
+    result.itemsScanned += reviewInvoices.length;
 
-    for (const invoice of recentlyPaidInvoices) {
+    for (const invoice of reviewInvoices) {
       if (!invoice.contact || invoice.contact.doNotContact) continue;
 
       const existing = await this.prisma.client.autopilotTask.findFirst({
@@ -517,15 +742,15 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           relatedType: 'INVOICE',
           relatedId: invoice.id,
           category: 'POST_PURCHASE',
+          aiContext: { path: ['subType'], equals: 'review_request' },
         },
       });
       if (existing) continue;
 
       result.itemsMatched++;
-
       const contactName = [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(' ') || 'Customer';
 
-      await this.prisma.client.autopilotTask.create({
+      const task = await this.prisma.client.autopilotTask.create({
         data: {
           businessId,
           title: `Review request: ${contactName}`,
@@ -538,6 +763,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           relatedId: invoice.id,
           aiContext: {
             loopType: 'post_purchase',
+            subType: 'review_request',
             contactId: invoice.contact.id,
             contactName,
             invoiceNumber: invoice.invoiceNumber,
@@ -547,16 +773,98 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         },
       });
 
+      this.events.emit('autopilot.task.created', {
+        businessId,
+        taskId: task.id,
+        category: 'POST_PURCHASE',
+        loopType: 'post_purchase',
+        subType: 'review_request',
+        relatedId: invoice.id,
+      });
+
       result.actionsCreated++;
       result.results.push({ type: 'review_request', contactName, invoiceId: invoice.id });
+    }
+
+    const crossSellCutoffStart = new Date();
+    crossSellCutoffStart.setDate(crossSellCutoffStart.getDate() - crossSellDelayDays - 1);
+    const crossSellCutoffEnd = new Date();
+    crossSellCutoffEnd.setDate(crossSellCutoffEnd.getDate() - crossSellDelayDays);
+
+    const crossSellInvoices = await this.prisma.client.invoice.findMany({
+      where: {
+        businessId,
+        status: 'PAID',
+        paidAt: { gte: crossSellCutoffStart, lt: crossSellCutoffEnd },
+        deletedAt: null,
+      },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true, doNotContact: true } },
+      },
+      take: 20,
+    });
+
+    result.itemsScanned += crossSellInvoices.length;
+
+    for (const invoice of crossSellInvoices) {
+      if (!invoice.contact || invoice.contact.doNotContact) continue;
+
+      const existing = await this.prisma.client.autopilotTask.findFirst({
+        where: {
+          businessId,
+          relatedType: 'INVOICE',
+          relatedId: invoice.id,
+          category: 'POST_PURCHASE',
+          aiContext: { path: ['subType'], equals: 'cross_sell' },
+        },
+      });
+      if (existing) continue;
+
+      result.itemsMatched++;
+      const contactName = [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(' ') || 'Customer';
+
+      const task = await this.prisma.client.autopilotTask.create({
+        data: {
+          businessId,
+          title: `Cross-sell: ${contactName}`,
+          description: `${contactName} purchased ${crossSellDelayDays} days ago. Suggest complementary services or products based on their purchase history.`,
+          category: 'POST_PURCHASE',
+          priority: 'LOW',
+          autoExecutable: !requiresConfirm,
+          requiresApproval: requiresConfirm,
+          relatedType: 'INVOICE',
+          relatedId: invoice.id,
+          aiContext: {
+            loopType: 'post_purchase',
+            subType: 'cross_sell',
+            contactId: invoice.contact.id,
+            contactName,
+            invoiceNumber: invoice.invoiceNumber,
+            paidAt: invoice.paidAt?.toISOString(),
+            total: Number(invoice.total),
+          },
+        },
+      });
+
+      this.events.emit('autopilot.task.created', {
+        businessId,
+        taskId: task.id,
+        category: 'POST_PURCHASE',
+        loopType: 'post_purchase',
+        subType: 'cross_sell',
+        relatedId: invoice.id,
+      });
+
+      result.actionsCreated++;
+      result.results.push({ type: 'cross_sell', contactName, invoiceId: invoice.id });
     }
   }
 
   private async runBookingPrep(
     businessId: string,
     config: Record<string, unknown>,
-    result: { itemsScanned: number; itemsMatched: number; actionsCreated: number; actionsBlocked: number; results: unknown[] },
-    requiresConfirm = false,
+    result: ScanResult,
+    requiresConfirm: boolean,
   ) {
     const reminderHoursBefore = (config.reminderHoursBefore as number) || 24;
     const followUpDelayHours = (config.followUpDelayHours as number) || 2;
@@ -573,6 +881,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       },
       include: {
         contact: { select: { id: true, firstName: true, lastName: true, email: true, doNotContact: true } },
+        service: { select: { name: true } },
       },
       take: 50,
     });
@@ -597,12 +906,13 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
       const contactName = [booking.contact.firstName, booking.contact.lastName].filter(Boolean).join(' ') || 'Client';
       const startFormatted = new Date(booking.startTime).toLocaleString('en-TT', { timeZone: 'America/Port_of_Spain' });
+      const serviceName = booking.service?.name || null;
 
-      await this.prisma.client.autopilotTask.create({
+      const task = await this.prisma.client.autopilotTask.create({
         data: {
           businessId,
           title: `Prep reminder: ${contactName} — ${startFormatted}`,
-          description: `Upcoming appointment for ${contactName} at ${startFormatted}. Send preparation details.`,
+          description: `Upcoming ${serviceName ? serviceName + ' ' : ''}appointment for ${contactName} at ${startFormatted}. Send preparation details and confirmation.`,
           category: 'BOOKING_PREP',
           priority: 'HIGH',
           autoExecutable: !requiresConfirm,
@@ -613,15 +923,24 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
             loopType: 'booking_prep',
             contactId: booking.contact.id,
             contactName,
+            contactEmail: booking.contact.email,
             bookingId: booking.id,
             startTime: booking.startTime.toISOString(),
-            serviceName: (booking as any).serviceName || null,
+            serviceName,
           },
         },
       });
 
+      this.events.emit('autopilot.task.created', {
+        businessId,
+        taskId: task.id,
+        category: 'BOOKING_PREP',
+        loopType: 'booking_prep',
+        relatedId: booking.id,
+      });
+
       result.actionsCreated++;
-      result.results.push({ type: 'booking_prep', contactName, bookingId: booking.id, startTime: booking.startTime });
+      result.results.push({ type: 'booking_prep', contactName, bookingId: booking.id, startTime: booking.startTime.toISOString() });
     }
 
     const followUpWindow = new Date(Date.now() - followUpDelayHours * 60 * 60 * 1000);
@@ -636,6 +955,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       },
       include: {
         contact: { select: { id: true, firstName: true, lastName: true, email: true, doNotContact: true } },
+        service: { select: { name: true } },
       },
       take: 30,
     });
@@ -658,12 +978,13 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       result.itemsMatched++;
 
       const contactName = [booking.contact.firstName, booking.contact.lastName].filter(Boolean).join(' ') || 'Client';
+      const serviceName = booking.service?.name || null;
 
-      await this.prisma.client.autopilotTask.create({
+      const task = await this.prisma.client.autopilotTask.create({
         data: {
           businessId,
           title: `Follow up: ${contactName} — session completed`,
-          description: `${contactName}'s appointment has completed. Send a thank-you and feedback request.`,
+          description: `${contactName}'s ${serviceName ? serviceName + ' ' : ''}appointment has completed. Send a thank-you and feedback request.`,
           category: 'BOOKING_FOLLOWUP',
           priority: 'NORMAL',
           autoExecutable: !requiresConfirm,
@@ -675,9 +996,20 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
             subType: 'follow_up',
             contactId: booking.contact.id,
             contactName,
+            contactEmail: booking.contact.email,
             bookingId: booking.id,
+            serviceName,
           },
         },
+      });
+
+      this.events.emit('autopilot.task.created', {
+        businessId,
+        taskId: task.id,
+        category: 'BOOKING_FOLLOWUP',
+        loopType: 'booking_prep',
+        subType: 'follow_up',
+        relatedId: booking.id,
       });
 
       result.actionsCreated++;
@@ -688,19 +1020,16 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
   private async runWeeklyHygiene(
     businessId: string,
     config: Record<string, unknown>,
-    result: { itemsScanned: number; itemsMatched: number; actionsCreated: number; actionsBlocked: number; results: unknown[] },
+    result: ScanResult,
   ) {
     const archiveDraftsDays = (config.archiveDraftsDays as number) || 30;
     const summarizePatterns = (config.summarizePatterns as boolean) !== false;
-
-    const draftCutoff = new Date();
-    draftCutoff.setDate(draftCutoff.getDate() - archiveDraftsDays);
 
     const staleDrafts = await this.prisma.client.invoice.count({
       where: {
         businessId,
         status: 'DRAFT',
-        updatedAt: { lt: draftCutoff },
+        updatedAt: { lt: new Date(Date.now() - archiveDraftsDays * 24 * 60 * 60 * 1000) },
         deletedAt: null,
       },
     });
@@ -708,7 +1037,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
     if (staleDrafts > 0) {
       result.itemsMatched++;
-      await this.prisma.client.autopilotTask.create({
+      const task = await this.prisma.client.autopilotTask.create({
         data: {
           businessId,
           title: `Archive ${staleDrafts} stale draft invoice${staleDrafts > 1 ? 's' : ''}`,
@@ -721,6 +1050,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           aiContext: { loopType: 'weekly_hygiene', subType: 'stale_drafts', count: staleDrafts },
         },
       });
+      this.events.emit('autopilot.task.created', { businessId, taskId: task.id, category: 'WEEKLY_HYGIENE', loopType: 'weekly_hygiene', subType: 'stale_drafts' });
       result.actionsCreated++;
       result.results.push({ type: 'stale_drafts', count: staleDrafts });
     }
@@ -736,7 +1066,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
     if (staleTaskCount > 0) {
       result.itemsMatched++;
-      await this.prisma.client.autopilotTask.create({
+      const task = await this.prisma.client.autopilotTask.create({
         data: {
           businessId,
           title: `Review ${staleTaskCount} stale autopilot task${staleTaskCount > 1 ? 's' : ''}`,
@@ -749,8 +1079,102 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           aiContext: { loopType: 'weekly_hygiene', subType: 'stale_tasks', count: staleTaskCount },
         },
       });
+      this.events.emit('autopilot.task.created', { businessId, taskId: task.id, category: 'WEEKLY_HYGIENE', loopType: 'weekly_hygiene', subType: 'stale_tasks' });
       result.actionsCreated++;
       result.results.push({ type: 'stale_tasks', count: staleTaskCount });
+    }
+
+    const overdueInvoiceCount = await this.prisma.client.invoice.count({
+      where: {
+        businessId,
+        status: 'OVERDUE',
+        deletedAt: null,
+      },
+    });
+    result.itemsScanned += overdueInvoiceCount;
+
+    if (overdueInvoiceCount > 0) {
+      result.itemsMatched++;
+      const task = await this.prisma.client.autopilotTask.create({
+        data: {
+          businessId,
+          title: `${overdueInvoiceCount} overdue invoice${overdueInvoiceCount > 1 ? 's' : ''} need attention`,
+          description: `You have ${overdueInvoiceCount} overdue invoice${overdueInvoiceCount > 1 ? 's' : ''}. Review and follow up or enable Payment Recovery loop.`,
+          category: 'WEEKLY_HYGIENE',
+          priority: 'NORMAL',
+          autoExecutable: false,
+          requiresApproval: false,
+          relatedType: 'SYSTEM',
+          aiContext: { loopType: 'weekly_hygiene', subType: 'overdue_invoices', count: overdueInvoiceCount },
+        },
+      });
+      this.events.emit('autopilot.task.created', { businessId, taskId: task.id, category: 'WEEKLY_HYGIENE', loopType: 'weekly_hygiene', subType: 'overdue_invoices' });
+      result.actionsCreated++;
+      result.results.push({ type: 'overdue_invoices', count: overdueInvoiceCount });
+    }
+
+    const staleLeadCount = await this.prisma.client.contact.count({
+      where: {
+        businessId,
+        status: 'LEAD',
+        deletedAt: null,
+        updatedAt: { lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+      },
+    });
+    result.itemsScanned += staleLeadCount;
+
+    if (staleLeadCount > 0) {
+      result.itemsMatched++;
+      const task = await this.prisma.client.autopilotTask.create({
+        data: {
+          businessId,
+          title: `${staleLeadCount} stale lead${staleLeadCount > 1 ? 's' : ''} detected`,
+          description: `${staleLeadCount} lead${staleLeadCount > 1 ? 's have' : ' has'} gone 30+ days without interaction. Enable Lead Reactivation loop or manually review.`,
+          category: 'WEEKLY_HYGIENE',
+          priority: 'NORMAL',
+          autoExecutable: false,
+          requiresApproval: false,
+          relatedType: 'SYSTEM',
+          aiContext: { loopType: 'weekly_hygiene', subType: 'stale_leads', count: staleLeadCount },
+        },
+      });
+      this.events.emit('autopilot.task.created', { businessId, taskId: task.id, category: 'WEEKLY_HYGIENE', loopType: 'weekly_hygiene', subType: 'stale_leads' });
+      result.actionsCreated++;
+      result.results.push({ type: 'stale_leads', count: staleLeadCount });
+    }
+
+    const incompleteProfileCount = await this.prisma.client.contact.count({
+      where: {
+        businessId,
+        deletedAt: null,
+        OR: [
+          { email: null },
+          { email: '' },
+          { phone: null },
+          { phone: '' },
+        ],
+      },
+    });
+    result.itemsScanned += incompleteProfileCount;
+
+    if (incompleteProfileCount >= 5) {
+      result.itemsMatched++;
+      const task = await this.prisma.client.autopilotTask.create({
+        data: {
+          businessId,
+          title: `${incompleteProfileCount} contact${incompleteProfileCount > 1 ? 's' : ''} with incomplete profiles`,
+          description: `${incompleteProfileCount} contact${incompleteProfileCount > 1 ? 's are' : ' is'} missing email or phone. Complete their profiles to improve communication reach.`,
+          category: 'WEEKLY_HYGIENE',
+          priority: 'LOW',
+          autoExecutable: false,
+          requiresApproval: false,
+          relatedType: 'SYSTEM',
+          aiContext: { loopType: 'weekly_hygiene', subType: 'incomplete_profiles', count: incompleteProfileCount },
+        },
+      });
+      this.events.emit('autopilot.task.created', { businessId, taskId: task.id, category: 'WEEKLY_HYGIENE', loopType: 'weekly_hygiene', subType: 'incomplete_profiles' });
+      result.actionsCreated++;
+      result.results.push({ type: 'incomplete_profiles', count: incompleteProfileCount });
     }
 
     if (summarizePatterns) {
