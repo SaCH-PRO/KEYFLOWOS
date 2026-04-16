@@ -59,32 +59,36 @@ export default function ControlTowerPage() {
   const db = d.data?.dashboard;
   const mods = d.data?.modules;
   const graphData = d.graph;
+  const snap = d.snapshot;
 
   const metricItems: MetricStripItem[] = db && mods ? [
     {
       label: "Monthly Revenue",
-      value: formatTTD(db.monthlyRevenue),
+      value: formatTTD(snap?.revenue?.monthlyRevenue ?? db.monthlyRevenue),
       icon: DollarSign,
       iconColor: "#F97316",
-      threshold: { status: db.monthlyRevenue > 0 ? "good" : "warn" },
+      threshold: { status: (snap?.revenue?.monthlyRevenue ?? db.monthlyRevenue) > 0 ? "good" : "warn" },
     },
     {
       label: "Contacts",
-      value: mods.contacts.total,
+      value: snap?.contacts?.total ?? mods.contacts.total,
       icon: Users,
       iconColor: "#14B8A6",
     },
     {
       label: "Bookings",
-      value: db.upcomingBookings,
+      value: snap?.bookings?.upcomingCount ?? db.upcomingBookings,
       icon: Calendar,
       iconColor: "#3b82f6",
     },
     {
       label: "Projects",
-      value: db.activeProjects,
+      value: snap?.projects?.activeCount ?? db.activeProjects,
       icon: FolderKanban,
       iconColor: "#a78bfa",
+      threshold: {
+        status: (snap?.projects?.overdueTaskCount ?? db.overdueTaskCount) > 0 ? "warn" : "good",
+      },
     },
     {
       label: "Approvals",
