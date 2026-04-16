@@ -207,7 +207,7 @@ function RecentOrdersList({ businessId, onViewAll }: { businessId: string; onVie
 }
 
 function TopProductsGrid({ products, services }: { products: Product[]; services: Service[] }) {
-  const liveProducts = products.filter((p) => services.some((s) => s.name === p.name));
+  const liveProducts = products.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
   const sorted = [...liveProducts].sort((a, b) => (b.price ?? 0) - (a.price ?? 0)).slice(0, 4);
   if (sorted.length === 0) return null;
 
@@ -264,7 +264,7 @@ export function OverviewMode({
   const hoursConfigured = Object.values(businessHours).some((h) => h?.enabled);
   const hasMetaSeo = !!(seo?.metaTitle && seo?.metaDescription);
   const hasContact = !!(businessData?.phone || businessData?.email || contact?.whatsapp);
-  const liveProducts = commerceProducts.filter((p) => services.some((s) => s.name === p.name)).length;
+  const liveProducts = commerceProducts.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim())).length;
   const liveServices = services.length;
   const totalCatalog = commerceProducts.length;
 

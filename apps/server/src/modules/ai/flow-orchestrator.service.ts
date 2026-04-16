@@ -1824,6 +1824,17 @@ export class FlowOrchestratorService {
     return { planId, status: finalStatus, stepsExecuted, stepsFailed, stepsSkipped, results };
   }
 
+  async executeToolDirect(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+    planId?: string,
+    planStepId?: string,
+  ): Promise<FlowToolResult> {
+    const planContext = planId && planStepId ? { planId, planStepId } : undefined;
+    return this.executeTool(businessId, toolName, args, undefined, planContext);
+  }
+
   async autoExecuteToolForMonitoring(
     businessId: string,
     toolName: string,

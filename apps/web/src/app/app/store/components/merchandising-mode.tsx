@@ -146,7 +146,7 @@ type Props = {
 };
 
 function PricingSignals({ products, services }: { products: Product[]; services: Service[] }) {
-  const liveProducts = products.filter((p) => services.some((s) => s.name === p.name));
+  const liveProducts = products.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
   if (liveProducts.length === 0) return null;
 
   const prices = liveProducts.map((p) => p.price).filter((p) => p > 0);
@@ -202,7 +202,7 @@ function PricingSignals({ products, services }: { products: Product[]; services:
 }
 
 function InventoryHealthPanel({ products, services }: { products: Product[]; services: Service[] }) {
-  const liveProducts = products.filter((p) => services.some((s) => s.name === p.name));
+  const liveProducts = products.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
   if (liveProducts.length === 0) return null;
 
   const withImages = liveProducts.filter((p) => p.imageUrl).length;
@@ -260,7 +260,7 @@ function InventoryHealthPanel({ products, services }: { products: Product[]; ser
 }
 
 function CrossSellRecommendations({ products, services }: { products: Product[]; services: Service[] }) {
-  const liveProducts = products.filter((p) => services.some((s) => s.name === p.name));
+  const liveProducts = products.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
   if (liveProducts.length < 2) return null;
 
   const categories = [...new Set(liveProducts.map((p) => p.category).filter(Boolean))];
@@ -360,7 +360,7 @@ export function MerchandisingMode({
   const testimonials = (storefrontConfig.socialProof as any)?.testimonials ?? [];
   const faqEntries = storefrontConfig.faqEntries ?? [];
   const seo = storefrontConfig.seo as { metaTitle?: string; metaDescription?: string } | undefined;
-  const liveItems = commerceProducts.filter((p) => services.some((s) => s.name === p.name));
+  const liveItems = commerceProducts.filter((p) => services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
 
   const metrics: MetricStripItem[] = [
     {

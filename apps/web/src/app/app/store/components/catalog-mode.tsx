@@ -56,7 +56,7 @@ export function CatalogMode({
 }: Props) {
   const totalItems = commerceProducts.length;
   const inStore = storeItemCount;
-  const notAdded = totalItems - commerceProducts.filter((p) => storeServiceNames.has(p.name)).length;
+  const notAdded = totalItems - commerceProducts.filter((p) => storeServiceNames.has(p.name.toLowerCase().trim())).length;
   const categories = new Set(commerceProducts.map((p) => p.category).filter(Boolean));
   const serviceCount = commerceProducts.filter((p) => p.category === "SERVICE").length;
   const productCount = commerceProducts.filter((p) => p.category === "PRODUCT").length;

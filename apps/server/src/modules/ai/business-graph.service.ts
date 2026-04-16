@@ -1,6 +1,46 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
+export interface GraphEntityLink {
+  fromType: string;
+  fromId: string;
+  toType: string;
+  toId: string;
+  relation: string;
+  meta?: Record<string, any>;
+}
+
+export interface GraphContactSummary {
+  id: string;
+  name: string;
+  email: string | null;
+  status: string;
+  revenue: number;
+  invoiceIds: string[];
+  bookingIds: string[];
+  projectIds: string[];
+}
+
+export interface GraphInvoiceSummary {
+  id: string;
+  number: string | null;
+  status: string;
+  total: number;
+  dueDate: string | null;
+  contactId: string | null;
+  contactName: string | null;
+}
+
+export interface GraphProductSummary {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+  isActive: boolean;
+  serviceId: string | null;
+  storefrontListed: boolean;
+}
+
 export interface BusinessGraphSnapshot {
   businessId: string;
   timestamp: Date;
@@ -61,6 +101,12 @@ export interface BusinessGraphSnapshot {
   };
   momentumScore: number;
   healthIndicators: Array<{ area: string; status: 'good' | 'warning' | 'critical'; detail: string }>;
+  links: GraphEntityLink[];
+  entities: {
+    topContacts: GraphContactSummary[];
+    overdueInvoices: GraphInvoiceSummary[];
+    catalogProducts: GraphProductSummary[];
+  };
 }
 
 const CACHE_TTL_MS = 120_000;
@@ -217,7 +263,7 @@ export class BusinessGraphService {
     ];
     const momentumScore = Math.round((momentumSignals.reduce((a, b) => a + b, 0) / momentumSignals.length) * 100);
 
-    return {
+    const snapshot: BusinessGraphSnapshot = {
       businessId,
       timestamp: now,
       business: {
@@ -277,6 +323,141 @@ export class BusinessGraphService {
       },
       momentumScore,
       healthIndicators,
+      links: [],
+      entities: {
+        topContacts: [],
+        overdueInvoices: [],
+        catalogProducts: [],
+      },
+    };
+
+    await this.assembleEntityLinks(businessId, snapshot);
+
+    return snapshot;
+  }
+
+  private async assembleEntityLinks(businessId: string, snapshot: BusinessGraphSnapshot): Promise<void> {
+    const db = this.prisma.client;
+    const now = new Date();
+    const links: GraphEntityLink[] = [];
+
+    const [topContacts, overdueInvs, catalogProducts] = await Promise.all([
+      db.contact.findMany({
+        where: { businessId, deletedAt: null },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          status: true,
+          invoices: { select: { id: true, total: true, status: true }, where: { deletedAt: null }, take: 20 },
+          bookings: { select: { id: true }, where: { deletedAt: null }, take: 20 },
+          projects: { select: { id: true }, where: { deletedAt: null }, take: 10 },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 25,
+      }),
+      db.invoice.findMany({
+        where: { businessId, deletedAt: null, status: { in: ['SENT', 'DRAFT'] }, dueDate: { lt: now } },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          status: true,
+          total: true,
+          dueDate: true,
+          contactId: true,
+          contact: { select: { firstName: true, lastName: true } },
+        },
+        orderBy: { dueDate: 'asc' },
+        take: 20,
+      }),
+      db.product.findMany({
+        where: { businessId, deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          price: true,
+          category: true,
+          isActive: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+    ]);
+
+    const services = await db.service.findMany({
+      where: { businessId, deletedAt: null },
+      select: { id: true, name: true },
+    });
+    const serviceByName = new Map(services.map(s => [s.name.toLowerCase(), s.id]));
+
+    const contactSummaries: GraphContactSummary[] = topContacts.map(c => {
+      const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unknown';
+      const revenue = c.invoices
+        .filter(inv => inv.status === 'PAID')
+        .reduce((sum, inv) => sum + (Number(inv.total) || 0), 0);
+      const invoiceIds = c.invoices.map(inv => inv.id);
+      const bookingIds = c.bookings.map(b => b.id);
+      const projectIds = c.projects.map(p => p.id);
+
+      for (const invId of invoiceIds) {
+        links.push({ fromType: 'contact', fromId: c.id, toType: 'invoice', toId: invId, relation: 'has_invoice' });
+      }
+      for (const bId of bookingIds) {
+        links.push({ fromType: 'contact', fromId: c.id, toType: 'booking', toId: bId, relation: 'has_booking' });
+      }
+      for (const pId of projectIds) {
+        links.push({ fromType: 'contact', fromId: c.id, toType: 'project', toId: pId, relation: 'has_project' });
+      }
+
+      return { id: c.id, name, email: c.email, status: c.status, revenue, invoiceIds, bookingIds, projectIds };
+    });
+
+    contactSummaries.sort((a, b) => b.revenue - a.revenue);
+    snapshot.contacts.topClients = contactSummaries
+      .filter(c => c.revenue > 0)
+      .slice(0, 10)
+      .map(c => ({ id: c.id, name: c.name, revenue: c.revenue }));
+
+    const invoiceSummaries: GraphInvoiceSummary[] = overdueInvs.map(inv => {
+      const contactName = inv.contact
+        ? [inv.contact.firstName, inv.contact.lastName].filter(Boolean).join(' ') || null
+        : null;
+      if (inv.contactId) {
+        links.push({ fromType: 'invoice', fromId: inv.id, toType: 'contact', toId: inv.contactId, relation: 'billed_to' });
+      }
+      return {
+        id: inv.id,
+        number: inv.invoiceNumber,
+        status: inv.status,
+        total: Number(inv.total) || 0,
+        dueDate: inv.dueDate?.toISOString() ?? null,
+        contactId: inv.contactId,
+        contactName,
+      };
+    });
+
+    const productSummaries: GraphProductSummary[] = catalogProducts.map(p => {
+      const matchedServiceId = serviceByName.get(p.name.toLowerCase()) ?? null;
+      if (matchedServiceId) {
+        links.push({ fromType: 'product', fromId: p.id, toType: 'service', toId: matchedServiceId, relation: 'listed_as_service' });
+      }
+      return {
+        id: p.id,
+        name: p.name,
+        price: Number(p.price) || 0,
+        category: p.category,
+        isActive: p.isActive,
+        serviceId: matchedServiceId,
+        storefrontListed: matchedServiceId !== null,
+      };
+    });
+
+    snapshot.links = links;
+    snapshot.entities = {
+      topContacts: contactSummaries.slice(0, 15),
+      overdueInvoices: invoiceSummaries,
+      catalogProducts: productSummaries,
     };
   }
 
