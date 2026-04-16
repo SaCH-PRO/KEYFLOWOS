@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { GovernanceService } from '../ai/governance.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
 import { AiExecutionLogService } from '../ai/ai-execution-log.service';
+import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 export type LoopType =
@@ -58,10 +59,10 @@ const LOOP_DEFINITIONS: LoopDefinition[] = [
   {
     loopType: 'post_purchase',
     name: 'Post-Purchase Follow-up',
-    description: 'Sends thank-you messages (2h), review requests (7d), and cross-sell prompts (30d) after completed purchases.',
+    description: 'Sends thank-you messages (2h), review requests (7d), and cross-sell prompts (14d) after completed purchases.',
     riskTier: 1,
     defaultIntervalMin: 720,
-    defaultConfig: { thankYouDelayHours: 2, reviewRequestDelayDays: 7, crossSellDelayDays: 30 },
+    defaultConfig: { thankYouDelayHours: 2, reviewRequestDelayDays: 7, crossSellDelayDays: 14 },
   },
   {
     loopType: 'booking_prep',
@@ -93,6 +94,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
     @Inject(GovernanceService) private readonly governance: GovernanceService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
+    @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
@@ -422,8 +424,8 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
     requiresConfirm: boolean,
   ) {
     const graceDays = (config.graceDays as number) || 3;
-    const maxReminders = (config.maxReminders as number) || 3;
     const escalateAfterDays = (config.escalateAfterDays as number) || 14;
+    const milestones = [graceDays, 7, escalateAfterDays];
 
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - graceDays);
@@ -447,16 +449,20 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       if (!invoice.contact || invoice.contact.doNotContact) continue;
 
       const daysPastDue = Math.ceil((Date.now() - new Date(invoice.dueDate!).getTime()) / (24 * 60 * 60 * 1000));
-      const existingReminders = await this.prisma.client.autopilotTask.count({
+
+      const currentMilestone = milestones.filter(m => daysPastDue >= m).pop();
+      if (!currentMilestone) continue;
+
+      const existingForMilestone = await this.prisma.client.autopilotTask.findFirst({
         where: {
           businessId,
           relatedType: 'INVOICE',
           relatedId: invoice.id,
           category: 'PAYMENT_RECOVERY',
+          aiContext: { path: ['milestone'], equals: currentMilestone },
         },
       });
-
-      if (existingReminders >= maxReminders) continue;
+      if (existingForMilestone) continue;
 
       if (invoice.status === 'SENT' && daysPastDue >= graceDays) {
         await this.prisma.client.invoice.update({
@@ -477,14 +483,14 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
       let cadenceLabel: string;
       let priority: string;
-      if (daysPastDue >= escalateAfterDays) {
-        cadenceLabel = 'Final escalation';
+      if (currentMilestone >= escalateAfterDays) {
+        cadenceLabel = `Final escalation (${escalateAfterDays}d)`;
         priority = 'URGENT';
-      } else if (daysPastDue >= 7) {
-        cadenceLabel = 'Second reminder (7d+)';
+      } else if (currentMilestone >= 7) {
+        cadenceLabel = 'Second reminder (7d)';
         priority = 'HIGH';
       } else {
-        cadenceLabel = 'First reminder (3d+)';
+        cadenceLabel = `First reminder (${graceDays}d)`;
         priority = 'NORMAL';
       }
 
@@ -505,14 +511,13 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           aiContext: {
             loopType: 'payment_recovery',
             cadence: cadenceLabel,
+            milestone: currentMilestone,
             contactId: invoice.contact.id,
             contactName,
             contactEmail: invoice.contact.email,
             invoiceNumber: invoice.invoiceNumber,
             total: Number(invoice.total),
             daysPastDue,
-            reminderCount: existingReminders + 1,
-            maxReminders,
             escalateAfterDays,
           },
         },
@@ -523,7 +528,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           contactId: invoice.contact.id,
           businessId,
           type: 'autopilot.payment_recovery',
-          data: { description: `${cadenceLabel} created for invoice ${invoice.invoiceNumber} (${daysPastDue} days overdue)`, taskId: task.id, invoiceId: invoice.id, daysPastDue, cadence: cadenceLabel },
+          data: { description: `${cadenceLabel} created for invoice ${invoice.invoiceNumber} (${daysPastDue} days overdue)`, taskId: task.id, invoiceId: invoice.id, daysPastDue, cadence: cadenceLabel, milestone: currentMilestone },
           source: 'delegation_loop',
         },
       });
@@ -537,6 +542,41 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         priority,
       });
 
+      if (!needsApproval && invoice.contact.email) {
+        try {
+          await this.emailService.send({
+            businessId,
+            type: 'invoice_sent',
+            recipientEmail: invoice.contact.email,
+            recipientName: contactName,
+            contactId: invoice.contact.id,
+            templateData: {
+              invoiceNumber: invoice.invoiceNumber,
+              total: Number(invoice.total).toFixed(2),
+              currency: 'TTD',
+              daysPastDue,
+              cadence: cadenceLabel,
+              isPaymentReminder: true,
+            },
+            dedupeKey: `payment_recovery_${invoice.id}_${currentMilestone}`,
+          });
+
+          await this.prisma.client.autopilotTask.update({
+            where: { id: task.id },
+            data: { status: 'AUTO_EXECUTED', completedAt: new Date() },
+          });
+
+          this.events.emit('autopilot.task.auto_executed', {
+            businessId,
+            taskId: task.id,
+            category: 'PAYMENT_RECOVERY',
+            action: 'email_sent',
+          });
+        } catch (emailErr) {
+          this.logger.warn(`Failed to auto-send payment reminder email for invoice ${invoice.invoiceNumber}: ${(emailErr as Error).message}`);
+        }
+      }
+
       result.actionsCreated++;
       result.results.push({
         type: 'payment_reminder',
@@ -544,8 +584,10 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         invoiceNumber: invoice.invoiceNumber,
         contactName,
         daysPastDue,
+        milestone: currentMilestone,
         cadence: cadenceLabel,
         priority,
+        autoExecuted: !needsApproval && !!invoice.contact.email,
       });
     }
   }
@@ -1061,6 +1103,13 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
     config: Record<string, unknown>,
     result: ScanResult,
   ) {
+    const now = new Date();
+    const ttNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Port_of_Spain' }));
+    if (ttNow.getDay() !== 1) {
+      result.results.push({ type: 'skipped', reason: 'Weekly hygiene only runs on Mondays (Trinidad time)' });
+      return;
+    }
+
     const archiveDraftsDays = (config.archiveDraftsDays as number) || 30;
     const summarizePatterns = (config.summarizePatterns as boolean) !== false;
 
@@ -1249,12 +1298,21 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
     const approvalRate = approved / total;
     const toolName = `delegation_${loopType}`;
+    const currentSettings = await this.governance.getAutonomySettings(businessId);
 
     if (approvalRate >= 0.9 && total >= 15) {
+      const currentToolTier = this.governance.getToolTier(toolName);
+      if (currentToolTier > currentSettings.maxAutoTier && currentToolTier <= 2) {
+        await this.governance.updateAutonomySettings(businessId, {
+          maxAutoTier: currentToolTier as 1 | 2 | 3,
+        });
+        this.logger.log(`Governance auto-promoted maxAutoTier to ${currentToolTier} for business ${businessId} based on ${loopType} approval rate`);
+      }
+
       await this.memory.upsert(businessId, {
         category: 'governance',
         key: `${toolName}_trust_signal`,
-        value: `Loop "${loopType}" has a ${Math.round(approvalRate * 100)}% approval rate over ${total} actions. Consider promoting to auto-execute (Tier 1).`,
+        value: `Loop "${loopType}" has a ${Math.round(approvalRate * 100)}% approval rate over ${total} actions. Auto-execute tier promoted.`,
         confidence: Math.min(approvalRate, 0.95),
         source: 'learning_loop',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -1266,14 +1324,23 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         approvalRate,
         totalActions: total,
         recommendation: 'promote_to_auto',
+        tierAdjusted: true,
       });
 
       this.logger.log(`Loop ${loopType} trust elevated for business ${businessId}: ${Math.round(approvalRate * 100)}% approval over ${total} actions`);
     } else if (approvalRate < 0.5 && total >= 10) {
+      if (currentSettings.maxAutoTier > 1) {
+        const demotedTier = Math.max(1, currentSettings.maxAutoTier - 1) as 1 | 2 | 3;
+        await this.governance.updateAutonomySettings(businessId, {
+          maxAutoTier: demotedTier,
+        });
+        this.logger.log(`Governance auto-demoted maxAutoTier to ${demotedTier} for business ${businessId} based on ${loopType} rejection rate`);
+      }
+
       await this.memory.upsert(businessId, {
         category: 'governance',
         key: `${toolName}_distrust_signal`,
-        value: `Loop "${loopType}" has a ${Math.round(approvalRate * 100)}% approval rate over ${total} actions. Consider requiring manual approval (Tier 3).`,
+        value: `Loop "${loopType}" has a ${Math.round(approvalRate * 100)}% approval rate over ${total} actions. Auto-execute tier demoted.`,
         confidence: Math.min(1 - approvalRate, 0.9),
         source: 'learning_loop',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -1285,6 +1352,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         approvalRate,
         totalActions: total,
         recommendation: 'require_approval',
+        tierAdjusted: true,
       });
 
       this.logger.log(`Loop ${loopType} trust degraded for business ${businessId}: ${Math.round(approvalRate * 100)}% approval over ${total} actions`);
