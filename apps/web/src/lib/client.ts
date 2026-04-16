@@ -5420,6 +5420,18 @@ export async function removeNetworkConnection(businessId: string, toBusinessId: 
 export async function getConnectionStatus(businessId: string, targetId: string): Promise<ApiResult<NetworkConnectionStatus>> {
   return apiGetSimple<NetworkConnectionStatus>(`/businesses/${encodeURIComponent(businessId)}/community/connection-status/${encodeURIComponent(targetId)}`);
 }
+export interface BusinessRecommendation {
+  businessId: string;
+  score: number;
+  reasons: string[];
+  explanation: string;
+  matchType: 'complementary_skills' | 'same_industry' | 'referral_partner' | 'collaboration' | 'general';
+  business: DirectoryBusiness;
+}
+export async function fetchBusinessRecommendations(businessId: string, refresh = false): Promise<ApiResult<BusinessRecommendation[]>> {
+  const q = refresh ? '?refresh=true' : '';
+  return apiGetSimple<BusinessRecommendation[]>(`/businesses/${encodeURIComponent(businessId)}/community/recommendations${q}`);
+}
 export async function generateAiProfile(businessId: string, data: { name?: string; industry?: string; skills?: string[]; businessStage?: string; description?: string }): Promise<ApiResult<{ headline: string; bio: string }>> {
   return apiPost<{ headline: string; bio: string }>({ path: `/identity/businesses/${encodeURIComponent(businessId)}/generate-profile`, body: data });
 }
