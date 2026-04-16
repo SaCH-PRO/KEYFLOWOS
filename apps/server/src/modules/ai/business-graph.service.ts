@@ -341,7 +341,7 @@ export class BusinessGraphService {
     const now = new Date();
     const links: GraphEntityLink[] = [];
 
-    const [topContacts, overdueInvs, catalogProducts] = await Promise.all([
+    const [topContacts, overdueInvs, catalogProducts, contactProjects] = await Promise.all([
       db.contact.findMany({
         where: { businessId, deletedAt: null },
         select: {
@@ -352,7 +352,6 @@ export class BusinessGraphService {
           status: true,
           invoices: { select: { id: true, total: true, status: true }, where: { deletedAt: null }, take: 20 },
           bookings: { select: { id: true }, where: { deletedAt: null }, take: 20 },
-          projects: { select: { id: true }, where: { deletedAt: null }, take: 10 },
         },
         orderBy: { updatedAt: 'desc' },
         take: 25,
@@ -383,7 +382,20 @@ export class BusinessGraphService {
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
+      db.project.findMany({
+        where: { businessId, deletedAt: null, contactId: { not: null } },
+        select: { id: true, contactId: true },
+        take: 100,
+      }),
     ]);
+
+    const projectsByContact = new Map<string, string[]>();
+    for (const p of contactProjects) {
+      if (!p.contactId) continue;
+      const list = projectsByContact.get(p.contactId) || [];
+      list.push(p.id);
+      projectsByContact.set(p.contactId, list);
+    }
 
     const services = await db.service.findMany({
       where: { businessId, deletedAt: null },
@@ -398,7 +410,7 @@ export class BusinessGraphService {
         .reduce((sum, inv) => sum + (Number(inv.total) || 0), 0);
       const invoiceIds = c.invoices.map(inv => inv.id);
       const bookingIds = c.bookings.map(b => b.id);
-      const projectIds = c.projects.map(p => p.id);
+      const projectIds = projectsByContact.get(c.id) || [];
 
       for (const invId of invoiceIds) {
         links.push({ fromType: 'contact', fromId: c.id, toType: 'invoice', toId: invId, relation: 'has_invoice' });
