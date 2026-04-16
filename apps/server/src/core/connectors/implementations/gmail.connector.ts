@@ -1,0 +1,179 @@
+import { Injectable, Inject, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaService } from '../../prisma/prisma.service';
+import { EntityResolutionService } from '../entity-resolution.service';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+
+@Injectable()
+export class GmailConnector implements IConnector {
+  private readonly logger = new Logger(GmailConnector.name);
+
+  readonly meta: ConnectorMeta = {
+    type: 'gmail',
+    name: 'Gmail',
+    description: 'Send quotes, invoices, and campaigns from your business email',
+    category: 'communication',
+    icon: 'mail',
+    supportsSync: false,
+    supportsWebhook: false,
+    authType: 'oauth2',
+  };
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+  ) {}
+
+  async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { gmailAccessToken: true },
+    });
+    if (business?.gmailAccessToken) {
+      return { connected: true };
+    }
+    return { connected: false, authUrl: `/gmail/businesses/${businessId}/auth-url` };
+  }
+
+  async healthCheck(businessId: string): Promise<ConnectorHealth> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { gmailAccessToken: true, gmailEmail: true },
+    });
+    const realStatus = business?.gmailAccessToken ? 'connected' : 'disconnected';
+
+    const stored = await this.getConnectorStatus(businessId);
+    return {
+      status: realStatus,
+      lastSyncAt: stored?.lastSyncAt ?? null,
+      lastErrorAt: stored?.lastErrorAt ?? null,
+      lastError: stored?.lastError ?? null,
+      errorCount: stored?.errorCount ?? 0,
+      syncCount: stored?.syncCount ?? 0,
+      connectedAt: stored?.connectedAt ?? null,
+      connectedAccount: business?.gmailEmail ?? stored?.connectedAccount ?? null,
+    };
+  }
+
+  async getStatus(businessId: string): Promise<ConnectorStatusSummary> {
+    const health = await this.healthCheck(businessId);
+    return {
+      type: this.meta.type,
+      name: this.meta.name,
+      category: this.meta.category,
+      status: health.status,
+      connectedAccount: health.connectedAccount,
+    };
+  }
+
+  async isConnected(businessId: string): Promise<boolean> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { gmailAccessToken: true },
+    });
+    return !!business?.gmailAccessToken;
+  }
+
+  async sync(businessId: string): Promise<ConnectorSyncResult> {
+    const start = Date.now();
+    const connected = await this.isConnected(businessId);
+    if (!connected) {
+      return { success: false, itemsSynced: 0, errors: ['Gmail not connected'], duration: Date.now() - start };
+    }
+
+    await this.prisma.client.connectorStatus.upsert({
+      where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
+      create: { businessId, connectorType: 'gmail', status: 'connected', lastSyncAt: new Date(), syncCount: 1, connectedAccount: (await this.getGmailEmail(businessId)) },
+      update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
+    });
+
+    return { success: true, itemsSynced: 0, errors: [], duration: Date.now() - start };
+  }
+
+  async disconnect(businessId: string): Promise<void> {
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: {
+        gmailAccessToken: null,
+        gmailRefreshToken: null,
+      },
+    });
+    await this.prisma.client.connectorStatus.upsert({
+      where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
+      create: { businessId, connectorType: 'gmail', status: 'disconnected' },
+      update: { status: 'disconnected' },
+    });
+  }
+
+  async emitMessageReceived(businessId: string, opts: { from: string; subject?: string; body?: string; externalId?: string; senderName?: string }) {
+    await this.trackActivity(businessId);
+
+    const resolved = await this.entityResolution.resolveContact(businessId, {
+      source: 'gmail',
+      email: opts.from,
+      firstName: opts.senderName?.split(' ')[0],
+      lastName: opts.senderName?.split(' ').slice(1).join(' ') || undefined,
+    });
+
+    this.events.emit('entity.resolved', {
+      businessId,
+      contactId: resolved.contactId,
+      source: 'gmail',
+      matchedOn: resolved.matchedOn,
+      isNew: resolved.isNew,
+      merged: resolved.merged,
+    });
+
+    this.events.emit('message.received', {
+      connectorType: 'gmail' as const,
+      externalId: opts.externalId ?? null,
+      businessId,
+      timestamp: new Date(),
+      channel: 'email',
+      from: opts.from,
+      subject: opts.subject,
+      body: opts.body,
+      contactId: resolved.contactId,
+    });
+
+    return resolved;
+  }
+
+  async emitMessageSent(businessId: string, opts: { to: string; subject?: string; contactId?: string; externalId?: string }) {
+    await this.trackActivity(businessId);
+
+    this.events.emit('message.sent', {
+      connectorType: 'gmail' as const,
+      externalId: opts.externalId ?? null,
+      businessId,
+      timestamp: new Date(),
+      channel: 'email',
+      to: opts.to,
+      subject: opts.subject,
+      contactId: opts.contactId,
+    });
+  }
+
+  private async trackActivity(businessId: string) {
+    await this.prisma.client.connectorStatus.upsert({
+      where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
+      create: { businessId, connectorType: 'gmail', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
+      update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
+    }).catch((e) => this.logger.warn(`Failed to track gmail activity: ${e instanceof Error ? e.message : String(e)}`));
+  }
+
+  private async getGmailEmail(businessId: string): Promise<string | null> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { gmailEmail: true },
+    });
+    return business?.gmailEmail ?? null;
+  }
+
+  private async getConnectorStatus(businessId: string) {
+    return this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
+    });
+  }
+}

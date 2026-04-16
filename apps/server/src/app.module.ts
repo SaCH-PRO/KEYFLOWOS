@@ -44,6 +44,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { GoogleDriveModule } from './modules/google-drive/google-drive.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { CommunicationsModule } from './modules/communications/communications.module';
+import { ConnectorModule } from './core/connectors/connector.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { CommunicationsModule } from './modules/communications/communications.mo
     EventBusModule,
     AuthModule,
     TrpcModule,
+    ConnectorModule,
 
     // Feature Modules
     IdentityModule,

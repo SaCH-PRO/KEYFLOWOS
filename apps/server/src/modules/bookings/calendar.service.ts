@@ -1,6 +1,7 @@
-import { Injectable, BadRequestException, Logger, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
+import { GoogleCalendarConnector } from '../../core/connectors/implementations/google-calendar.connector';
 
 interface OAuthState {
   businessId: string;
@@ -26,6 +27,7 @@ export class CalendarService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Optional() @Inject(GoogleCalendarConnector) private readonly calendarConnector?: GoogleCalendarConnector,
   ) {
     if (!this.stateSecret) {
       this.logger.warn('GOOGLE_STATE_SECRET not configured - Calendar OAuth will not be secure');
@@ -365,6 +367,12 @@ export class CalendarService {
     if (booking.calendarEventId) {
       const updated = await this.updateCalendarEvent(booking.businessId, booking.calendarEventId, event);
       if (updated) {
+        this.calendarConnector?.emitCalendarEventUpdated(booking.businessId, {
+          title: event.summary,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          externalId: booking.calendarEventId,
+        }).catch((e) => this.logger.warn(`Calendar connector event emission failed: ${e.message}`));
         return booking.calendarEventId;
       }
     }
@@ -375,6 +383,16 @@ export class CalendarService {
         where: { id: bookingId },
         data: { calendarEventId: eventId },
       });
+
+      this.calendarConnector?.emitCalendarEventCreated(booking.businessId, {
+        title: event.summary,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        bookingId,
+        externalId: eventId,
+        clientEmail: booking.contact?.email ?? undefined,
+        clientName: contactName || undefined,
+      }).catch((e) => this.logger.warn(`Calendar connector event emission failed: ${e.message}`));
     }
 
     return eventId;
