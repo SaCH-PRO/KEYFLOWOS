@@ -742,13 +742,15 @@ export class CommerceController {
     return this.commerce.recordPublicPaymentIntent(invoiceId, body.method, body.amount);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/store/readiness')
   getStoreReadiness(@Param('businessId') businessId: string) {
     return this.storeReadiness.getReadiness(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/store/graph')
   getStoreGraph(@Param('businessId') businessId: string) {
     return this.storeReadiness.buildStoreGraph(businessId);

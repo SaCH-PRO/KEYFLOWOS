@@ -296,7 +296,7 @@ export class StoreReadinessService {
       { id: 'low-images', category: 'merchandising', severity: 'warning', title: 'Low Image Coverage', failDetail: `Only ${Math.round(liveWithImagesPct)}% of live items have images. Products with images convert 2× better.`, actionLabel: 'Add Images', actionTab: 'catalog', passed: liveWithImagesPct >= 50 || graph.liveCount === 0 },
       { id: 'inactive-items', category: 'merchandising', severity: 'warning', title: 'Inactive Items in Store', failDetail: 'Some store items are marked inactive in your catalog. Deactivated items confuse customers.', actionLabel: 'Review Catalog', actionTab: 'catalog', passed: !hasInactiveItems },
       { id: 'no-campaigns', category: 'promotion', severity: 'warning', title: 'No Marketing Campaigns', failDetail: 'You haven\'t sent any campaigns yet. Email campaigns drive repeat traffic and sales.', actionLabel: 'Create Campaign', actionTab: 'launch', passed: campaignStats.totalSent > 0 },
-      { id: 'low-campaign-coverage', category: 'promotion', severity: 'tip', title: 'Low Campaign Coverage', failDetail: `Only ${campaignStats.coveragePct}% of your catalog items have been mentioned in campaigns. Promote more items.`, actionLabel: 'Promote Items', actionTab: 'launch', passed: campaignStats.coveragePct >= 50 || graph.liveCount === 0 },
+      { id: 'low-campaign-coverage', category: 'promotion', severity: 'tip', title: 'Low Campaign Coverage', failDetail: 'Some catalog items may not have dedicated campaigns. Create targeted campaigns for each product to boost visibility.', actionLabel: 'Promote Items', actionTab: 'launch', passed: campaignStats.coveragePct < 0 || campaignStats.coveragePct >= 50 || graph.liveCount === 0 },
       { id: 'no-promo-codes', category: 'promotion', severity: 'tip', title: 'No Promo Codes', failDetail: 'Promo codes incentivize first-time buyers and drive urgency. Create one to boost conversions.', actionLabel: 'Create Promo', actionTab: 'merchandising', passed: campaignStats.hasPromoCodes },
     ];
 
@@ -363,9 +363,7 @@ export class StoreReadinessService {
         return { totalSent, coveragePct: 100, hasPromoCodes: promoCodeCount > 0 };
       }
 
-      const coveragePct = totalSent > 0
-        ? Math.min(100, Math.round((totalSent / products.length) * 100))
-        : 0;
+      const coveragePct = totalSent > 0 ? -1 : 0;
 
       return { totalSent, coveragePct, hasPromoCodes: promoCodeCount > 0 };
     } catch (e) {
