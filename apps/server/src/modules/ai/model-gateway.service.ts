@@ -79,6 +79,26 @@ export interface GatewayResponse {
   contractValidation?: ContractValidationResult;
 }
 
+export interface StreamChunk {
+  type: 'content_delta' | 'tool_call_delta' | 'usage' | 'done' | 'error';
+  content?: string;
+  toolCall?: {
+    index: number;
+    id?: string;
+    name?: string;
+    argumentsDelta?: string;
+  };
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    estimatedCost: number;
+  };
+  provider?: AiProvider;
+  model?: string;
+  error?: string;
+}
+
 export interface ProviderHealth {
   provider: AiProvider;
   available: boolean;
@@ -395,6 +415,364 @@ export class ModelGatewayService {
     }
 
     throw lastError || new Error('No AI providers available');
+  }
+
+  async *streamComplete(request: GatewayRequest): AsyncGenerator<StreamChunk> {
+    if (!this.routingTableLoaded) {
+      await this.loadRoutingConfig();
+    }
+
+    const preferences = await this.getPreferences(request.businessId);
+    const mode = preferences.aiMode;
+    const strategy = this.resolveStrategy(request, mode, preferences);
+    const candidates = [strategy.primary, ...strategy.fallbacks];
+
+    let lastError: Error | null = null;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+
+      if (!this.isProviderAvailable(candidate.provider, preferences)) {
+        continue;
+      }
+
+      if (i > 0) {
+        this.logger.warn(
+          `Stream falling back to ${candidate.provider}/${candidate.model} for ${request.taskCategory} (business: ${request.businessId})`,
+        );
+      }
+
+      try {
+        const startTime = Date.now();
+        const stream = this.callProviderStream(request, candidate.provider, candidate.model, preferences);
+
+        for await (const chunk of stream) {
+          yield { ...chunk, provider: candidate.provider, model: candidate.model };
+        }
+
+        const latencyMs = Date.now() - startTime;
+        this.recordProviderSuccess(candidate.provider, latencyMs);
+        return;
+      } catch (err) {
+        lastError = err as Error;
+        this.recordProviderError(candidate.provider);
+        this.logger.error(
+          `Stream provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
+        );
+      }
+    }
+
+    yield {
+      type: 'error',
+      error: lastError?.message || 'No AI providers available',
+    };
+  }
+
+  private async *callProviderStream(
+    request: GatewayRequest,
+    provider: AiProvider,
+    model: string,
+    preferences: AiPreferences,
+  ): AsyncGenerator<StreamChunk> {
+    const normalizedMessages = this.normalizeMessages(request.messages, provider);
+
+    switch (provider) {
+      case 'openai':
+        yield* this.streamOpenAi(normalizedMessages, model, request, preferences.byokOpenai);
+        break;
+      case 'anthropic':
+        yield* this.streamAnthropic(normalizedMessages, model, request, preferences.byokAnthropic);
+        break;
+      case 'xai':
+        yield* this.streamXai(normalizedMessages, model, request, preferences.byokXai);
+        break;
+      default:
+        throw new Error(`Unsupported provider: ${provider}`);
+    }
+  }
+
+  private async *streamOpenAi(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+    byokKey?: string,
+  ): AsyncGenerator<StreamChunk> {
+    const client = byokKey ? new OpenAI({ apiKey: byokKey }) : this.openai;
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const stream = await client.chat.completions.create(params);
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+
+      if (delta?.content) {
+        yield { type: 'content_delta', content: delta.content };
+      }
+
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          yield {
+            type: 'tool_call_delta',
+            toolCall: {
+              index: tc.index,
+              id: tc.id,
+              name: tc.function?.name,
+              argumentsDelta: tc.function?.arguments,
+            },
+          };
+        }
+      }
+
+      if (chunk.usage) {
+        const promptTokens = chunk.usage.prompt_tokens ?? 0;
+        const completionTokens = chunk.usage.completion_tokens ?? 0;
+        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['gpt-4o'];
+        const estimatedCost =
+          (promptTokens / 1000) * costs.input +
+          (completionTokens / 1000) * costs.output;
+
+        yield {
+          type: 'usage',
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          },
+        };
+      }
+    }
+
+    yield { type: 'done' };
+  }
+
+  private async *streamAnthropic(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+    byokKey?: string,
+  ): AsyncGenerator<StreamChunk> {
+    const apiKey = byokKey || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('Anthropic API key not configured');
+
+    let systemPrompt = '';
+    const nonSystemMessages: Array<{ role: string; content: string }> = [];
+
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        systemPrompt += (systemPrompt ? '\n\n' : '') + (msg.content || '');
+      } else if (msg.role === 'tool') {
+        nonSystemMessages.push({
+          role: 'user',
+          content: `[Tool result for ${msg.tool_call_id}]: ${msg.content}`,
+        });
+      } else {
+        nonSystemMessages.push({
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: msg.content || '',
+        });
+      }
+    }
+
+    if (nonSystemMessages.length === 0) {
+      nonSystemMessages.push({ role: 'user', content: 'Please respond.' });
+    }
+
+    const mergedMessages: Array<{ role: string; content: string }> = [];
+    for (const msg of nonSystemMessages) {
+      if (mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === msg.role) {
+        mergedMessages[mergedMessages.length - 1].content += '\n\n' + msg.content;
+      } else {
+        mergedMessages.push({ ...msg });
+      }
+    }
+
+    if (mergedMessages.length > 0 && mergedMessages[0].role !== 'user') {
+      mergedMessages.unshift({ role: 'user', content: 'Continue.' });
+    }
+
+    const body: Record<string, unknown> = {
+      model,
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+      messages: mergedMessages,
+      stream: true,
+    };
+
+    if (systemPrompt) {
+      body.system = systemPrompt;
+    }
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Anthropic streaming API error (${response.status}): ${errorText}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Anthropic streaming response has no body');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr || jsonStr === '[DONE]') continue;
+
+            try {
+              const event = JSON.parse(jsonStr);
+
+              if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+                yield { type: 'content_delta', content: event.delta.text };
+              }
+
+              if (event.type === 'message_start' && event.message?.usage) {
+                inputTokens = event.message.usage.input_tokens ?? 0;
+              }
+
+              if (event.type === 'message_delta' && event.usage) {
+                outputTokens = event.usage.output_tokens ?? 0;
+              }
+            } catch {
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const totalTokens = inputTokens + outputTokens;
+    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['claude-3-5-sonnet-20241022'];
+    const estimatedCost =
+      (inputTokens / 1000) * costs.input +
+      (outputTokens / 1000) * costs.output;
+
+    yield {
+      type: 'usage',
+      usage: {
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        totalTokens,
+        estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+      },
+    };
+
+    yield { type: 'done' };
+  }
+
+  private async *streamXai(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+    byokKey?: string,
+  ): AsyncGenerator<StreamChunk> {
+    const apiKey = byokKey || process.env.XAI_API_KEY;
+    if (!apiKey) throw new Error('xAI API key not configured');
+
+    const client = new OpenAI({
+      apiKey,
+      baseURL: 'https://api.x.ai/v1',
+    });
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const stream = await client.chat.completions.create(params);
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+
+      if (delta?.content) {
+        yield { type: 'content_delta', content: delta.content };
+      }
+
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          yield {
+            type: 'tool_call_delta',
+            toolCall: {
+              index: tc.index,
+              id: tc.id,
+              name: tc.function?.name,
+              argumentsDelta: tc.function?.arguments,
+            },
+          };
+        }
+      }
+
+      if (chunk.usage) {
+        const promptTokens = chunk.usage.prompt_tokens ?? 0;
+        const completionTokens = chunk.usage.completion_tokens ?? 0;
+        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['grok-2'];
+        const estimatedCost =
+          (promptTokens / 1000) * costs.input +
+          (completionTokens / 1000) * costs.output;
+
+        yield {
+          type: 'usage',
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          },
+        };
+      }
+    }
+
+    yield { type: 'done' };
   }
 
   private resolveStrategy(
