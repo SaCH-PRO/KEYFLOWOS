@@ -37,7 +37,7 @@ const MODULE_IMPACT = [
   { icon: Users, label: "Clients", fields: ["Industry", "Stage", "Skills"], color: "--kf-accent1" },
   { icon: DollarSign, label: "Revenue", fields: ["Name", "Description", "Team Size"], color: "--kf-success" },
   { icon: BarChart3, label: "Content", fields: ["Industry", "Description", "Tagline"], color: "--kf-accent2" },
-  { icon: Zap, label: "Autopilot", fields: ["Stage", "Team Size", "Industry"], color: "--kf-warning" },
+  { icon: Zap, label: "Automations", fields: ["Stage", "Team Size", "Industry"], color: "--kf-warning" },
   { icon: Target, label: "Projects", fields: ["Skills", "Team Size", "Stage"], color: "--kf-info" },
   { icon: FileText, label: "Documents", fields: ["Name", "Industry", "Description"], color: "--kf-accent1" },
 ];

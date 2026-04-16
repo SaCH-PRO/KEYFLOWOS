@@ -59,7 +59,7 @@ const WORKSPACE_MAP: Record<string, string> = {
   marketing: "Content",
   expenses: "Expenses",
   projects: "Projects",
-  automations: "Autopilot",
+  automations: "Automations",
   reports: "Reports",
   store: "Presence",
   settings: "Studio",

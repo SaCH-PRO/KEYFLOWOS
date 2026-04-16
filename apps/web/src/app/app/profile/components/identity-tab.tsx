@@ -30,9 +30,9 @@ const IDENTITY_MODES: { id: IdentityMode; label: string; icon: React.ElementType
 const FIELD_POWERS: Record<string, { powers: string; modules: string[] }> = {
   name: { powers: "Your business name appears on invoices, contracts, storefront, and all AI-generated content", modules: ["Revenue", "Store", "Documents"] },
   industry: { powers: "Your industry selection drives template recommendations, market intelligence, and competitive analysis", modules: ["Intelligence", "Content", "Projects"] },
-  businessStage: { powers: "Business stage powers growth recommendations, automation suggestions, and intelligence depth", modules: ["Autopilot", "Intelligence", "Revenue"] },
+  businessStage: { powers: "Business stage powers growth recommendations, automation suggestions, and intelligence depth", modules: ["Automations", "Intelligence", "Revenue"] },
   description: { powers: "Your description improves AI document quality and feeds into public profile and storefront", modules: ["Documents", "Store", "Content"] },
-  teamSize: { powers: "Team size shapes staffing recommendations, operations guidance, and automation fit", modules: ["Autopilot", "Projects", "Revenue"] },
+  teamSize: { powers: "Team size shapes staffing recommendations, operations guidance, and automation fit", modules: ["Automations", "Projects", "Revenue"] },
   headline: { powers: "Your headline defines how you appear in marketplace listings and public profiles", modules: ["Store", "Clients"] },
   bio: { powers: "Your bio enriches AI-generated proposals, company profiles, and client communications", modules: ["Documents", "Clients", "Content"] },
   skills: { powers: "Skills enable smarter project templates, service matching, and expertise-based recommendations", modules: ["Projects", "Revenue", "Intelligence"] },

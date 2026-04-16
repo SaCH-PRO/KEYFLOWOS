@@ -18,7 +18,7 @@ const TIER_CONFIG: Record<number, { label: string; icon: typeof Shield; color: s
 
 const MODULE_LABELS: Record<string, string> = {
   crm: "Clients", commerce: "Revenue", bookings: "Calendar",
-  marketing: "Content", social: "Social", automations: "Autopilot",
+  marketing: "Content", social: "Social", automations: "Automations",
   expenses: "Expenses", projects: "Projects",
 };
 

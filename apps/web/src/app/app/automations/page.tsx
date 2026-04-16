@@ -239,7 +239,7 @@ export default function FlowsPage() {
   return (
     <WorkspaceShell
       icon={Workflow}
-      title="Autopilot"
+      title="Automations"
       subtitle={<span className="inline-flex items-center gap-1.5">Automate and orchestrate how your business reacts across every module <AiBadge label="AI-Powered" compact /></span>}
       tabs={TABS}
       activeTab={activeTab}
