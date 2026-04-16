@@ -468,6 +468,7 @@ export function useCommerceAiHub() {
     moduleName: "Commerce",
     generateSuggestions: generateCommerceSuggestions,
     tools,
+    useGlobalCopilot: true,
     executeAction: async (actionKey, context) => {
       if (actionKey.startsWith("tool:")) {
         const toolId = actionKey.replace("tool:", "");

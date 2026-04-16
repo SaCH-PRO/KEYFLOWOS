@@ -214,6 +214,7 @@ export function useExpensesAiHub() {
     moduleName: "Expenses",
     generateSuggestions: generateExpenseSuggestions,
     tools,
+    useGlobalCopilot: true,
     executeAction: async (actionKey, context) => {
       if (actionKey.startsWith("tool:")) {
         const toolId = actionKey.replace("tool:", "");

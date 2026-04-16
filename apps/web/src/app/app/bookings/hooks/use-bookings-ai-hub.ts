@@ -163,6 +163,7 @@ export function useBookingsAiHub() {
     moduleName: "Bookings",
     generateSuggestions: generateBookingsSuggestions,
     tools,
+    useGlobalCopilot: true,
     executeAction: async (actionKey, context) => {
       if (actionKey.startsWith("tool:")) {
         const toolId = actionKey.replace("tool:", "");

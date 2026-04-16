@@ -299,6 +299,7 @@ export function useCrmAiHub() {
     moduleName: "CRM",
     generateSuggestions: generateCrmSuggestions,
     tools,
+    useGlobalCopilot: true,
   });
 
   const updateCrmContext = useCallback((params: {

@@ -150,6 +150,7 @@ export function useAutomationsAiHub() {
     moduleName: "Flows",
     generateSuggestions: generateAutomationSuggestions,
     tools,
+    useGlobalCopilot: true,
     executeAction: async (actionKey, context) => {
       if (actionKey.startsWith("tool:")) {
         const toolId = actionKey.replace("tool:", "");
