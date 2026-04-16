@@ -204,6 +204,10 @@ model Business {
   networkConnectionsFrom NetworkConnection[] @relation("NetworkConnectionFrom")
   networkConnectionsTo   NetworkConnection[] @relation("NetworkConnectionTo")
 
+  // Endorsements (Trust & Reputation)
+  endorsementsGiven    Endorsement[] @relation("EndorsementFrom")
+  endorsementsReceived Endorsement[] @relation("EndorsementTo")
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -1866,6 +1870,23 @@ model NetworkConnection {
   @@index([fromBusinessId])
   @@index([toBusinessId])
   @@map("network_connections")
+}
+
+model Endorsement {
+  id             String   @id @default(cuid())
+  fromBusinessId String   @map("from_business_id")
+  toBusinessId   String   @map("to_business_id")
+  skill          String
+  message        String?
+  fromBusiness   Business @relation("EndorsementFrom", fields: [fromBusinessId], references: [id], onDelete: Cascade)
+  toBusiness     Business @relation("EndorsementTo", fields: [toBusinessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([fromBusinessId, toBusinessId, skill])
+  @@index([fromBusinessId])
+  @@index([toBusinessId])
+  @@map("endorsements")
 }
 
 // ---

@@ -322,6 +322,7 @@ export class IdentityService {
             communityPosts: true,
             cohortMembers: true,
             networkConnectionsTo: true,
+            endorsementsReceived: true,
           },
         },
       },

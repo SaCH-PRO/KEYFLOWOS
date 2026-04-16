@@ -5316,6 +5316,19 @@ export interface Cohort {
   isActive: boolean;
   _count?: { members: number };
 }
+export interface TrustSignals {
+  reputationScore: number;
+  badges: { id: string; label: string; icon: string }[];
+  endorsementCount: number;
+  topEndorsedSkills: { skill: string; count: number }[];
+}
+export interface EndorsementData {
+  id: string;
+  skill: string;
+  message?: string;
+  createdAt: string;
+  fromBusiness: { id: string; name: string; logoUrl?: string; headline?: string };
+}
 export interface CommunityProfile {
   id: string;
   name: string;
@@ -5340,7 +5353,7 @@ export interface CommunityProfile {
   products?: { id: string; name: string; price: number; currency: string; category: string; imageUrl?: string; description?: string }[];
   services?: { id: string; name: string; price: number; currency: string; durationMins?: number; description?: string }[];
   createdAt: string;
-  _count?: { communityPosts: number; cohortMembers: number; networkConnectionsTo: number };
+  _count?: { communityPosts: number; cohortMembers: number; networkConnectionsTo: number; endorsementsReceived?: number };
 }
 export interface DirectoryBusiness {
   id: string;
@@ -5364,7 +5377,7 @@ export interface DirectoryBusiness {
   profileCompleteness: number;
   products?: { id: string; name: string; price: number; currency: string; category: string }[];
   services?: { id: string; name: string; price: number; currency: string }[];
-  _count?: { communityPosts: number; cohortMembers: number; networkConnectionsTo: number };
+  _count?: { communityPosts: number; cohortMembers: number; networkConnectionsTo: number; endorsementsReceived?: number };
 }
 export interface NetworkConnectionStatus {
   following: boolean;
@@ -5431,6 +5444,21 @@ export interface BusinessRecommendation {
 export async function fetchBusinessRecommendations(businessId: string, refresh = false): Promise<ApiResult<BusinessRecommendation[]>> {
   const q = refresh ? '?refresh=true' : '';
   return apiGetSimple<BusinessRecommendation[]>(`/businesses/${encodeURIComponent(businessId)}/community/recommendations${q}`);
+}
+export async function fetchTrustSignals(businessId: string): Promise<ApiResult<TrustSignals>> {
+  return apiGetSimple<TrustSignals>(`/community/trust-signals/${encodeURIComponent(businessId)}`);
+}
+export async function fetchEndorsements(businessId: string): Promise<ApiResult<{ endorsements: EndorsementData[]; topSkills: { skill: string; count: number }[]; total: number }>> {
+  return apiGetSimple<{ endorsements: EndorsementData[]; topSkills: { skill: string; count: number }[]; total: number }>(`/community/endorsements/${encodeURIComponent(businessId)}`);
+}
+export async function fetchMyEndorsementsGiven(businessId: string, targetId: string): Promise<ApiResult<{ skill: string }[]>> {
+  return apiGetSimple<{ skill: string }[]>(`/businesses/${encodeURIComponent(businessId)}/community/endorsements-given/${encodeURIComponent(targetId)}`);
+}
+export async function createEndorsement(businessId: string, toBusinessId: string, skill: string, message?: string): Promise<ApiResult<EndorsementData>> {
+  return apiPost<EndorsementData>({ path: `/businesses/${encodeURIComponent(businessId)}/community/endorsements`, body: { toBusinessId, skill, message } });
+}
+export async function removeEndorsement(businessId: string, toBusinessId: string, skill: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/community/endorsements`, { toBusinessId, skill });
 }
 export async function generateAiProfile(businessId: string, data: { name?: string; industry?: string; skills?: string[]; businessStage?: string; description?: string }): Promise<ApiResult<{ headline: string; bio: string }>> {
   return apiPost<{ headline: string; bio: string }>({ path: `/identity/businesses/${encodeURIComponent(businessId)}/generate-profile`, body: data });

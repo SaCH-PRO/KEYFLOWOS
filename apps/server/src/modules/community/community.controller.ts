@@ -205,4 +205,43 @@ export class CommunityController {
   ) {
     return this.matching.getRecommendations(businessId, refresh === 'true');
   }
+
+  @UseGuards(AuthGuard)
+  @Get('community/trust-signals/:businessId')
+  getTrustSignals(@Param('businessId') businessId: string) {
+    return this.community.getTrustSignals(businessId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('community/endorsements/:businessId')
+  getEndorsements(@Param('businessId') businessId: string) {
+    return this.community.getEndorsements(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/endorsements-given/:targetId')
+  getMyEndorsementsGiven(
+    @Param('businessId') businessId: string,
+    @Param('targetId') targetId: string,
+  ) {
+    return this.community.getMyEndorsementsGiven(businessId, targetId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/endorsements')
+  createEndorsement(
+    @Param('businessId') businessId: string,
+    @Body() body: { toBusinessId: string; skill: string; message?: string },
+  ) {
+    return this.community.createEndorsement(businessId, body.toBusinessId, body.skill, body.message);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/community/endorsements')
+  removeEndorsement(
+    @Param('businessId') businessId: string,
+    @Body() body: { toBusinessId: string; skill: string },
+  ) {
+    return this.community.removeEndorsement(businessId, body.toBusinessId, body.skill);
+  }
 }
