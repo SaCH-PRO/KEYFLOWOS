@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface TrustSignals {
   reputationScore: number;
@@ -21,6 +22,7 @@ const BADGE_DEFINITIONS = [
 export class CommunityService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async listPosts(filters?: { type?: string; tag?: string; page?: number; limit?: number }) {
@@ -399,12 +401,27 @@ export class CommunityService {
     });
     if (existing) return { error: 'Already endorsed this skill' };
 
-    return this.prisma.client.endorsement.create({
+    const endorsement = await this.prisma.client.endorsement.create({
       data: { fromBusinessId, toBusinessId, skill, message: message ?? null },
       include: {
         fromBusiness: { select: { id: true, name: true, logoUrl: true, headline: true } },
       },
     });
+
+    this.notificationsService.create({
+      businessId: toBusinessId,
+      type: 'endorsement',
+      title: `${endorsement.fromBusiness.name} endorsed your skill`,
+      body: `${endorsement.fromBusiness.name} endorsed you for "${skill}"`,
+      data: {
+        endorserBusinessId: fromBusinessId,
+        endorserName: endorsement.fromBusiness.name,
+        skill,
+        link: `/app/community/profile/${fromBusinessId}`,
+      },
+    }).catch(() => {});
+
+    return endorsement;
   }
 
   async removeEndorsement(fromBusinessId: string, toBusinessId: string, skill: string) {
