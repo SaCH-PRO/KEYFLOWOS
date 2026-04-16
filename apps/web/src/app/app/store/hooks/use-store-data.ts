@@ -19,6 +19,10 @@ import {
   fetchStoreAnalytics,
   StoreAnalytics,
   CatalogItemOverride,
+  fetchStoreGraph,
+  fetchStoreReadiness,
+  StoreGraph,
+  StoreReadinessResult,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { apiGet } from "@/lib/api";
@@ -65,6 +69,9 @@ export function useStoreData() {
   const [overviewAnalytics, setOverviewAnalytics] = useState<StoreAnalytics | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeDeliveryMethodsCount, setActiveDeliveryMethodsCount] = useState(0);
+
+  const [storeGraph, setStoreGraph] = useState<StoreGraph | null>(null);
+  const [readiness, setReadiness] = useState<StoreReadinessResult | null>(null);
 
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>({
     hero: {},
@@ -115,11 +122,12 @@ export function useStoreData() {
     if (showLoader) setLoading(true);
     setLoadError(null);
     try {
-      const [servicesRes, staffRes, bizRes, productsRes] = await Promise.all([
+      const [servicesRes, staffRes, bizRes, productsRes, graphRes] = await Promise.all([
         fetchServices(businessId),
         fetchStaff(businessId),
         getBusinessById(businessId).catch(() => ({ data: null, error: null })),
         fetchProducts(businessId).catch(() => ({ data: null, error: null })),
+        fetchStoreGraph(businessId).catch(() => ({ data: null, error: null })),
       ]);
       const loadedServices = servicesRes.data ?? [];
       const loadedProducts = (productsRes as any)?.data ?? [];
@@ -137,35 +145,29 @@ export function useStoreData() {
           setBusinessHours({ ...DEFAULT_HOURS, ...(bizRes.data as any).businessHours });
         }
       }
-      const productByNameKey = new Map<string, Product>();
-      for (const p of loadedProducts) {
-        productByNameKey.set(p.name.toLowerCase().trim(), p);
+
+      const graph = graphRes.data;
+      if (graph) {
+        setStoreGraph(graph);
+
+        const drifts: DriftedItem[] = graph.mappings
+          .filter((m) => m.isLive && (m.priceDrift || m.durationDrift))
+          .map((m) => ({
+            serviceId: m.serviceId!,
+            serviceName: m.serviceName ?? m.productName,
+            priceDiff: m.priceDrift,
+            durationDiff: m.durationDrift,
+            commercePrice: m.commercePrice,
+            commerceDuration: m.commerceDuration,
+          }));
+        setDriftedItems(drifts);
       }
 
-      const drifts: DriftedItem[] = [];
-      for (const svc of loadedServices) {
-        const product = productByNameKey.get(svc.name.toLowerCase().trim());
-        if (!product) continue;
-        const priceDiff = Math.abs(svc.price - product.price) > 0.01;
-        const svcDuration = (svc as any).durationMins ?? (svc as any).duration ?? null;
-        const durationDiff = product.duration != null && svcDuration != null && svcDuration !== product.duration;
-        if (priceDiff || durationDiff) {
-          drifts.push({
-            serviceId: svc.id,
-            serviceName: svc.name,
-            priceDiff,
-            durationDiff,
-            commercePrice: product.price,
-            commerceDuration: product.duration ?? null,
-          });
-        }
-      }
-      setDriftedItems(drifts);
-
-      const [configRes, analyticsRes, deliveryRes] = await Promise.all([
+      const [configRes, analyticsRes, deliveryRes, readinessRes] = await Promise.all([
         fetchStorefrontConfig(businessId).catch(() => ({ data: null, error: null })),
         fetchStoreAnalytics(businessId, 30).catch(() => ({ data: null, error: null })),
         apiGet<Record<string, { enabled?: boolean }>>(`/marketplace/businesses/${businessId}/delivery-config`).catch(() => ({ data: null })),
+        fetchStoreReadiness(businessId).catch(() => ({ data: null, error: null })),
       ]);
       if (configRes.data) setStorefrontConfig(configRes.data);
       if (analyticsRes.data) setOverviewAnalytics(analyticsRes.data);
@@ -173,6 +175,7 @@ export function useStoreData() {
         const count = Object.values(deliveryRes.data).filter((m) => m?.enabled).length;
         setActiveDeliveryMethodsCount(count);
       }
+      if (readinessRes.data) setReadiness(readinessRes.data);
     } catch (e) {
       console.error("Failed to load store data:", e);
       setLoadError("Failed to load store data. Please refresh the page.");
@@ -279,11 +282,19 @@ export function useStoreData() {
     await loadData();
   }
 
+  const graphProductToServiceMap = new Map<string, string>();
+  if (storeGraph) {
+    for (const m of storeGraph.mappings) {
+      if (m.isLive && m.serviceId) {
+        graphProductToServiceMap.set(m.productId, m.serviceId);
+      }
+    }
+  }
+
   async function handleQuickAddProduct(product: Product) {
     if (!businessId) return;
-    const existingService = services.find((s) => s.name.toLowerCase().trim() === product.name.toLowerCase().trim());
-    if (existingService) {
-      toast.warning(`A service named '${product.name}' already exists in your store.`);
+    if (graphProductToServiceMap.has(product.id)) {
+      toast.warning(`"${product.name}" is already in your store.`);
       return;
     }
     setProcessingItems((prev) => new Set(prev).add(product.id));
@@ -299,7 +310,7 @@ export function useStoreData() {
         toast.error(`Failed to add: ${res.error}`);
       } else {
         toast.success(`"${product.name}" added to store!`);
-        emitEvent("store:item_added", "store", { productName: product.name });
+        emitEvent("store:item_added", "store", { productId: product.id, productName: product.name });
         await loadData();
       }
     } finally {
@@ -313,17 +324,14 @@ export function useStoreData() {
 
   async function handleDeleteServiceFromStore(serviceId: string, productName?: string) {
     if (!businessId) return;
-    const lookupName = (productName ?? services.find((s) => s.id === serviceId)?.name ?? "").toLowerCase().trim();
-    const matchedProduct = commerceProducts.find(
-      (p) => p.name.toLowerCase().trim() === lookupName
-    );
-    const productId = matchedProduct?.id;
+    const mapping = storeGraph?.mappings.find((m) => m.serviceId === serviceId);
+    const productId = mapping?.productId;
     if (productId && confirmRemove !== productId) {
       setConfirmRemove(productId);
       return;
     }
     setConfirmRemove(null);
-    if (matchedProduct) setProcessingItems((prev) => new Set(prev).add(matchedProduct.id));
+    if (productId) setProcessingItems((prev) => new Set(prev).add(productId));
     try {
       const res = await deleteService(serviceId, businessId);
       if (res.error) {
@@ -333,36 +341,37 @@ export function useStoreData() {
         await loadData();
       }
     } finally {
-      if (matchedProduct)
+      if (productId)
         setProcessingItems((prev) => {
           const n = new Set(prev);
-          n.delete(matchedProduct.id);
+          n.delete(productId);
           return n;
         });
     }
   }
 
   async function handleToggleStoreItem(product: Product) {
-    const matchedService = services.find((s) => s.name.toLowerCase().trim() === product.name.toLowerCase().trim());
-    if (matchedService) {
-      await handleDeleteServiceFromStore(matchedService.id, product.name);
+    const mapping = storeGraph?.mappings.find((m) => m.productId === product.id);
+    if (mapping?.isLive && mapping.serviceId) {
+      await handleDeleteServiceFromStore(mapping.serviceId, product.name);
     } else {
       await handleQuickAddProduct(product);
     }
   }
 
   async function handleSelectAll() {
-    const notAdded = commerceProducts.filter((p) => !services.some((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim()));
+    const notAdded = commerceProducts.filter((p) => !graphProductToServiceMap.has(p.id));
     for (const p of notAdded) {
       await handleQuickAddProduct(p);
     }
   }
 
   async function handleDeselectAll() {
-    const toRemove = services.filter((s) => commerceProducts.some((p) => p.name.toLowerCase().trim() === s.name.toLowerCase().trim()));
-    for (const s of toRemove) {
+    if (!storeGraph) return;
+    const liveEntries = storeGraph.mappings.filter((m) => m.isLive && m.serviceId);
+    for (const entry of liveEntries) {
       setConfirmRemove(null);
-      await handleDeleteServiceFromStore(s.id);
+      await handleDeleteServiceFromStore(entry.serviceId!);
     }
   }
 
@@ -419,8 +428,23 @@ export function useStoreData() {
     setConfigSaving(false);
   }
 
-  const storeServiceNames = new Set(services.map((s) => s.name.toLowerCase().trim()));
-  const storeItemCount = services.filter((s) => commerceProducts.some((p) => p.name.toLowerCase().trim() === s.name.toLowerCase().trim())).length;
+  const liveProductIds = new Set<string>();
+  if (storeGraph) {
+    for (const m of storeGraph.mappings) {
+      if (m.isLive) liveProductIds.add(m.productId);
+    }
+  }
+
+  const storeServiceNames = new Set<string>();
+  if (storeGraph) {
+    for (const m of storeGraph.mappings) {
+      if (m.isLive) {
+        storeServiceNames.add(m.productName.toLowerCase().trim());
+      }
+    }
+  }
+
+  const storeItemCount = storeGraph?.liveCount ?? 0;
 
   return {
     businessId,
@@ -464,5 +488,8 @@ export function useStoreData() {
     storeItemCount,
     emitEvent,
     activeDeliveryMethodsCount,
+    storeGraph,
+    readiness,
+    liveProductIds,
   };
 }

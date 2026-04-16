@@ -3423,6 +3423,78 @@ export async function fetchStoreAnalytics(businessId: string, days = 30): Promis
   return apiGetSimple<StoreAnalytics>(`/site/businesses/${encodeURIComponent(businessId)}/analytics?days=${days}`);
 }
 
+export interface StoreGraphMapping {
+  productId: string;
+  productName: string;
+  serviceId: string | null;
+  serviceName: string | null;
+  isLive: boolean;
+  priceDrift: boolean;
+  durationDrift: boolean;
+  commercePrice: number;
+  servicePrice: number | null;
+  commerceDuration: number | null;
+  serviceDuration: number | null;
+  category: string;
+  imageUrl: string | null;
+  isActive: boolean;
+}
+
+export interface StoreGraph {
+  mappings: StoreGraphMapping[];
+  liveCount: number;
+  draftCount: number;
+  driftCount: number;
+  totalProducts: number;
+  totalServices: number;
+  serviceNameIndex: Record<string, string>;
+}
+
+export type ReadinessCategory = 'launch' | 'conversion' | 'merchandising' | 'promotion';
+export type ReadinessSeverity = 'blocker' | 'warning' | 'tip';
+
+export interface ReadinessItem {
+  id: string;
+  category: ReadinessCategory;
+  severity: ReadinessSeverity;
+  title: string;
+  detail: string;
+  actionLabel: string;
+  actionTab: string;
+  resolved: boolean;
+}
+
+export interface ReadinessScores {
+  overall: number;
+  launch: number;
+  conversion: number;
+  merchandising: number;
+  promotion: number;
+}
+
+export interface RevenueSnapshot {
+  totalRevenue30d: number;
+  totalOrders30d: number;
+  avgOrderValue: number;
+  topProductRevenue: { productId: string; productName: string; revenue: number; orders: number }[];
+  conversionRate: number | null;
+}
+
+export interface StoreReadinessResult {
+  scores: ReadinessScores;
+  items: ReadinessItem[];
+  revenue: RevenueSnapshot;
+  graph: StoreGraph;
+}
+
+export async function fetchStoreGraph(businessId: string): Promise<ApiResult<StoreGraph>> {
+  return apiGetSimple<StoreGraph>(`/commerce/businesses/${encodeURIComponent(businessId)}/store/graph`);
+}
+
+export async function fetchStoreReadiness(businessId: string): Promise<ApiResult<StoreReadinessResult>> {
+  return apiGetSimple<StoreReadinessResult>(`/commerce/businesses/${encodeURIComponent(businessId)}/store/readiness`);
+}
+
 export async function trackStoreEvent(businessId: string, type: string, itemId?: string): Promise<void> {
   fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/analytics/event`, {
     method: 'POST',

@@ -18,6 +18,7 @@ import { SourceRiskService } from './source-risk.service';
 import { InventoryRiskService } from './inventory-risk.service';
 import { CommerceIntelligenceService } from './commerce-intelligence.service';
 import { MarginSnapshotSchedulerService } from './margin-snapshot-scheduler.service';
+import { StoreReadinessService } from './store-readiness.service';
 import { CrmModule } from '../crm/crm.module';
 import { AutomationModule } from '../automation/automation.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
@@ -43,6 +44,7 @@ import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
     InventoryRiskService,
     CommerceIntelligenceService,
     MarginSnapshotSchedulerService,
+    StoreReadinessService,
     PlanLimitGuard,
   ],
   exports: [

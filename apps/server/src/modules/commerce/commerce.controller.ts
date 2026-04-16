@@ -4,6 +4,7 @@ import { Response } from 'express';
 import { CommerceService } from './commerce.service';
 import { RecurringInvoiceService } from './recurring-invoice.service';
 import { CommerceVisionService } from './commerce-vision.service';
+import { StoreReadinessService } from './store-readiness.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -32,6 +33,7 @@ export class CommerceController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommerceVisionService) private readonly vision: CommerceVisionService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
+    @Inject(StoreReadinessService) private readonly storeReadiness: StoreReadinessService,
   ) {}
 
   private async verifyBusinessAccess(userId: string, businessId: string) {
@@ -738,5 +740,17 @@ export class CommerceController {
     @Body() body: { method: string; amount?: number },
   ) {
     return this.commerce.recordPublicPaymentIntent(invoiceId, body.method, body.amount);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/store/readiness')
+  getStoreReadiness(@Param('businessId') businessId: string) {
+    return this.storeReadiness.getReadiness(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/store/graph')
+  getStoreGraph(@Param('businessId') businessId: string) {
+    return this.storeReadiness.buildStoreGraph(businessId);
   }
 }
