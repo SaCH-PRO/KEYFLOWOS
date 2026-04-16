@@ -103,7 +103,7 @@ const MODULE_LABELS: Record<string, { label: string; icon: typeof Sparkles; colo
   flows: { label: "Automations", icon: Zap, color: "text-teal-400" },
   automations: { label: "Automations", icon: Zap, color: "text-teal-400" },
   store: { label: "Store", icon: Package, color: "text-orange-400" },
-  cockpit: { label: "Command", icon: Target, color: "text-foreground/70" },
+  cockpit: { label: "Command Tower", icon: Target, color: "text-foreground/70" },
 };
 
 const RISK_STYLES: Record<string, { bg: string; border: string; label: string; color: string }> = {

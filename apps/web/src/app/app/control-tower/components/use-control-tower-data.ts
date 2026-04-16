@@ -298,14 +298,14 @@ export function useControlTowerData(): ControlTowerState {
       if (ctRes.data) {
         setData(ctRes.data);
       } else if (!graphRes.data && !silent) {
-        setError("Failed to load Control Tower data");
+        setError("Failed to load Command Tower data");
       }
       if (queueRes.data) {
         setActionItems(queueRes.data.items ?? []);
       }
     } catch {
       if (!silent) {
-        setError("Failed to load Control Tower data");
+        setError("Failed to load Command Tower data");
       }
     } finally {
       if (!silent) {

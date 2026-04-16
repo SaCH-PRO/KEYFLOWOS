@@ -56,6 +56,7 @@ async function generateTowerSuggestions(context: ModuleContext): Promise<AiSugge
       priority: "high",
       actionLabel: "Review actions",
       actionKey: "navigate:/app/control-tower",
+
     });
   }
 
@@ -88,7 +89,7 @@ const towerTools: AiTool[] = [
   {
     id: "explain_metric",
     name: "Explain Metric",
-    description: "AI explains what a Control Tower metric means and suggests actions to improve it",
+    description: "AI explains what a Command Tower metric means and suggests actions to improve it",
     icon: "help-circle",
     category: "analyze",
     requiresSelection: false,
@@ -209,7 +210,7 @@ export function useControlTowerAiHub(customData: TowerCustomData) {
 
   const ai = useModuleAi({
     moduleId: "control-tower",
-    moduleName: "Control Tower",
+    moduleName: "Command Tower",
     generateSuggestions: generateTowerSuggestions,
     tools: towerTools,
     useGlobalCopilot: true,
