@@ -214,4 +214,22 @@ export class CommerceAiController {
     checkAiRateLimit(businessId);
     return this.commerceAi.revenueJourney(businessId);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(5, 60_000)
+  @Post('businesses/:businessId/ai-quote-from-conversation')
+  aiQuoteFromConversation(
+    @Param('businessId') businessId: string,
+    @Body() body: { conversationText: string },
+  ) {
+    if (!body.conversationText || typeof body.conversationText !== 'string') {
+      throw new BadRequestException('conversationText is required');
+    }
+    if (body.conversationText.length > 10000) {
+      throw new BadRequestException('conversationText must be 10000 characters or less');
+    }
+    checkAiRateLimit(businessId);
+    return this.commerceAi.quoteFromConversation(businessId, body.conversationText);
+  }
 }

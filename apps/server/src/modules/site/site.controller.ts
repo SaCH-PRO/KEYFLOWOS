@@ -3,6 +3,7 @@ import { SiteService } from './site.service';
 import { StoreOrderService } from './store-order.service';
 import { PromoCodeService } from './promo-code.service';
 import { IntakeService } from './intake.service';
+import { QualificationService } from './qualification.service';
 import { PaymentsService } from '../payments/payments.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -16,6 +17,7 @@ export class SiteController {
     @Inject(StoreOrderService) private readonly storeOrderService: StoreOrderService,
     @Inject(PromoCodeService) private readonly promoCodeService: PromoCodeService,
     @Inject(IntakeService) private readonly intakeService: IntakeService,
+    @Inject(QualificationService) private readonly qualificationService: QualificationService,
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
   ) {}
 
@@ -400,5 +402,63 @@ export class SiteController {
     @Body() body: { status: string; notes?: string },
   ) {
     return this.intakeService.updateStatus(id, businessId, body.status, body.notes);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/qualification-config')
+  getQualificationConfig(@Param('businessId') businessId: string) {
+    return this.qualificationService.getQualificationConfig(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/qualification-config')
+  updateQualificationConfig(
+    @Param('businessId') businessId: string,
+    @Body() config: Record<string, any>,
+  ) {
+    return this.qualificationService.updateQualificationConfig(businessId, config);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/qualification-analytics')
+  getQualificationAnalytics(@Param('businessId') businessId: string) {
+    return this.qualificationService.getJourneyAnalytics(businessId);
+  }
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
+  @Get('storefront/public/:slug/qualification-flow')
+  getPublicQualificationFlow(@Param('slug') slug: string) {
+    return this.qualificationService.getPublicQualificationFlow(slug);
+  }
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(10, 60_000)
+  @Post('storefront/public/:slug/qualification-recommend')
+  qualificationRecommend(
+    @Param('slug') slug: string,
+    @Body() body: { answers: { questionId: string; answer: string; tags?: string[] }[] },
+  ) {
+    return this.qualificationService.scoreAndRecommend(slug, body.answers ?? []);
+  }
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(10, 60_000)
+  @Post('storefront/public/qualification/:journeyId/select')
+  qualificationSelect(
+    @Param('journeyId') journeyId: string,
+    @Body() body: { productId: string; executionModel?: string; customer?: { name?: string; email?: string } },
+  ) {
+    return this.qualificationService.selectPackage(journeyId, body.productId, body.executionModel, body.customer);
+  }
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(5, 60_000)
+  @Post('storefront/public/qualification/:journeyId/intake')
+  qualificationIntake(
+    @Param('journeyId') journeyId: string,
+    @Body() body: Record<string, any>,
+  ) {
+    return this.qualificationService.submitAssetIntake(journeyId, body);
   }
 }

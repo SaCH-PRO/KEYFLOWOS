@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-  Power, Pause, Play, Truck, Clock, Phone,
+  Power, Pause, Play, Truck, Clock, Phone, Target,
   Package, RefreshCw, Shield,
   Loader2, MessageCircle, Mail, Save, Monitor,
   MapPin, Eye, Loader, CheckCircle2, AlertTriangle,
@@ -17,7 +17,8 @@ import { DeliveryConfigPanel } from "./delivery-config-panel";
 import { ShippingZonesPanel } from "./shipping-zones-panel";
 import { HoursEditor, type BusinessHoursMap } from "./hours-editor";
 import { FulfillmentPanel, type Order } from "./fulfillment-panel";
-import type { StorefrontConfig, StoreStatus, DeliveryMethod } from "@/lib/client";
+import { QualificationConfig } from "./qualification-config";
+import type { StorefrontConfig, StoreStatus, DeliveryMethod, Product } from "@/lib/client";
 
 type OrderApiResponse = {
   data: Order[];
@@ -36,6 +37,7 @@ type Props = {
   onSaveHours: () => Promise<void>;
   hoursSaving: boolean;
   onToggleStoreEnabled: () => void;
+  commerceProducts?: Product[];
 };
 
 const STATUS_OPTIONS: { key: StoreStatus; label: string; description: string; icon: React.ElementType; color: string }[] = [
@@ -452,6 +454,7 @@ export function OperationsMode({
   onSaveHours,
   hoursSaving,
   onToggleStoreEnabled,
+  commerceProducts,
 }: Props) {
   const primaryColor = "hsl(var(--kf-accent1))";
   const successColor = "hsl(var(--kf-success))";
@@ -645,6 +648,18 @@ export function OperationsMode({
               onConfigChange={onConfigChange}
               onSave={onSaveConfig}
               saving={configSaving}
+            />
+          </AccordionSection>
+
+          <AccordionSection
+            title="Qualification Engine"
+            subtitle="Guided package selector, intake, and analytics"
+            icon={Target}
+            accentColor={primaryColor}
+          >
+            <QualificationConfig
+              businessId={businessId}
+              products={commerceProducts ?? []}
             />
           </AccordionSection>
         </AccordionGroup>
