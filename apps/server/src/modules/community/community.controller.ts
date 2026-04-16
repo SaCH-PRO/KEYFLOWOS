@@ -244,4 +244,13 @@ export class CommunityController {
   ) {
     return this.community.removeEndorsement(businessId, body.toBusinessId, body.skill);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/match-history')
+  getMatchHistory(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.matching.getMatchHistory(businessId, limit ? parseInt(limit, 10) : 50);
+  }
 }
