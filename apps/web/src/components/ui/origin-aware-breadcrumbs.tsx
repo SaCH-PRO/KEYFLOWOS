@@ -45,6 +45,7 @@ const LABEL_MAP: Record<string, string> = {
   branding: "Branding",
   integrations: "Integrations",
   security: "Security",
+  "control-tower": "Command Tower",
   "api-keys": "API Keys",
   budgets: "Budgets",
   analytics: "Analytics",
