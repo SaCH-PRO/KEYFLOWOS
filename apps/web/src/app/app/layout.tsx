@@ -195,8 +195,7 @@ interface PrimaryNavItem {
 }
 
 const primaryNav: PrimaryNavItem[] = [
-  { id: "cockpit", label: "Command", icon: Gauge, href: "/app" },
-  { id: "tower", label: "Control Tower", icon: Radar, href: "/app/control-tower" },
+  { id: "tower", label: "Command Tower", icon: Radar, href: "/app/control-tower" },
   { id: "store", label: "Store", icon: Store, href: "/app/store" },
   { id: "workspaces", label: "Workspaces", icon: LayoutGrid },
   { id: "studio", label: "Studio", icon: Wrench },
@@ -249,7 +248,7 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/expenses", "workspaces"],
   ["/app/reports", "workspaces"],
   ["/app/documents", "workspaces"],
-  ["/app/onboarding", "cockpit"],
+  ["/app/onboarding", "tower"],
 ];
 
 function detectPrimarySection(pathname: string): PrimarySectionId {
@@ -263,7 +262,7 @@ function detectPrimarySection(pathname: string): PrimarySectionId {
 }
 
 const mobileBottomNav = [
-  { label: "Home", href: "/app/control-tower", icon: Radar },
+  { label: "Command", href: "/app/control-tower", icon: Radar },
   { label: "Revenue", href: "/app/commerce", icon: CreditCard },
   { label: "Calendar", href: "/app/bookings", icon: Calendar },
   { label: "Clients", href: "/app/crm/pipeline", icon: Users },
@@ -347,12 +346,12 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         const isUuid = /^[0-9a-f-]{20,}$/i.test(last || "");
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
-          app: "Command", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
+          app: "Command Tower", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
           bookings: "Calendar", marketing: "Content", expenses: "Expenses",
           projects: "Projects", documents: "Documents", automations: "Automations", reports: "Reports",
           store: "Presence", settings: "Studio", learn: "Learn",
           community: "Community", marketplace: "Marketplace",
-          "control-tower": "Control Tower",
+          "control-tower": "Command Tower",
         };
         const label = labelMap[labelSegment || ""] || (labelSegment ? labelSegment.charAt(0).toUpperCase() + labelSegment.slice(1) : "");
         if (label) {
@@ -930,15 +929,15 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
             <div className="flex-1 py-2 px-2">
               <Link
-                href="/app"
+                href="/app/control-tower"
                 onClick={() => setMobileDrawerOpen(false)}
                 className={cn(
                   "kf-nav-item py-2.5 active:scale-[0.98] mb-2",
-                  pathname === "/app" && "active"
+                  (pathname === "/app" || pathname.startsWith("/app/control-tower")) && "active"
                 )}
               >
-                <Gauge className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                <span>Command</span>
+                <Radar className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                <span>Command Tower</span>
               </Link>
 
               {(["workspaces", "studio", "public"] as const).map((sectionId) => {

@@ -191,7 +191,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   ], [router]);
 
   const NAV_ACTIONS: Action[] = useMemo(() => [
-    { id: "nav-cockpit", label: "Command", hint: "Live operations dashboard", shortcut: "⌘1", icon: Zap, onSelect: () => router.push("/app") },
+    { id: "nav-command-tower", label: "Command Tower", hint: "Live operations dashboard", shortcut: "⌘1", icon: Zap, onSelect: () => router.push("/app/control-tower") },
     { id: "nav-clients", label: "Clients", hint: "CRM & pipeline", shortcut: "⌘2", icon: Users, onSelect: () => router.push("/app/crm/pipeline") },
     { id: "nav-revenue", label: "Revenue", hint: "Invoices, quotes & payments", shortcut: "⌘3", icon: Receipt, onSelect: () => router.push("/app/commerce") },
     { id: "nav-calendar", label: "Calendar", hint: "Bookings & schedule", shortcut: "⌘4", icon: Calendar, onSelect: () => router.push("/app/bookings") },
