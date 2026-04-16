@@ -24,6 +24,8 @@ import {
   Target,
   Handshake,
   Star,
+  ShieldCheck,
+  Award,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -90,6 +92,32 @@ function CapacityBadge({ capacity, accepting }: { capacity?: string; accepting: 
       <CheckCircle className="w-2.5 h-2.5" /> {c.label}
     </span>
   );
+}
+
+function ReputationIndicator({ score }: { score: number }) {
+  let color = "text-zinc-400";
+  let bg = "bg-zinc-500/15";
+  if (score >= 80) { color = "text-emerald-400"; bg = "bg-emerald-500/15"; }
+  else if (score >= 60) { color = "text-blue-400"; bg = "bg-blue-500/15"; }
+  else if (score >= 40) { color = "text-amber-400"; bg = "bg-amber-500/15"; }
+
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${bg} ${color}`}>
+      <Star className="w-2.5 h-2.5" /> {score}
+    </span>
+  );
+}
+
+function DirectoryBadgeIcon({ icon }: { icon: string }) {
+  const iconMap: Record<string, React.ReactNode> = {
+    "shield-check": <ShieldCheck className="w-2.5 h-2.5" />,
+    "store": <Store className="w-2.5 h-2.5" />,
+    "message-square": <MessageSquare className="w-2.5 h-2.5" />,
+    "users": <Users className="w-2.5 h-2.5" />,
+    "award": <Award className="w-2.5 h-2.5" />,
+    "graduation-cap": <Sparkles className="w-2.5 h-2.5" />,
+  };
+  return <>{iconMap[icon] || <CheckCircle className="w-2.5 h-2.5" />}</>;
 }
 
 function MatchScoreBadge({ score }: { score: number }) {
@@ -189,6 +217,8 @@ function DirectoryCard({ biz, onViewProfile }: { biz: DirectoryBusiness; onViewP
     : null;
   const initials = biz.name?.[0]?.toUpperCase() || "?";
   const topOffering = biz.services?.[0] || biz.products?.[0];
+  const hasVerified = biz.badges?.some(b => b.id === 'complete_profile') ?? false;
+  const topBadges = (biz.badges || []).filter(b => b.id !== 'complete_profile').slice(0, 2);
 
   return (
     <motion.div
@@ -206,7 +236,15 @@ function DirectoryCard({ biz, onViewProfile }: { biz: DirectoryBusiness; onViewP
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold truncate group-hover:text-[hsl(var(--kf-accent1))] transition-colors">{biz.name}</h3>
+          <div className="flex items-center gap-1.5">
+            <h3 className="text-sm font-semibold truncate group-hover:text-[hsl(var(--kf-accent1))] transition-colors">{biz.name}</h3>
+            {hasVerified && (
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+            )}
+            {biz.reputationScore != null && biz.reputationScore > 0 && (
+              <ReputationIndicator score={biz.reputationScore} />
+            )}
+          </div>
           {biz.headline && <p className="text-xs text-muted-foreground truncate">{biz.headline}</p>}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <CapacityBadge capacity={biz.currentCapacity} accepting={biz.acceptingWork} />
@@ -218,6 +256,21 @@ function DirectoryCard({ biz, onViewProfile }: { biz: DirectoryBusiness; onViewP
           </div>
         </div>
       </div>
+
+      {topBadges.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {topBadges.map((badge) => (
+            <span
+              key={badge.id}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
+              title={badge.label}
+            >
+              <DirectoryBadgeIcon icon={badge.icon} />
+              {badge.label}
+            </span>
+          ))}
+        </div>
+      )}
 
       {biz.positioningStatement && (
         <p className="text-xs text-muted-foreground line-clamp-2">{biz.positioningStatement}</p>
