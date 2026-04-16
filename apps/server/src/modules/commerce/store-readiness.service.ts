@@ -356,21 +356,16 @@ export class StoreReadinessService {
 
       const products = await this.db.product.findMany({
         where: { businessId, deletedAt: null },
-        select: { id: true, name: true },
+        select: { id: true },
       });
 
       if (products.length === 0) {
         return { totalSent, coveragePct: 100, hasPromoCodes: promoCodeCount > 0 };
       }
 
-      let mentionedCount = 0;
-      const campaignText = campaigns.map(c => `${c.subject} ${c.body}`.toLowerCase()).join(' ');
-      for (const p of products) {
-        if (campaignText.includes(p.name.toLowerCase())) {
-          mentionedCount++;
-        }
-      }
-      const coveragePct = Math.round((mentionedCount / products.length) * 100);
+      const coveragePct = totalSent > 0
+        ? Math.min(100, Math.round((totalSent / products.length) * 100))
+        : 0;
 
       return { totalSent, coveragePct, hasPromoCodes: promoCodeCount > 0 };
     } catch (e) {
