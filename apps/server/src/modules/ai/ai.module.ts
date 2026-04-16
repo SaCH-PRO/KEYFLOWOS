@@ -18,6 +18,7 @@ import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { ProfileIntelligenceService } from './profile-intelligence.service';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
+import { ModelGatewayService } from './model-gateway.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
@@ -26,6 +27,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
   controllers: [AiController, OutputTemplateController, FlowController, GraphActionsController],
   providers: [
     AiListener,
+    ModelGatewayService,
     AiAdvisorService,
     AiUsageService,
     OutputTemplateService,
@@ -42,6 +44,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     WorkspaceRecommendationsService,
   ],
   exports: [
+    ModelGatewayService,
     AiAdvisorService,
     AiUsageService,
     OutputTemplateService,

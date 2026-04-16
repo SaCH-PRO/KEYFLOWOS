@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMemoryService, MemoryCategory } from './ai-memory.service';
 import { BusinessGraphService } from './business-graph.service';
-import OpenAI from 'openai';
+import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
 
 export interface ProfileInterviewMessage {
   role: 'user' | 'assistant';
@@ -50,19 +50,14 @@ const PROFILE_TOPICS = [
 @Injectable()
 export class ProfileIntelligenceService {
   private readonly logger = new Logger(ProfileIntelligenceService.name);
-  private readonly openai: OpenAI;
   private readonly sessionCache = new Map<string, ProfileInterviewState>();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
-  ) {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-  }
+    @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+  ) {}
 
   async getInterviewState(businessId: string): Promise<ProfileInterviewState> {
     const cached = this.sessionCache.get(businessId);
@@ -159,20 +154,21 @@ TOPIC-to-CATEGORY mapping (you MUST use these exact topic, category, and key val
 NEVER use category "settings" or keys like "autonomy", "admin", "mode", "blockedTools", "blockedModules".
 Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
-    const openaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    const gatewayMessages: GatewayMessage[] = [
       { role: 'system', content: systemPrompt },
       ...state.messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     ];
 
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: openaiMessages,
+      const completion = await this.gateway.complete({
+        businessId,
+        taskCategory: 'extraction',
+        messages: gatewayMessages,
         temperature: 0.7,
-        max_tokens: 500,
+        maxTokens: 500,
       });
 
-      const rawReply = completion.choices[0]?.message?.content || "I'd love to learn more about your business. What does your business do?";
+      const rawReply = completion.content || "I'd love to learn more about your business. What does your business do?";
 
       const extractMatch = rawReply.match(/```extract\s*\n([\s\S]*?)\n```/);
       let reply = rawReply.replace(/```extract\s*\n[\s\S]*?\n```/g, '').trim();

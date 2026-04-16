@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import OpenAI from 'openai';
 import { BusinessGraphService } from './business-graph.service';
 import { AiMemoryService } from './ai-memory.service';
+import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
 
 export interface ParsedIntent {
   objective: string;
@@ -20,8 +20,8 @@ export interface ParsedIntent {
   rawInput: string;
 }
 
-const PARSE_INTENT_FUNCTION: OpenAI.ChatCompletionTool = {
-  type: 'function',
+const PARSE_INTENT_FUNCTION = {
+  type: 'function' as const,
   function: {
     name: 'parse_intent',
     description: 'Parse user input into a structured intent for the KeyFlowOS AI pipeline',
@@ -81,17 +81,12 @@ const AVAILABLE_TOOLS = [
 @Injectable()
 export class IntentParserService {
   private readonly logger = new Logger(IntentParserService.name);
-  private readonly openai: OpenAI;
 
   constructor(
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
-  ) {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-  }
+    @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+  ) {}
 
   async parse(businessId: string, userInput: string): Promise<ParsedIntent> {
     const snapshot = await this.businessGraph.getSnapshot(businessId);
@@ -117,30 +112,29 @@ RISK TIERS:
 Parse the user's input and call parse_intent with the structured result. Be specific about which tools would be needed. If the request is vague, note what clarification is needed.`;
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userInput },
-        ],
+      const messages: GatewayMessage[] = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userInput },
+      ];
+
+      const response = await this.gateway.complete({
+        businessId,
+        taskCategory: 'classification',
+        messages,
         tools: [PARSE_INTENT_FUNCTION],
-        tool_choice: { type: 'function', function: { name: 'parse_intent' } },
-        max_tokens: 800,
+        toolChoice: { type: 'function', function: { name: 'parse_intent' } },
+        maxTokens: 800,
         temperature: 0.3,
+        expectedContract: 'intent_parse',
       });
 
-      const toolCall = response.choices[0]?.message?.tool_calls?.[0];
-      if (!toolCall || toolCall.type !== 'function') {
-        this.logger.warn('OpenAI did not return expected function call, falling back');
-        return this.fallbackParse(userInput);
-      }
-      const fnCall = toolCall as Extract<typeof toolCall, { type: 'function' }>;
-      if (fnCall.function.name !== 'parse_intent') {
-        this.logger.warn('OpenAI returned unexpected function name, falling back');
+      const toolCall = response.toolCalls?.[0];
+      if (!toolCall) {
+        this.logger.warn('Gateway did not return expected function call, falling back');
         return this.fallbackParse(userInput);
       }
 
-      const parsed = JSON.parse(fnCall.function.arguments);
+      const parsed = JSON.parse(toolCall.function.arguments);
       return {
         objective: parsed.objective || userInput,
         urgency: parsed.urgency || 'normal',

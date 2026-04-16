@@ -1418,17 +1418,24 @@ model AiUsageLog {
 
   feature    String
   model      String   @default("gpt-5.2")
+  provider   String   @default("openai")
   promptTokens   Int  @default(0) @map("prompt_tokens")
   completionTokens Int @default(0) @map("completion_tokens")
   totalTokens    Int  @default(0) @map("total_tokens")
   estimatedCost  Float @default(0) @map("estimated_cost")
   creditsUsed    Int   @default(1) @map("credits_used")
+  latencyMs      Int?  @map("latency_ms")
+  fallbackUsed   Boolean @default(false) @map("fallback_used")
+  fallbackProvider String? @map("fallback_provider")
+  errorCode      String? @map("error_code")
+  taskCategory   String? @map("task_category")
 
   metadata   Json?
   createdAt  DateTime @default(now()) @map("created_at")
 
   @@index([businessId, createdAt])
   @@index([businessId, feature])
+  @@index([businessId, provider])
   @@map("ai_usage_logs")
 }
 

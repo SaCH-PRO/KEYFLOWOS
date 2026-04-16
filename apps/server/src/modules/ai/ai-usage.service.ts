@@ -2,9 +2,9 @@ import { Inject, Injectable, Logger, ForbiddenException, HttpException } from '@
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from '../subscriptions/plans';
-import OpenAI from 'openai';
 import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
 import { OutputTemplateService } from './output-template.service';
+import { ModelGatewayService, TaskCategory, GatewayMessage } from './model-gateway.service';
 
 /**
  * responseMode controls quality directive injection and output validation:
@@ -26,12 +26,15 @@ interface AiCallOptions {
   temperature?: number;
   outputCategory?: OutputCategory;
   responseMode?: AiResponseMode;
+  taskCategory?: TaskCategory;
   /** @deprecated Use responseMode: 'structured_json' instead */
   skipQualityDirectives?: boolean;
 }
 
 interface AiCallResult {
   content: string;
+  provider?: string;
+  model?: string;
   usage: {
     promptTokens: number;
     completionTokens: number;
@@ -56,31 +59,56 @@ interface UsageSummary {
   byFeature: Array<{ feature: string; credits: number; calls: number; cost: number }>;
 }
 
+const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
+  flow_chat: 'tool-calling',
+  plan_decompose: 'reasoning',
+  intent_parse: 'classification',
+  briefing: 'summarization',
+  cash_flow_forecast: 'reasoning',
+  business_model: 'reasoning',
+  seo_score: 'extraction',
+  simulate: 'reasoning',
+  chat: 'general',
+  profile_interview: 'extraction',
+  strategic_dashboard: 'reasoning',
+  revenue_forecast: 'reasoning',
+  profitability: 'reasoning',
+  pricing_advisor: 'reasoning',
+  seasonal_patterns: 'reasoning',
+  opportunities: 'reasoning',
+  risks: 'reasoning',
+  weekly_plan: 'reasoning',
+  crm_insight: 'summarization',
+  crm_churn_risk: 'classification',
+  crm_search: 'extraction',
+  commerce_analyze: 'reasoning',
+  ai_reminder: 'content-generation',
+  ai_pricing: 'reasoning',
+  schedule_optimizer: 'reasoning',
+  no_show_predictor: 'classification',
+  campaign_content: 'content-generation',
+  marketing_strategy: 'reasoning',
+  draft_followup_message: 'content-generation',
+  draft_campaign_bundle: 'content-generation',
+  draft_payment_reminder: 'content-generation',
+  draft_storefront_copy: 'content-generation',
+  draft_project_update: 'content-generation',
+};
+
 @Injectable()
 export class AiUsageService {
   private readonly logger = new Logger(AiUsageService.name);
-  private readonly openai: OpenAI;
-  private readonly defaultModel = 'gpt-4o';
 
   private readonly RATE_LIMIT_PER_MINUTE = 30;
   private readonly rateLimitMap = new Map<string, number[]>();
   private rateLimitCleanupTimer: ReturnType<typeof setInterval>;
 
-  private readonly TOKEN_COST_PER_1K: Record<string, { input: number; output: number }> = {
-    'gpt-4o': { input: 0.005, output: 0.015 },
-    'gpt-4o-mini': { input: 0.0004, output: 0.0016 },
-  };
-
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(SubscriptionsService) private readonly subscriptionsService: SubscriptionsService,
     @Inject(OutputTemplateService) private readonly outputTemplateService: OutputTemplateService,
+    @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
   ) {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-
     this.rateLimitCleanupTimer = setInterval(() => {
       const cutoff = Date.now() - 60_000;
       for (const [key, timestamps] of this.rateLimitMap.entries()) {
@@ -141,9 +169,13 @@ export class AiUsageService {
     return modified;
   }
 
+  private resolveTaskCategory(feature: string, explicit?: TaskCategory): TaskCategory {
+    if (explicit) return explicit;
+    return FEATURE_TASK_MAP[feature] || 'general';
+  }
+
   async callAi(options: AiCallOptions): Promise<AiCallResult> {
     const { businessId, feature, maxTokens = 500, temperature = 0.7 } = options;
-    const model = options.model || this.defaultModel;
     const outputCategory: OutputCategory = options.outputCategory || 'general';
 
     const isStructuredJson =
@@ -174,37 +206,49 @@ export class AiUsageService {
       }
     }
 
+    const taskCategory = this.resolveTaskCategory(feature, options.taskCategory);
+
     const executeCall = async (msgs: typeof messages) => {
-      const response = await this.openai.chat.completions.create({
-        model,
-        messages: msgs,
-        max_tokens: maxTokens,
+      const gatewayMessages: GatewayMessage[] = msgs.map(m => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const response = await this.gateway.complete({
+        businessId,
+        taskCategory,
+        messages: gatewayMessages,
+        maxTokens,
         temperature,
+        modelOverride: options.model || undefined,
+        providerOverride: options.model ? 'openai' : undefined,
       });
 
-      const content = response.choices[0]?.message?.content ?? '';
-      const promptTokens = response.usage?.prompt_tokens ?? 0;
-      const completionTokens = response.usage?.completion_tokens ?? 0;
-      const totalTokens = promptTokens + completionTokens;
-      const costs = this.TOKEN_COST_PER_1K[model] || this.TOKEN_COST_PER_1K['gpt-4o'];
-      const estimatedCost =
-        (promptTokens / 1000) * costs.input +
-        (completionTokens / 1000) * costs.output;
-
-      return { content, promptTokens, completionTokens, totalTokens, estimatedCost };
+      return {
+        content: response.content ?? '',
+        provider: response.provider,
+        model: response.model,
+        promptTokens: response.usage.promptTokens,
+        completionTokens: response.usage.completionTokens,
+        totalTokens: response.usage.totalTokens,
+        estimatedCost: response.usage.estimatedCost,
+        latencyMs: response.latencyMs,
+        fallbackUsed: response.fallbackUsed,
+        fallbackProvider: response.fallbackProvider,
+      };
     };
 
     try {
-      let { content, promptTokens, completionTokens, totalTokens, estimatedCost } = await executeCall(messages);
+      let result = await executeCall(messages);
 
       if (!isStructuredJson) {
         const requiredSections = resolvedTemplate?.requiredSections ?? [];
-        const validation = validateAiOutput(content, outputCategory, requiredSections);
+        const validation = validateAiOutput(result.content, outputCategory, requiredSections);
         if (!validation.passed) {
           this.logger.warn(`[Quality] ${feature} failed validation: ${validation.issues.join('; ')}. Retrying...`);
           const retryMessages = [
             ...messages,
-            { role: 'assistant' as const, content },
+            { role: 'assistant' as const, content: result.content },
             {
               role: 'user' as const,
               content: `The previous response did not meet quality standards. Issues: ${validation.issues.join('; ')}. Please provide a complete, specific, high-quality response that addresses all the quality requirements.`,
@@ -212,11 +256,13 @@ export class AiUsageService {
           ];
           try {
             const retry = await executeCall(retryMessages);
-            content = retry.content;
-            promptTokens += retry.promptTokens;
-            completionTokens += retry.completionTokens;
-            totalTokens += retry.totalTokens;
-            estimatedCost += retry.estimatedCost;
+            result = {
+              ...retry,
+              promptTokens: result.promptTokens + retry.promptTokens,
+              completionTokens: result.completionTokens + retry.completionTokens,
+              totalTokens: result.totalTokens + retry.totalTokens,
+              estimatedCost: result.estimatedCost + retry.estimatedCost,
+            };
           } catch (retryErr) {
             this.logger.warn(`Quality retry failed for ${feature}: ${(retryErr as Error).message}`);
           }
@@ -227,12 +273,17 @@ export class AiUsageService {
         data: {
           businessId,
           feature,
-          model,
-          promptTokens,
-          completionTokens,
-          totalTokens,
-          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          model: result.model,
+          provider: result.provider,
+          promptTokens: result.promptTokens,
+          completionTokens: result.completionTokens,
+          totalTokens: result.totalTokens,
+          estimatedCost: Math.round(result.estimatedCost * 10000) / 10000,
           creditsUsed: creditCost,
+          latencyMs: result.latencyMs,
+          fallbackUsed: result.fallbackUsed,
+          fallbackProvider: result.fallbackProvider,
+          taskCategory,
           metadata: {
             maxTokens,
             temperature,
@@ -242,13 +293,15 @@ export class AiUsageService {
       });
 
       return {
-        content,
+        content: result.content,
+        provider: result.provider,
+        model: result.model,
         usage: {
-          promptTokens,
-          completionTokens,
-          totalTokens,
+          promptTokens: result.promptTokens,
+          completionTokens: result.completionTokens,
+          totalTokens: result.totalTokens,
           creditsUsed: creditCost,
-          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          estimatedCost: Math.round(result.estimatedCost * 10000) / 10000,
         },
       };
     } catch (error) {
@@ -364,11 +417,16 @@ export class AiUsageService {
           id: true,
           feature: true,
           model: true,
+          provider: true,
           promptTokens: true,
           completionTokens: true,
           totalTokens: true,
           estimatedCost: true,
           creditsUsed: true,
+          latencyMs: true,
+          fallbackUsed: true,
+          fallbackProvider: true,
+          taskCategory: true,
           createdAt: true,
         },
       }),
@@ -376,6 +434,41 @@ export class AiUsageService {
     ]);
 
     return { logs, total, limit, offset };
+  }
+
+  async getProviderStats(businessId: string) {
+    const now = new Date();
+    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [byProvider, fallbackStats, avgLatency] = await Promise.all([
+      this.prisma.client.aiUsageLog.groupBy({
+        by: ['provider'],
+        where: { businessId, createdAt: { gte: periodStart } },
+        _sum: { creditsUsed: true, estimatedCost: true, totalTokens: true },
+        _count: true,
+        _avg: { latencyMs: true },
+      }),
+      this.prisma.client.aiUsageLog.count({
+        where: { businessId, createdAt: { gte: periodStart }, fallbackUsed: true },
+      }),
+      this.prisma.client.aiUsageLog.aggregate({
+        where: { businessId, createdAt: { gte: periodStart } },
+        _avg: { latencyMs: true },
+      }),
+    ]);
+
+    return {
+      byProvider: byProvider.map(p => ({
+        provider: p.provider,
+        calls: p._count,
+        credits: p._sum.creditsUsed ?? 0,
+        cost: Math.round((p._sum.estimatedCost ?? 0) * 100) / 100,
+        tokens: p._sum.totalTokens ?? 0,
+        avgLatencyMs: Math.round(p._avg.latencyMs ?? 0),
+      })),
+      fallbackCount: fallbackStats,
+      avgLatencyMs: Math.round(avgLatency._avg.latencyMs ?? 0),
+    };
   }
 
   async getBillingSummary(businessId: string) {
