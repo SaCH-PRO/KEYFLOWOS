@@ -143,6 +143,9 @@ export default function PublicProfilePage() {
   const [topSkills, setTopSkills] = useState<{ skill: string; count: number }[]>([]);
   const [myEndorsedSkills, setMyEndorsedSkills] = useState<string[]>([]);
   const [endorsingSkill, setEndorsingSkill] = useState<string | null>(null);
+  const [endorseModalSkill, setEndorseModalSkill] = useState<string | null>(null);
+  const [endorseMessage, setEndorseMessage] = useState("");
+  const [endorseError, setEndorseError] = useState<string | null>(null);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -218,24 +221,55 @@ export default function PublicProfilePage() {
 
   const handleEndorse = useCallback(async (skill: string) => {
     if (!myBusinessId || endorsingSkill) return;
-    setEndorsingSkill(skill);
-    try {
-      if (myEndorsedSkills.includes(skill)) {
+    if (myEndorsedSkills.includes(skill)) {
+      setEndorsingSkill(skill);
+      try {
         await removeEndorsement(myBusinessId, businessId, skill);
         setMyEndorsedSkills(prev => prev.filter(s => s !== skill));
         setTopSkills(prev => prev.map(s => s.skill === skill ? { ...s, count: Math.max(0, s.count - 1) } : s).filter(s => s.count > 0));
-      } else {
-        await createEndorsement(myBusinessId, businessId, skill);
-        setMyEndorsedSkills(prev => [...prev, skill]);
-        setTopSkills(prev => {
-          const existing = prev.find(s => s.skill === skill);
-          if (existing) return prev.map(s => s.skill === skill ? { ...s, count: s.count + 1 } : s);
-          return [...prev, { skill, count: 1 }];
-        });
-      }
-    } catch {}
-    setEndorsingSkill(null);
+        setEndorsements(prev => prev.filter(e => !(e.skill === skill && e.fromBusiness.id === myBusinessId)));
+      } catch {}
+      setEndorsingSkill(null);
+    } else {
+      setEndorseMessage("");
+      setEndorseModalSkill(skill);
+    }
   }, [myBusinessId, businessId, myEndorsedSkills, endorsingSkill]);
+
+  const closeEndorseModal = useCallback(() => {
+    setEndorseModalSkill(null);
+    setEndorseMessage("");
+    setEndorseError(null);
+  }, []);
+
+  const submitEndorsement = useCallback(async () => {
+    if (!myBusinessId || !endorseModalSkill || endorsingSkill) return;
+    const skill = endorseModalSkill;
+    setEndorsingSkill(skill);
+    setEndorseError(null);
+    try {
+      const msg = endorseMessage.trim() || undefined;
+      const result = await createEndorsement(myBusinessId, businessId, skill, msg);
+      if (result.error) {
+        setEndorseError(typeof result.error === "string" ? result.error : "Failed to endorse. Please try again.");
+        setEndorsingSkill(null);
+        return;
+      }
+      setMyEndorsedSkills(prev => [...prev, skill]);
+      setTopSkills(prev => {
+        const existing = prev.find(s => s.skill === skill);
+        if (existing) return prev.map(s => s.skill === skill ? { ...s, count: s.count + 1 } : s);
+        return [...prev, { skill, count: 1 }];
+      });
+      if (result.data) {
+        setEndorsements(prev => [result.data!, ...prev]);
+      }
+      closeEndorseModal();
+    } catch {
+      setEndorseError("Failed to endorse. Please try again.");
+    }
+    setEndorsingSkill(null);
+  }, [myBusinessId, businessId, endorseModalSkill, endorseMessage, endorsingSkill, closeEndorseModal]);
 
   const resolvedLogo = profile?.logoUrl
     ? profile.logoUrl.startsWith("http") ? profile.logoUrl : `${API_BASE}${profile.logoUrl}`
@@ -635,7 +669,7 @@ export default function PublicProfilePage() {
                       </span>
                     </div>
                     {endorsement.message && (
-                      <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{endorsement.message}</p>
+                      <p className="text-xs text-muted-foreground mt-1 italic border-l-2 border-[hsl(var(--kf-accent1))]/30 pl-2 line-clamp-3">&ldquo;{endorsement.message}&rdquo;</p>
                     )}
                     <span className="text-[9px] text-muted-foreground">{timeAgo(endorsement.createdAt)}</span>
                   </div>
@@ -660,6 +694,75 @@ export default function PublicProfilePage() {
             ))}
           </div>
         </motion.div>
+      )}
+
+      {endorseModalSkill && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={closeEndorseModal}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="kf-card rounded-2xl border border-border/50 p-6 w-full max-w-md mx-4 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <ThumbsUp className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                Endorse Skill
+              </h3>
+              <button
+                onClick={closeEndorseModal}
+                className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <X className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">
+                You are endorsing <span className="font-medium text-foreground">{profile.name}</span> for:
+              </p>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                {endorseModalSkill}
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground">
+                Add a testimonial <span className="text-muted-foreground/60">(optional)</span>
+              </label>
+              <textarea
+                value={endorseMessage}
+                onChange={(e) => setEndorseMessage(e.target.value)}
+                placeholder="Share your experience working with them on this skill..."
+                maxLength={500}
+                rows={3}
+                className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/50 resize-none"
+              />
+              <p className="text-[10px] text-muted-foreground text-right">{endorseMessage.length}/500</p>
+            </div>
+
+            {endorseError && (
+              <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{endorseError}</p>
+            )}
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={closeEndorseModal}
+                className="flex-1 px-4 py-2.5 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 text-muted-foreground transition-colors border border-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitEndorsement}
+                disabled={!!endorsingSkill}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-medium kf-btn-primary transition-colors"
+              >
+                <ThumbsUp className="w-3.5 h-3.5" />
+                {endorsingSkill ? "Endorsing..." : "Endorse"}
+              </button>
+            </div>
+          </motion.div>
+        </div>
       )}
 
       {posts.length > 0 && (
