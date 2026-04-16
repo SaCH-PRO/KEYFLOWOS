@@ -353,7 +353,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           app: "Command Flow", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
           bookings: "Calendar", marketing: "Content", expenses: "Expenses",
           projects: "Projects", documents: "Documents", automations: "Automations", reports: "Reports",
-          store: "Presence", settings: "Studio", learn: "Learn",
+          store: "Store", settings: "Studio", learn: "Learn",
           community: "Community", marketplace: "Marketplace",
           "control-tower": "Command Flow",
         };

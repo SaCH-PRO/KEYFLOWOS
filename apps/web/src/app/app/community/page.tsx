@@ -252,7 +252,7 @@ export default function CommunityPage() {
                   { step: "1", title: "Browse the Feed", desc: "Read posts from other business owners covering discussions, questions, wins, and resources." },
                   { step: "2", title: "Discover Businesses", desc: "Use the Directory to find businesses by industry, skills, availability, and location." },
                   { step: "3", title: "Engage", desc: "Like and comment on posts, follow businesses, and save them to your shortlist." },
-                  { step: "4", title: "Complete Your Presence", desc: "Set your availability status, positioning statement, and preferred project types to attract opportunities." },
+                  { step: "4", title: "Complete Your Store Profile", desc: "Set your availability status, positioning statement, and preferred project types to attract opportunities." },
                 ].map((item) => (
                   <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
                     <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
