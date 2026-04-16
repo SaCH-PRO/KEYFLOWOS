@@ -351,12 +351,16 @@ export default function StorePage() {
 
       <PageGuide moduleKey="store" walkthroughSteps={STORE_WALKTHROUGH} />
 
-      <AiHubTrigger ai={ai.aiHook} moduleName="Store" />
-      <AnimatePresence>
-        {ai.aiHook.panelOpen && (
-          <AiCommandHub ai={ai.aiHook} moduleName="Store" onAction={handleStoreAiAction} />
-        )}
-      </AnimatePresence>
+      {!ai.aiHook.useGlobalCopilot && (
+        <>
+          <AiHubTrigger ai={ai.aiHook} moduleName="Store" />
+          <AnimatePresence>
+            {ai.aiHook.panelOpen && (
+              <AiCommandHub ai={ai.aiHook} moduleName="Store" onAction={handleStoreAiAction} />
+            )}
+          </AnimatePresence>
+        </>
+      )}
     </div>
   );
 }

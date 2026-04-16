@@ -181,7 +181,7 @@ export function WorkspaceShell({
 
       {contentWrapper}
 
-      {ai && (
+      {ai && !ai.hook.useGlobalCopilot && (
         <>
           <AiHubTrigger ai={ai.hook} moduleName={ai.moduleName} />
           <AnimatePresence>
