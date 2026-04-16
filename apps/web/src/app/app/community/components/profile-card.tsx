@@ -17,8 +17,11 @@ import {
   ShoppingBag,
   Send,
   Bookmark,
+  ShieldCheck,
+  Award,
+  Star,
 } from "lucide-react";
-import { fetchCommunityProfile, type CommunityProfile } from "@/lib/client";
+import { fetchCommunityProfile, fetchTrustSignals, type CommunityProfile, type TrustSignals } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
 import { useRouter } from "next/navigation";
 
@@ -49,18 +52,50 @@ function CapacityBadge({ capacity, accepting }: { capacity?: string; accepting: 
   );
 }
 
+function ReputationBadge({ score }: { score: number }) {
+  let color = "text-zinc-400";
+  let bg = "bg-zinc-500/15";
+  if (score >= 80) { color = "text-emerald-400"; bg = "bg-emerald-500/15"; }
+  else if (score >= 60) { color = "text-blue-400"; bg = "bg-blue-500/15"; }
+  else if (score >= 40) { color = "text-amber-400"; bg = "bg-amber-500/15"; }
+
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${bg} ${color}`}>
+      <Star className="w-2.5 h-2.5" /> {score} Rep
+    </span>
+  );
+}
+
+function BadgeIcon({ icon }: { icon: string }) {
+  const iconMap: Record<string, React.ReactNode> = {
+    "shield-check": <ShieldCheck className="w-3 h-3" />,
+    "store": <Store className="w-3 h-3" />,
+    "message-square": <MessageSquare className="w-3 h-3" />,
+    "users": <Users className="w-3 h-3" />,
+    "award": <Award className="w-3 h-3" />,
+    "graduation-cap": <Sparkles className="w-3 h-3" />,
+  };
+  return <>{iconMap[icon] || <CheckCircle className="w-3 h-3" />}</>;
+}
+
 export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
   const [profile, setProfile] = useState<CommunityProfile | null>(null);
+  const [trustSignals, setTrustSignals] = useState<TrustSignals | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
     if (!isOpen || !businessId) return;
     setProfile(null);
+    setTrustSignals(null);
     setLoading(true);
-    fetchCommunityProfile(businessId)
-      .then((res) => {
-        if (res.data) setProfile(res.data);
+    Promise.all([
+      fetchCommunityProfile(businessId),
+      fetchTrustSignals(businessId),
+    ])
+      .then(([profileRes, trustRes]) => {
+        if (profileRes.data) setProfile(profileRes.data);
+        if (trustRes.data) setTrustSignals(trustRes.data);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -125,7 +160,12 @@ export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
                       )}
                     </div>
                     <div className="min-w-0 pb-1">
-                      <h3 className="text-lg font-bold truncate">{profile.name}</h3>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="text-lg font-bold truncate">{profile.name}</h3>
+                        {trustSignals && trustSignals.badges.some(b => b.id === 'complete_profile') && (
+                          <ShieldCheck className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                        )}
+                      </div>
                       {profile.headline && (
                         <p className="text-sm text-muted-foreground truncate">{profile.headline}</p>
                       )}
@@ -134,12 +174,30 @@ export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
 
                   <div className="flex items-center gap-2 flex-wrap">
                     <CapacityBadge capacity={profile.currentCapacity} accepting={profile.acceptingWork} />
+                    {trustSignals && trustSignals.reputationScore > 0 && (
+                      <ReputationBadge score={trustSignals.reputationScore} />
+                    )}
                     {profile.leadTime && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-white/10 text-muted-foreground">
                         <Clock className="w-2.5 h-2.5" /> {profile.leadTime}
                       </span>
                     )}
                   </div>
+
+                  {trustSignals && trustSignals.badges.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {trustSignals.badges.map((badge) => (
+                        <span
+                          key={badge.id}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
+                          title={badge.label}
+                        >
+                          <BadgeIcon icon={badge.icon} />
+                          {badge.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   {profile.positioningStatement && (
                     <p className="text-sm text-muted-foreground leading-relaxed italic border-l-2 border-[hsl(var(--kf-accent1))]/30 pl-3">
@@ -173,6 +231,9 @@ export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
                       {profile.skills.slice(0, 6).map((skill) => (
                         <span key={skill} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/10 text-muted-foreground border border-white/5">
                           {skill}
+                          {trustSignals?.topEndorsedSkills.some(s => s.skill === skill) && (
+                            <Award className="w-2 h-2 inline ml-0.5 text-amber-400" />
+                          )}
                         </span>
                       ))}
                       {profile.skills.length > 6 && (
@@ -200,7 +261,7 @@ export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border/30">
+                  <div className="grid grid-cols-4 gap-2 pt-2 border-t border-border/30">
                     <div className="text-center">
                       <div className="text-lg font-bold">{profile._count?.communityPosts || 0}</div>
                       <div className="text-[10px] text-muted-foreground flex items-center justify-center gap-1">
@@ -211,6 +272,12 @@ export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
                       <div className="text-lg font-bold">{profile._count?.networkConnectionsTo || 0}</div>
                       <div className="text-[10px] text-muted-foreground flex items-center justify-center gap-1">
                         <Users className="w-3 h-3" /> Followers
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-lg font-bold">{trustSignals?.endorsementCount || 0}</div>
+                      <div className="text-[10px] text-muted-foreground flex items-center justify-center gap-1">
+                        <Award className="w-3 h-3" /> Endorsed
                       </div>
                     </div>
                     <div className="text-center">

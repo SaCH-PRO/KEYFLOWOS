@@ -1,6 +1,22 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
+export interface TrustSignals {
+  reputationScore: number;
+  badges: { id: string; label: string; icon: string }[];
+  endorsementCount: number;
+  topEndorsedSkills: { skill: string; count: number }[];
+}
+
+const BADGE_DEFINITIONS = [
+  { id: 'complete_profile', label: 'Complete Profile', icon: 'shield-check', minCompleteness: 80 },
+  { id: 'active_store', label: 'Active Store', icon: 'store', requiresProducts: true },
+  { id: 'community_contributor', label: 'Community Contributor', icon: 'message-square', minPosts: 5 },
+  { id: 'well_connected', label: 'Well Connected', icon: 'users', minFollowers: 5 },
+  { id: 'endorsed', label: 'Endorsed', icon: 'award', minEndorsements: 3 },
+  { id: 'cohort_member', label: 'Cohort Member', icon: 'graduation-cap', minCohorts: 1 },
+] as const;
+
 @Injectable()
 export class CommunityService {
   constructor(
@@ -292,6 +308,7 @@ export class CommunityService {
               communityPosts: true,
               cohortMembers: true,
               networkConnectionsTo: true,
+              endorsementsReceived: true,
             },
           },
         },
@@ -359,6 +376,126 @@ export class CommunityService {
     return {
       following: connections.some((c) => c.type === 'FOLLOW'),
       saved: connections.some((c) => c.type === 'SAVE'),
+    };
+  }
+
+  async createEndorsement(fromBusinessId: string, toBusinessId: string, skill: string, message?: string) {
+    if (fromBusinessId === toBusinessId) return { error: 'Cannot endorse yourself' };
+
+    const isConnected = await this.prisma.client.networkConnection.findFirst({
+      where: {
+        OR: [
+          { fromBusinessId, toBusinessId, type: 'FOLLOW' },
+          { fromBusinessId: toBusinessId, toBusinessId: fromBusinessId, type: 'FOLLOW' },
+        ],
+      },
+    });
+    if (!isConnected) return { error: 'Must be connected to endorse' };
+
+    const existing = await this.prisma.client.endorsement.findUnique({
+      where: {
+        fromBusinessId_toBusinessId_skill: { fromBusinessId, toBusinessId, skill },
+      },
+    });
+    if (existing) return { error: 'Already endorsed this skill' };
+
+    return this.prisma.client.endorsement.create({
+      data: { fromBusinessId, toBusinessId, skill, message: message ?? null },
+      include: {
+        fromBusiness: { select: { id: true, name: true, logoUrl: true, headline: true } },
+      },
+    });
+  }
+
+  async removeEndorsement(fromBusinessId: string, toBusinessId: string, skill: string) {
+    try {
+      return await this.prisma.client.endorsement.delete({
+        where: {
+          fromBusinessId_toBusinessId_skill: { fromBusinessId, toBusinessId, skill },
+        },
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async getEndorsements(businessId: string) {
+    const endorsements = await this.prisma.client.endorsement.findMany({
+      where: { toBusinessId: businessId },
+      include: {
+        fromBusiness: { select: { id: true, name: true, logoUrl: true, headline: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const skillMap = new Map<string, number>();
+    for (const e of endorsements) {
+      skillMap.set(e.skill, (skillMap.get(e.skill) || 0) + 1);
+    }
+    const topSkills = Array.from(skillMap.entries())
+      .map(([skill, count]) => ({ skill, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return { endorsements, topSkills, total: endorsements.length };
+  }
+
+  async getMyEndorsementsGiven(fromBusinessId: string, toBusinessId: string) {
+    return this.prisma.client.endorsement.findMany({
+      where: { fromBusinessId, toBusinessId },
+      select: { skill: true },
+    });
+  }
+
+  async getTrustSignals(businessId: string): Promise<TrustSignals> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: {
+        profileCompleteness: true,
+        acceptingWork: true,
+        _count: {
+          select: {
+            communityPosts: true,
+            cohortMembers: true,
+            networkConnectionsTo: true,
+            endorsementsReceived: true,
+            products: true,
+            services: true,
+          },
+        },
+      },
+    });
+
+    if (!business) return { reputationScore: 0, badges: [], endorsementCount: 0, topEndorsedSkills: [] };
+
+    const endorsementData = await this.getEndorsements(businessId);
+
+    const badges: { id: string; label: string; icon: string }[] = [];
+    for (const def of BADGE_DEFINITIONS) {
+      let earned = false;
+      if ('minCompleteness' in def) earned = business.profileCompleteness >= def.minCompleteness;
+      if ('requiresProducts' in def) earned = (business._count.products + business._count.services) > 0;
+      if ('minPosts' in def) earned = business._count.communityPosts >= def.minPosts;
+      if ('minFollowers' in def) earned = business._count.networkConnectionsTo >= def.minFollowers;
+      if ('minEndorsements' in def) earned = endorsementData.total >= def.minEndorsements;
+      if ('minCohorts' in def) earned = business._count.cohortMembers >= def.minCohorts;
+      if (earned) badges.push({ id: def.id, label: def.label, icon: def.icon });
+    }
+
+    const completenessScore = Math.min(business.profileCompleteness, 100) * 0.25;
+    const activityScore = Math.min(business._count.communityPosts * 3, 25);
+    const connectionScore = Math.min(business._count.networkConnectionsTo * 2, 20);
+    const endorsementScore = Math.min(endorsementData.total * 5, 20);
+    const badgeScore = Math.min(badges.length * (10 / BADGE_DEFINITIONS.length), 10);
+
+    const reputationScore = Math.round(
+      completenessScore + activityScore + connectionScore + endorsementScore + badgeScore,
+    );
+
+    return {
+      reputationScore: Math.min(reputationScore, 100),
+      badges,
+      endorsementCount: endorsementData.total,
+      topEndorsedSkills: endorsementData.topSkills.slice(0, 5),
     };
   }
 }
