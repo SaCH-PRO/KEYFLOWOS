@@ -77,7 +77,12 @@ export class StrategicIntelligenceService {
 
   private parseAiJson<T extends Record<string, unknown>>(content: string, fallback: T, label: string): T {
     try {
-      const parsed = JSON.parse(content);
+      let cleaned = content.trim();
+      const fenceMatch = cleaned.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+      if (fenceMatch) {
+        cleaned = fenceMatch[1].trim();
+      }
+      const parsed = JSON.parse(cleaned);
       if (typeof parsed !== 'object' || parsed === null) {
         this.logger.warn(`[${label}] AI returned non-object JSON: ${typeof parsed}`);
         return { ...fallback, dataQuality: 'degraded' };
