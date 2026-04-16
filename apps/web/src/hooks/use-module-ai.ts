@@ -36,6 +36,7 @@ export type ModuleAiConfig = {
   generateSuggestions: (context: ModuleContext) => Promise<AiSuggestion[]>;
   executeAction?: (actionKey: string, context: ModuleContext) => Promise<void>;
   tools?: AiTool[];
+  useGlobalCopilot?: boolean;
 };
 
 export type ModuleContext = {
@@ -101,7 +102,21 @@ export function useModuleAi(config: ModuleAiConfig) {
     }
   }, []);
 
+  const openGlobalCopilot = useCallback((prompt?: string) => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("kf:open-copilot", {
+          detail: { module: configRef.current.moduleId, prompt },
+        })
+      );
+    }
+  }, []);
+
   const refreshSuggestions = useCallback(async () => {
+    if (configRef.current.useGlobalCopilot) {
+      openGlobalCopilot();
+      return;
+    }
     if (!contextRef.current.businessId) {
       toast.info("Loading data — try again in a moment");
       return;
@@ -124,7 +139,7 @@ export function useModuleAi(config: ModuleAiConfig) {
         error: (err as Error).message || "Failed to get AI suggestions",
       }));
     }
-  }, []);
+  }, [openGlobalCopilot]);
 
   const dismissSuggestion = useCallback((id: string) => {
     setState(prev => ({
@@ -144,6 +159,10 @@ export function useModuleAi(config: ModuleAiConfig) {
   }, []);
 
   const executeSuggestionAction = useCallback(async (suggestion: AiSuggestion) => {
+    if (configRef.current.useGlobalCopilot) {
+      openGlobalCopilot(suggestion.actionLabel || suggestion.title);
+      return;
+    }
     if (!suggestion.actionKey || !configRef.current.executeAction) return;
     try {
       await configRef.current.executeAction(suggestion.actionKey, contextRef.current);
@@ -152,7 +171,7 @@ export function useModuleAi(config: ModuleAiConfig) {
     } catch {
       toast.error("Failed to execute action");
     }
-  }, [dismissSuggestion, notifyGlobalQueue]);
+  }, [dismissSuggestion, notifyGlobalQueue, openGlobalCopilot]);
 
   const togglePanel = useCallback(() => {
     setState(prev => ({ ...prev, panelOpen: !prev.panelOpen }));
@@ -169,6 +188,10 @@ export function useModuleAi(config: ModuleAiConfig) {
   const executeTool = useCallback(async (toolId: string) => {
     const tool = configRef.current.tools?.find(t => t.id === toolId);
     if (!tool) return;
+    if (configRef.current.useGlobalCopilot) {
+      openGlobalCopilot(`Use ${tool.name} tool`);
+      return;
+    }
     if (tool.requiresSelection && !contextRef.current.selectedItemId) {
       toast.info("Select an item first to use this tool");
       return;
@@ -241,6 +264,7 @@ export function useModuleAi(config: ModuleAiConfig) {
     setHubMode,
     executeTool,
     clearToolResult,
+    openGlobalCopilot,
   };
 }
 

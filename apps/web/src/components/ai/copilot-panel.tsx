@@ -38,6 +38,7 @@ import {
   type FlowPendingConfirmation,
 } from "@/lib/client";
 import { VerificationCardCompact } from "./verification-card";
+import { useAiContext } from "@/contexts/ai-context";
 
 type Tab = "chat" | "queue" | "activity";
 
@@ -59,6 +60,8 @@ interface CopilotPanelProps {
   open: boolean;
   onClose: () => void;
   currentModule?: CopilotModule;
+  initialPrompt?: string;
+  onInitialPromptConsumed?: () => void;
 }
 
 interface QuickPrompt {
@@ -324,7 +327,8 @@ function getTimeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps) {
+export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onInitialPromptConsumed }: CopilotPanelProps) {
+  const aiContext = useAiContext();
   const [tab, setTab] = useState<Tab>("chat");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -533,6 +537,13 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (open && initialPrompt && !sending) {
+      setInput(initialPrompt);
+      onInitialPromptConsumed?.();
+    }
+  }, [open, initialPrompt, sending, onInitialPromptConsumed]);
+
   const processFlowResponse = useCallback((res: FlowChatResponse): ChatMessage => {
     const msg: ChatMessage = {
       role: "assistant",
@@ -581,6 +592,18 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     return msg;
   }, []);
 
+  const buildContextPrefix = useCallback((): string => {
+    const parts: string[] = [];
+    if (currentModule && currentModule !== "cockpit") {
+      parts.push(`[Active workspace: ${(MODULE_LABELS[currentModule] || MODULE_LABELS.cockpit).label}]`);
+    }
+    const contextSummary = aiContext.getAllContextSummary();
+    if (contextSummary) {
+      parts.push(`[Module context:\n${contextSummary}]`);
+    }
+    return parts.length > 0 ? parts.join("\n") + "\n\n" : "";
+  }, [currentModule, aiContext]);
+
   const handleSend = useCallback(async (text?: string) => {
     const msg = text || input.trim();
     if (!msg || sending) return;
@@ -593,8 +616,10 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     setSending(true);
 
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
+    const contextPrefix = buildContextPrefix();
+    const enrichedMessage = contextPrefix ? `${contextPrefix}${msg}` : msg;
     try {
-      const res = await sendFlowChat(biz, msg, history);
+      const res = await sendFlowChat(biz, enrichedMessage, history);
       if (res.data) {
         const assistantMsg = processFlowResponse(res.data);
         setMessages((prev) => [...prev, assistantMsg]);
@@ -610,7 +635,7 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     } finally {
       setSending(false);
     }
-  }, [input, sending, messages, processFlowResponse, loadSidebarData]);
+  }, [input, sending, messages, processFlowResponse, loadSidebarData, buildContextPrefix]);
 
   const handlePlanAction = useCallback(async (toolCallId: string, confirmed: boolean, msg: ChatMessage) => {
     const biz = getStoredBusinessId();
@@ -639,6 +664,19 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
       if (res.data) {
         const resultMsg = processFlowResponse(res.data);
 
+        let derivedStatus: "completed" | "rejected" | "failed" = confirmed ? "completed" : "rejected";
+        let derivedError: string | undefined;
+
+        if (confirmed && res.data.toolResults?.length) {
+          const matchingResult = res.data.toolResults.find((tr) => tr.toolCallId === toolCallId);
+          if (matchingResult) {
+            if (matchingResult.success === false) {
+              derivedStatus = "failed";
+              derivedError = typeof matchingResult.result === "string" ? matchingResult.result : "Execution failed";
+            }
+          }
+        }
+
         setMessages((prev) =>
           prev.map((m) => {
             if (m.timestamp !== msg.timestamp || !m.plan) return m;
@@ -646,7 +684,7 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
               ...m,
               plan: m.plan.map((s) =>
                 s.toolCallId === toolCallId
-                  ? { ...s, status: confirmed ? ("completed" as const) : ("rejected" as const) }
+                  ? { ...s, status: derivedStatus, error: derivedError }
                   : s
               ),
             };
