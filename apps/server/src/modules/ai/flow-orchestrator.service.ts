@@ -1,5 +1,4 @@
 import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
-import OpenAI from 'openai';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
@@ -9,6 +8,7 @@ import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
 import { AiMemoryService } from './ai-memory.service';
+import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
@@ -109,7 +109,6 @@ Business context:
 @Injectable()
 export class FlowOrchestratorService {
   private readonly logger = new Logger(FlowOrchestratorService.name);
-  private readonly openai: OpenAI;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -120,12 +119,8 @@ export class FlowOrchestratorService {
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
-  ) {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-  }
+    @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+  ) {}
 
   async chat(
     businessId: string,
@@ -153,7 +148,7 @@ export class FlowOrchestratorService {
       .replace('{{CURRENT_DATE}}', new Date().toISOString())
       .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection);
 
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    const messages: GatewayMessage[] = [
       { role: 'system', content: systemPrompt },
     ];
 
@@ -240,31 +235,39 @@ export class FlowOrchestratorService {
     messages.push({ role: 'user', content: message });
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages,
+      const gatewayResponse = await this.gateway.complete({
+        businessId,
+        taskCategory: 'tool-calling',
+        messages: messages as GatewayMessage[],
         tools: getOpenAiToolDefinitions(),
-        tool_choice: 'auto',
-        max_tokens: 1000,
+        toolChoice: 'auto',
+        maxTokens: 1000,
         temperature: 0.7,
       });
 
-      const choice = response.choices[0];
-      const assistantMessage = choice.message;
-      const promptTokens = response.usage?.prompt_tokens ?? 0;
-      const completionTokens = response.usage?.completion_tokens ?? 0;
-      const totalTokens = promptTokens + completionTokens;
+      const assistantMessage = {
+        content: gatewayResponse.content,
+        tool_calls: gatewayResponse.toolCalls,
+      };
+      const promptTokens = gatewayResponse.usage.promptTokens;
+      const completionTokens = gatewayResponse.usage.completionTokens;
+      const totalTokens = gatewayResponse.usage.totalTokens;
 
       await this.prisma.client.aiUsageLog.create({
         data: {
           businessId,
           feature: 'flow_chat',
-          model: 'gpt-4o',
+          model: gatewayResponse.model,
+          provider: gatewayResponse.provider,
           promptTokens,
           completionTokens,
           totalTokens,
-          estimatedCost: Math.round(((promptTokens / 1000) * 0.005 + (completionTokens / 1000) * 0.015) * 10000) / 10000,
+          estimatedCost: gatewayResponse.usage.estimatedCost,
           creditsUsed: 2,
+          latencyMs: gatewayResponse.latencyMs,
+          fallbackUsed: gatewayResponse.fallbackUsed,
+          fallbackProvider: gatewayResponse.fallbackProvider,
+          taskCategory: 'tool-calling',
           metadata: { maxTokens: 1000, temperature: 0.7, outputCategory: 'general' },
         },
       });
@@ -279,12 +282,11 @@ export class FlowOrchestratorService {
       }
 
       const toolCalls: FlowToolCall[] = assistantMessage.tool_calls.map((tc) => {
-        const fn = (tc as any).function;
-        const tool = getToolByName(fn.name);
+        const tool = getToolByName(tc.function.name);
         return {
           id: tc.id,
-          name: fn.name,
-          arguments: JSON.parse(fn.arguments || '{}'),
+          name: tc.function.name,
+          arguments: JSON.parse(tc.function.arguments || '{}'),
           riskLevel: tool?.riskLevel ?? 'low',
         };
       });
@@ -352,10 +354,10 @@ export class FlowOrchestratorService {
         toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id)),
       );
 
-      const followUpMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      const followUpMessages: GatewayMessage[] = [
         ...messages,
         {
-          role: 'assistant',
+          role: 'assistant' as const,
           content: assistantMessage.content || null,
           tool_calls: assistantMessage.tool_calls,
         },
@@ -366,14 +368,15 @@ export class FlowOrchestratorService {
         })),
       ];
 
-      const followUpResponse = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
+      const followUpGateway = await this.gateway.complete({
+        businessId,
+        taskCategory: 'summarization',
         messages: followUpMessages,
-        max_tokens: 500,
+        maxTokens: 500,
         temperature: 0.7,
       });
 
-      const finalReply = followUpResponse.choices[0]?.message?.content
+      const finalReply = followUpGateway.content
         || 'Done! The action was completed successfully.';
 
       return {

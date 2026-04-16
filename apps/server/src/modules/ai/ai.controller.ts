@@ -11,6 +11,7 @@ import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { ProfileIntelligenceService } from './profile-intelligence.service';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
+import { ModelGatewayService, AiMode } from './model-gateway.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -57,6 +58,7 @@ export class AiController {
     @Inject(ProAutoMonitorService) private readonly proAutoMonitor: ProAutoMonitorService,
     @Inject(ProfileIntelligenceService) private readonly profileIntelligence: ProfileIntelligenceService,
     @Inject(WorkspaceRecommendationsService) private readonly workspaceRecs: WorkspaceRecommendationsService,
+    @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
   ) {}
 
   @Get('health')
@@ -815,5 +817,81 @@ export class AiController {
   async profileReset(@Param('businessId') businessId: string) {
     this.profileIntelligence.resetSession(businessId);
     return { success: true };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/preferences')
+  async getAiPreferences(@Param('businessId') businessId: string) {
+    const prefs = await this.gateway.getPreferences(businessId);
+    return {
+      mode: prefs.aiMode,
+      writingStyle: prefs.preferredWritingStyle || 'professional',
+      byokOpenai: prefs.byokOpenai ? '••••••••' : null,
+      byokAnthropic: prefs.byokAnthropic ? '••••••••' : null,
+      byokXai: prefs.byokXai ? '••••••••' : null,
+    };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/ai/preferences')
+  async updateAiPreferences(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      mode?: AiMode;
+      writingStyle?: string;
+      byokOpenai?: string | null;
+      byokAnthropic?: string | null;
+      byokXai?: string | null;
+    },
+  ) {
+    const validModes: AiMode[] = ['balanced', 'premium', 'fast'];
+    if (body.mode !== undefined && !validModes.includes(body.mode)) {
+      throw new BadRequestException(`Invalid AI mode. Must be one of: ${validModes.join(', ')}`);
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (body.mode !== undefined) updates.aiMode = body.mode;
+    if (body.writingStyle !== undefined) updates.preferredWritingStyle = body.writingStyle;
+    if (body.byokOpenai !== undefined) updates.byokOpenai = body.byokOpenai === null ? '' : body.byokOpenai;
+    if (body.byokAnthropic !== undefined) updates.byokAnthropic = body.byokAnthropic === null ? '' : body.byokAnthropic;
+    if (body.byokXai !== undefined) updates.byokXai = body.byokXai === null ? '' : body.byokXai;
+
+    const merged = await this.gateway.updatePreferences(businessId, updates);
+    return {
+      success: true,
+      mode: merged.aiMode,
+      writingStyle: merged.preferredWritingStyle || 'professional',
+    };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/provider-health')
+  async getProviderHealth(@Param('businessId') _businessId: string) {
+    return this.gateway.getProviderHealth();
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/provider-stats')
+  async getProviderStats(@Param('businessId') businessId: string) {
+    return this.aiUsage.getProviderStats(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/routing-config')
+  async getRoutingConfig(@Param('businessId') _businessId: string) {
+    return this.gateway.getRoutingConfig();
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/ai/routing-config')
+  async updateRoutingConfig(
+    @Param('businessId') _businessId: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() body: Record<string, unknown>,
+  ) {
+    if (req.user?.role !== 'SUPER_ADMIN') {
+      throw new BadRequestException('Only super admins can update routing configuration');
+    }
+    return this.gateway.updateRoutingConfig(body as Record<string, Record<string, { primary: { provider: string; model: string }; fallbacks: Array<{ provider: string; model: string }> }>>);
   }
 }
