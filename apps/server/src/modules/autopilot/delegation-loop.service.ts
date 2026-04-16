@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy, NotFoundExce
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GovernanceService } from '../ai/governance.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
+import { AiExecutionLogService } from '../ai/ai-execution-log.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 export type LoopType =
@@ -91,6 +92,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(GovernanceService) private readonly governance: GovernanceService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
+    @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
@@ -228,6 +230,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async executeLoop(loop: LoopRecord) {
+    const startTime = Date.now();
     const run = await this.prisma.client.delegationLoopRun.create({
       data: {
         loopId: loop.id,
@@ -343,6 +346,23 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         actionsBlocked: result.actionsBlocked,
       });
 
+      const durationMs = Date.now() - startTime;
+
+      await this.executionLog.log({
+        businessId: loop.businessId,
+        action: `delegation_loop.${loop.loopType}`,
+        toolName: toolName,
+        module: 'autopilot',
+        riskTier: loop.riskTier,
+        mode: 'autonomous',
+        actor: 'system',
+        rationale: `Scheduled delegation loop execution: ${loop.loopType}`,
+        inputSummary: { loopId: loop.id, loopType: loop.loopType, config: loop.config },
+        outputSummary: { runId: run.id, itemsScanned: result.itemsScanned, itemsMatched: result.itemsMatched, actionsCreated: result.actionsCreated, actionsBlocked: result.actionsBlocked },
+        success: true,
+        durationMs,
+      });
+
       if (result.actionsCreated > 0) {
         this.memory.upsert(loop.businessId, {
           category: 'patterns',
@@ -354,8 +374,12 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         }).catch(() => {});
       }
 
+      await this.adaptGovernanceFromHistory(loop.businessId, loop.loopType).catch(() => {});
+
       return { runId: run.id, status: 'completed', itemsMatched: result.itemsMatched, actionsCreated: result.actionsCreated };
     } catch (err) {
+      const durationMs = Date.now() - startTime;
+
       await this.prisma.client.delegationLoopRun.update({
         where: { id: run.id },
         data: {
@@ -364,6 +388,21 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           error: (err as Error).message,
         },
       });
+
+      await this.executionLog.log({
+        businessId: loop.businessId,
+        action: `delegation_loop.${loop.loopType}`,
+        toolName: `delegation_${loop.loopType}`,
+        module: 'autopilot',
+        riskTier: loop.riskTier,
+        mode: 'autonomous',
+        actor: 'system',
+        rationale: `Scheduled delegation loop execution: ${loop.loopType}`,
+        inputSummary: { loopId: loop.id, loopType: loop.loopType },
+        success: false,
+        errorMessage: (err as Error).message,
+        durationMs,
+      }).catch(() => {});
 
       this.events.emit('delegation_loop.failed', {
         businessId: loop.businessId,
@@ -1186,6 +1225,69 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       } catch {
         this.logger.warn(`Pattern summarization failed for business ${businessId}`);
       }
+    }
+  }
+
+  private async adaptGovernanceFromHistory(businessId: string, loopType: string) {
+    const recentTasks = await this.prisma.client.autopilotTask.findMany({
+      where: {
+        businessId,
+        aiContext: { path: ['loopType'], equals: loopType },
+        status: { in: ['COMPLETED', 'AUTO_EXECUTED', 'SKIPPED', 'REJECTED'] },
+        updatedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+      },
+      select: { status: true },
+      take: 100,
+    });
+
+    if (recentTasks.length < 10) return;
+
+    const approved = recentTasks.filter((t: { status: string }) => t.status === 'COMPLETED' || t.status === 'AUTO_EXECUTED').length;
+    const rejected = recentTasks.filter((t: { status: string }) => t.status === 'REJECTED' || t.status === 'SKIPPED').length;
+    const total = approved + rejected;
+    if (total === 0) return;
+
+    const approvalRate = approved / total;
+    const toolName = `delegation_${loopType}`;
+
+    if (approvalRate >= 0.9 && total >= 15) {
+      await this.memory.upsert(businessId, {
+        category: 'governance',
+        key: `${toolName}_trust_signal`,
+        value: `Loop "${loopType}" has a ${Math.round(approvalRate * 100)}% approval rate over ${total} actions. Consider promoting to auto-execute (Tier 1).`,
+        confidence: Math.min(approvalRate, 0.95),
+        source: 'learning_loop',
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      });
+
+      this.events.emit('delegation_loop.trust_elevated', {
+        businessId,
+        loopType,
+        approvalRate,
+        totalActions: total,
+        recommendation: 'promote_to_auto',
+      });
+
+      this.logger.log(`Loop ${loopType} trust elevated for business ${businessId}: ${Math.round(approvalRate * 100)}% approval over ${total} actions`);
+    } else if (approvalRate < 0.5 && total >= 10) {
+      await this.memory.upsert(businessId, {
+        category: 'governance',
+        key: `${toolName}_distrust_signal`,
+        value: `Loop "${loopType}" has a ${Math.round(approvalRate * 100)}% approval rate over ${total} actions. Consider requiring manual approval (Tier 3).`,
+        confidence: Math.min(1 - approvalRate, 0.9),
+        source: 'learning_loop',
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      });
+
+      this.events.emit('delegation_loop.trust_degraded', {
+        businessId,
+        loopType,
+        approvalRate,
+        totalActions: total,
+        recommendation: 'require_approval',
+      });
+
+      this.logger.log(`Loop ${loopType} trust degraded for business ${businessId}: ${Math.round(approvalRate * 100)}% approval over ${total} actions`);
     }
   }
 }
