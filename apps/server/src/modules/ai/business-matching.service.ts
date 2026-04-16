@@ -35,17 +35,12 @@ interface BusinessProfile {
   _count?: { communityPosts: number; cohortMembers: number; networkConnectionsTo: number };
 }
 
-interface CachedRecommendations {
-  matches: (MatchResult & { business: BusinessProfile })[];
-  computedAt: number;
-}
+const DB_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_RECOMMENDATIONS = 6;
 
 @Injectable()
 export class BusinessMatchingService {
   private readonly logger = new Logger(BusinessMatchingService.name);
-  private readonly cache = new Map<string, CachedRecommendations>();
-  private readonly CACHE_TTL_MS = 30 * 60 * 1000;
-  private readonly MAX_RECOMMENDATIONS = 6;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -54,15 +49,157 @@ export class BusinessMatchingService {
 
   async getRecommendations(businessId: string, forceRefresh = false): Promise<(MatchResult & { business: BusinessProfile })[]> {
     if (!forceRefresh) {
-      const cached = this.cache.get(businessId);
-      if (cached && Date.now() - cached.computedAt < this.CACHE_TTL_MS) {
-        return cached.matches;
-      }
+      const dbCached = await this.loadFromDb(businessId);
+      if (dbCached) return dbCached;
     }
 
     const matches = await this.computeMatches(businessId);
-    this.cache.set(businessId, { matches, computedAt: Date.now() });
+    await this.persistToDb(businessId, matches);
     return matches;
+  }
+
+  async refreshStaleMatches(stalenessMs = DB_CACHE_TTL_MS): Promise<number> {
+    const cutoff = new Date(Date.now() - stalenessMs);
+
+    const businessesWithStaleMatches = await this.prisma.client.business.findMany({
+      where: {
+        deletedAt: null,
+        profileCompleteness: { gte: 20 },
+        OR: [
+          { matchesAsSource: { none: {} } },
+          { matchesAsSource: { every: { computedAt: { lt: cutoff } } } },
+        ],
+      },
+      select: { id: true },
+      take: 50,
+    });
+
+    let refreshed = 0;
+    for (const biz of businessesWithStaleMatches) {
+      try {
+        const matches = await this.computeMatches(biz.id);
+        await this.persistToDb(biz.id, matches);
+        refreshed++;
+      } catch (err) {
+        this.logger.warn(`Failed to refresh matches for ${biz.id}: ${(err as Error).message}`);
+      }
+    }
+
+    return refreshed;
+  }
+
+  async getMatchHistory(businessId: string, limit = 50): Promise<{
+    id: string;
+    targetBusinessId: string;
+    targetBusinessName: string;
+    score: number;
+    matchType: string;
+    computedAt: Date;
+  }[]> {
+    const rows = await this.prisma.client.businessMatch.findMany({
+      where: { businessId },
+      orderBy: { computedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        targetBusinessId: true,
+        score: true,
+        matchType: true,
+        computedAt: true,
+        targetBusiness: { select: { name: true } },
+      },
+    });
+
+    return rows.map((r) => ({
+      id: r.id,
+      targetBusinessId: r.targetBusinessId,
+      targetBusinessName: r.targetBusiness.name,
+      score: r.score,
+      matchType: r.matchType,
+      computedAt: r.computedAt,
+    }));
+  }
+
+  private async loadFromDb(businessId: string): Promise<(MatchResult & { business: BusinessProfile })[] | null> {
+    const cutoff = new Date(Date.now() - DB_CACHE_TTL_MS);
+
+    const rows = await this.prisma.client.businessMatch.findMany({
+      where: {
+        businessId,
+        computedAt: { gte: cutoff },
+      },
+      orderBy: { score: 'desc' },
+      take: MAX_RECOMMENDATIONS,
+    });
+
+    if (rows.length === 0) return null;
+
+    const targetIds = rows.map((r) => r.targetBusinessId);
+    const targets = await this.prisma.client.business.findMany({
+      where: { id: { in: targetIds }, deletedAt: null },
+      select: {
+        id: true, name: true, slug: true, logoUrl: true,
+        headline: true, bio: true, industry: true, skills: true,
+        businessStage: true, city: true, country: true, tagline: true,
+        acceptingWork: true, currentCapacity: true, leadTime: true,
+        preferredProjectTypes: true, budgetFit: true,
+        positioningStatement: true, profileCompleteness: true,
+        products: {
+          where: { isActive: true },
+          select: { id: true, name: true, price: true, currency: true, category: true },
+          take: 3,
+          orderBy: { createdAt: 'desc' },
+        },
+        services: {
+          select: { id: true, name: true, price: true },
+          take: 3,
+          orderBy: { createdAt: 'desc' },
+        },
+        _count: {
+          select: { communityPosts: true, cohortMembers: true, networkConnectionsTo: true },
+        },
+      },
+    });
+
+    const targetMap = new Map(targets.map((t) => [t.id, t]));
+
+    return rows
+      .filter((r) => targetMap.has(r.targetBusinessId))
+      .map((r) => {
+        const target = targetMap.get(r.targetBusinessId)!;
+        return {
+          businessId: r.targetBusinessId,
+          score: r.score,
+          reasons: r.reasons,
+          explanation: r.explanation,
+          matchType: r.matchType as MatchResult['matchType'],
+          business: target as BusinessProfile,
+        };
+      });
+  }
+
+  private async persistToDb(businessId: string, matches: (MatchResult & { business: BusinessProfile })[]): Promise<void> {
+    try {
+      await this.prisma.client.$transaction(async (tx) => {
+        await tx.businessMatch.deleteMany({ where: { businessId } });
+
+        if (matches.length > 0) {
+          await tx.businessMatch.createMany({
+            data: matches.map((m) => ({
+              businessId,
+              targetBusinessId: m.businessId,
+              score: m.score,
+              reasons: m.reasons,
+              explanation: m.explanation,
+              matchType: m.matchType,
+              computedAt: new Date(),
+            })),
+          });
+        }
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to persist matches for ${businessId}: ${(err as Error).message}`);
+    }
   }
 
   private async computeMatches(businessId: string): Promise<(MatchResult & { business: BusinessProfile })[]> {
@@ -99,7 +236,7 @@ export class BusinessMatchingService {
           orderBy: { createdAt: 'desc' },
         },
         services: {
-          select: { id: true, name: true, price: true, currency: true },
+          select: { id: true, name: true, price: true },
           take: 3,
           orderBy: { createdAt: 'desc' },
         },
@@ -117,7 +254,7 @@ export class BusinessMatchingService {
     });
 
     scored.sort((a, b) => b.score - a.score);
-    const topMatches = scored.slice(0, this.MAX_RECOMMENDATIONS).filter((m) => m.score > 0);
+    const topMatches = scored.slice(0, MAX_RECOMMENDATIONS).filter((m) => m.score > 0);
 
     if (topMatches.length === 0) return [];
 

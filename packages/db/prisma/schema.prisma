@@ -248,6 +248,10 @@ model Business {
   // Field for UI/UX: Gamification, Onboarding, etc.
   metaData  Json?     @default("{}") @map("meta_data")
 
+  // AI Match Recommendations
+  matchesAsSource  BusinessMatch[] @relation("BusinessMatchSource")
+  matchesAsTarget  BusinessMatch[] @relation("BusinessMatchTarget")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -3739,6 +3743,28 @@ model AiPlan {
   @@index([businessId, status])
   @@index([businessId, createdAt])
   @@map("ai_plans")
+}
+
+model BusinessMatch {
+  id               String   @id @default(cuid())
+  businessId       String   @map("business_id")
+  business         Business @relation("BusinessMatchSource", fields: [businessId], references: [id], onDelete: Cascade)
+  targetBusinessId String   @map("target_business_id")
+  targetBusiness   Business @relation("BusinessMatchTarget", fields: [targetBusinessId], references: [id], onDelete: Cascade)
+
+  score       Int
+  reasons     String[]  @default([])
+  explanation String    @default("")
+  matchType   String    @map("match_type")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, targetBusinessId])
+  @@index([businessId, computedAt])
+  @@index([targetBusinessId])
+  @@map("business_matches")
 }
 
 model AiPlanStep {

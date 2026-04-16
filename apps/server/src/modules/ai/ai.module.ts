@@ -20,6 +20,7 @@ import { ProfileIntelligenceService } from './profile-intelligence.service';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
 import { ModelGatewayService } from './model-gateway.service';
 import { BusinessMatchingService } from './business-matching.service';
+import { MatchRefreshSchedulerService } from './match-refresh-scheduler.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
@@ -44,6 +45,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     ProfileIntelligenceService,
     WorkspaceRecommendationsService,
     BusinessMatchingService,
+    MatchRefreshSchedulerService,
   ],
   exports: [
     ModelGatewayService,
