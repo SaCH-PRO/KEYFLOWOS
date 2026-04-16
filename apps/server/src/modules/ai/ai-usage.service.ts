@@ -4,7 +4,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from '../subscriptions/plans';
 import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
 import { OutputTemplateService } from './output-template.service';
-import { ModelGatewayService, TaskCategory, GatewayMessage } from './model-gateway.service';
+import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus } from './model-gateway.service';
 
 /**
  * responseMode controls quality directive injection and output validation:
@@ -57,6 +57,7 @@ interface UsageSummary {
   periodStart: Date;
   periodEnd: Date;
   byFeature: Array<{ feature: string; credits: number; calls: number; cost: number }>;
+  budget?: BudgetStatus;
 }
 
 const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
@@ -390,6 +391,12 @@ export class AiUsageService {
       cost: Math.round((f._sum.estimatedCost ?? 0) * 100) / 100,
     }));
 
+    let budget: BudgetStatus | undefined;
+    try {
+      budget = await this.gateway.getBudgetStatus(businessId);
+    } catch {
+    }
+
     return {
       currentPlan: sub.plan,
       creditsUsed,
@@ -403,6 +410,7 @@ export class AiUsageService {
       periodStart,
       periodEnd,
       byFeature,
+      budget,
     };
   }
 
@@ -457,6 +465,16 @@ export class AiUsageService {
       }),
     ]);
 
+    let budgetStatus: BudgetStatus | undefined;
+    try {
+      budgetStatus = await this.gateway.getBudgetStatus(businessId);
+    } catch {
+    }
+
+    const providerBudgetMap = new Map(
+      budgetStatus?.byProvider?.map(b => [b.provider, b]) || [],
+    );
+
     return {
       byProvider: byProvider.map(p => ({
         provider: p.provider,
@@ -465,9 +483,11 @@ export class AiUsageService {
         cost: Math.round((p._sum.estimatedCost ?? 0) * 100) / 100,
         tokens: p._sum.totalTokens ?? 0,
         avgLatencyMs: Math.round(p._avg.latencyMs ?? 0),
+        budget: providerBudgetMap.get(p.provider) || null,
       })),
       fallbackCount: fallbackStats,
       avgLatencyMs: Math.round(avgLatency._avg.latencyMs ?? 0),
+      overallBudget: budgetStatus?.overall || null,
     };
   }
 
