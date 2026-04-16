@@ -1307,29 +1307,24 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
 
               {tab === "queue" && (
                 <div id="copilot-panel-queue" role="tabpanel" aria-labelledby="copilot-tab-queue" className="px-4 py-3 space-y-3 overflow-y-auto">
-                  {pendingApprovals.length > 0 && (
+                  {allQueueItems.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Pending Approvals</p>
-                      {pendingApprovals.map((item) => (
-                        <VerificationCardCompact
-                          key={item.id}
-                          item={item}
-                          onApprove={handleApprove}
-                          onReject={handleReject}
-                          loading={resolvingId === item.id}
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                  {actionQueue.filter((q) => q.status === "pending" || q.status === "scheduled").length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Action Queue</p>
-                      {actionQueue
-                        .filter((q) => q.status === "pending" || q.status === "scheduled")
-                        .map((item) => (
+                      <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">
+                        Priority Queue ({allQueueItems.length})
+                      </p>
+                      {allQueueItems.map((item) =>
+                        item.type === "pending_approval" ? (
+                          <VerificationCardCompact
+                            key={item.id}
+                            item={pendingApprovals.find((a) => a.id === item.id)!}
+                            onApprove={handleApprove}
+                            onReject={handleReject}
+                            loading={resolvingId === item.id}
+                          />
+                        ) : (
                           <QueueItemCard key={item.id} item={item} />
-                        ))}
+                        )
+                      )}
                     </div>
                   )}
 
@@ -1380,7 +1375,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                     </div>
                   )}
 
-                  {pendingApprovals.length === 0 && queueInsights.length === 0 && actionQueue.filter((q) => q.status === "pending" || q.status === "scheduled").length === 0 && (
+                  {allQueueItems.length === 0 && queueInsights.length === 0 && (
                     <div className="flex flex-col items-center py-8 gap-2">
                       <CheckCircle2 className="w-6 h-6 text-emerald-400/60" />
                       <span className="text-xs text-muted-foreground/50">All clear</span>
