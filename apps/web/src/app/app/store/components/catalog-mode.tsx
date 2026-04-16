@@ -11,7 +11,8 @@ import type { Product, Service, CatalogItemOverride } from "@/lib/client";
 
 type Props = {
   commerceProducts: Product[];
-  storeServiceNames: Set<string>;
+  liveProductIds: Set<string>;
+  graphProductToServiceMap: Map<string, string>;
   storeItemCount: number;
   processingItems: Set<string>;
   confirmRemove: string | null;
@@ -34,7 +35,8 @@ type Props = {
 
 export function CatalogMode({
   commerceProducts,
-  storeServiceNames,
+  liveProductIds,
+  graphProductToServiceMap,
   storeItemCount,
   processingItems,
   confirmRemove,
@@ -56,7 +58,7 @@ export function CatalogMode({
 }: Props) {
   const totalItems = commerceProducts.length;
   const inStore = storeItemCount;
-  const notAdded = totalItems - commerceProducts.filter((p) => storeServiceNames.has(p.name.toLowerCase().trim())).length;
+  const notAdded = totalItems - commerceProducts.filter((p) => liveProductIds.has(p.id)).length;
   const categories = new Set(commerceProducts.map((p) => p.category).filter(Boolean));
   const serviceCount = commerceProducts.filter((p) => p.category === "SERVICE").length;
   const productCount = commerceProducts.filter((p) => p.category === "PRODUCT").length;
@@ -158,7 +160,8 @@ export function CatalogMode({
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
         <CatalogManager
           products={commerceProducts}
-          storeServiceNames={storeServiceNames}
+          liveProductIds={liveProductIds}
+          graphProductToServiceMap={graphProductToServiceMap}
           storeItemCount={storeItemCount}
           processingItems={processingItems}
           confirmRemove={confirmRemove}

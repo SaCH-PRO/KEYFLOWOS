@@ -31,7 +31,8 @@ function formatRelativeTime(dateStr: string | undefined | null): string {
 
 type Props = {
   products: Product[];
-  storeServiceNames: Set<string>;
+  liveProductIds: Set<string>;
+  graphProductToServiceMap: Map<string, string>;
   storeItemCount: number;
   processingItems: Set<string>;
   confirmRemove: string | null;
@@ -90,7 +91,8 @@ const EMPHASIS_OPTIONS = [
 
 export function CatalogManager({
   products,
-  storeServiceNames,
+  liveProductIds,
+  graphProductToServiceMap,
   storeItemCount,
   processingItems,
   confirmRemove,
@@ -142,7 +144,7 @@ export function CatalogManager({
     orderDirty.current = false;
   }, [onReorder, orderedProducts]);
 
-  const notAddedCount = products.filter((p) => !storeServiceNames.has(p.name.toLowerCase().trim())).length;
+  const notAddedCount = products.filter((p) => !liveProductIds.has(p.id)).length;
   const inStoreCount = storeItemCount;
 
   const isFiltering = categoryFilter !== "ALL" || searchInput.trim() !== "";
@@ -373,13 +375,13 @@ export function CatalogManager({
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleBulkAdd}
-              disabled={products.every((p) => storeServiceNames.has(p.name.toLowerCase().trim()))}
+              disabled={products.every((p) => liveProductIds.has(p.id))}
               className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all ${
                 bulkConfirm === "add"
                   ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
                   : "kf-btn-secondary"
               }`}
-              style={{ opacity: products.every((p) => storeServiceNames.has(p.name.toLowerCase().trim())) ? 0.3 : 1 }}
+              style={{ opacity: products.every((p) => liveProductIds.has(p.id)) ? 0.3 : 1 }}
             >
               <CheckCircle2 className="w-3 h-3 inline mr-1" />
               {bulkConfirm === "add" ? "Confirm Add All?" : "Add All"}
@@ -453,7 +455,7 @@ export function CatalogManager({
               <CatalogItem
                 key={p.id}
                 product={p}
-                isOnStore={storeServiceNames.has(p.name.toLowerCase().trim())}
+                isOnStore={liveProductIds.has(p.id)}
                 isProcessing={processingItems.has(p.id)}
                 isConfirming={confirmRemove === p.id}
                 isDraggable={!isFiltering}
@@ -578,8 +580,8 @@ function CatalogItem({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                const matched = services.find((s) => s.name.toLowerCase().trim() === p.name.toLowerCase().trim());
-                if (matched) onDeleteFromStore(matched.id, p.name);
+                const serviceId = graphProductToServiceMap.get(p.id);
+                if (serviceId) onDeleteFromStore(serviceId, p.name);
               }}
               className="px-3 py-1.5 rounded-lg text-xs font-medium min-h-[44px] transition-colors"
               style={{ background: "hsl(var(--kf-error) / 0.2)", border: "1px solid hsl(var(--kf-error) / 0.3)", color: "hsl(var(--kf-error))" }}

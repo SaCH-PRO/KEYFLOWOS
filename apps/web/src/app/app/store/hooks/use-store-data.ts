@@ -305,6 +305,7 @@ export function useStoreData() {
         durationMins: product.duration ?? 30,
         price: product.price,
         description: product.description ?? undefined,
+        sourceProductId: product.id,
       });
       if (res.error) {
         toast.error(`Failed to add: ${res.error}`);
@@ -491,5 +492,6 @@ export function useStoreData() {
     storeGraph,
     readiness,
     liveProductIds,
+    graphProductToServiceMap,
   };
 }

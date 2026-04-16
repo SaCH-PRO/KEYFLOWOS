@@ -747,6 +747,8 @@ model Service {
   bufferMins  Int?    @map("buffer_mins")
   leadTimeMins Int?   @map("lead_time_mins")
 
+  sourceProductId String? @map("source_product_id")
+
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -758,6 +760,7 @@ model Service {
   deletedAt DateTime? @map("deleted_at") // Soft delete
 
   @@index([businessId])
+  @@index([sourceProductId])
   @@map("services")
 }
 
