@@ -544,6 +544,9 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
       if (!needsApproval && invoice.contact.email) {
         try {
+          const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://keyflowos.replit.app';
+          const invoiceUrl = `${appUrl}/pay/${invoice.id}`;
+
           await this.emailService.send({
             businessId,
             type: 'invoice_sent',
@@ -557,6 +560,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
               daysPastDue,
               cadence: cadenceLabel,
               isPaymentReminder: true,
+              invoiceUrl,
             },
             dedupeKey: `payment_recovery_${invoice.id}_${currentMilestone}`,
           });
@@ -721,7 +725,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
   ) {
     const thankYouDelayHours = (config.thankYouDelayHours as number) || 2;
     const reviewRequestDelayDays = (config.reviewRequestDelayDays as number) || 7;
-    const crossSellDelayDays = (config.crossSellDelayDays as number) || 30;
+    const crossSellDelayDays = (config.crossSellDelayDays as number) || 14;
 
     const thankYouWindowStart = new Date(Date.now() - (thankYouDelayHours + 4) * 60 * 60 * 1000);
     const thankYouWindowEnd = new Date(Date.now() - thankYouDelayHours * 60 * 60 * 1000);
