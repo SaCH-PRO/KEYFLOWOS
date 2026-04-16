@@ -185,7 +185,7 @@ interface NavItem {
   exactMatch?: boolean;
 }
 
-type PrimarySectionId = "cockpit" | "tower" | "workspaces" | "studio" | "public";
+type PrimarySectionId = "cockpit" | "tower" | "store" | "workspaces" | "studio" | "public";
 
 interface PrimaryNavItem {
   id: PrimarySectionId;
@@ -197,6 +197,7 @@ interface PrimaryNavItem {
 const primaryNav: PrimaryNavItem[] = [
   { id: "cockpit", label: "Cockpit", icon: Gauge, href: "/app" },
   { id: "tower", label: "Control Tower", icon: Radar, href: "/app/control-tower" },
+  { id: "store", label: "Store", icon: Store, href: "/app/store" },
   { id: "workspaces", label: "Workspaces", icon: LayoutGrid },
   { id: "studio", label: "Studio", icon: Wrench },
   { id: "public", label: "Public", icon: Globe },
@@ -222,7 +223,6 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Integrations", href: "/app/settings/connections", icon: Plug },
     { label: "Templates", href: "/app/settings/templates", icon: FileText },
     { label: "Emails", href: "/app/settings/notifications", icon: Mail },
-    { label: "Presence", href: "/app/store", icon: Store },
   ],
   public: [
     { label: "Community", href: "/app/community", icon: MessageCircle },
@@ -235,7 +235,7 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/control-tower", "tower"],
   ["/app/settings", "studio"],
   ["/app/profile", "studio"],
-  ["/app/store", "studio"],
+  ["/app/store", "store"],
   ["/app/community", "public"],
   ["/app/learn", "public"],
   ["/app/marketplace", "public"],

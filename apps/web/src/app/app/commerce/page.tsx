@@ -450,7 +450,7 @@ export default function CommercePage() {
         {[
           { label: "Outstanding", value: formatCurrencyCompact(financialSummary.outstanding, businessCurrency), color: "text-amber-400", bg: "bg-amber-500/10", icon: Clock },
           { label: "Overdue", value: formatCurrencyCompact(financialSummary.overdue, businessCurrency), color: financialSummary.overdue > 0 ? "text-red-400" : "text-muted-foreground/50", bg: financialSummary.overdue > 0 ? "bg-red-500/10" : "bg-muted/10", icon: AlertTriangle },
-          { label: "This Month", value: formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency), color: "text-emerald-400", bg: "bg-emerald-500/10", icon: DollarSign },
+          { label: "Collected", value: formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency), color: "text-emerald-400", bg: "bg-emerald-500/10", icon: DollarSign, sub: "this month" },
           { label: "Drafts", value: String(financialSummary.draftCount), color: financialSummary.draftCount > 0 ? "text-amber-300" : "text-muted-foreground/50", bg: "bg-muted/10", icon: FileText },
           { label: "Quotes Pending", value: String(financialSummary.pendingQuotes), color: financialSummary.pendingQuotes > 0 ? "text-blue-400" : "text-muted-foreground/50", bg: "bg-blue-500/10", icon: CreditCard },
           { label: "Recurring", value: "0", color: "text-muted-foreground/50", bg: "bg-muted/10", icon: RefreshCw },
