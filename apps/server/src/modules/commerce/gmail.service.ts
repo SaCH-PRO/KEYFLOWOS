@@ -1,6 +1,7 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHmac, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { GmailConnector } from '../../core/connectors/implementations/gmail.connector';
 
 interface GoogleToken {
   access_token: string;
@@ -31,6 +32,7 @@ export class GmailService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Optional() @Inject(GmailConnector) private readonly gmailConnector?: GmailConnector,
   ) {
     if (!this.stateSecret) {
       this.logger.warn('GOOGLE_STATE_SECRET not configured - Gmail OAuth will not be secure');
@@ -342,6 +344,13 @@ export class GmailService {
 
     const result = await response.json();
     this.logger.log(`Email sent: ${result.id}`);
+
+    this.gmailConnector?.emitMessageSent(params.businessId, {
+      to: params.to,
+      subject: params.subject,
+      externalId: result.id,
+    }).catch((e) => this.logger.warn(`Gmail connector event emission failed: ${e.message}`));
+
     return { messageId: result.id };
   }
 }

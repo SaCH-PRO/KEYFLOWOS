@@ -1,18 +1,22 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Post, Query, UseGuards, Optional, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CommerceService } from '../commerce/commerce.service';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
+import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { StripeWebhookDto } from './dto/stripe-webhook.dto';
 import { randomBytes } from 'crypto';
 
 @Controller('webhooks')
 export class WebhooksController {
+  private readonly logger = new Logger(WebhooksController.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommerceService) private readonly commerce: CommerceService,
     @Inject(WebhookDispatcherService) private readonly dispatcher: WebhookDispatcherService,
+    @Optional() @Inject(StripeConnector) private readonly stripeConnector?: StripeConnector,
   ) {}
 
   @Get('health')
@@ -22,7 +26,23 @@ export class WebhooksController {
 
   @Post('stripe')
   async handleStripeWebhook(@Body() body: StripeWebhookDto) {
-    return this.commerce.markInvoicePaid(body.invoiceId);
+    const result = await this.commerce.markInvoicePaid(body.invoiceId);
+
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: body.invoiceId },
+      select: { businessId: true, total: true, currency: true },
+    });
+
+    if (invoice) {
+      this.stripeConnector?.emitPaymentReceived(invoice.businessId, {
+        amount: Number(invoice.total),
+        currency: invoice.currency,
+        invoiceId: body.invoiceId,
+        externalId: body.invoiceId,
+      }).catch((e) => this.logger.warn(`Stripe connector event emission failed: ${e.message}`));
+    }
+
+    return result;
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

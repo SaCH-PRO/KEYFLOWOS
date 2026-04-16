@@ -1,6 +1,6 @@
 import { Booking, Contact, Invoice, InvoiceItem, Product, Quote, QuoteItem, SocialPost } from '@keyflow/db';
+import type { ConnectorType } from '../connectors/connector.interface';
 
-// Payload for when a new contact is created
 export class ContactCreatedPayload {
   contact!: Contact;
   businessId!: string;
@@ -54,7 +54,6 @@ export class SequenceStepFailedPayload {
   retryCount!: number;
 }
 
-// Payload for when a new booking is created
 export class BookingCreatedPayload {
   booking!: Booking;
   contact?: Contact;
@@ -87,7 +86,6 @@ export class BookingRescheduledPayload {
   previousEndTime!: Date;
 }
 
-// Payload for when an invoice is paid
 export class InvoicePaidPayload {
   invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact; bookingId?: string | null };
   businessId!: string;
@@ -291,7 +289,174 @@ export class ActionBlockedPayload {
   riskTier!: number;
 }
 
-// Master event map for reference and typing
+export interface ConnectorEventEnvelope {
+  connectorType: ConnectorType;
+  externalId: string | null;
+  businessId: string;
+  timestamp: Date;
+}
+
+export class ConnectorSyncedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: null;
+  businessId!: string;
+  timestamp!: Date;
+  itemsSynced!: number;
+  duration!: number;
+}
+
+export class ConnectorErrorPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: null;
+  businessId!: string;
+  timestamp!: Date;
+  error!: string;
+  duration!: number;
+}
+
+export class ConnectorDisconnectedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: null;
+  businessId!: string;
+  timestamp!: Date;
+}
+
+export class ConnectorConnectedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: null;
+  businessId!: string;
+  timestamp!: Date;
+  account?: string;
+}
+
+export class MessageReceivedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  channel!: string;
+  from!: string;
+  to?: string;
+  subject?: string;
+  body?: string;
+  contactId?: string;
+}
+
+export class MessageSentPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  channel!: string;
+  to!: string;
+  subject?: string;
+  contactId?: string;
+}
+
+export class PaymentReceivedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  amount!: number;
+  currency!: string;
+  provider!: string;
+  invoiceId?: string;
+  contactId?: string;
+}
+
+export class PaymentFailedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  amount!: number;
+  currency!: string;
+  provider!: string;
+  error!: string;
+  invoiceId?: string;
+}
+
+export class CalendarEventCreatedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  title!: string;
+  startTime!: Date;
+  endTime!: Date;
+  bookingId?: string;
+}
+
+export class CalendarEventUpdatedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  title!: string;
+  startTime!: Date;
+  endTime!: Date;
+}
+
+export class FileUploadedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  fileName!: string;
+  mimeType!: string;
+  size?: number;
+  url?: string;
+}
+
+export class FileSyncedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  fileCount!: number;
+}
+
+export class SocialPostPublishedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  platform!: string;
+  postId?: string;
+  url?: string;
+}
+
+export class SocialEngagementReceivedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  platform!: string;
+  type!: string;
+  postId?: string;
+}
+
+export class FormSubmittedPayload implements ConnectorEventEnvelope {
+  connectorType!: ConnectorType;
+  externalId!: string | null;
+  businessId!: string;
+  timestamp!: Date;
+  formId!: string;
+  formName?: string;
+  contactId?: string;
+  data!: Record<string, unknown>;
+}
+
+export class EntityResolvedPayload {
+  businessId!: string;
+  contactId!: string;
+  source!: string;
+  matchedOn!: string;
+  isNew!: boolean;
+  merged!: boolean;
+}
+
 export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
   'contact.updated': ContactUpdatedPayload;
@@ -338,4 +503,22 @@ export interface KeyFlowEventMap {
   'graph.cache_invalidated': GraphCacheInvalidatedPayload;
   'action.executed': ActionExecutedPayload;
   'action.blocked': ActionBlockedPayload;
+
+  'connector.synced': ConnectorSyncedPayload;
+  'connector.error': ConnectorErrorPayload;
+  'connector.disconnected': ConnectorDisconnectedPayload;
+  'connector.connected': ConnectorConnectedPayload;
+
+  'message.received': MessageReceivedPayload;
+  'message.sent': MessageSentPayload;
+  'payment.received': PaymentReceivedPayload;
+  'payment.failed': PaymentFailedPayload;
+  'calendar_event.created': CalendarEventCreatedPayload;
+  'calendar_event.updated': CalendarEventUpdatedPayload;
+  'file.uploaded': FileUploadedPayload;
+  'file.synced': FileSyncedPayload;
+  'social_post.published': SocialPostPublishedPayload;
+  'social.engagement_received': SocialEngagementReceivedPayload;
+  'form.submitted': FormSubmittedPayload;
+  'entity.resolved': EntityResolvedPayload;
 }

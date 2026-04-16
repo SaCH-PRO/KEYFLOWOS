@@ -367,6 +367,7 @@ model Contact {
   momentum            ContactMomentum[]
   momentumSnapshots   ContactMomentumSnapshot[]
   momentumRecommendations MomentumRecommendation[]
+  externalMappings    ContactExternalMapping[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
@@ -385,6 +386,45 @@ model Contact {
   @@unique([businessId, emailNormalized])
   @@unique([businessId, phoneNormalized])
   @@map("contacts")
+}
+
+model ContactExternalMapping {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  contactId  String   @map("contact_id")
+  source     String
+  externalId String   @map("external_id")
+
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, source, externalId])
+  @@index([contactId])
+  @@map("contact_external_mappings")
+}
+
+model ConnectorStatus {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  connectorType   String   @map("connector_type")
+  status          String   @default("disconnected")
+  connectedAt     DateTime? @map("connected_at")
+  connectedAccount String? @map("connected_account")
+  lastSyncAt      DateTime? @map("last_sync_at")
+  lastErrorAt     DateTime? @map("last_error_at")
+  lastError       String?   @map("last_error")
+  errorCount      Int       @default(0) @map("error_count")
+  syncCount       Int       @default(0) @map("sync_count")
+  metadata        Json?
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, connectorType])
+  @@index([businessId])
+  @@map("connector_statuses")
 }
 
 model ContactEvent {

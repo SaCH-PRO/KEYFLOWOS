@@ -1,7 +1,9 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
+import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
+import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
 
 interface WipayCallbackParams {
@@ -25,6 +27,8 @@ export class PaymentsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommerceService) private readonly commerceService: CommerceService,
+    @Optional() @Inject(WiPayConnector) private readonly wipayConnector?: WiPayConnector,
+    @Optional() @Inject(PayPalConnector) private readonly paypalConnector?: PayPalConnector,
   ) {}
 
   private getPaypalClient(clientId?: string, clientSecret?: string): { client: Client; ordersController: OrdersController } | null {
@@ -204,11 +208,19 @@ export class PaymentsService {
           });
 
           await this.commerceService.markInvoicePaid(order_id);
+
+          this.wipayConnector?.emitPaymentReceived(invoice.businessId, {
+            amount: parseFloat(total || String(invoice.total)),
+            currency: invoice.currency,
+            invoiceId: order_id,
+            externalId: transaction_id,
+          }).catch((e) => this.logger.warn(`WiPay connector event emission failed: ${e.message}`));
         }
 
         return { success: true, invoiceId: order_id, message: 'Payment successful' };
-      } catch (error: any) {
-        this.logger.error(`Failed to process WiPay payment for order ${order_id}: ${error.message}`, error.stack);
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.error(`Failed to process WiPay payment for order ${order_id}: ${errMsg}`);
         return { success: false, invoiceId: order_id, message: 'Payment processing error' };
       }
     }
@@ -225,8 +237,17 @@ export class PaymentsService {
           businessId: invoice.businessId,
         },
       });
-    } catch (error: any) {
-      this.logger.error(`Failed to record failed WiPay payment: ${error.message}`);
+
+      this.wipayConnector?.emitPaymentFailed(invoice.businessId, {
+        amount: parseFloat(total || String(invoice.total)),
+        currency: invoice.currency,
+        error: `WiPay payment status: ${status}`,
+        invoiceId: order_id,
+        externalId: transaction_id,
+      }).catch((e) => this.logger.warn(`WiPay connector event emission failed: ${e.message}`));
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to record failed WiPay payment: ${errMsg}`);
     }
 
     return { success: false, invoiceId: order_id, message: 'Payment was not successful' };
@@ -443,6 +464,16 @@ export class PaymentsService {
         });
 
         await this.commerceService.markInvoicePaid(invoiceId);
+
+        const payer = result.payer as { emailAddress?: string; name?: { givenName?: string; surname?: string } } | undefined;
+        this.paypalConnector?.emitPaymentReceived(invoice.businessId, {
+          amount: Number(invoice.total),
+          currency: invoice.currency,
+          invoiceId,
+          payerEmail: payer?.emailAddress,
+          payerName: payer?.name ? `${payer.name.givenName ?? ''} ${payer.name.surname ?? ''}`.trim() : undefined,
+          externalId: captureId,
+        }).catch((e) => this.logger.warn(`PayPal connector event emission failed: ${e.message}`));
       }
 
       return {
@@ -450,8 +481,9 @@ export class PaymentsService {
         status: result.status,
         payer: result.payer,
       };
-    } catch (error: any) {
-      this.logger.error(`PayPal capture failed for order ${orderId}: ${error.message}`, error.stack);
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`PayPal capture failed for order ${orderId}: ${errMsg}`);
 
       try {
         await this.prisma.client.payment.create({
@@ -465,8 +497,17 @@ export class PaymentsService {
             businessId: invoice.businessId,
           },
         });
-      } catch (recordError: any) {
-        this.logger.error(`Failed to record failed PayPal payment: ${recordError.message}`);
+
+        this.paypalConnector?.emitPaymentFailed(invoice.businessId, {
+          amount: Number(invoice.total),
+          currency: invoice.currency,
+          error: errMsg,
+          invoiceId,
+          externalId: orderId,
+        }).catch((e) => this.logger.warn(`PayPal connector event emission failed: ${e.message}`));
+      } catch (recordError: unknown) {
+        const recErrMsg = recordError instanceof Error ? recordError.message : 'Unknown error';
+        this.logger.error(`Failed to record failed PayPal payment: ${recErrMsg}`);
       }
 
       throw new Error('Failed to capture PayPal order');

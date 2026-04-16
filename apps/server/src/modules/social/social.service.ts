@@ -1,15 +1,19 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SocialPublishingService } from './social-publishing.service';
+import { MetaSocialConnector } from '../../core/connectors/implementations/meta-social.connector';
 import { PostPublishedPayload } from '../../core/event-bus/events.types';
 
 @Injectable()
 export class SocialService {
+  private readonly logger = new Logger(SocialService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(SocialPublishingService) private readonly publishingService: SocialPublishingService,
+    @Optional() @Inject(MetaSocialConnector) private readonly metaConnector?: MetaSocialConnector,
   ) {}
 
   createDraft(businessId: string, content: string, mediaUrls: string[], scheduledAt?: string, channelIds?: string[]) {
@@ -83,6 +87,11 @@ export class SocialService {
         eventName: 'post.published',
       };
       this.events.emit('post.published', payload);
+
+      this.metaConnector?.emitPostPublished(businessId, {
+        platform: 'meta',
+        postId,
+      }).catch((e) => this.logger.warn(`Meta connector event emission failed: ${e.message}`));
 
       return { post: updatedPost, results };
     }

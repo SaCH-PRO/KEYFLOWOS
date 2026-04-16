@@ -1,6 +1,7 @@
-import { Injectable, BadRequestException, Logger, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
+import { GoogleDriveConnector } from '../../core/connectors/implementations/google-drive.connector';
 
 interface OAuthState {
   businessId: string;
@@ -39,6 +40,7 @@ export class GoogleDriveService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Optional() @Inject(GoogleDriveConnector) private readonly driveConnector?: GoogleDriveConnector,
   ) {
     if (!this.stateSecret) {
       this.logger.warn('GOOGLE_STATE_SECRET not configured - Drive OAuth will not be secure');
@@ -383,6 +385,14 @@ export class GoogleDriveService {
 
     const file = await res.json();
     this.logger.log(`Document "${document.title}" saved to Drive as ${file.id}`);
+
+    this.driveConnector?.emitFileUploaded(businessId, {
+      fileName: `${document.title} (v${document.version})`,
+      mimeType: 'application/vnd.google-apps.document',
+      url: file.webViewLink,
+      externalId: file.id,
+    }).catch((e) => this.logger.warn(`Drive connector event emission failed: ${e.message}`));
+
     return { fileId: file.id, webViewLink: file.webViewLink };
   }
 
