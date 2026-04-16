@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
 
 export type AiSuggestion = {
@@ -86,6 +86,19 @@ export function useModuleAi(config: ModuleAiConfig) {
 
   const updateContext = useCallback((ctx: Partial<ModuleContext>) => {
     contextRef.current = { ...contextRef.current, ...ctx };
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("kf:module-context-update", {
+          detail: {
+            moduleId: configRef.current.moduleId,
+            moduleName: configRef.current.moduleName,
+            activeView: contextRef.current.activeView,
+            selectedItemId: contextRef.current.selectedItemId,
+            customData: contextRef.current.customData,
+          },
+        })
+      );
+    }
   }, []);
 
   const refreshSuggestions = useCallback(async () => {

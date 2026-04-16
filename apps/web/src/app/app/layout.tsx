@@ -55,6 +55,7 @@ import {
 
 
 import { CopilotPanel, type CopilotModule } from "@/components/ai/copilot-panel";
+import { AiContextProvider } from "@/contexts/ai-context";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
@@ -272,7 +273,9 @@ const mobileBottomNav = [
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <NavigationContextProvider>
-      <AppLayoutInner>{children}</AppLayoutInner>
+      <AiContextProvider>
+        <AppLayoutInner>{children}</AppLayoutInner>
+      </AiContextProvider>
     </NavigationContextProvider>
   );
 }

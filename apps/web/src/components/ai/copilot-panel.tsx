@@ -7,14 +7,19 @@ import {
   Brain, X, Send, Loader2, Sparkles, ArrowRight,
   Activity, Shield, CheckCircle2,
   ChevronRight, Settings, TrendingUp, Calendar, AlertCircle,
-  AlertTriangle, Zap, Info,
+  AlertTriangle, Zap, Info, Check, XIcon, Edit3,
+  Clock, Package, Users, DollarSign, FileText,
+  BarChart3, Target, Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   sendFlowChat,
+  confirmFlowAction,
   fetchAiPendingApprovals,
   fetchAiExecutionStats,
+  fetchAiExecutionLogs,
+  fetchActionQueue,
   resolveAiApproval,
   fetchProAutoInsights,
   fetchProfileStatus,
@@ -22,19 +27,19 @@ import {
   confirmProfileExtractions,
   type AiApprovalItem,
   type AiExecutionStats,
+  type AiExecutionLogEntry,
+  type ActionQueueItem,
   type ProAutoInsight,
   type ProfileStatus,
   type ProfileExtraction,
+  type FlowChatResponse,
+  type FlowToolCall,
+  type FlowToolResult,
+  type FlowPendingConfirmation,
 } from "@/lib/client";
 import { VerificationCardCompact } from "./verification-card";
 
 type Tab = "chat" | "queue" | "activity";
-
-interface CopilotMessage {
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-}
 
 export type CopilotModule =
   | "cockpit"
@@ -59,59 +64,50 @@ interface CopilotPanelProps {
 interface QuickPrompt {
   label: string;
   prompt: string;
+  dynamic?: boolean;
+  severity?: "critical" | "warning" | "opportunity" | "info";
 }
 
-const GLOBAL_PROMPTS: QuickPrompt[] = [
-  { label: "Business overview", prompt: "Give me a quick business overview" },
-  { label: "Today's priorities", prompt: "What should I focus on today?" },
-  { label: "Revenue summary", prompt: "How is my revenue performing?" },
-  { label: "Pending tasks", prompt: "Show me what needs my attention" },
-];
+interface PlanStep {
+  toolCallId: string;
+  name: string;
+  description: string;
+  arguments: Record<string, unknown>;
+  riskLevel: "low" | "medium" | "high";
+  status: "pending" | "approved" | "rejected" | "executing" | "completed" | "failed";
+  result?: unknown;
+  error?: string;
+}
 
-const MODULE_PROMPTS: Record<string, QuickPrompt[]> = {
-  crm: [
-    { label: "Follow up stale leads", prompt: "Which leads need follow-up and what should I say?" },
-    { label: "Client health check", prompt: "How are my top clients doing? Any at risk?" },
-    { label: "Segment contacts", prompt: "Help me segment my contacts for targeted outreach" },
-    { label: "Draft outreach", prompt: "Draft a follow-up message for my most promising lead" },
-  ],
-  revenue: [
-    { label: "Overdue invoices", prompt: "Show me all overdue invoices and suggest collection actions" },
-    { label: "Revenue forecast", prompt: "What's my revenue forecast for the next 30 days?" },
-    { label: "Payment reminders", prompt: "Draft payment reminders for overdue clients" },
-    { label: "Pricing advice", prompt: "Should I adjust my pricing? Analyze my current rates" },
-  ],
-  calendar: [
-    { label: "Schedule health", prompt: "How is my calendar utilization this month?" },
-    { label: "Booking gaps", prompt: "Where are the gaps in my schedule I should fill?" },
-    { label: "Client reminders", prompt: "Send reminders for upcoming appointments" },
-    { label: "Optimize hours", prompt: "Suggest better availability hours based on booking patterns" },
-  ],
-  content: [
-    { label: "Content ideas", prompt: "Suggest social media content ideas for this week" },
-    { label: "Draft a post", prompt: "Help me write a social media post about my latest service" },
-    { label: "Campaign strategy", prompt: "What email campaign should I run next?" },
-    { label: "Content calendar", prompt: "Plan my content for the next 2 weeks" },
-  ],
-  projects: [
-    { label: "Project status", prompt: "Give me a status update on all active projects" },
-    { label: "Overdue tasks", prompt: "What project tasks are overdue and need attention?" },
-    { label: "Risk assessment", prompt: "Which projects are at risk of missing deadlines?" },
-    { label: "Bottleneck analysis", prompt: "Where are the bottlenecks in my project delivery?" },
-  ],
-  expenses: [
-    { label: "Spending analysis", prompt: "Analyze my spending patterns this month" },
-    { label: "Cost savings", prompt: "Where can I cut costs without impacting quality?" },
-    { label: "Budget status", prompt: "How am I tracking against my budget?" },
-    { label: "Profit margins", prompt: "What are my profit margins by client and service?" },
-  ],
-  flows: [
-    { label: "Automation health", prompt: "How are my automations performing?" },
-    { label: "New flow ideas", prompt: "Suggest automations I should set up for my business" },
-    { label: "Flow coverage", prompt: "What business processes am I not automating yet?" },
-    { label: "Fix failing flows", prompt: "Are any of my automations failing? Help me fix them" },
-  ],
-  cockpit: GLOBAL_PROMPTS,
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+  plan?: PlanStep[];
+  pendingConfirmations?: FlowPendingConfirmation[];
+  toolResults?: FlowToolResult[];
+  requiresConfirmation?: boolean;
+}
+
+const MODULE_LABELS: Record<string, { label: string; icon: typeof Sparkles; color: string }> = {
+  crm: { label: "CRM", icon: Users, color: "text-blue-400" },
+  revenue: { label: "Revenue", icon: DollarSign, color: "text-emerald-400" },
+  commerce: { label: "Commerce", icon: Package, color: "text-emerald-400" },
+  calendar: { label: "Calendar", icon: Calendar, color: "text-purple-400" },
+  bookings: { label: "Bookings", icon: Calendar, color: "text-purple-400" },
+  content: { label: "Content", icon: FileText, color: "text-pink-400" },
+  projects: { label: "Projects", icon: Layers, color: "text-cyan-400" },
+  expenses: { label: "Expenses", icon: BarChart3, color: "text-amber-400" },
+  flows: { label: "Flows", icon: Zap, color: "text-teal-400" },
+  automations: { label: "Flows", icon: Zap, color: "text-teal-400" },
+  store: { label: "Store", icon: Package, color: "text-orange-400" },
+  cockpit: { label: "Cockpit", icon: Target, color: "text-foreground/70" },
+};
+
+const RISK_STYLES: Record<string, { bg: string; border: string; label: string; color: string }> = {
+  low: { bg: "bg-emerald-500/10", border: "border-emerald-500/20", label: "Safe", color: "text-emerald-400" },
+  medium: { bg: "bg-amber-500/10", border: "border-amber-500/20", label: "Confirm", color: "text-amber-400" },
+  high: { bg: "bg-red-500/10", border: "border-red-500/20", label: "Approval", color: "text-red-400" },
 };
 
 const SEVERITY_CONFIG: Record<ProAutoInsight["severity"], { icon: typeof AlertCircle; color: string; bg: string; border: string }> = {
@@ -121,9 +117,216 @@ const SEVERITY_CONFIG: Record<ProAutoInsight["severity"], { icon: typeof AlertCi
   info: { icon: Info, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20" },
 };
 
+const FALLBACK_PROMPTS: QuickPrompt[] = [
+  { label: "Business overview", prompt: "Give me a quick business overview" },
+  { label: "Today's priorities", prompt: "What should I focus on today?" },
+  { label: "Revenue summary", prompt: "How is my revenue performing?" },
+  { label: "Pending tasks", prompt: "Show me what needs my attention" },
+];
+
+function ModuleBadge({ moduleId }: { moduleId: string }) {
+  const info = MODULE_LABELS[moduleId] || MODULE_LABELS.cockpit;
+  const Icon = info.icon;
+  return (
+    <span className={`inline-flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-muted/20 ${info.color}`}>
+      <Icon className="w-2.5 h-2.5" />
+      {info.label}
+    </span>
+  );
+}
+
+function PlanStepCard({
+  step,
+  onApprove,
+  onReject,
+  loading,
+}: {
+  step: PlanStep;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+  loading: boolean;
+}) {
+  const risk = RISK_STYLES[step.riskLevel] || RISK_STYLES.low;
+  const toolLabel = step.name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  return (
+    <div className={`p-3 rounded-xl border ${risk.border} ${risk.bg} space-y-2`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-semibold text-foreground/85">{toolLabel}</span>
+            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${risk.color} ${risk.bg} border ${risk.border}`}>
+              {risk.label}
+            </span>
+          </div>
+          {step.description && (
+            <p className="text-[11px] text-muted-foreground/60 leading-relaxed">{step.description}</p>
+          )}
+        </div>
+        {step.status === "completed" && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
+        {step.status === "failed" && <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />}
+      </div>
+
+      {Object.keys(step.arguments).length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {Object.entries(step.arguments).slice(0, 4).map(([k, v]) => (
+            <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-muted/20 text-muted-foreground/50">
+              {k}: {typeof v === "string" ? v.slice(0, 30) : String(v)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {step.status === "pending" && step.riskLevel !== "low" && (
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={() => onApprove(step.toolCallId)}
+            disabled={loading}
+            className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[11px] font-medium hover:bg-emerald-500/25 transition-all disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            Approve
+          </button>
+          <button
+            onClick={() => onReject(step.toolCallId)}
+            disabled={loading}
+            className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-red-500/15 text-red-400 text-[11px] font-medium hover:bg-red-500/25 transition-all disabled:opacity-50"
+          >
+            <XIcon className="w-3 h-3" />
+            Reject
+          </button>
+        </div>
+      )}
+
+      {step.status === "completed" && (
+        <div className="text-[10px] text-emerald-400/70 flex items-center gap-1">
+          <CheckCircle2 className="w-3 h-3" />
+          <span>Executed successfully</span>
+        </div>
+      )}
+
+      {step.status === "failed" && step.error && (
+        <div className="text-[10px] text-red-400/70">{step.error}</div>
+      )}
+    </div>
+  );
+}
+
+function ExecutionLogCard({ log }: { log: AiExecutionLogEntry }) {
+  const timeAgo = getTimeAgo(log.createdAt ?? "");
+  const toolLabel = (log.toolName || log.action || "Unknown").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  return (
+    <div className="flex items-start gap-3 p-2.5 rounded-xl bg-muted/10 border border-border/20">
+      <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${log.success ? "bg-emerald-500/15" : "bg-red-500/15"}`}>
+        {log.success ? (
+          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+        ) : (
+          <AlertTriangle className="w-3 h-3 text-red-400" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-0.5">
+          <span className="text-[11px] font-medium text-foreground/80 truncate">{toolLabel}</span>
+          {log.module && <ModuleBadge moduleId={log.module} />}
+        </div>
+        {log.rationale && (
+          <p className="text-[10px] text-muted-foreground/50 leading-relaxed line-clamp-2">{log.rationale}</p>
+        )}
+        <div className="flex items-center gap-2 mt-1">
+          <span className="text-[9px] text-muted-foreground/40">{timeAgo}</span>
+          {log.durationMs != null && (
+            <span className="text-[9px] text-muted-foreground/30">{log.durationMs}ms</span>
+          )}
+          {log.riskTier > 0 && (
+            <span className={`text-[9px] px-1 rounded ${log.riskTier <= 1 ? "text-emerald-400 bg-emerald-500/10" : log.riskTier === 2 ? "text-amber-400 bg-amber-500/10" : "text-red-400 bg-red-500/10"}`}>
+              T{log.riskTier}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QueueItemCard({
+  item,
+  onAction,
+}: {
+  item: ActionQueueItem;
+  onAction?: (id: string) => void;
+}) {
+  const tierColor = item.riskTier <= 1
+    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+    : item.riskTier === 2
+      ? "text-blue-400 bg-blue-500/10 border-blue-500/20"
+      : item.riskTier === 3
+        ? "text-amber-400 bg-amber-500/10 border-amber-500/20"
+        : "text-red-400 bg-red-500/10 border-red-500/20";
+  const tierLabel = item.riskTier <= 1 ? "Auto" : item.riskTier === 2 ? "Confirm" : item.riskTier === 3 ? "Approval" : "Admin";
+  const statusColor = item.status === "completed"
+    ? "text-emerald-400"
+    : item.status === "failed"
+      ? "text-red-400"
+      : item.status === "pending"
+        ? "text-amber-400"
+        : "text-blue-400";
+  const toolLabel = item.toolName.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  return (
+    <div className="p-3 rounded-xl border border-border/20 bg-muted/5 space-y-2">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="text-[11px] font-semibold text-foreground/85">{item.title || toolLabel}</span>
+            {item.module && <ModuleBadge moduleId={item.module} />}
+            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium border ${tierColor}`}>
+              T{item.riskTier} · {tierLabel}
+            </span>
+          </div>
+          {item.description && (
+            <p className="text-[10px] text-muted-foreground/50 leading-relaxed">{item.description}</p>
+          )}
+        </div>
+        <span className={`text-[9px] font-medium capitalize shrink-0 ${statusColor}`}>{item.status}</span>
+      </div>
+      {item.affectedEntities.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {item.affectedEntities.slice(0, 3).map((e, i) => (
+            <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-muted/20 text-muted-foreground/40">{e}</span>
+          ))}
+          {item.affectedEntities.length > 3 && (
+            <span className="text-[9px] text-muted-foreground/30">+{item.affectedEntities.length - 3} more</span>
+          )}
+        </div>
+      )}
+      {item.status === "pending" && onAction && (
+        <button
+          onClick={() => onAction(item.id)}
+          className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))/0.1] text-[hsl(var(--kf-accent1))] text-[11px] font-medium hover:bg-[hsl(var(--kf-accent1))/0.2] transition-all"
+        >
+          Review <ChevronRight className="w-3 h-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function getTimeAgo(dateStr: string): string {
+  if (!dateStr) return "";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
 export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps) {
   const [tab, setTab] = useState<Tab>("chat");
-  const [messages, setMessages] = useState<CopilotMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<AiApprovalItem[]>([]);
@@ -137,33 +340,96 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
   const [profileMessages, setProfileMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const [pendingExtractions, setPendingExtractions] = useState<ProfileExtraction[]>([]);
   const [confirmingExtractions, setConfirmingExtractions] = useState(false);
+  const [executionLogs, setExecutionLogs] = useState<AiExecutionLogEntry[]>([]);
+  const [actionQueue, setActionQueue] = useState<ActionQueueItem[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const quickPrompts = useMemo(() => {
-    const module = currentModule || "cockpit";
-    return MODULE_PROMPTS[module] || GLOBAL_PROMPTS;
-  }, [currentModule]);
+  const dynamicPrompts = useMemo((): QuickPrompt[] => {
+    const prompts: QuickPrompt[] = [];
+
+    const criticalInsights = insights.filter((i) => i.severity === "critical" || i.severity === "warning");
+    for (const insight of criticalInsights.slice(0, 2)) {
+      prompts.push({
+        label: insight.title,
+        prompt: insight.suggestedAction || `Tell me about: ${insight.title}`,
+        dynamic: true,
+        severity: insight.severity,
+      });
+    }
+
+    const opportunities = insights.filter((i) => i.severity === "opportunity");
+    for (const opp of opportunities.slice(0, 1)) {
+      prompts.push({
+        label: opp.title,
+        prompt: opp.suggestedAction || `How can I leverage: ${opp.title}`,
+        dynamic: true,
+        severity: "opportunity",
+      });
+    }
+
+    if (pendingApprovals.length > 0) {
+      prompts.push({
+        label: `${pendingApprovals.length} pending approval${pendingApprovals.length !== 1 ? "s" : ""}`,
+        prompt: `Review my ${pendingApprovals.length} pending AI actions and help me decide`,
+        dynamic: true,
+        severity: "warning",
+      });
+    }
+
+    while (prompts.length < 4) {
+      const remaining = FALLBACK_PROMPTS.filter(
+        (fp) => !prompts.some((p) => p.label === fp.label)
+      );
+      if (remaining.length === 0) break;
+      prompts.push(remaining[0]);
+    }
+
+    return prompts.slice(0, 4);
+  }, [insights, pendingApprovals]);
 
   const moduleInsights = useMemo(() => {
     if (!currentModule || currentModule === "cockpit") return insights;
-    return insights.filter(i => i.module === currentModule);
+    return insights.filter((i) => i.module === currentModule);
   }, [insights, currentModule]);
 
+  const allQueueItems = useMemo(() => {
+    const approvalItems: ActionQueueItem[] = pendingApprovals.map((a) => ({
+      id: a.id,
+      type: "pending_approval" as const,
+      toolName: a.toolName,
+      title: a.title,
+      description: a.description,
+      riskTier: a.riskTier,
+      module: null,
+      status: "pending" as const,
+      createdAt: a.createdAt,
+      affectedEntities: [],
+    }));
+
+    const combined = [...approvalItems, ...actionQueue.filter((q) => q.status === "pending" || q.status === "scheduled")];
+    return combined.sort((a, b) => b.riskTier - a.riskTier || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [pendingApprovals, actionQueue]);
+
   const queueInsights = useMemo(() => {
-    return insights.filter(i => i.severity === "critical" || i.severity === "warning");
+    return insights.filter((i) => i.severity === "critical" || i.severity === "warning");
   }, [insights]);
+
+  const totalQueueCount = allQueueItems.length + queueInsights.length;
 
   const loadSidebarData = useCallback(async () => {
     const biz = getStoredBusinessId();
     if (!biz) return;
     try {
-      const [approvalRes, statsRes] = await Promise.all([
+      const [approvalRes, statsRes, queueRes] = await Promise.all([
         fetchAiPendingApprovals(biz),
         fetchAiExecutionStats(biz, 7),
+        fetchActionQueue(biz, undefined, 20).catch(() => ({ data: null, error: "Failed" })),
       ]);
-      if (approvalRes.data) setPendingApprovals(approvalRes.data.filter(a => a.status === "pending"));
+      if (approvalRes.data) setPendingApprovals(approvalRes.data.filter((a) => a.status === "pending"));
       if (statsRes.data) setStats(statsRes.data);
+      if (queueRes.data) setActionQueue(queueRes.data.items);
     } catch {
     }
   }, []);
@@ -190,15 +456,28 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     } catch {}
   }, []);
 
+  const loadExecutionLogs = useCallback(async () => {
+    const biz = getStoredBusinessId();
+    if (!biz) return;
+    setLogsLoading(true);
+    try {
+      const res = await fetchAiExecutionLogs(biz, { limit: 20 });
+      if (res.data) setExecutionLogs(res.data);
+    } catch {
+    } finally {
+      setLogsLoading(false);
+    }
+  }, []);
+
   const handleProfileSend = useCallback(async (msg: string) => {
     const biz = getStoredBusinessId();
     if (!biz || !msg.trim()) return;
-    setProfileMessages(prev => [...prev, { role: "user", content: msg }]);
+    setProfileMessages((prev) => [...prev, { role: "user", content: msg }]);
     setProfileSending(true);
     try {
       const res = await sendProfileChat(biz, msg);
       if (res.data) {
-        setProfileMessages(prev => [...prev, { role: "assistant", content: res.data!.reply }]);
+        setProfileMessages((prev) => [...prev, { role: "assistant", content: res.data!.reply }]);
         if (res.data.pendingExtractions?.length > 0) {
           setPendingExtractions(res.data.pendingExtractions);
         }
@@ -239,6 +518,12 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
   }, [open, loadSidebarData, loadInsights, loadProfileStatus]);
 
   useEffect(() => {
+    if (open && tab === "activity") {
+      loadExecutionLogs();
+    }
+  }, [open, tab, loadExecutionLogs]);
+
+  useEffect(() => {
     const handler = () => { loadSidebarData(); };
     window.addEventListener("kf:ai-activity", handler);
     return () => window.removeEventListener("kf:ai-activity", handler);
@@ -248,6 +533,54 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const processFlowResponse = useCallback((res: FlowChatResponse): ChatMessage => {
+    const msg: ChatMessage = {
+      role: "assistant",
+      content: res.reply,
+      timestamp: Date.now(),
+    };
+
+    if (res.pendingConfirmations && res.pendingConfirmations.length > 0) {
+      msg.pendingConfirmations = res.pendingConfirmations;
+      msg.requiresConfirmation = true;
+      msg.plan = res.pendingConfirmations.map((pc) => ({
+        toolCallId: pc.toolCallId,
+        name: pc.name,
+        description: pc.description,
+        arguments: pc.arguments,
+        riskLevel: pc.riskLevel,
+        status: "pending" as const,
+      }));
+    }
+
+    if (res.toolResults && res.toolResults.length > 0) {
+      msg.toolResults = res.toolResults;
+      msg.plan = res.toolResults.map((tr) => ({
+        toolCallId: tr.toolCallId,
+        name: tr.name,
+        description: tr.followOnSuggestions?.[0] || "",
+        arguments: {},
+        riskLevel: tr.riskTier <= 1 ? "low" : tr.riskTier === 2 ? "medium" : "high",
+        status: tr.success ? ("completed" as const) : ("failed" as const),
+        result: tr.result,
+        error: tr.error,
+      }));
+    }
+
+    if (res.toolCalls && res.toolCalls.length > 0 && !msg.plan) {
+      msg.plan = res.toolCalls.map((tc) => ({
+        toolCallId: tc.id,
+        name: tc.name,
+        description: "",
+        arguments: tc.arguments,
+        riskLevel: tc.riskLevel,
+        status: "pending" as const,
+      }));
+    }
+
+    return msg;
+  }, []);
+
   const handleSend = useCallback(async (text?: string) => {
     const msg = text || input.trim();
     if (!msg || sending) return;
@@ -255,24 +588,94 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     if (!biz) return;
 
     setInput("");
-    const userMsg: CopilotMessage = { role: "user", content: msg, timestamp: Date.now() };
-    setMessages(prev => [...prev, userMsg]);
+    const userMsg: ChatMessage = { role: "user", content: msg, timestamp: Date.now() };
+    setMessages((prev) => [...prev, userMsg]);
     setSending(true);
 
-    const history = messages.map(m => ({ role: m.role, content: m.content }));
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
     try {
       const res = await sendFlowChat(biz, msg, history);
       if (res.data) {
-        setMessages(prev => [...prev, { role: "assistant", content: res.data!.reply, timestamp: Date.now() }]);
+        const assistantMsg = processFlowResponse(res.data);
+        setMessages((prev) => [...prev, assistantMsg]);
+
+        if (res.data.toolResults?.length) {
+          loadSidebarData();
+        }
       } else {
-        setMessages(prev => [...prev, { role: "assistant", content: "Sorry, I encountered an error. Please try again.", timestamp: Date.now() }]);
+        setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, I encountered an error. Please try again.", timestamp: Date.now() }]);
       }
     } catch {
-      setMessages(prev => [...prev, { role: "assistant", content: "Sorry, I encountered an error. Please try again.", timestamp: Date.now() }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, I encountered an error. Please try again.", timestamp: Date.now() }]);
     } finally {
       setSending(false);
     }
-  }, [input, sending, messages]);
+  }, [input, sending, messages, processFlowResponse, loadSidebarData]);
+
+  const handlePlanAction = useCallback(async (toolCallId: string, confirmed: boolean, msg: ChatMessage) => {
+    const biz = getStoredBusinessId();
+    if (!biz || !msg.pendingConfirmations) return;
+    const pc = msg.pendingConfirmations.find((p) => p.toolCallId === toolCallId);
+    if (!pc) return;
+
+    setResolvingId(toolCallId);
+
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.timestamp !== msg.timestamp || !m.plan) return m;
+        return {
+          ...m,
+          plan: m.plan.map((s) =>
+            s.toolCallId === toolCallId
+              ? { ...s, status: confirmed ? ("executing" as const) : ("rejected" as const) }
+              : s
+          ),
+        };
+      })
+    );
+
+    try {
+      const res = await confirmFlowAction(biz, toolCallId, pc.name, pc.arguments, confirmed);
+      if (res.data) {
+        const resultMsg = processFlowResponse(res.data);
+
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.timestamp !== msg.timestamp || !m.plan) return m;
+            return {
+              ...m,
+              plan: m.plan.map((s) =>
+                s.toolCallId === toolCallId
+                  ? { ...s, status: confirmed ? ("completed" as const) : ("rejected" as const) }
+                  : s
+              ),
+            };
+          })
+        );
+
+        if (resultMsg.content) {
+          setMessages((prev) => [...prev, resultMsg]);
+        }
+
+        loadSidebarData();
+      }
+    } catch {
+      toast.error("Failed to process action");
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.timestamp !== msg.timestamp || !m.plan) return m;
+          return {
+            ...m,
+            plan: m.plan.map((s) =>
+              s.toolCallId === toolCallId ? { ...s, status: "failed" as const, error: "Execution failed" } : s
+            ),
+          };
+        })
+      );
+    } finally {
+      setResolvingId(null);
+    }
+  }, [processFlowResponse, loadSidebarData]);
 
   const handleApprove = useCallback(async (id: string) => {
     const biz = getStoredBusinessId();
@@ -281,8 +684,9 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     try {
       const res = await resolveAiApproval(biz, id, "approved");
       if (res.data) {
-        setPendingApprovals(prev => prev.filter(a => a.id !== id));
+        setPendingApprovals((prev) => prev.filter((a) => a.id !== id));
         toast.success("Action approved");
+        loadSidebarData();
       } else {
         toast.error(res.error || "Failed to approve");
       }
@@ -291,7 +695,7 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     } finally {
       setResolvingId(null);
     }
-  }, []);
+  }, [loadSidebarData]);
 
   const handleReject = useCallback(async (id: string) => {
     const biz = getStoredBusinessId();
@@ -300,8 +704,9 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     try {
       const res = await resolveAiApproval(biz, id, "rejected");
       if (res.data) {
-        setPendingApprovals(prev => prev.filter(a => a.id !== id));
+        setPendingApprovals((prev) => prev.filter((a) => a.id !== id));
         toast.success("Action rejected");
+        loadSidebarData();
       } else {
         toast.error(res.error || "Failed to reject");
       }
@@ -310,7 +715,7 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
     } finally {
       setResolvingId(null);
     }
-  }, []);
+  }, [loadSidebarData]);
 
   const displayInsights = currentModule && currentModule !== "cockpit" ? moduleInsights : insights.slice(0, 5);
 
@@ -345,11 +750,11 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                   <Brain className="w-4 h-4 text-white" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-semibold text-foreground/90">AI Copilot</h2>
+                  <h2 className="text-sm font-semibold text-foreground/90">AI Command Center</h2>
                   <p className="text-[10px] text-muted-foreground/50">
                     {currentModule && currentModule !== "cockpit"
-                      ? `Context: ${currentModule.charAt(0).toUpperCase() + currentModule.slice(1)}`
-                      : "Your business assistant"}
+                      ? `Context: ${(MODULE_LABELS[currentModule] || MODULE_LABELS.cockpit).label}`
+                      : "Your business autopilot"}
                   </p>
                 </div>
               </div>
@@ -376,9 +781,9 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
             <div className="flex items-center border-b border-border/20" role="tablist" aria-label="Copilot sections">
               {([
                 { id: "chat" as Tab, label: "Chat", icon: Sparkles },
-                { id: "queue" as Tab, label: `Queue${(pendingApprovals.length + queueInsights.length) > 0 ? ` (${pendingApprovals.length + queueInsights.length})` : ""}`, icon: Shield },
+                { id: "queue" as Tab, label: `Queue${totalQueueCount > 0 ? ` (${totalQueueCount})` : ""}`, icon: Shield },
                 { id: "activity" as Tab, label: "Activity", icon: Activity },
-              ]).map(t => (
+              ]).map((t) => (
                 <button
                   key={t.id}
                   id={`copilot-tab-${t.id}`}
@@ -486,7 +891,7 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                     <div className="flex items-center gap-2 bg-muted/20 border border-border/30 rounded-xl px-3 py-2">
                       <input
                         value={input}
-                        onChange={e => setInput(e.target.value)}
+                        onChange={(e) => setInput(e.target.value)}
                         placeholder="Tell me about your business..."
                         className="flex-1 bg-transparent text-sm text-foreground/85 placeholder:text-muted-foreground/35 outline-none"
                         disabled={profileSending}
@@ -535,15 +940,15 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                             <div className="p-2 rounded-lg bg-muted/20 text-center">
                               <AlertCircle className="w-3.5 h-3.5 mx-auto mb-1 text-amber-400" />
                               <p className="text-[10px] text-muted-foreground/60">Pending</p>
-                              <p className="text-xs font-medium text-foreground/80">{pendingApprovals.length}</p>
+                              <p className="text-xs font-medium text-foreground/80">{totalQueueCount}</p>
                             </div>
                           </div>
-                          {pendingApprovals.length > 0 && (
+                          {totalQueueCount > 0 && (
                             <button
                               onClick={() => setTab("queue")}
                               className="w-full flex items-center justify-between p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 hover:bg-amber-500/15 transition-all"
                             >
-                              <span className="font-medium">{pendingApprovals.length} action{pendingApprovals.length !== 1 ? "s" : ""} waiting for your review</span>
+                              <span className="font-medium">{totalQueueCount} action{totalQueueCount !== 1 ? "s" : ""} waiting for your review</span>
                               <ChevronRight className="w-3.5 h-3.5" />
                             </button>
                           )}
@@ -552,10 +957,10 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                         {displayInsights.length > 0 && (
                           <div>
                             <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-2">
-                              {currentModule && currentModule !== "cockpit" ? `${currentModule.charAt(0).toUpperCase() + currentModule.slice(1)} Insights` : "Pro Auto Insights"}
+                              {currentModule && currentModule !== "cockpit" ? `${(MODULE_LABELS[currentModule] || MODULE_LABELS.cockpit).label} Insights` : "Business Intelligence"}
                             </p>
                             <div className="space-y-1.5">
-                              {displayInsights.map(insight => {
+                              {displayInsights.map((insight) => {
                                 const config = SEVERITY_CONFIG[insight.severity];
                                 const SevIcon = config.icon;
                                 return (
@@ -570,7 +975,10 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                                   >
                                     <SevIcon className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${config.color}`} />
                                     <div className="flex-1 min-w-0">
-                                      <p className={`font-medium ${config.color} leading-snug`}>{insight.title}</p>
+                                      <div className="flex items-center gap-2">
+                                        <p className={`font-medium ${config.color} leading-snug`}>{insight.title}</p>
+                                        {insight.module && <ModuleBadge moduleId={insight.module} />}
+                                      </div>
                                       {insight.metric && (
                                         <span className="text-[10px] text-muted-foreground/50">{insight.metric}</span>
                                       )}
@@ -630,35 +1038,73 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
 
                         <div>
                           <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-2">
-                            {currentModule && currentModule !== "cockpit" ? `${currentModule.charAt(0).toUpperCase() + currentModule.slice(1)} Actions` : "Suggested Actions"}
+                            {dynamicPrompts.some((p) => p.dynamic) ? "Suggested Now" : "Quick Actions"}
                           </p>
                           <div className="grid grid-cols-2 gap-2">
-                            {quickPrompts.map(qp => (
-                              <button
-                                key={qp.label}
-                                onClick={() => handleSend(qp.prompt)}
-                                className="flex items-center gap-2 p-2.5 rounded-xl text-xs text-left text-muted-foreground/70 bg-muted/20 border border-border/30 hover:bg-muted/30 hover:text-foreground/80 transition-all"
-                              >
-                                <ArrowRight className="w-3 h-3 shrink-0 text-[hsl(var(--kf-accent1))]" />
-                                <span>{qp.label}</span>
-                              </button>
-                            ))}
+                            {dynamicPrompts.map((qp) => {
+                              const sevConfig = qp.severity ? SEVERITY_CONFIG[qp.severity] : null;
+                              return (
+                                <button
+                                  key={qp.label}
+                                  onClick={() => handleSend(qp.prompt)}
+                                  className={`flex items-center gap-2 p-2.5 rounded-xl text-xs text-left transition-all ${
+                                    sevConfig
+                                      ? `${sevConfig.bg} border ${sevConfig.border} ${sevConfig.color} hover:opacity-80`
+                                      : "text-muted-foreground/70 bg-muted/20 border border-border/30 hover:bg-muted/30 hover:text-foreground/80"
+                                  }`}
+                                >
+                                  {sevConfig ? (
+                                    <sevConfig.icon className="w-3 h-3 shrink-0" />
+                                  ) : (
+                                    <ArrowRight className="w-3 h-3 shrink-0 text-[hsl(var(--kf-accent1))]" />
+                                  )}
+                                  <span className="line-clamp-2">{qp.label}</span>
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
                     )}
 
                     {messages.map((msg, i) => (
-                      <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                        <div
-                          className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-                            msg.role === "user"
-                              ? "bg-[hsl(var(--kf-accent1))] text-white rounded-br-md"
-                              : "bg-muted/30 text-foreground/85 border border-border/20 rounded-bl-md"
-                          }`}
-                        >
-                          {msg.content}
+                      <div key={i} className="space-y-2">
+                        <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                          <div
+                            className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                              msg.role === "user"
+                                ? "bg-[hsl(var(--kf-accent1))] text-white rounded-br-md"
+                                : "bg-muted/30 text-foreground/85 border border-border/20 rounded-bl-md"
+                            }`}
+                          >
+                            {msg.content}
+                          </div>
                         </div>
+
+                        {msg.plan && msg.plan.length > 0 && (
+                          <div className="ml-2 space-y-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="w-5 h-5 rounded-md flex items-center justify-center bg-[hsl(var(--kf-accent1))/0.15]">
+                                <Edit3 className="w-3 h-3 text-[hsl(var(--kf-accent1))]" />
+                              </div>
+                              <span className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">
+                                {msg.requiresConfirmation ? "Proposed Plan" : "Execution Results"}
+                              </span>
+                              <span className="text-[9px] text-muted-foreground/40">
+                                {msg.plan.length} step{msg.plan.length !== 1 ? "s" : ""}
+                              </span>
+                            </div>
+                            {msg.plan.map((step) => (
+                              <PlanStepCard
+                                key={step.toolCallId}
+                                step={step}
+                                onApprove={(id) => handlePlanAction(id, true, msg)}
+                                onReject={(id) => handlePlanAction(id, false, msg)}
+                                loading={resolvingId === step.toolCallId}
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
 
@@ -678,11 +1124,11 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
               )}
 
               {tab === "queue" && (
-                <div id="copilot-panel-queue" role="tabpanel" aria-labelledby="copilot-tab-queue" className="px-4 py-3 space-y-3">
+                <div id="copilot-panel-queue" role="tabpanel" aria-labelledby="copilot-tab-queue" className="px-4 py-3 space-y-3 overflow-y-auto">
                   {pendingApprovals.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Pending Approvals</p>
-                      {pendingApprovals.map(item => (
+                      {pendingApprovals.map((item) => (
                         <VerificationCardCompact
                           key={item.id}
                           item={item}
@@ -694,10 +1140,21 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                     </div>
                   )}
 
+                  {actionQueue.filter((q) => q.status === "pending" || q.status === "scheduled").length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Action Queue</p>
+                      {actionQueue
+                        .filter((q) => q.status === "pending" || q.status === "scheduled")
+                        .map((item) => (
+                          <QueueItemCard key={item.id} item={item} />
+                        ))}
+                    </div>
+                  )}
+
                   {queueInsights.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Monitoring Alerts</p>
-                      {queueInsights.map(insight => {
+                      {queueInsights.map((insight) => {
                         const config = SEVERITY_CONFIG[insight.severity];
                         const SevIcon = config.icon;
                         const tierLabel = insight.riskTier <= 1 ? "Auto" : insight.riskTier === 2 ? "Confirm" : insight.riskTier === 3 ? "Approval" : "Admin";
@@ -710,8 +1167,9 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                             <div className="flex items-start gap-2">
                               <SevIcon className={`w-4 h-4 shrink-0 mt-0.5 ${config.color}`} />
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <p className={`text-xs font-semibold ${config.color} leading-snug`}>{insight.title}</p>
+                                  {insight.module && <ModuleBadge moduleId={insight.module} />}
                                   <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${tierColor}`}>
                                     Tier {insight.riskTier} · {tierLabel}
                                   </span>
@@ -740,43 +1198,69 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                     </div>
                   )}
 
-                  {pendingApprovals.length === 0 && queueInsights.length === 0 && (
+                  {pendingApprovals.length === 0 && queueInsights.length === 0 && actionQueue.filter((q) => q.status === "pending" || q.status === "scheduled").length === 0 && (
                     <div className="flex flex-col items-center py-8 gap-2">
                       <CheckCircle2 className="w-6 h-6 text-emerald-400/60" />
                       <span className="text-xs text-muted-foreground/50">All clear</span>
-                      <p className="text-[10px] text-muted-foreground/40 text-center">No pending approvals or alerts</p>
+                      <p className="text-[10px] text-muted-foreground/40 text-center">No pending approvals, queued actions, or alerts</p>
                     </div>
                   )}
                 </div>
               )}
 
               {tab === "activity" && (
-                <div id="copilot-panel-activity" role="tabpanel" aria-labelledby="copilot-tab-activity" className="px-4 py-3 space-y-3">
+                <div id="copilot-panel-activity" role="tabpanel" aria-labelledby="copilot-tab-activity" className="px-4 py-3 space-y-3 overflow-y-auto">
                   {stats ? (
                     <>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="p-3 rounded-xl border border-border/30 bg-card/50">
-                          <div className="text-[10px] text-muted-foreground/50 uppercase tracking-wider mb-1">Actions (7d)</div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2.5 rounded-xl border border-border/30 bg-card/50">
+                          <div className="text-[9px] text-muted-foreground/50 uppercase tracking-wider mb-0.5">Actions (7d)</div>
                           <div className="text-lg font-bold text-foreground/90">{stats.totalActions}</div>
                         </div>
-                        <div className="p-3 rounded-xl border border-border/30 bg-card/50">
-                          <div className="text-[10px] text-muted-foreground/50 uppercase tracking-wider mb-1">Success</div>
+                        <div className="p-2.5 rounded-xl border border-border/30 bg-card/50">
+                          <div className="text-[9px] text-muted-foreground/50 uppercase tracking-wider mb-0.5">Success</div>
                           <div className={`text-lg font-bold ${stats.successRate >= 90 ? "text-emerald-400" : stats.successRate >= 70 ? "text-amber-400" : "text-red-400"}`}>
                             {stats.successRate}%
                           </div>
                         </div>
+                        <div className="p-2.5 rounded-xl border border-border/30 bg-card/50">
+                          <div className="text-[9px] text-muted-foreground/50 uppercase tracking-wider mb-0.5">Modules</div>
+                          <div className="text-lg font-bold text-foreground/90">{stats.byModule.length}</div>
+                        </div>
                       </div>
+
                       {stats.byModule.length > 0 && (
                         <div className="space-y-1.5">
                           <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">By Module</span>
-                          {stats.byModule.sort((a, b) => b.count - a.count).map(m => (
+                          {stats.byModule.sort((a, b) => b.count - a.count).map((m) => (
                             <div key={m.module} className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-muted/10">
-                              <span className="text-xs text-foreground/70">{m.module}</span>
+                              <div className="flex items-center gap-2">
+                                <ModuleBadge moduleId={m.module} />
+                              </div>
                               <span className="text-xs font-medium text-foreground/90">{m.count}</span>
                             </div>
                           ))}
                         </div>
                       )}
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">Recent Actions</span>
+                          {logsLoading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground/30" />}
+                        </div>
+                        {executionLogs.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {executionLogs.slice(0, 10).map((log) => (
+                              <ExecutionLogCard key={log.id} log={log} />
+                            ))}
+                          </div>
+                        ) : (
+                          !logsLoading && (
+                            <p className="text-[10px] text-muted-foreground/40 text-center py-3">No recent actions recorded</p>
+                          )
+                        )}
+                      </div>
+
                       <Link
                         href="/app/settings/ai-control"
                         onClick={onClose}
@@ -802,7 +1286,7 @@ export function CopilotPanel({ open, onClose, currentModule }: CopilotPanelProps
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                    placeholder={currentModule && currentModule !== "cockpit" ? `Ask about ${currentModule}...` : "Ask anything..."}
+                    placeholder={currentModule && currentModule !== "cockpit" ? `Command ${(MODULE_LABELS[currentModule] || MODULE_LABELS.cockpit).label}...` : "What should I do for you?"}
                     className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none py-2"
                     disabled={sending}
                   />
