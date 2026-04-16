@@ -252,7 +252,7 @@ const routeToSurface: [string, PrimarySectionId][] = [
 ];
 
 function detectPrimarySection(pathname: string): PrimarySectionId {
-  if (pathname === "/app") return "cockpit";
+  if (pathname === "/app") return "tower";
   for (const [prefix, section] of routeToSurface) {
     if (pathname === prefix || pathname.startsWith(prefix + "/")) {
       return section;
@@ -262,7 +262,7 @@ function detectPrimarySection(pathname: string): PrimarySectionId {
 }
 
 const mobileBottomNav = [
-  { label: "Cockpit", href: "/app", icon: Gauge },
+  { label: "Home", href: "/app/control-tower", icon: Radar },
   { label: "Revenue", href: "/app/commerce", icon: CreditCard },
   { label: "Calendar", href: "/app/bookings", icon: Calendar },
   { label: "Clients", href: "/app/crm/pipeline", icon: Users },
