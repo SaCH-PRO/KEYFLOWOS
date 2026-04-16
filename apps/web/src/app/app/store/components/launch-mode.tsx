@@ -8,11 +8,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { LaunchAdvisor } from "./launch-advisor";
 import { StoreSettings } from "./store-settings";
-import type { Service, Product, StorefrontConfig, StorefrontPolicies, StoreReadinessResult, ReadinessItem as ApiReadinessItem } from "@/lib/client";
-
-type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string; subheadline?: string; ctaLabel?: string };
-type SeoSection = { metaTitle?: string; metaDescription?: string };
-type SocialProofSection = { testimonials?: unknown[] };
+import type { Service, Product, StorefrontConfig, StoreReadinessResult } from "@/lib/client";
 
 type Props = {
   businessId: string;
@@ -120,25 +116,11 @@ export function LaunchMode({
   const pc = businessData?.primaryColor || "#F97316";
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
 
-  const hero = storefrontConfig?.hero as HeroSection | undefined;
-  const seo = storefrontConfig?.seo as SeoSection | undefined;
-  const socialProof = storefrontConfig?.socialProof as SocialProofSection | undefined;
-  const policies = storefrontConfig?.policies as Partial<StorefrontPolicies> | undefined;
-  const faqEntries = storefrontConfig?.faqEntries ?? [];
-
-  const hasHeroHeadline = !!(hero?.headline && hero.headline.trim().length > 0);
-  const hasHeroCta = !!(hero?.ctaLabel && hero.ctaLabel.trim().length > 0);
-  const hasMetaTitle = !!(seo?.metaTitle && seo.metaTitle.trim().length > 0);
-  const hasMetaDescription = !!(seo?.metaDescription && seo.metaDescription.trim().length > 0);
-  const hasPolicies = policies ? Object.values(policies).some((p: any) => p?.enabled) : false;
-  const hasFaq = Array.isArray(faqEntries) && faqEntries.length > 0;
-  const hasLogo = !!businessData?.logoUrl;
-  const hasSlug = !!businessData?.slug;
   const itemCount = services.length + commerceProducts.length;
-  const completedChecks = [storeEnabled, hasSlug, itemCount > 0, hasHeroImage, hasHeroHeadline, hasLogo, hoursConfigured, hasTestimonials, hasMetaTitle, activeDeliveryMethodsCount > 0].filter(Boolean).length;
-  const totalChecks = 10;
-  const readinessPercent = readiness?.scores?.launch ?? Math.round((completedChecks / totalChecks) * 100);
-  const blockerCount = readiness?.items.filter((i) => !i.resolved && i.severity === "blocker").length ?? 0;
+  const readinessPercent = readiness?.scores?.overall ?? 0;
+  const totalItems = readiness?.items?.length ?? 0;
+  const resolvedItems = readiness?.items?.filter((i) => i.resolved).length ?? 0;
+  const blockerCount = readiness?.items?.filter((i) => !i.resolved && i.severity === "blocker").length ?? 0;
 
   const metrics: MetricStripItem[] = [
     {
@@ -164,7 +146,7 @@ export function LaunchMode({
     },
     {
       label: "Checks Passed",
-      value: `${completedChecks}/${totalChecks}`,
+      value: totalItems > 0 ? `${resolvedItems}/${totalItems}` : "—",
       icon: Monitor,
       iconColor: "#14B8A6",
     },
@@ -190,23 +172,8 @@ export function LaunchMode({
             defaultOpen
           >
             <LaunchAdvisor
-              hasLogo={hasLogo}
-              hasHeroImage={hasHeroImage}
-              hasHeroHeadline={hasHeroHeadline}
-              hasHeroCta={hasHeroCta}
-              hoursConfigured={hoursConfigured}
-              hasTestimonials={hasTestimonials}
-              hasSlug={hasSlug}
-              servicesCount={services.length}
-              productsCount={commerceProducts.length}
-              storeEnabled={storeEnabled}
-              hasMetaTitle={hasMetaTitle}
-              hasMetaDescription={hasMetaDescription}
-              hasPhone={!!(businessData?.phone)}
-              hasEmail={!!(businessData?.email)}
-              hasPolicies={hasPolicies}
-              hasFaq={hasFaq}
-              activeDeliveryCount={activeDeliveryMethodsCount}
+              readinessItems={readiness?.items}
+              readinessScores={readiness?.scores}
               onTabChange={onModeChange}
               slug={businessData?.slug ?? currentSlug ?? undefined}
               storeName={businessData?.name}
