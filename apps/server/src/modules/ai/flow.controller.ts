@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
@@ -33,6 +34,43 @@ export class FlowController {
       body.pendingConfirmation,
     );
     return result;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/flow/chat/stream')
+  async flowChatStream(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      message: string;
+      history?: any[];
+    },
+    @Res() res: Response,
+  ) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const history = body.history || [];
+
+    try {
+      const stream = this.flow.streamChat(businessId, body.message, history);
+
+      for await (const chunk of stream) {
+        if (res.destroyed) break;
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+    } catch (error) {
+      if (!res.destroyed) {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: (error as Error).message })}\n\n`);
+      }
+    } finally {
+      if (!res.destroyed) {
+        res.write('data: [DONE]\n\n');
+        res.end();
+      }
+    }
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

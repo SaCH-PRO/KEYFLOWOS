@@ -8,7 +8,7 @@ import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
 import { AiMemoryService } from './ai-memory.service';
-import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
+import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
@@ -57,6 +57,21 @@ export interface FlowResponse {
     totalTokens: number;
     creditsUsed: number;
   };
+}
+
+export interface FlowStreamChunk {
+  type: 'content_delta' | 'tool_calls' | 'tool_results' | 'confirmation_required' | 'usage' | 'done' | 'error';
+  content?: string;
+  toolCalls?: FlowToolCall[];
+  toolResults?: FlowToolResult[];
+  pendingConfirmations?: PendingConfirmation[];
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    creditsUsed: number;
+  };
+  error?: string;
 }
 
 const FLOW_SYSTEM_PROMPT = `You are Flow, an AI assistant built into KeyFlowOS — a business operating system for Caribbean entrepreneurs. You have full access to the user's business data and can take real actions on their behalf.
@@ -388,6 +403,279 @@ export class FlowOrchestratorService {
     } catch (error) {
       this.logger.error(`Flow chat error: ${(error as Error).message}`);
       throw error;
+    }
+  }
+
+  async *streamChat(
+    businessId: string,
+    message: string,
+    conversationHistory: FlowMessage[] = [],
+  ): AsyncGenerator<FlowStreamChunk> {
+    try {
+      this.aiUsage.checkRateLimit(businessId);
+    } catch (err) {
+      yield { type: 'error', error: (err as Error).message };
+      return;
+    }
+
+    const canProceed = await this.aiUsage.checkCredits(businessId, 2);
+    if (!canProceed.allowed) {
+      yield {
+        type: 'error',
+        error: `AI credit limit reached (${canProceed.used}/${canProceed.limit} credits used this month). Please upgrade your plan.`,
+      };
+      return;
+    }
+
+    const snapshot = await this.businessGraph.getSnapshot(businessId);
+    const contextSnapshot = this.businessGraph.buildContextString(snapshot);
+    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    const memorySection = this.memory.buildPromptSection(memoryCtx);
+
+    const systemPrompt = FLOW_SYSTEM_PROMPT
+      .replace('{{CURRENT_DATE}}', new Date().toISOString())
+      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection);
+
+    const messages: GatewayMessage[] = [
+      { role: 'system', content: systemPrompt },
+    ];
+
+    for (const msg of conversationHistory) {
+      if (msg.role === 'user') {
+        messages.push({ role: 'user', content: msg.content });
+      } else if (msg.role === 'assistant') {
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          messages.push({
+            role: 'assistant',
+            content: msg.content || null,
+            tool_calls: msg.toolCalls.map((tc) => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: {
+                name: tc.name,
+                arguments: JSON.stringify(tc.arguments),
+              },
+            })),
+          });
+          if (msg.toolResults) {
+            for (const result of msg.toolResults) {
+              messages.push({
+                role: 'tool',
+                tool_call_id: result.toolCallId,
+                content: JSON.stringify(result.result),
+              });
+            }
+          }
+        } else {
+          messages.push({ role: 'assistant', content: msg.content });
+        }
+      }
+    }
+
+    messages.push({ role: 'user', content: message });
+
+    try {
+      const stream = this.gateway.streamComplete({
+        businessId,
+        taskCategory: 'tool-calling',
+        messages,
+        tools: getOpenAiToolDefinitions(),
+        toolChoice: 'auto',
+        maxTokens: 1000,
+        temperature: 0.7,
+      });
+
+      let fullContent = '';
+      const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
+      let streamUsage: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost: number } | undefined;
+      let streamProvider = '';
+      let streamModel = '';
+
+      for await (const chunk of stream) {
+        if (chunk.provider) streamProvider = chunk.provider;
+        if (chunk.model) streamModel = chunk.model;
+
+        if (chunk.type === 'content_delta' && chunk.content) {
+          fullContent += chunk.content;
+          yield { type: 'content_delta', content: chunk.content };
+        }
+
+        if (chunk.type === 'tool_call_delta' && chunk.toolCall) {
+          const tc = chunk.toolCall;
+          if (!toolCallAccumulator.has(tc.index)) {
+            toolCallAccumulator.set(tc.index, { id: '', name: '', arguments: '' });
+          }
+          const acc = toolCallAccumulator.get(tc.index)!;
+          if (tc.id) acc.id = tc.id;
+          if (tc.name) acc.name = tc.name;
+          if (tc.argumentsDelta) acc.arguments += tc.argumentsDelta;
+        }
+
+        if (chunk.type === 'usage' && chunk.usage) {
+          streamUsage = chunk.usage;
+        }
+
+        if (chunk.type === 'error') {
+          yield { type: 'error', error: chunk.error };
+          return;
+        }
+      }
+
+      this.prisma.client.aiUsageLog.create({
+        data: {
+          businessId,
+          feature: 'flow_chat_stream',
+          model: streamModel,
+          provider: streamProvider,
+          promptTokens: streamUsage?.promptTokens ?? 0,
+          completionTokens: streamUsage?.completionTokens ?? 0,
+          totalTokens: streamUsage?.totalTokens ?? 0,
+          estimatedCost: streamUsage?.estimatedCost ?? 0,
+          creditsUsed: 2,
+          latencyMs: 0,
+          fallbackUsed: false,
+          taskCategory: 'tool-calling',
+          metadata: { maxTokens: 1000, temperature: 0.7, streaming: true },
+        },
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log streaming usage: ${e instanceof Error ? e.message : String(e)}`);
+      });
+
+      const usage = {
+        promptTokens: streamUsage?.promptTokens ?? 0,
+        completionTokens: streamUsage?.completionTokens ?? 0,
+        totalTokens: streamUsage?.totalTokens ?? 0,
+        creditsUsed: 2,
+      };
+
+      if (toolCallAccumulator.size === 0) {
+        yield { type: 'usage', usage };
+        yield { type: 'done' };
+        return;
+      }
+
+      const toolCalls: FlowToolCall[] = [];
+      for (const [, acc] of toolCallAccumulator) {
+        const tool = getToolByName(acc.name);
+        toolCalls.push({
+          id: acc.id,
+          name: acc.name,
+          arguments: JSON.parse(acc.arguments || '{}'),
+          riskLevel: tool?.riskLevel ?? 'low',
+        });
+      }
+
+      yield { type: 'tool_calls', toolCalls };
+
+      const governanceChecks = await Promise.all(
+        toolCalls.map(async (tc) => {
+          const decision = await this.governance.evaluate(businessId, tc.name);
+          return { tc, decision };
+        }),
+      );
+
+      const blocked = governanceChecks.filter(({ decision }) => !decision.allowed);
+      const needsQuickConfirm = governanceChecks.filter(({ decision }) => decision.requiresQuickConfirm && !decision.requiresFormalApproval);
+      const needsFormalApproval = governanceChecks.filter(({ decision }) => decision.requiresFormalApproval);
+
+      if (blocked.length > 0) {
+        yield {
+          type: 'content_delta',
+          content: `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`,
+        };
+        yield { type: 'usage', usage };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (needsFormalApproval.length > 0) {
+        for (const { tc, decision } of needsFormalApproval) {
+          this.governance.createApprovalItem(businessId, {
+            toolName: tc.name,
+            title: this.describeToolCall(tc.name, tc.arguments),
+            description: `Tier ${decision.tier} action requested via Flow chat — requires ${decision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
+            rationale: decision.reason,
+            inputPayload: tc.arguments,
+          }).catch((e: unknown) => {
+            this.logger.error(`Failed to create approval item for ${tc.name}: ${e instanceof Error ? e.message : String(e)}`);
+          });
+        }
+
+        const approvalMessages = needsFormalApproval.map(({ tc, decision }) =>
+          `• ${this.describeToolCall(tc.name, tc.arguments)} (Tier ${decision.tier}${decision.requiresAdminApproval ? ', admin required' : ''})`
+        ).join('\n');
+
+        yield {
+          type: 'content_delta',
+          content: `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`,
+        };
+        yield { type: 'usage', usage };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (needsQuickConfirm.length > 0) {
+        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc }) => ({
+          toolCallId: tc.id,
+          name: tc.name,
+          arguments: tc.arguments,
+          description: this.describeToolCall(tc.name, tc.arguments),
+          riskLevel: tc.riskLevel,
+        }));
+
+        yield {
+          type: 'confirmation_required',
+          pendingConfirmations,
+          toolCalls,
+        };
+        yield { type: 'usage', usage };
+        yield { type: 'done' };
+        return;
+      }
+
+      const toolResults: FlowToolResult[] = await Promise.all(
+        toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id)),
+      );
+
+      yield { type: 'tool_results', toolResults };
+
+      const followUpMessages: GatewayMessage[] = [
+        ...messages,
+        {
+          role: 'assistant' as const,
+          content: fullContent || null,
+          tool_calls: toolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+          })),
+        },
+        ...toolResults.map((result) => ({
+          role: 'tool' as const,
+          tool_call_id: result.toolCallId,
+          content: JSON.stringify(result.success ? result.result : { error: result.error }),
+        })),
+      ];
+
+      const followUpStream = this.gateway.streamComplete({
+        businessId,
+        taskCategory: 'summarization',
+        messages: followUpMessages,
+        maxTokens: 500,
+        temperature: 0.7,
+      });
+
+      for await (const chunk of followUpStream) {
+        if (chunk.type === 'content_delta' && chunk.content) {
+          yield { type: 'content_delta', content: chunk.content };
+        }
+      }
+
+      yield { type: 'usage', usage };
+      yield { type: 'done' };
+    } catch (error) {
+      this.logger.error(`Flow stream chat error: ${(error as Error).message}`);
+      yield { type: 'error', error: (error as Error).message };
     }
   }
 
