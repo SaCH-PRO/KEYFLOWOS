@@ -51,6 +51,7 @@ import {
   Shield,
   Brain,
   Radar,
+  Award,
 } from "lucide-react";
 
 
@@ -85,6 +86,7 @@ function getNotificationIcon(n: any): typeof Bell {
   if (type.includes("project") || title.includes("project") || title.includes("task")) return FolderKanban;
   if (type.includes("expense") || title.includes("expense")) return Receipt;
   if (type.includes("automation") || title.includes("automation") || title.includes("playbook")) return Zap;
+  if (type.includes("endorsement") || title.includes("endorsed")) return Award;
   return Bell;
 }
 
@@ -99,6 +101,8 @@ function getNotificationLink(n: any): string | null {
   if (type.includes("project") || title.includes("project")) return "/app/projects";
   if (type.includes("expense") || title.includes("expense")) return "/app/expenses";
   if (type.includes("automation") || title.includes("automation")) return "/app/automations";
+  if (type.includes("endorsement") && n.data?.link) return n.data.link;
+  if (n.data?.link) return n.data.link;
   if (n.link || n.href) return n.link || n.href;
   return null;
 }
