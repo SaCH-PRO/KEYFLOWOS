@@ -144,7 +144,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       staffMembers: 1,
       products: 10,
       automations: 0,
-      aiCreditsPerMonth: 10,
+      aiCreditsPerMonth: 10000,
       aiSuggestions: false,
       customBranding: false,
       prioritySupport: false,
