@@ -282,12 +282,16 @@ export default function ContactsPage() {
         walkthroughSteps={CRM_WALKTHROUGH}
       />
 
-      <AiHubTrigger ai={crmAi.aiHook} moduleName="Clients" />
-      <AnimatePresence>
-        {crmAi.aiHook.panelOpen && (
-          <AiCommandHub ai={crmAi.aiHook} moduleName="Clients" onAction={handleCrmAiAction} />
-        )}
-      </AnimatePresence>
+      {!crmAi.aiHook.useGlobalCopilot && (
+        <>
+          <AiHubTrigger ai={crmAi.aiHook} moduleName="Clients" />
+          <AnimatePresence>
+            {crmAi.aiHook.panelOpen && (
+              <AiCommandHub ai={crmAi.aiHook} moduleName="Clients" onAction={handleCrmAiAction} />
+            )}
+          </AnimatePresence>
+        </>
+      )}
     </div>
   );
 }

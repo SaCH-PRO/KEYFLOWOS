@@ -174,12 +174,20 @@ export function useModuleAi(config: ModuleAiConfig) {
   }, [dismissSuggestion, notifyGlobalQueue, openGlobalCopilot]);
 
   const togglePanel = useCallback(() => {
+    if (configRef.current.useGlobalCopilot) {
+      openGlobalCopilot();
+      return;
+    }
     setState(prev => ({ ...prev, panelOpen: !prev.panelOpen }));
-  }, []);
+  }, [openGlobalCopilot]);
 
   const setOpen = useCallback((open: boolean) => {
+    if (configRef.current.useGlobalCopilot && open) {
+      openGlobalCopilot();
+      return;
+    }
     setState(prev => ({ ...prev, panelOpen: open }));
-  }, []);
+  }, [openGlobalCopilot]);
 
   const setHubMode = useCallback((mode: HubMode) => {
     setState(prev => ({ ...prev, hubMode: mode, toolError: null }));
@@ -254,6 +262,7 @@ export function useModuleAi(config: ModuleAiConfig) {
     tools,
     availableTools,
     activeTool,
+    useGlobalCopilot: configRef.current.useGlobalCopilot ?? false,
     contextReady,
     updateContext,
     refreshSuggestions,
