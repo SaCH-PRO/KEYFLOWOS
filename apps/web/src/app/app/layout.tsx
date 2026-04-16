@@ -485,6 +485,20 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  const [copilotInitialPrompt, setCopilotInitialPrompt] = useState<string | undefined>();
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.prompt) {
+        setCopilotInitialPrompt(detail.prompt);
+      }
+      setCopilotOpen(true);
+    };
+    window.addEventListener("kf:open-copilot", handler);
+    return () => window.removeEventListener("kf:open-copilot", handler);
+  }, []);
+
   const handlePrimaryClick = (item: PrimaryNavItem) => {
     if (item.href) {
       router.push(item.href);
@@ -1043,7 +1057,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <PlanLimitDialog planLimit={planLimitHit} onClose={clearPlanLimit} />
       <KeyflowOSStoreDrawer open={kfStoreOpen} onClose={() => setKfStoreOpen(false)} />
-      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} currentModule={copilotModule} />
+      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} currentModule={copilotModule} initialPrompt={copilotInitialPrompt} onInitialPromptConsumed={() => setCopilotInitialPrompt(undefined)} />
     </div>
   );
 }
