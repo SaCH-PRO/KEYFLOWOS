@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject, Req } from '@nestjs/common';
 import { AutopilotService } from './autopilot.service';
 import { AutopilotAiService } from './autopilot-ai.service';
+import { DelegationLoopService } from './delegation-loop.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -10,6 +11,7 @@ export class AutopilotController {
   constructor(
     @Inject(AutopilotService) private autopilotService: AutopilotService,
     @Inject(AutopilotAiService) private autopilotAiService: AutopilotAiService,
+    @Inject(DelegationLoopService) private delegationLoopService: DelegationLoopService,
   ) {}
 
   @Get('tasks/today')
@@ -160,5 +162,36 @@ export class AutopilotController {
     @Body() body: Record<string, unknown>
   ) {
     return this.autopilotService.updateSettings(businessId, body);
+  }
+
+  @Get('loops')
+  async getLoops(@Param('businessId') businessId: string) {
+    return this.delegationLoopService.getLoops(businessId);
+  }
+
+  @Patch('loops/:loopId')
+  async updateLoop(
+    @Param('businessId') businessId: string,
+    @Param('loopId') loopId: string,
+    @Body() body: { enabled?: boolean; config?: Record<string, unknown>; intervalMin?: number },
+  ) {
+    return this.delegationLoopService.updateLoop(businessId, loopId, body);
+  }
+
+  @Post('loops/:loopId/run')
+  async runLoop(
+    @Param('businessId') businessId: string,
+    @Param('loopId') loopId: string,
+  ) {
+    return this.delegationLoopService.runLoop(businessId, loopId);
+  }
+
+  @Get('loops/:loopId/runs')
+  async getLoopRuns(
+    @Param('businessId') businessId: string,
+    @Param('loopId') loopId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.delegationLoopService.getRunHistory(businessId, loopId, limit ? parseInt(limit, 10) : 20);
   }
 }

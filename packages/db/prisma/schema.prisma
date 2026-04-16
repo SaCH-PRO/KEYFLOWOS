@@ -114,6 +114,8 @@ model Business {
   projectTemplates ProjectTemplate[]
   sites            Site[]
   autopilotTasks   AutopilotTask[]
+  delegationLoops  DelegationLoop[]
+  delegationLoopRuns DelegationLoopRun[]
   notifications    Notification[]
   subscriptions    Subscription[]
   activities       Activity[]
@@ -1236,6 +1238,61 @@ model AutopilotTask {
   @@index([businessId, status])
   @@index([businessId, scheduledFor])
   @@map("autopilot_tasks")
+}
+
+model DelegationLoop {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+
+  loopType    String   @map("loop_type")
+  name        String
+  description String?
+  enabled     Boolean  @default(false)
+  riskTier    Int      @default(2) @map("risk_tier")
+
+  config      Json?    @default("{}")
+  stats       Json?    @default("{}")
+
+  lastRunAt   DateTime? @map("last_run_at")
+  nextRunAt   DateTime? @map("next_run_at")
+  intervalMin Int       @default(360) @map("interval_min")
+
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  runs        DelegationLoopRun[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, loopType])
+  @@index([businessId, enabled])
+  @@map("delegation_loops")
+}
+
+model DelegationLoopRun {
+  id             String   @id @default(cuid())
+  loopId         String   @map("loop_id")
+  businessId     String   @map("business_id")
+
+  status         String   @default("running")
+  startedAt      DateTime @default(now()) @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+
+  itemsScanned   Int      @default(0) @map("items_scanned")
+  itemsMatched   Int      @default(0) @map("items_matched")
+  actionsCreated Int      @default(0) @map("actions_created")
+  actionsBlocked Int      @default(0) @map("actions_blocked")
+
+  results        Json?    @default("[]")
+  error          String?
+
+  loop           DelegationLoop @relation(fields: [loopId], references: [id], onDelete: Cascade)
+  business       Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([loopId, startedAt])
+  @@index([businessId, startedAt])
+  @@map("delegation_loop_runs")
 }
 
 // ---
