@@ -85,15 +85,20 @@ export function ApprovalsQueue({
     if (tier1Items.length === 0) return;
 
     setBulkResolving(true);
-    let successCount = 0;
+    const resolvedIds = new Set<string>();
     for (const item of tier1Items) {
       try {
         await resolveAiApproval(businessId, item.id, "approved");
-        successCount++;
+        resolvedIds.add(item.id);
       } catch {}
     }
-    setApprovals((prev) => prev.filter((a) => a.riskTier !== 1));
-    toast.success(`${successCount} low-risk action${successCount > 1 ? "s" : ""} approved`);
+    setApprovals((prev) => prev.filter((a) => !resolvedIds.has(a.id)));
+    const failedCount = tier1Items.length - resolvedIds.size;
+    if (resolvedIds.size > 0) {
+      toast.success(`${resolvedIds.size} low-risk action${resolvedIds.size > 1 ? "s" : ""} approved${failedCount > 0 ? ` (${failedCount} failed)` : ""}`);
+    } else {
+      toast.error("Failed to approve actions");
+    }
     window.dispatchEvent(new CustomEvent("kf:approval.resolved"));
     onResolve?.();
     setBulkResolving(false);
