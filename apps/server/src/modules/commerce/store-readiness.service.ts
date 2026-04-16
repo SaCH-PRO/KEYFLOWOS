@@ -351,7 +351,7 @@ export class StoreReadinessService {
           select: { id: true, body: true, subject: true },
         }),
         this.db.promoCode.count({
-          where: { businessId, isActive: true },
+          where: { businessId, active: true },
         }).catch(() => 0),
       ]);
 
