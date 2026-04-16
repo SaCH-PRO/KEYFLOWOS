@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Rocket, Link2, Eye, Monitor, Smartphone, ExternalLink, Globe, Send, Megaphone, UserPlus } from "lucide-react";
+import { Rocket, Link2, Eye, Monitor, Smartphone, ExternalLink, Globe, Send, Megaphone, UserPlus, Loader2, CheckCircle2 } from "lucide-react";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { SectionCard } from "@/components/ui/section-card";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { LaunchAdvisor } from "./launch-advisor";
 import { StoreSettings } from "./store-settings";
+import { createCampaign } from "@/lib/client";
 import type { Service, Product, StorefrontConfig, StoreReadinessResult } from "@/lib/client";
 
 type Props = {
@@ -89,6 +90,121 @@ function StorefrontPreview({ slug, previewMode }: { slug: string | null; preview
         />
       </div>
     </div>
+  );
+}
+
+function LaunchActions({
+  businessId,
+  storeName,
+  onCopilotAction,
+}: {
+  businessId: string;
+  storeName?: string;
+  onCopilotAction?: (prompt: string) => void;
+}) {
+  const [actionState, setActionState] = useState<Record<string, "idle" | "loading" | "done">>({});
+
+  const handleCreateCampaignDraft = useCallback(async (type: "launch" | "promo" | "segment") => {
+    setActionState(prev => ({ ...prev, [type]: "loading" }));
+    try {
+      const templates: Record<string, { name: string; subject: string; body: string }> = {
+        launch: {
+          name: `Store Launch - ${storeName || 'My Store'}`,
+          subject: `${storeName || 'We'} just launched! Come check us out`,
+          body: `<p>We're excited to announce that <strong>${storeName || 'our store'}</strong> is now live!</p><p>Browse our catalog and place your first order today.</p>`,
+        },
+        promo: {
+          name: `Promotion - ${storeName || 'My Store'}`,
+          subject: `Special offer from ${storeName || 'us'} - Limited time!`,
+          body: `<p>Don't miss our special promotion at <strong>${storeName || 'our store'}</strong>!</p><p>Visit now for exclusive deals.</p>`,
+        },
+        segment: {
+          name: `VIP Offer - ${storeName || 'My Store'}`,
+          subject: `Exclusive offer for our valued customers`,
+          body: `<p>As a valued customer of <strong>${storeName || 'our store'}</strong>, we have an exclusive offer just for you.</p>`,
+        },
+      };
+
+      const tpl = templates[type];
+      const result = await createCampaign(businessId, {
+        name: tpl.name,
+        subject: tpl.subject,
+        body: tpl.body,
+        status: 'DRAFT',
+      });
+
+      if (result.data && !result.error) {
+        setActionState(prev => ({ ...prev, [type]: "done" }));
+        setTimeout(() => setActionState(prev => ({ ...prev, [type]: "idle" })), 3000);
+
+        onCopilotAction?.(
+          type === "segment"
+            ? `I just created a VIP campaign draft "${tpl.name}". Help me identify my best customer segments from CRM contacts and suggest targeted offers for each segment.`
+            : `I just created a campaign draft "${tpl.name}". Help me refine the copy and suggest the best send time for maximum engagement.`,
+        );
+      } else {
+        setActionState(prev => ({ ...prev, [type]: "idle" }));
+      }
+    } catch {
+      setActionState(prev => ({ ...prev, [type]: "idle" }));
+    }
+  }, [businessId, storeName, onCopilotAction]);
+
+  const actions = [
+    {
+      key: "launch",
+      label: "Draft Launch Campaign",
+      icon: Send,
+      description: "Creates an email campaign draft announcing your store",
+    },
+    {
+      key: "promo",
+      label: "Draft Promotion",
+      icon: Megaphone,
+      description: "Creates a promotional campaign draft with offer copy",
+    },
+    {
+      key: "segment",
+      label: "Target VIP Segment",
+      icon: UserPlus,
+      description: "Creates a VIP offer draft and opens AI for segmentation",
+    },
+  ];
+
+  return (
+    <SectionCard title="Launch Actions" subtitle="Create campaigns & target audiences" icon={Megaphone}>
+      <div className="space-y-2">
+        {actions.map((action) => {
+          const Icon = action.icon;
+          const state = actionState[action.key] || "idle";
+          return (
+            <button
+              key={action.key}
+              onClick={() => handleCreateCampaignDraft(action.key as "launch" | "promo" | "segment")}
+              disabled={state === "loading"}
+              className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all hover:scale-[1.005] min-h-[44px]"
+              style={{ background: "hsl(var(--kf-muted)/0.06)", border: "1px solid hsl(var(--kf-border)/0.25)" }}
+            >
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-accent1)/0.1)" }}>
+                {state === "loading" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "hsl(var(--kf-accent1))" }} />
+                ) : state === "done" ? (
+                  <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-success))" }} />
+                ) : (
+                  <Icon className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold" style={{ color: "hsl(var(--kf-foreground))" }}>
+                  {state === "done" ? "Campaign draft created!" : action.label}
+                </p>
+                <p className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{action.description}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </SectionCard>
   );
 }
 
@@ -199,32 +315,13 @@ export function LaunchMode({
         </AccordionGroup>
       </motion.div>
 
-      {onCopilotAction && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
-          <SectionCard title="Launch Actions" subtitle="Marketing & CRM connections" icon={Megaphone}>
-            <div className="flex items-center gap-2">
-              {[
-                { label: "Send Launch Offer", icon: Send, prompt: "Draft a store launch announcement with a special opening offer. Create an email subject line and a WhatsApp message version for my contacts." },
-                { label: "Promote to Segment", icon: UserPlus, prompt: "Identify my best customer segments from CRM contacts and create a targeted promotion for each to drive store launch traffic." },
-                { label: "Generate Campaign", icon: Megaphone, prompt: "Create a complete launch campaign with social media posts, WhatsApp broadcast messages, and email copy to announce my store going live." },
-              ].map((action) => {
-                const Icon = action.icon;
-                return (
-                  <button
-                    key={action.label}
-                    onClick={() => onCopilotAction(action.prompt)}
-                    className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-medium transition-all hover:scale-[1.02] flex-1 justify-center min-h-[40px]"
-                    style={{ background: "hsl(var(--kf-muted)/0.08)", border: "1px solid hsl(var(--kf-border)/0.3)", color: "hsl(var(--kf-foreground))" }}
-                  >
-                    <Icon className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
-                    {action.label}
-                  </button>
-                );
-              })}
-            </div>
-          </SectionCard>
-        </motion.div>
-      )}
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
+        <LaunchActions
+          businessId={businessId}
+          storeName={businessData?.name}
+          onCopilotAction={onCopilotAction}
+        />
+      </motion.div>
 
       {(currentSlug || businessData?.slug) && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>

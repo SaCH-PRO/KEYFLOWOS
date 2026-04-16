@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import { apiGet } from "@/lib/api";
+import { createCampaign } from "@/lib/client";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { SectionCard } from "@/components/ui/section-card";
 import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
@@ -239,6 +240,33 @@ function TopProductsGrid({ products, liveProductIds }: { products: Product[]; li
   );
 }
 
+function RevenueTrendBar({ trend, pc }: { trend: { period: string; revenue: number; orders: number }[]; pc: string }) {
+  if (trend.length === 0) return null;
+  const maxRev = Math.max(...trend.map(t => t.revenue), 1);
+  return (
+    <div className="mt-3 space-y-1.5">
+      <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: "hsl(var(--kf-muted-foreground)/0.6)" }}>Weekly Trend</p>
+      <div className="flex items-end gap-1.5 h-16 px-1">
+        {trend.map((t) => (
+          <div key={t.period} className="flex-1 flex flex-col items-center gap-0.5">
+            <div
+              className="w-full rounded-t-md transition-all duration-500"
+              style={{
+                height: `${Math.max((t.revenue / maxRev) * 100, 4)}%`,
+                background: pc,
+                opacity: 0.7,
+              }}
+            />
+            <span className="text-[7px]" style={{ color: "hsl(var(--kf-muted-foreground)/0.5)" }}>
+              {t.period.slice(5)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function RevenueCockpit({ readiness, pc, sc }: { readiness: StoreReadinessResult; pc: string; sc: string }) {
   const rev = readiness.revenue;
   if (rev.totalOrders30d === 0 && rev.totalRevenue30d === 0) return null;
@@ -259,6 +287,7 @@ function RevenueCockpit({ readiness, pc, sc }: { readiness: StoreReadinessResult
           <p className="text-[10px] mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Avg Order</p>
         </div>
       </div>
+
       {rev.conversionRate != null && (
         <div className="flex items-center gap-2 mt-3 rounded-xl px-3 py-2" style={{ background: "hsl(var(--kf-muted)/0.06)" }}>
           <Percent className="w-3.5 h-3.5" style={{ color: sc }} />
@@ -267,6 +296,11 @@ function RevenueCockpit({ readiness, pc, sc }: { readiness: StoreReadinessResult
           </span>
         </div>
       )}
+
+      {rev.revenueTrend && rev.revenueTrend.length > 1 && (
+        <RevenueTrendBar trend={rev.revenueTrend} pc={pc} />
+      )}
+
       {rev.topProductRevenue.length > 0 && (
         <div className="mt-3 space-y-1.5">
           <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: "hsl(var(--kf-muted-foreground)/0.6)" }}>Top Sellers</p>
@@ -279,36 +313,130 @@ function RevenueCockpit({ readiness, pc, sc }: { readiness: StoreReadinessResult
           ))}
         </div>
       )}
+
+      {rev.bottomProductRevenue && rev.bottomProductRevenue.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: "hsl(var(--kf-muted-foreground)/0.6)" }}>Lowest Performers</p>
+          {rev.bottomProductRevenue.map((bp) => (
+            <div key={bp.productId} className="flex items-center justify-between rounded-lg px-3 py-1.5" style={{ background: "hsl(var(--kf-warning)/0.04)" }}>
+              <span className="text-xs truncate flex-1" style={{ color: "hsl(var(--kf-foreground))" }}>{bp.productName}</span>
+              <span className="text-xs font-bold ml-2" style={{ color: "hsl(var(--kf-warning))" }}>{formatPrice(bp.revenue)}</span>
+              <span className="text-[10px] ml-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{bp.orders} sold</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {rev.revenueByChannel && rev.revenueByChannel.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: "hsl(var(--kf-muted-foreground)/0.6)" }}>Revenue by Channel</p>
+          {rev.revenueByChannel.map((ch) => (
+            <div key={ch.channel} className="flex items-center justify-between rounded-lg px-3 py-1.5" style={{ background: "hsl(var(--kf-muted)/0.04)" }}>
+              <span className="text-xs capitalize flex-1" style={{ color: "hsl(var(--kf-foreground))" }}>{ch.channel}</span>
+              <span className="text-xs font-bold ml-2" style={{ color: sc }}>{formatPrice(ch.revenue)}</span>
+              <span className="text-[10px] ml-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{ch.orders} orders</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {rev.promotionROI && (
+        <div className="mt-3 rounded-xl px-3 py-2 flex items-center gap-2" style={{ background: "hsl(var(--kf-accent1)/0.06)", border: "1px solid hsl(var(--kf-accent1)/0.15)" }}>
+          <Megaphone className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span className="text-xs" style={{ color: "hsl(var(--kf-foreground))" }}>
+            <span className="font-bold">{rev.promotionROI.campaignsSent}</span> campaign{rev.promotionROI.campaignsSent !== 1 ? 's' : ''} sent
+            {rev.promotionROI.totalCampaignRevenue > 0 && (
+              <> · <span className="font-bold" style={{ color: "hsl(var(--kf-success))" }}>{formatPrice(rev.promotionROI.totalCampaignRevenue)}</span> attributed revenue</>
+            )}
+          </span>
+        </div>
+      )}
     </SectionCard>
   );
 }
 
-function CrmActionBar({ onCopilotAction }: { onCopilotAction?: (prompt: string) => void }) {
-  if (!onCopilotAction) return null;
+function CrmActionBar({ businessId, businessName, onCopilotAction }: { businessId: string; businessName?: string; onCopilotAction?: (prompt: string) => void }) {
+  const [actionState, setActionState] = useState<Record<string, "idle" | "loading" | "done">>({});
 
+  const handleAction = useCallback(async (key: string, campaignName: string, subject: string, body: string, copilotPrompt: string) => {
+    setActionState(prev => ({ ...prev, [key]: "loading" }));
+    try {
+      const result = await createCampaign(businessId, {
+        name: campaignName,
+        subject,
+        body,
+        status: 'DRAFT',
+      });
+      if (result.data && !result.error) {
+        setActionState(prev => ({ ...prev, [key]: "done" }));
+        setTimeout(() => setActionState(prev => ({ ...prev, [key]: "idle" })), 3000);
+        onCopilotAction?.(copilotPrompt);
+      } else {
+        setActionState(prev => ({ ...prev, [key]: "idle" }));
+      }
+    } catch {
+      setActionState(prev => ({ ...prev, [key]: "idle" }));
+    }
+  }, [businessId, onCopilotAction]);
+
+  const name = businessName || 'My Store';
   const actions = [
-    { label: "Promote Store", icon: Megaphone, prompt: "Create a promotional campaign for my store. Draft social media posts and a WhatsApp message to announce it to my audience." },
-    { label: "Target Segment", icon: UserPlus, prompt: "Identify my top customer segments from CRM contacts and suggest a targeted offer for each segment to drive store traffic." },
-    { label: "Send Launch Offer", icon: Send, prompt: "Draft a store launch announcement message with a special offer. Include email subject line and WhatsApp message versions." },
+    {
+      key: "promote",
+      label: "Draft Promotion",
+      icon: Megaphone,
+      campaignName: `Store Promotion - ${name}`,
+      subject: `Special offer from ${name}!`,
+      body: `<p>Check out our latest offers at <strong>${name}</strong>!</p>`,
+      copilotPrompt: `I just created a promotion campaign draft for "${name}". Help me refine the copy with compelling offers and suggest the best time to send.`,
+    },
+    {
+      key: "segment",
+      label: "Target Top Customers",
+      icon: UserPlus,
+      campaignName: `VIP Campaign - ${name}`,
+      subject: `An exclusive offer for you from ${name}`,
+      body: `<p>As a valued customer, we have something special for you.</p>`,
+      copilotPrompt: `I created a VIP campaign draft. Help me identify my best customer segments from CRM and suggest personalized offers for each.`,
+    },
+    {
+      key: "launch",
+      label: "Draft Store Announcement",
+      icon: Send,
+      campaignName: `Store Announcement - ${name}`,
+      subject: `${name} is live! Come visit us`,
+      body: `<p>We're excited to share that <strong>${name}</strong> is now open for business!</p>`,
+      copilotPrompt: `I just created a store announcement campaign draft. Help me write compelling copy and plan a multi-channel launch (email + WhatsApp).`,
+    },
   ];
 
   return (
-    <div className="flex items-center gap-2">
-      {actions.map((action) => {
-        const Icon = action.icon;
-        return (
-          <button
-            key={action.label}
-            onClick={() => onCopilotAction(action.prompt)}
-            className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-medium transition-all hover:scale-[1.02] flex-1 justify-center min-h-[40px]"
-            style={{ background: "hsl(var(--kf-muted)/0.08)", border: "1px solid hsl(var(--kf-border)/0.3)", color: "hsl(var(--kf-foreground))" }}
-          >
-            <Icon className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
-            {action.label}
-          </button>
-        );
-      })}
-    </div>
+    <SectionCard title="Quick Actions" subtitle="Create campaign drafts & target audiences" icon={Megaphone}>
+      <div className="flex items-center gap-2">
+        {actions.map((action) => {
+          const Icon = action.icon;
+          const state = actionState[action.key] || "idle";
+          return (
+            <button
+              key={action.key}
+              onClick={() => handleAction(action.key, action.campaignName, action.subject, action.body, action.copilotPrompt)}
+              disabled={state === "loading"}
+              className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-medium transition-all hover:scale-[1.02] flex-1 justify-center min-h-[40px]"
+              style={{ background: "hsl(var(--kf-muted)/0.08)", border: "1px solid hsl(var(--kf-border)/0.3)", color: "hsl(var(--kf-foreground))" }}
+            >
+              {state === "loading" ? (
+                <Loader2 className="w-3 h-3 animate-spin" style={{ color: "hsl(var(--kf-accent1))" }} />
+              ) : state === "done" ? (
+                <CheckCircle2 className="w-3 h-3" style={{ color: "hsl(var(--kf-success))" }} />
+              ) : (
+                <Icon className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
+              )}
+              {state === "done" ? "Created!" : action.label}
+            </button>
+          );
+        })}
+      </div>
+    </SectionCard>
   );
 }
 
@@ -539,7 +667,7 @@ export function OverviewMode({
       )}
 
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
-        <CrmActionBar onCopilotAction={onCopilotAction} />
+        <CrmActionBar businessId={businessId} businessName={businessData?.name} onCopilotAction={onCopilotAction} />
       </motion.div>
 
       <motion.div
