@@ -31,6 +31,56 @@ type WeeklyPlanData = {
   summary?: string;
 };
 
+type RawPlanResponse = {
+  summary?: string;
+  weeklyGoal?: string;
+  dailyFocus?: Array<{ day: string; theme: string; tasks: string[] }>;
+  topPriorities?: Array<{ priority: string; reason?: string; deadline?: string }>;
+  days?: Array<{ day: string; blocks: DayBlock[] }>;
+};
+
+function normalizePlan(raw: RawPlanResponse): WeeklyPlanData {
+  if (raw.days && Array.isArray(raw.days) && raw.days.length > 0 && raw.days[0].blocks) {
+    return { days: raw.days, summary: raw.summary || raw.weeklyGoal };
+  }
+
+  const themeToCategory: Record<string, string> = {
+    revenue: "revenue", recovery: "revenue", collection: "revenue", invoic: "revenue",
+    client: "clients", engagement: "clients", outreach: "clients", crm: "crm",
+    content: "content", marketing: "content", social: "content",
+    deliver: "projects", project: "projects", milestone: "projects",
+    review: "operations", planning: "operations", operation: "operations", expense: "operations",
+  };
+
+  function inferCategory(theme: string): string {
+    const lower = theme.toLowerCase();
+    for (const [key, cat] of Object.entries(themeToCategory)) {
+      if (lower.includes(key)) return cat;
+    }
+    return "growth";
+  }
+
+  const days: WeeklyPlanData["days"] = [];
+
+  if (raw.dailyFocus && Array.isArray(raw.dailyFocus)) {
+    for (const df of raw.dailyFocus) {
+      const category = inferCategory(df.theme || "");
+      const blocks: DayBlock[] = (df.tasks || []).map((task, i) => ({
+        timeSlot: "",
+        focus: df.theme || "Focus",
+        description: task,
+        category,
+      }));
+      days.push({ day: df.day, blocks });
+    }
+  }
+
+  return {
+    days,
+    summary: raw.summary || raw.weeklyGoal || "",
+  };
+}
+
 const CATEGORY_ICONS: Record<string, typeof Target> = {
   revenue: DollarSign,
   clients: Users,
@@ -70,11 +120,11 @@ export function DailyPlan({ businessId }: { businessId: string }) {
     setLoading(true);
     setError(false);
     try {
-      const res = await apiGet<WeeklyPlanData>(
+      const res = await apiGet<RawPlanResponse>(
         `/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/weekly-plan`,
       );
       if (res.data) {
-        setPlan(res.data as WeeklyPlanData);
+        setPlan(normalizePlan(res.data as RawPlanResponse));
       } else {
         setError(true);
       }
