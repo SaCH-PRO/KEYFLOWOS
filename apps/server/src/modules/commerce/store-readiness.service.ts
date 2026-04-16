@@ -55,7 +55,11 @@ export interface RevenueSnapshot {
   totalOrders30d: number;
   avgOrderValue: number;
   topProductRevenue: { productId: string; productName: string; revenue: number; orders: number }[];
+  bottomProductRevenue: { productId: string; productName: string; revenue: number; orders: number }[];
   conversionRate: number | null;
+  revenueByChannel: { channel: string; revenue: number; orders: number }[];
+  revenueTrend: { period: string; revenue: number; orders: number }[];
+  promotionROI: { campaignsSent: number; totalCampaignRevenue: number; roi: number | null } | null;
 }
 
 export interface StoreReadinessResult {
@@ -210,7 +214,7 @@ export class StoreReadinessService {
   }
 
   async getReadiness(businessId: string): Promise<StoreReadinessResult> {
-    const [graph, business, orderData] = await Promise.all([
+    const [graph, business, orderData, campaignStats] = await Promise.all([
       this.buildStoreGraph(businessId),
       this.db.business.findUnique({
         where: { id: businessId },
@@ -222,6 +226,7 @@ export class StoreReadinessService {
         },
       }),
       this.getRevenueSnapshot(businessId),
+      this.getCampaignStats(businessId),
     ]);
 
     const meta = (business?.metaData as Record<string, any>) ?? {};
@@ -290,6 +295,9 @@ export class StoreReadinessService {
       { id: 'price-drift', category: 'merchandising', severity: 'warning', title: `${graph.driftCount} Price/Duration Drift${graph.driftCount > 1 ? 's' : ''}`, failDetail: 'Some store items have different prices than their catalog source. Sync to fix.', actionLabel: 'Sync Catalog', actionTab: 'catalog', passed: graph.driftCount === 0 },
       { id: 'low-images', category: 'merchandising', severity: 'warning', title: 'Low Image Coverage', failDetail: `Only ${Math.round(liveWithImagesPct)}% of live items have images. Products with images convert 2× better.`, actionLabel: 'Add Images', actionTab: 'catalog', passed: liveWithImagesPct >= 50 || graph.liveCount === 0 },
       { id: 'inactive-items', category: 'merchandising', severity: 'warning', title: 'Inactive Items in Store', failDetail: 'Some store items are marked inactive in your catalog. Deactivated items confuse customers.', actionLabel: 'Review Catalog', actionTab: 'catalog', passed: !hasInactiveItems },
+      { id: 'no-campaigns', category: 'promotion', severity: 'warning', title: 'No Marketing Campaigns', failDetail: 'You haven\'t sent any campaigns yet. Email campaigns drive repeat traffic and sales.', actionLabel: 'Create Campaign', actionTab: 'launch', passed: campaignStats.totalSent > 0 },
+      { id: 'low-campaign-coverage', category: 'promotion', severity: 'tip', title: 'Low Campaign Coverage', failDetail: `Only ${campaignStats.coveragePct}% of your catalog items have been mentioned in campaigns. Promote more items.`, actionLabel: 'Promote Items', actionTab: 'launch', passed: campaignStats.coveragePct >= 50 || graph.liveCount === 0 },
+      { id: 'no-promo-codes', category: 'promotion', severity: 'tip', title: 'No Promo Codes', failDetail: 'Promo codes incentivize first-time buyers and drive urgency. Create one to boost conversions.', actionLabel: 'Create Promo', actionTab: 'merchandising', passed: campaignStats.hasPromoCodes },
     ];
 
     const items: ReadinessItem[] = checks.map(c => ({
@@ -332,6 +340,45 @@ export class StoreReadinessService {
     };
   }
 
+  private async getCampaignStats(businessId: string): Promise<{ totalSent: number; coveragePct: number; hasPromoCodes: boolean }> {
+    try {
+      const [campaigns, promoCodeCount] = await Promise.all([
+        this.db.emailCampaign.findMany({
+          where: { businessId, deletedAt: null, status: 'SENT' },
+          select: { id: true, body: true, subject: true },
+        }),
+        this.db.promoCode.count({
+          where: { businessId, isActive: true },
+        }).catch(() => 0),
+      ]);
+
+      const totalSent = campaigns.length;
+
+      const products = await this.db.product.findMany({
+        where: { businessId, deletedAt: null },
+        select: { id: true, name: true },
+      });
+
+      if (products.length === 0) {
+        return { totalSent, coveragePct: 100, hasPromoCodes: promoCodeCount > 0 };
+      }
+
+      let mentionedCount = 0;
+      const campaignText = campaigns.map(c => `${c.subject} ${c.body}`.toLowerCase()).join(' ');
+      for (const p of products) {
+        if (campaignText.includes(p.name.toLowerCase())) {
+          mentionedCount++;
+        }
+      }
+      const coveragePct = Math.round((mentionedCount / products.length) * 100);
+
+      return { totalSent, coveragePct, hasPromoCodes: promoCodeCount > 0 };
+    } catch (e) {
+      this.logger.warn(`Failed to compute campaign stats: ${(e as Error).message}`);
+      return { totalSent: 0, coveragePct: 0, hasPromoCodes: false };
+    }
+  }
+
   private async getRevenueSnapshot(businessId: string): Promise<RevenueSnapshot> {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
 
@@ -343,7 +390,7 @@ export class StoreReadinessService {
           status: { notIn: ['CANCELLED', 'REFUNDED'] },
         },
         select: {
-          id: true, total: true,
+          id: true, total: true, createdAt: true, type: true,
           items: {
             select: { productId: true, total: true, quantity: true, product: { select: { name: true } } },
           },
@@ -365,10 +412,64 @@ export class StoreReadinessService {
         }
       }
 
-      const topProductRevenue = [...productMap.entries()]
+      const sortedProducts = [...productMap.entries()]
         .map(([productId, data]) => ({ productId, ...data }))
-        .sort((a, b) => b.revenue - a.revenue)
-        .slice(0, 5);
+        .sort((a, b) => b.revenue - a.revenue);
+
+      const topProductRevenue = sortedProducts.slice(0, 5);
+      const bottomProductRevenue = sortedProducts.length > 2
+        ? sortedProducts.slice(-3).reverse()
+        : [];
+
+      const channelMap = new Map<string, { revenue: number; orders: number }>();
+      for (const order of orders) {
+        const channel = (order.type ?? 'STANDARD').toLowerCase();
+        const existing = channelMap.get(channel) ?? { revenue: 0, orders: 0 };
+        existing.revenue += Number(order.total ?? 0);
+        existing.orders++;
+        channelMap.set(channel, existing);
+      }
+      const revenueByChannel = [...channelMap.entries()]
+        .map(([channel, data]) => ({ channel, ...data }))
+        .sort((a, b) => b.revenue - a.revenue);
+
+      const weekBuckets = new Map<string, { revenue: number; orders: number }>();
+      for (const order of orders) {
+        const d = new Date(order.createdAt);
+        const weekStart = new Date(d);
+        weekStart.setDate(d.getDate() - d.getDay());
+        const key = weekStart.toISOString().slice(0, 10);
+        const existing = weekBuckets.get(key) ?? { revenue: 0, orders: 0 };
+        existing.revenue += Number(order.total ?? 0);
+        existing.orders++;
+        weekBuckets.set(key, existing);
+      }
+      const revenueTrend = [...weekBuckets.entries()]
+        .map(([period, data]) => ({ period, ...data }))
+        .sort((a, b) => a.period.localeCompare(b.period));
+
+      let promotionROI: RevenueSnapshot['promotionROI'] = null;
+      try {
+        const sentCampaigns = await this.db.emailCampaign.findMany({
+          where: { businessId, deletedAt: null, status: 'SENT', sentAt: { gte: thirtyDaysAgo } },
+          select: { id: true, sentAt: true },
+        });
+        if (sentCampaigns.length > 0) {
+          const campaignOrderRevenue = orders
+            .filter(o => {
+              const orderDate = new Date(o.createdAt);
+              return sentCampaigns.some(c =>
+                c.sentAt && orderDate >= c.sentAt && orderDate.getTime() - c.sentAt.getTime() <= 7 * 86400000,
+              );
+            })
+            .reduce((sum, o) => sum + Number(o.total ?? 0), 0);
+          promotionROI = {
+            campaignsSent: sentCampaigns.length,
+            totalCampaignRevenue: campaignOrderRevenue,
+            roi: null,
+          };
+        }
+      } catch {}
 
       const meta = (await this.db.business.findUnique({
         where: { id: businessId },
@@ -382,10 +483,24 @@ export class StoreReadinessService {
 
       const conversionRate = pageViews > 0 ? (totalOrders / pageViews) * 100 : null;
 
-      return { totalRevenue30d: totalRevenue, totalOrders30d: totalOrders, avgOrderValue, topProductRevenue, conversionRate };
+      return {
+        totalRevenue30d: totalRevenue,
+        totalOrders30d: totalOrders,
+        avgOrderValue,
+        topProductRevenue,
+        bottomProductRevenue,
+        conversionRate,
+        revenueByChannel,
+        revenueTrend,
+        promotionROI,
+      };
     } catch (e) {
       this.logger.warn(`Failed to compute revenue snapshot: ${(e as Error).message}`);
-      return { totalRevenue30d: 0, totalOrders30d: 0, avgOrderValue: 0, topProductRevenue: [], conversionRate: null };
+      return {
+        totalRevenue30d: 0, totalOrders30d: 0, avgOrderValue: 0,
+        topProductRevenue: [], bottomProductRevenue: [],
+        conversionRate: null, revenueByChannel: [], revenueTrend: [], promotionROI: null,
+      };
     }
   }
 }

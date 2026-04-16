@@ -3477,7 +3477,11 @@ export interface RevenueSnapshot {
   totalOrders30d: number;
   avgOrderValue: number;
   topProductRevenue: { productId: string; productName: string; revenue: number; orders: number }[];
+  bottomProductRevenue: { productId: string; productName: string; revenue: number; orders: number }[];
   conversionRate: number | null;
+  revenueByChannel: { channel: string; revenue: number; orders: number }[];
+  revenueTrend: { period: string; revenue: number; orders: number }[];
+  promotionROI: { campaignsSent: number; totalCampaignRevenue: number; roi: number | null } | null;
 }
 
 export interface StoreReadinessResult {
