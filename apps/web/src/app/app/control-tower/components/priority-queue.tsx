@@ -7,11 +7,11 @@ import { toast } from "sonner";
 import {
   AlertTriangle, ShieldAlert, Zap, TrendingUp,
   ChevronDown, ChevronUp, ArrowRight, Pin, PinOff,
-  Eye, EyeOff, Clock, Loader2, Bot, Send,
+  Eye, EyeOff, Clock, Loader2, Bot, Send, ExternalLink,
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import { executeAction } from "@/lib/client";
-import type { EnrichedPriority } from "./use-control-tower-data";
+import type { EnrichedPriority, PriorityAction } from "./use-control-tower-data";
 
 const TYPE_CONFIG = {
   risk: { icon: ShieldAlert, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.08)" },
@@ -44,6 +44,12 @@ const CONSEQUENCE_MAP: Record<string, (p: EnrichedPriority) => string> = {
         ? `${tasks} overdue tasks cascading into client dissatisfaction and potential contract penalties.`
         : "Delivery delays cascade into client dissatisfaction and potential contract penalties.";
     }
+    if (p.module === "expenses") {
+      const util = p.graphContext?.budgetUtilization;
+      return util
+        ? `Budget at ${(util * 100).toFixed(0)}% — overspending erodes margins and creates cash flow pressure.`
+        : "Budget overruns erode margins and create cash flow pressure.";
+    }
     return "Unresolved risks compound over time and affect overall business health.";
   },
   action: (p) => {
@@ -56,72 +62,42 @@ const CONSEQUENCE_MAP: Record<string, (p: EnrichedPriority) => string> = {
     if (p.module === "bookings") {
       const util = p.graphContext?.utilizationRate;
       return util !== undefined
-        ? `Only ${util.toFixed(0)}% capacity used. Promotions or outreach could fill ${(100 - util).toFixed(0)}% of available slots.`
+        ? `Only ${(util * 100).toFixed(0)}% capacity used. Promotions or outreach could fill ${((1 - util) * 100).toFixed(0)}% of available slots.`
         : "Opportunities lose value over time. Acting early gives you the best chance of capturing this.";
     }
     return "Opportunities lose value over time. Acting early gives you the best chance of capturing this.";
   },
 };
 
-function getPinKey(businessId: string) {
-  return `kf-tower-pinned-${businessId}`;
-}
+const ACTION_ICONS: Record<string, typeof Send> = {
+  send_reminder: Send,
+  send_followup: Send,
+  view_detail: ExternalLink,
+  delegate_ai: Bot,
+  approve: Zap,
+};
 
-function getDismissKey(businessId: string) {
-  return `kf-tower-dismissed-${businessId}`;
-}
-
-function getSnoozedKey(businessId: string) {
-  return `kf-tower-snoozed-${businessId}`;
-}
+function getPinKey(businessId: string) { return `kf-tower-pinned-${businessId}`; }
+function getDismissKey(businessId: string) { return `kf-tower-dismissed-${businessId}`; }
+function getSnoozedKey(businessId: string) { return `kf-tower-snoozed-${businessId}`; }
 
 function getPinnedIds(businessId: string): Set<string> {
   if (typeof window === "undefined") return new Set();
-  try {
-    const raw = localStorage.getItem(getPinKey(businessId));
-    return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch {
-    return new Set();
-  }
+  try { return new Set(JSON.parse(localStorage.getItem(getPinKey(businessId)) ?? "[]")); } catch { return new Set(); }
 }
-
-function savePinnedIds(businessId: string, ids: Set<string>) {
-  try {
-    localStorage.setItem(getPinKey(businessId), JSON.stringify([...ids]));
-  } catch {}
-}
+function savePinnedIds(businessId: string, ids: Set<string>) { try { localStorage.setItem(getPinKey(businessId), JSON.stringify([...ids])); } catch {} }
 
 function getDismissedIds(businessId: string): Map<string, string> {
   if (typeof window === "undefined") return new Map();
-  try {
-    const raw = localStorage.getItem(getDismissKey(businessId));
-    return raw ? new Map(Object.entries(JSON.parse(raw))) : new Map();
-  } catch {
-    return new Map();
-  }
+  try { return new Map(Object.entries(JSON.parse(localStorage.getItem(getDismissKey(businessId)) ?? "{}"))); } catch { return new Map(); }
 }
-
-function saveDismissedIds(businessId: string, ids: Map<string, string>) {
-  try {
-    localStorage.setItem(getDismissKey(businessId), JSON.stringify(Object.fromEntries(ids)));
-  } catch {}
-}
+function saveDismissedIds(businessId: string, ids: Map<string, string>) { try { localStorage.setItem(getDismissKey(businessId), JSON.stringify(Object.fromEntries(ids))); } catch {} }
 
 function getSnoozedIds(businessId: string): Map<string, number> {
   if (typeof window === "undefined") return new Map();
-  try {
-    const raw = localStorage.getItem(getSnoozedKey(businessId));
-    return raw ? new Map(Object.entries(JSON.parse(raw)).map(([k, v]) => [k, Number(v)])) : new Map();
-  } catch {
-    return new Map();
-  }
+  try { return new Map(Object.entries(JSON.parse(localStorage.getItem(getSnoozedKey(businessId)) ?? "{}")).map(([k, v]) => [k, Number(v)])); } catch { return new Map(); }
 }
-
-function saveSnoozedIds(businessId: string, ids: Map<string, number>) {
-  try {
-    localStorage.setItem(getSnoozedKey(businessId), JSON.stringify(Object.fromEntries(ids)));
-  } catch {}
-}
+function saveSnoozedIds(businessId: string, ids: Map<string, number>) { try { localStorage.setItem(getSnoozedKey(businessId), JSON.stringify(Object.fromEntries(ids))); } catch {} }
 
 const DISMISS_REASONS = [
   "Already handled",
@@ -155,10 +131,7 @@ export function PriorityQueue({
     const now = Date.now();
     let changed = false;
     for (const [id, until] of snoozed) {
-      if (until < now) {
-        snoozed.delete(id);
-        changed = true;
-      }
+      if (until < now) { snoozed.delete(id); changed = true; }
     }
     if (changed) saveSnoozedIds(businessId, snoozed);
     setSnoozedIds(snoozed);
@@ -168,24 +141,33 @@ export function PriorityQueue({
     e.stopPropagation();
     setPinnedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       savePinnedIds(businessId, next);
       return next;
     });
   }, [businessId]);
 
-  const handleDismiss = useCallback((id: string, reason: string) => {
+  const handleDismiss = useCallback(async (priorityId: string, reason: string) => {
+    try {
+      await executeAction(businessId, "dismiss_priority", {
+        priorityId,
+        reason,
+        module: priorities.find((p) => p.id === priorityId)?.module,
+      });
+    } catch {}
+
     setDismissedIds((prev) => {
       const next = new Map(prev);
-      next.set(id, reason);
+      next.set(priorityId, reason);
       saveDismissedIds(businessId, next);
       return next;
     });
     setDismissPrompt(null);
     setExpandedItem(null);
     toast.success(`Dismissed: ${reason}`);
-  }, [businessId]);
+    window.dispatchEvent(new CustomEvent("kf:action.executed"));
+    onActionExecuted?.();
+  }, [businessId, priorities, onActionExecuted]);
 
   const handleSnooze = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -199,31 +181,34 @@ export function PriorityQueue({
     toast.success("Snoozed for 2 hours");
   }, [businessId]);
 
-  const handleNavigate = useCallback((p: EnrichedPriority, e: React.MouseEvent) => {
+  const handleExecuteAction = useCallback(async (
+    p: EnrichedPriority,
+    action: PriorityAction,
+    e: React.MouseEvent,
+  ) => {
     e.stopPropagation();
-    if (p.actionRoute) {
-      router.push(p.actionRoute);
-    }
-  }, [router]);
 
-  const handleSuggestedAction = useCallback(async (p: EnrichedPriority, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!p.suggestedAction || !businessId) return;
-
-    if (p.suggestedAction.toolName === "_approve") {
-      router.push("/app/control-tower#tower-approvals");
+    if (action.toolName === "_navigate") {
+      const route = action.args.route as string;
+      if (route.includes("#")) {
+        const [path, hash] = route.split("#");
+        if (path) router.push(path);
+        setTimeout(() => {
+          const el = document.getElementById(hash);
+          if (el) el.scrollIntoView({ behavior: "smooth" });
+        }, 200);
+      } else {
+        router.push(route);
+      }
       return;
     }
 
-    setExecutingAction(p.id);
+    const actionKey = `${p.id}-${action.key}`;
+    setExecutingAction(actionKey);
     try {
-      const res = await executeAction(
-        businessId,
-        p.suggestedAction.toolName,
-        p.suggestedAction.args,
-      );
+      const res = await executeAction(businessId, action.toolName, action.args);
       if (res.data?.success) {
-        toast.success(`${p.suggestedAction.label} completed`);
+        toast.success(`${action.label} completed`);
         window.dispatchEvent(new CustomEvent("kf:action.executed"));
         onActionExecuted?.();
       } else if (res.data?.blocked) {
@@ -298,8 +283,7 @@ export function PriorityQueue({
             const isExpanded = expandedItem === p.id;
             const consequenceFn = CONSEQUENCE_MAP[p.type] ?? CONSEQUENCE_MAP.action;
             const consequence = consequenceFn(p);
-            const hasSuggestedAction = !!p.suggestedAction;
-            const isExecuting = executingAction === p.id;
+            const primaryAction = p.actions.find((a) => a.variant === "primary") ?? p.actions[0];
             const showDismissPrompt = dismissPrompt === p.id;
 
             return (
@@ -351,30 +335,23 @@ export function PriorityQueue({
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {hasSuggestedAction && (
+                    {primaryAction && (
                       <button
-                        onClick={(e) => handleSuggestedAction(p, e)}
-                        disabled={isExecuting}
+                        onClick={(e) => handleExecuteAction(p, primaryAction, e)}
+                        disabled={executingAction === `${p.id}-${primaryAction.key}`}
                         className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-semibold transition-all hover:opacity-80 min-h-[24px]"
                         style={{ background: `${cfg.color}15`, color: cfg.color }}
-                        title={p.suggestedAction!.label}
+                        title={primaryAction.label}
                       >
-                        {isExecuting ? (
+                        {executingAction === `${p.id}-${primaryAction.key}` ? (
                           <Loader2 className="w-2.5 h-2.5 animate-spin" />
                         ) : (
-                          <Bot className="w-2.5 h-2.5" />
+                          (() => {
+                            const ActionIcon = ACTION_ICONS[primaryAction.key] ?? ArrowRight;
+                            return <ActionIcon className="w-2.5 h-2.5" />;
+                          })()
                         )}
-                        {p.suggestedAction!.label}
-                      </button>
-                    )}
-                    {!hasSuggestedAction && p.actionLabel && (
-                      <button
-                        onClick={(e) => handleNavigate(p, e)}
-                        className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-semibold transition-all hover:opacity-80 min-h-[24px]"
-                        style={{ background: `${cfg.color}15`, color: cfg.color }}
-                      >
-                        {p.actionLabel}
-                        <ArrowRight className="w-2.5 h-2.5" />
+                        {primaryAction.label}
                       </button>
                     )}
                     <span
@@ -444,28 +421,55 @@ export function PriorityQueue({
                           </div>
                         )}
 
+                        {p.affectedEntities && p.affectedEntities.length > 0 && (
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-muted-foreground) / 0.5)" }} />
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "hsl(var(--kf-muted-foreground) / 0.6)" }}>
+                                Affected entities
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {p.affectedEntities.slice(0, 5).map((entity, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="text-[9px] px-1.5 py-0.5 rounded-md"
+                                    style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-foreground) / 0.7)" }}
+                                  >
+                                    {entity}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="flex items-center gap-2 pt-1 flex-wrap">
-                          {hasSuggestedAction && (
-                            <button
-                              onClick={(e) => handleSuggestedAction(p, e)}
-                              disabled={isExecuting}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80 min-h-[28px]"
-                              style={{ background: `${cfg.color}15`, color: cfg.color }}
-                            >
-                              {isExecuting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bot className="w-3 h-3" />}
-                              {p.suggestedAction!.label}
-                            </button>
-                          )}
-                          {p.actionLabel && p.actionRoute && (
-                            <button
-                              onClick={(e) => handleNavigate(p, e)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80 min-h-[28px]"
-                              style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-foreground) / 0.8)" }}
-                            >
-                              {p.actionLabel}
-                              <ArrowRight className="w-3 h-3" />
-                            </button>
-                          )}
+                          {p.actions.map((action) => {
+                            const ActionBtnIcon = ACTION_ICONS[action.key] ?? ArrowRight;
+                            const isExec = executingAction === `${p.id}-${action.key}`;
+                            const btnBg = action.variant === "primary"
+                              ? `${cfg.color}15`
+                              : action.variant === "ai"
+                                ? "hsl(var(--kf-accent2) / 0.12)"
+                                : "hsl(var(--kf-muted) / 0.1)";
+                            const btnColor = action.variant === "primary"
+                              ? cfg.color
+                              : action.variant === "ai"
+                                ? "hsl(var(--kf-accent2))"
+                                : "hsl(var(--kf-foreground) / 0.8)";
+                            return (
+                              <button
+                                key={action.key}
+                                onClick={(e) => handleExecuteAction(p, action, e)}
+                                disabled={isExec}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80 min-h-[28px]"
+                                style={{ background: btnBg, color: btnColor }}
+                              >
+                                {isExec ? <Loader2 className="w-3 h-3 animate-spin" /> : <ActionBtnIcon className="w-3 h-3" />}
+                                {action.label}
+                              </button>
+                            );
+                          })}
                           <button
                             onClick={(e) => { e.stopPropagation(); handleSnooze(p.id, e); }}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-all hover:opacity-80 min-h-[28px]"

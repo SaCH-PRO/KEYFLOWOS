@@ -240,6 +240,27 @@ export function ApprovalsQueue({
                         borderBottom: `1px solid ${tierColor}25`,
                       }}
                     >
+                      {a.inputPayload && Object.keys(a.inputPayload).length > 0 && (
+                        <div className="flex items-start gap-2">
+                          <ShieldCheck className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: tierColor }} />
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "hsl(var(--kf-muted-foreground) / 0.6)" }}>
+                              Affected Entities & Context
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              {Object.entries(a.inputPayload).slice(0, 6).map(([key, val]) => (
+                                <span
+                                  key={key}
+                                  className="text-[9px] px-1.5 py-0.5 rounded-md"
+                                  style={{ background: `${tierColor}08`, color: "hsl(var(--kf-foreground) / 0.7)" }}
+                                >
+                                  {key}: {typeof val === "object" ? JSON.stringify(val).slice(0, 40) : String(val).slice(0, 40)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       {a.rationale && (
                         <div className="flex items-start gap-2">
                           <Zap className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: tierColor }} />
@@ -264,6 +285,18 @@ export function ApprovalsQueue({
                           </p>
                         </div>
                       </div>
+                      {a.toolName && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-md" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground) / 0.6)" }}>
+                            Tool: {a.toolName}
+                          </span>
+                          {a.planId && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-md" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground) / 0.6)" }}>
+                              Plan: {a.planId.slice(0, 8)}…
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}
