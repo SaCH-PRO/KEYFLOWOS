@@ -19,6 +19,7 @@ import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { ProfileIntelligenceService } from './profile-intelligence.service';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
 import { ModelGatewayService } from './model-gateway.service';
+import { BusinessMatchingService } from './business-matching.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
@@ -42,6 +43,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     ProAutoMonitorService,
     ProfileIntelligenceService,
     WorkspaceRecommendationsService,
+    BusinessMatchingService,
   ],
   exports: [
     ModelGatewayService,
@@ -59,6 +61,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     ProAutoMonitorService,
     ProfileIntelligenceService,
     WorkspaceRecommendationsService,
+    BusinessMatchingService,
   ],
 })
 export class AiModule {}

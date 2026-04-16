@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CommunityService } from './community.service';
+import { BusinessMatchingService } from '../ai/business-matching.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -7,6 +8,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 export class CommunityController {
   constructor(
     @Inject(CommunityService) private readonly community: CommunityService,
+    @Inject(BusinessMatchingService) private readonly matching: BusinessMatchingService,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -193,5 +195,14 @@ export class CommunityController {
     @Param('targetId') targetId: string,
   ) {
     return this.community.getConnectionStatus(businessId, targetId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/recommendations')
+  getRecommendations(
+    @Param('businessId') businessId: string,
+    @Query('refresh') refresh?: string,
+  ) {
+    return this.matching.getRecommendations(businessId, refresh === 'true');
   }
 }
