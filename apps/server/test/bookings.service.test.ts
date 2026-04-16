@@ -47,13 +47,11 @@ describe('BookingsService', () => {
     const events = { emit } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { findOrCreateContact: vi.fn(), logContactEvent: vi.fn() };
-    const automation = { handle: vi.fn() };
     const service = new BookingsService(
       prisma,
       events,
       crm as any,
       { createInvoiceForService: vi.fn() } as any,
-      automation as any,
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
     );
@@ -80,13 +78,11 @@ describe('BookingsService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { findOrCreateContact: vi.fn(), logContactEvent: vi.fn() };
-    const automation = { handle: vi.fn() };
     const service = new BookingsService(
       prisma,
       events,
       crm as any,
       { createInvoiceForService: vi.fn() } as any,
-      automation as any,
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
     );
@@ -120,13 +116,11 @@ describe('BookingsService', () => {
     const createInvoiceForService = vi.fn().mockResolvedValue({ id: 'inv_1' });
     const findOrCreateContact = vi.fn().mockResolvedValue({ id: 'contact_public' });
     const logContactEvent = vi.fn();
-    const automation = { handle: vi.fn() };
     const service = new BookingsService(
       prisma,
       events,
       { findOrCreateContact, logContactEvent } as any,
       { createInvoiceForService } as any,
-      automation as any,
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
     );

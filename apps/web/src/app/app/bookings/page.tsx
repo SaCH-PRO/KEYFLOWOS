@@ -63,9 +63,9 @@ import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { BOOKINGS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
-import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
-import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
+import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar, tooltip: "View and manage upcoming bookings. Filter by status, date, or service." },
@@ -147,7 +147,7 @@ export default function BookingsPage() {
   const [businessHoursSet, setBusinessHoursSet] = useState(false);
 
   const ai = useBookingsAiHub();
-  const intelligence = useWorkspaceIntelligence({ businessId, module: "bookings" });
+  const intelligence = useGraphIntelligence({ businessId, module: "bookings" });
 
   const handleBookingsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
@@ -585,7 +585,7 @@ export default function BookingsPage() {
         )}
       </div>
 
-      <WorkspaceInsightsPanel
+      <GraphInsightsPanel
         recommendations={intelligence.recommendations}
         loading={intelligence.loading}
         onDismiss={intelligence.dismiss}

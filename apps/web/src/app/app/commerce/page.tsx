@@ -47,9 +47,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { formatCurrencyCompact } from "@/lib/currency";
 import { usePlan } from "@/hooks/use-plan";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
-import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
-import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
+import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 import type { BillingSlots } from "./utils/commerce-slots";
 import InvoicesPanel from "./invoices/invoices-panel";
 import QuotesPanel from "./quotes/quotes-panel";
@@ -80,7 +80,7 @@ export default function CommercePage() {
   const shell = useCommerceShell();
   const billing = useBillingWorkspace();
   const { checkLimit } = usePlan();
-  const intelligence = useWorkspaceIntelligence({ businessId: shell.businessId, module: "revenue" });
+  const intelligence = useGraphIntelligence({ businessId: shell.businessId, module: "revenue" });
   const overview = useCommerceOverview(shell.invoices, shell.businessCurrency);
   const composer = useCommerceComposer({
     tab: overview.tab,
@@ -478,7 +478,7 @@ export default function CommercePage() {
         )}
       </div>
 
-      <WorkspaceInsightsPanel
+      <GraphInsightsPanel
         recommendations={intelligence.recommendations}
         loading={intelligence.loading}
         onDismiss={intelligence.dismiss}

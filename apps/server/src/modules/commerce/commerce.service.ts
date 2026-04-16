@@ -4,7 +4,6 @@ import { InvoicePaidPayload, InvoiceStatusPayload, ProductCreatedPayload, Produc
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { Service } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
-import { AutomationService } from '../automation/automation.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 
@@ -14,7 +13,6 @@ export class CommerceService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(CrmService) private readonly crm: CrmService,
-    @Inject(AutomationService) private readonly automation: AutomationService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(CommerceStatsService) private readonly statsCache: CommerceStatsService,
   ) {}
@@ -426,16 +424,7 @@ export class CommerceService {
         source: 'commerce',
       });
     }
-    if (invoice.contactId) {
-      await this.automation.handle({
-        type: 'invoice.paid',
-        businessId: invoice.businessId,
-        contactId: invoice.contactId,
-        invoiceId,
-        total: invoice.total,
-        currency: invoice.currency,
-      });
-    }
+    
     return invoice;
   }
 
@@ -577,16 +566,7 @@ export class CommerceService {
       };
       this.events.emit(`invoice.${params.status.toLowerCase()}`, payload);
     }
-    if (params.status === 'OVERDUE' && invoice.contactId) {
-      await this.automation.handle({
-        type: 'invoice.overdue',
-        businessId: invoice.businessId,
-        contactId: invoice.contactId,
-        invoiceId: invoice.id,
-        total: invoice.total,
-        currency: invoice.currency,
-      });
-    }
+    
     this.statsCache.invalidateCache(existingInvoice.businessId);
     return invoice;
   }

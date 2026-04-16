@@ -30,9 +30,9 @@ import { ExpenseInsightsTab } from "./components/expense-insights-tab";
 import { ExpenseDetailModal } from "./components/expense-detail-modal";
 import { ExpenseTaxCalc } from "./components/expense-tax-calc";
 import type { MetricStripItem } from "@/components/ui/workspace-metric-strip";
-import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
-import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
+import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 
 const TABS = [
   { key: "transactions", label: "Transactions", icon: Receipt },
@@ -54,7 +54,7 @@ export default function ExpensesPage() {
   }, [router]);
 
   const d = useExpensesData();
-  const intelligence = useWorkspaceIntelligence({ businessId: d.businessId, module: "expenses" });
+  const intelligence = useGraphIntelligence({ businessId: d.businessId, module: "expenses" });
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
@@ -269,7 +269,7 @@ export default function ExpensesPage() {
         )}
       </div>
 
-      <WorkspaceInsightsPanel
+      <GraphInsightsPanel
         recommendations={intelligence.recommendations}
         loading={intelligence.loading}
         onDismiss={intelligence.dismiss}

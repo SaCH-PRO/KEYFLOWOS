@@ -79,7 +79,7 @@ function buildCards(modules: ControlTowerModules, dashboard: StrategicDashboard)
     },
     {
       key: "automations",
-      label: "Flows",
+      label: "Autopilot",
       icon: Zap,
       href: "/app/automations",
       primary: `${modules.automations.activeCount} active`,

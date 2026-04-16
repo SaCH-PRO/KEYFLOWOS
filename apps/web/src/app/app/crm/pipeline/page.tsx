@@ -32,9 +32,9 @@ import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { AiHubTrigger, AiCommandHub } from "@/components/ai/ai-command-hub";
-import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
-import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
+import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -70,7 +70,7 @@ export default function ContactsPage() {
     selectContact, loadFlowData,
   } = state;
 
-  const intelligence = useWorkspaceIntelligence({ businessId, module: "crm" });
+  const intelligence = useGraphIntelligence({ businessId, module: "crm" });
 
   useEffect(() => {
     if (businessId) {
@@ -239,7 +239,7 @@ export default function ContactsPage() {
         )}
       </div>
 
-      <WorkspaceInsightsPanel
+      <GraphInsightsPanel
         recommendations={intelligence.recommendations}
         loading={intelligence.loading}
         onDismiss={intelligence.dismiss}

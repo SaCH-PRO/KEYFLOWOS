@@ -20,9 +20,9 @@ import { ProjectDetail } from "./components/project-detail";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
-import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
-import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
+import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 
 const TABS = [
   { key: "board", label: "Board", icon: LayoutGrid, tooltip: "Kanban board view grouped by delivery stage." },
@@ -43,7 +43,7 @@ export default function ProjectsPage() {
   const projectTaskIdRef = useRef<string | null>(null);
   const { aiHook: projectsAi, updateProjectsContext } = useProjectsAiHub();
   const router = useRouter();
-  const intelligence = useWorkspaceIntelligence({ businessId, module: "projects" });
+  const intelligence = useGraphIntelligence({ businessId, module: "projects" });
 
   const handleProjectsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
@@ -214,7 +214,7 @@ export default function ProjectsPage() {
         )}
       </div>
 
-      <WorkspaceInsightsPanel
+      <GraphInsightsPanel
         recommendations={intelligence.recommendations}
         loading={intelligence.loading}
         onDismiss={intelligence.dismiss}

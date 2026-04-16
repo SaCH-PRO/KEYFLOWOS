@@ -58,9 +58,9 @@ import { UnifiedComposer } from "./components/unified/unified-composer";
 import { ContentStudioTab } from "./components/content-studio-tab";
 import { OutboundHistory } from "./components/outbound-history";
 import { useChannelHealth } from "@/hooks/use-channel-health";
-import { WorkspaceInsightsPanel } from "@/components/ai/workspace-insights-panel";
+import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
-import { useWorkspaceIntelligence } from "@/hooks/use-workspace-intelligence";
+import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 import { listOutboundContent } from "@/lib/client";
 import type { EmailCampaign, LeadForm, OutboundContent } from "@/lib/client";
 import type { BusinessPulse, MarketingStats } from "./hooks/use-marketing";
@@ -460,7 +460,7 @@ export default function ContentPage() {
   const mk = useMarketing();
   const marketingAi = useMarketingAiHub();
   const channelHealth = useChannelHealth(mk.businessId || "");
-  const intelligence = useWorkspaceIntelligence({ businessId: mk.businessId, module: "marketing" });
+  const intelligence = useGraphIntelligence({ businessId: mk.businessId, module: "marketing" });
 
   const [activeTab, setActiveTab] = useState<ContentTab>("create");
   const [createSubmode, setCreateSubmode] = useState<CreateSubmode>("compose");
@@ -820,7 +820,7 @@ export default function ContentPage() {
               )}
             </div>
 
-            <WorkspaceInsightsPanel
+            <GraphInsightsPanel
               recommendations={intelligence.recommendations}
               loading={intelligence.loading}
               onDismiss={intelligence.dismiss}
