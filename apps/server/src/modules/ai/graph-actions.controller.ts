@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
@@ -10,6 +11,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
+import { ActionExecutedPayload, ActionBlockedPayload } from '../../core/event-bus/events.types';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
@@ -32,6 +34,7 @@ export class GraphActionsController {
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(WorkspaceRecommendationsService) private readonly workspaceRecs: WorkspaceRecommendationsService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly eventEmitter: EventEmitter2,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -97,6 +100,13 @@ export class GraphActionsController {
     const decision = await this.governance.evaluate(businessId, body.toolName);
 
     if (!decision.allowed) {
+      const blockedPayload: ActionBlockedPayload = {
+        businessId,
+        toolName: body.toolName,
+        reason: decision.reason ?? 'Governance policy',
+        riskTier: decision.tier,
+      };
+      this.eventEmitter.emit('action.blocked', blockedPayload);
       return {
         success: false,
         blocked: true,
@@ -131,6 +141,15 @@ export class GraphActionsController {
         body.planId,
         body.planStepId,
       );
+      const executedPayload: ActionExecutedPayload = {
+        businessId,
+        toolName: body.toolName,
+        module: this.inferModule(body.toolName),
+        riskTier: decision.tier,
+        success: result.success,
+        changedEntities: result.changedEntities,
+      };
+      this.eventEmitter.emit('action.executed', executedPayload);
       return {
         success: result.success,
         result: result.result,
@@ -139,6 +158,14 @@ export class GraphActionsController {
         tier: decision.tier,
       };
     } catch (err) {
+      const failPayload: ActionExecutedPayload = {
+        businessId,
+        toolName: body.toolName,
+        module: null,
+        riskTier: decision.tier,
+        success: false,
+      };
+      this.eventEmitter.emit('action.executed', failPayload);
       return {
         success: false,
         error: (err as Error).message,
@@ -169,24 +196,41 @@ export class GraphActionsController {
       title: a.title,
       description: a.description,
       riskTier: a.riskTier,
-      module: a.module,
-      status: 'pending',
+      module: a.module ?? this.inferModule(a.toolName),
+      status: 'pending' as const,
       createdAt: a.createdAt,
+      affectedEntities: a.inputPayload ? this.extractAffectedEntities(a.inputPayload) : [],
     }));
 
     const logs = (recentLogs.logs ?? recentLogs ?? []).map((l: any) => ({
       id: l.id,
       type: 'executed' as const,
       toolName: l.toolName,
-      title: l.toolName,
+      title: l.action ?? l.toolName,
       description: l.rationale ?? null,
       riskTier: l.riskTier ?? 1,
-      module: l.module ?? null,
-      status: l.success ? 'completed' : 'failed',
+      module: l.module ?? this.inferModule(l.toolName),
+      status: l.success ? ('completed' as const) : ('failed' as const),
       createdAt: l.createdAt,
+      affectedEntities: l.outputSummary?.changedEntities ?? [],
     }));
 
-    let items = [...pending, ...logs];
+    const planItems = (activePlans ?? [])
+      .filter((p: any) => ['pending', 'in_progress', 'approved'].includes(p.status))
+      .map((p: any) => ({
+        id: p.id,
+        type: 'scheduled' as const,
+        toolName: p.steps?.[0]?.toolName ?? 'plan',
+        title: p.objective,
+        description: `${p.steps?.length ?? 0} step plan`,
+        riskTier: p.maxRiskTier ?? 1,
+        module: p.modules?.[0] ?? null,
+        status: p.status === 'in_progress' ? ('active' as const) : ('scheduled' as const),
+        createdAt: p.createdAt,
+        affectedEntities: p.modules ?? [],
+      }));
+
+    let items = [...pending, ...planItems, ...logs];
     if (status) {
       items = items.filter(i => i.status === status);
     }
@@ -196,6 +240,8 @@ export class GraphActionsController {
       items: items.slice(0, take),
       counts: {
         pending: pending.length,
+        scheduled: planItems.filter((p: any) => p.status === 'scheduled').length,
+        active: planItems.filter((p: any) => p.status === 'active').length,
         completed: logs.filter((l: any) => l.status === 'completed').length,
         failed: logs.filter((l: any) => l.status === 'failed').length,
       },
@@ -249,6 +295,28 @@ export class GraphActionsController {
         disabledFlows: snapshot.automations.disabledCount,
       },
     };
+  }
+
+  private inferModule(toolName: string | null): string | null {
+    if (!toolName) return null;
+    const lower = toolName.toLowerCase();
+    if (lower.includes('contact') || lower.includes('client') || lower.includes('lead')) return 'crm';
+    if (lower.includes('invoice') || lower.includes('payment') || lower.includes('revenue')) return 'revenue';
+    if (lower.includes('booking') || lower.includes('calendar') || lower.includes('schedule')) return 'calendar';
+    if (lower.includes('campaign') || lower.includes('content') || lower.includes('post')) return 'content';
+    if (lower.includes('project') || lower.includes('task')) return 'projects';
+    if (lower.includes('expense') || lower.includes('budget')) return 'expenses';
+    if (lower.includes('flow') || lower.includes('automation')) return 'flows';
+    if (lower.includes('store') || lower.includes('product') || lower.includes('storefront')) return 'store';
+    return null;
+  }
+
+  private extractAffectedEntities(inputPayload: Record<string, any>): string[] {
+    const entities: string[] = [];
+    for (const key of ['contactId', 'invoiceId', 'bookingId', 'projectId', 'productId', 'campaignId']) {
+      if (inputPayload[key]) entities.push(`${key.replace('Id', '')}:${inputPayload[key]}`);
+    }
+    return entities;
   }
 
   private estimateImpact(

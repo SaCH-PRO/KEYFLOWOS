@@ -4169,20 +4169,23 @@ export interface ActionExecuteResponse {
 
 export interface ActionQueueItem {
   id: string;
-  type: 'pending_approval' | 'executed';
+  type: 'pending_approval' | 'executed' | 'scheduled';
   toolName: string;
   title: string;
   description: string | null;
   riskTier: number;
   module: string | null;
-  status: string;
+  status: 'pending' | 'scheduled' | 'active' | 'completed' | 'failed';
   createdAt: string;
+  affectedEntities: string[];
 }
 
 export interface ActionQueueResponse {
   items: ActionQueueItem[];
   counts: {
     pending: number;
+    scheduled: number;
+    active: number;
     completed: number;
     failed: number;
   };

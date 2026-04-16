@@ -1,28 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BusinessGraphService } from './business-graph.service';
+import { GraphCacheInvalidatedPayload } from '../../core/event-bus/events.types';
 
-const GRAPH_INVALIDATING_EVENTS = [
-  'contact.created',
-  'contact.updated',
-  'contact.deleted',
-  'contact.merged',
-  'contact.imported',
-  'invoice.paid',
-  'invoice.sent',
-  'invoice.overdue',
-  'booking.created',
-  'booking.confirmed',
-  'booking.completed',
-  'booking.cancelled',
-  'product.created',
-  'product.updated',
-  'product.deactivated',
-  'expense.created',
-  'store_order.created',
-  'store_order.paid',
-  'action.executed',
-] as const;
+const INVALIDATING_DOMAINS = new Set([
+  'contact', 'invoice', 'booking', 'product', 'expense', 'store_order', 'action',
+]);
 
 @Injectable()
 export class AiListener {
@@ -31,70 +15,158 @@ export class AiListener {
 
   constructor(
     @Inject(BusinessGraphService) private readonly graphService: BusinessGraphService,
+    @Inject(EventEmitter2) private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  @OnEvent('contact.*')
-  handleContactEvent(payload: unknown) { this.processEvent('contact', payload); }
+  @OnEvent('contact.created')
+  onContactCreated(p: unknown) { this.processEvent('contact.created', p); }
 
-  @OnEvent('invoice.*')
-  handleInvoiceEvent(payload: unknown) { this.processEvent('invoice', payload); }
+  @OnEvent('contact.updated')
+  onContactUpdated(p: unknown) { this.processEvent('contact.updated', p); }
 
-  @OnEvent('booking.*')
-  handleBookingEvent(payload: unknown) { this.processEvent('booking', payload); }
+  @OnEvent('contact.deleted')
+  onContactDeleted(p: unknown) { this.processEvent('contact.deleted', p); }
 
-  @OnEvent('product.*')
-  handleProductEvent(payload: unknown) { this.processEvent('product', payload); }
+  @OnEvent('contact.merged')
+  onContactMerged(p: unknown) { this.processEvent('contact.merged', p); }
 
-  @OnEvent('expense.*')
-  handleExpenseEvent(payload: unknown) { this.processEvent('expense', payload); }
+  @OnEvent('contact.imported')
+  onContactImported(p: unknown) { this.processEvent('contact.imported', p); }
 
-  @OnEvent('store_order.*')
-  handleStoreOrderEvent(payload: unknown) { this.processEvent('store_order', payload); }
+  @OnEvent('invoice.paid')
+  onInvoicePaid(p: unknown) { this.processEvent('invoice.paid', p); }
 
-  @OnEvent('action.*')
-  handleActionEvent(payload: unknown) { this.processEvent('action', payload); }
+  @OnEvent('invoice.sent')
+  onInvoiceSent(p: unknown) { this.processEvent('invoice.sent', p); }
 
-  @OnEvent('campaign.*')
-  handleCampaignEvent(payload: unknown) { this.processEvent('campaign', payload); }
+  @OnEvent('invoice.overdue')
+  onInvoiceOverdue(p: unknown) { this.processEvent('invoice.overdue', p); }
 
-  @OnEvent('post.*')
-  handlePostEvent(payload: unknown) { this.processEvent('post', payload); }
+  @OnEvent('booking.created')
+  onBookingCreated(p: unknown) { this.processEvent('booking.created', p); }
 
-  @OnEvent('lead_form.*')
-  handleLeadFormEvent(payload: unknown) { this.processEvent('lead_form', payload); }
+  @OnEvent('booking.confirmed')
+  onBookingConfirmed(p: unknown) { this.processEvent('booking.confirmed', p); }
 
-  @OnEvent('sequence.*')
-  handleSequenceEvent(payload: unknown) { this.processEvent('sequence', payload); }
+  @OnEvent('booking.completed')
+  onBookingCompleted(p: unknown) { this.processEvent('booking.completed', p); }
 
-  @OnEvent('content.*')
-  handleContentEvent(payload: unknown) { this.processEvent('content', payload); }
+  @OnEvent('booking.cancelled')
+  onBookingCancelled(p: unknown) { this.processEvent('booking.cancelled', p); }
 
-  @OnEvent('delivery.*')
-  handleDeliveryEvent(payload: unknown) { this.processEvent('delivery', payload); }
+  @OnEvent('booking.rescheduled')
+  onBookingRescheduled(p: unknown) { this.processEvent('booking.rescheduled', p); }
 
-  @OnEvent('inventory.*')
-  handleInventoryEvent(payload: unknown) { this.processEvent('inventory', payload); }
+  @OnEvent('product.created')
+  onProductCreated(p: unknown) { this.processEvent('product.created', p); }
 
-  @OnEvent('quote.*')
-  handleQuoteEvent(payload: unknown) { this.processEvent('quote', payload); }
+  @OnEvent('product.updated')
+  onProductUpdated(p: unknown) { this.processEvent('product.updated', p); }
 
-  @OnEvent('preorder.*')
-  handlePreorderEvent(payload: unknown) { this.processEvent('preorder', payload); }
+  @OnEvent('product.deactivated')
+  onProductDeactivated(p: unknown) { this.processEvent('product.deactivated', p); }
 
-  @OnEvent('graph.*')
-  handleGraphEvent(payload: unknown) { this.processEvent('graph', payload); }
+  @OnEvent('expense.created')
+  onExpenseCreated(p: unknown) { this.processEvent('expense.created', p); }
 
-  private processEvent(domain: string, payload: unknown) {
-    this.events.push({ event: domain, payload });
-    this.logger.debug(`AI observed event in domain: ${domain}`);
+  @OnEvent('store_order.created')
+  onStoreOrderCreated(p: unknown) { this.processEvent('store_order.created', p); }
+
+  @OnEvent('store_order.paid')
+  onStoreOrderPaid(p: unknown) { this.processEvent('store_order.paid', p); }
+
+  @OnEvent('store_order.shipped')
+  onStoreOrderShipped(p: unknown) { this.processEvent('store_order.shipped', p); }
+
+  @OnEvent('store_order.delivered')
+  onStoreOrderDelivered(p: unknown) { this.processEvent('store_order.delivered', p); }
+
+  @OnEvent('store_order.cancelled')
+  onStoreOrderCancelled(p: unknown) { this.processEvent('store_order.cancelled', p); }
+
+  @OnEvent('store_order.refunded')
+  onStoreOrderRefunded(p: unknown) { this.processEvent('store_order.refunded', p); }
+
+  @OnEvent('action.executed')
+  onActionExecuted(p: unknown) { this.processEvent('action.executed', p); }
+
+  @OnEvent('action.blocked')
+  onActionBlocked(p: unknown) { this.processEvent('action.blocked', p); }
+
+  @OnEvent('campaign.created')
+  onCampaignCreated(p: unknown) { this.processEvent('campaign.created', p); }
+
+  @OnEvent('campaign.sent')
+  onCampaignSent(p: unknown) { this.processEvent('campaign.sent', p); }
+
+  @OnEvent('campaign.briefing_generated')
+  onCampaignBriefing(p: unknown) { this.processEvent('campaign.briefing_generated', p); }
+
+  @OnEvent('post.published')
+  onPostPublished(p: unknown) { this.processEvent('post.published', p); }
+
+  @OnEvent('lead_form.created')
+  onLeadFormCreated(p: unknown) { this.processEvent('lead_form.created', p); }
+
+  @OnEvent('lead_form.submitted')
+  onLeadFormSubmitted(p: unknown) { this.processEvent('lead_form.submitted', p); }
+
+  @OnEvent('sequence.step_due')
+  onSequenceStepDue(p: unknown) { this.processEvent('sequence.step_due', p); }
+
+  @OnEvent('sequence.step_failed')
+  onSequenceStepFailed(p: unknown) { this.processEvent('sequence.step_failed', p); }
+
+  @OnEvent('quote.created')
+  onQuoteCreated(p: unknown) { this.processEvent('quote.created', p); }
+
+  @OnEvent('quote.sent')
+  onQuoteSent(p: unknown) { this.processEvent('quote.sent', p); }
+
+  @OnEvent('quote.converted')
+  onQuoteConverted(p: unknown) { this.processEvent('quote.converted', p); }
+
+  @OnEvent('content.published')
+  onContentPublished(p: unknown) { this.processEvent('content.published', p); }
+
+  @OnEvent('content.failed')
+  onContentFailed(p: unknown) { this.processEvent('content.failed', p); }
+
+  @OnEvent('delivery.completed')
+  onDeliveryCompleted(p: unknown) { this.processEvent('delivery.completed', p); }
+
+  @OnEvent('delivery.failed')
+  onDeliveryFailed(p: unknown) { this.processEvent('delivery.failed', p); }
+
+  @OnEvent('inventory.low')
+  onInventoryLow(p: unknown) { this.processEvent('inventory.low', p); }
+
+  @OnEvent('inventory.out')
+  onInventoryOut(p: unknown) { this.processEvent('inventory.out', p); }
+
+  @OnEvent('preorder.delayed')
+  onPreorderDelayed(p: unknown) { this.processEvent('preorder.delayed', p); }
+
+  @OnEvent('purchaseOrder.received')
+  onPurchaseOrderReceived(p: unknown) { this.processEvent('purchaseOrder.received', p); }
+
+  private processEvent(eventName: string, payload: unknown) {
+    this.events.push({ event: eventName, payload });
+    this.logger.debug(`AI observed event: ${eventName}`);
 
     const businessId = (payload as any)?.businessId;
     if (!businessId) return;
 
-    const invalidatingDomains = ['contact', 'invoice', 'booking', 'product', 'expense', 'store_order', 'action'];
-    if (invalidatingDomains.includes(domain)) {
+    const domain = eventName.split('.')[0];
+    if (INVALIDATING_DOMAINS.has(domain)) {
       this.graphService.invalidateCache(businessId);
-      this.logger.debug(`Graph cache invalidated for ${businessId} due to ${domain} event`);
+      const cachePayload: GraphCacheInvalidatedPayload = {
+        businessId,
+        reason: 'data_change',
+        sourceEvent: eventName,
+      };
+      this.eventEmitter.emit('graph.cache_invalidated', cachePayload);
+      this.logger.debug(`Graph cache invalidated for ${businessId} due to ${eventName}`);
     }
   }
 
