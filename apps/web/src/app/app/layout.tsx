@@ -195,7 +195,7 @@ interface PrimaryNavItem {
 }
 
 const primaryNav: PrimaryNavItem[] = [
-  { id: "cockpit", label: "Cockpit", icon: Gauge, href: "/app" },
+  { id: "cockpit", label: "Command", icon: Gauge, href: "/app" },
   { id: "tower", label: "Control Tower", icon: Radar, href: "/app/control-tower" },
   { id: "store", label: "Store", icon: Store, href: "/app/store" },
   { id: "workspaces", label: "Workspaces", icon: LayoutGrid },
@@ -347,7 +347,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         const isUuid = /^[0-9a-f-]{20,}$/i.test(last || "");
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
-          app: "Cockpit", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
+          app: "Command", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
           bookings: "Calendar", marketing: "Content", expenses: "Expenses",
           projects: "Projects", documents: "Documents", automations: "Automations", reports: "Reports",
           store: "Presence", settings: "Studio", learn: "Learn",
@@ -938,7 +938,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 )}
               >
                 <Gauge className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                <span>Cockpit</span>
+                <span>Command</span>
               </Link>
 
               {(["workspaces", "studio", "public"] as const).map((sectionId) => {
