@@ -33,7 +33,6 @@ import {
   type ProfileStatus,
   type ProfileExtraction,
   type FlowChatResponse,
-  type FlowToolCall,
   type FlowToolResult,
   type FlowPendingConfirmation,
 } from "@/lib/client";
@@ -142,15 +141,41 @@ function PlanStepCard({
   step,
   onApprove,
   onReject,
+  onApproveWithEdits,
   loading,
 }: {
   step: PlanStep;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
+  onApproveWithEdits: (id: string, editedArgs: Record<string, unknown>) => void;
   loading: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editedArgs, setEditedArgs] = useState<Record<string, string>>({});
   const risk = RISK_STYLES[step.riskLevel] || RISK_STYLES.low;
   const toolLabel = step.name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const startEditing = useCallback(() => {
+    const initial: Record<string, string> = {};
+    for (const [k, v] of Object.entries(step.arguments)) {
+      initial[k] = typeof v === "string" ? v : JSON.stringify(v);
+    }
+    setEditedArgs(initial);
+    setEditing(true);
+  }, [step.arguments]);
+
+  const handleSaveEdits = useCallback(() => {
+    const parsed: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(editedArgs)) {
+      try {
+        parsed[k] = JSON.parse(v);
+      } catch {
+        parsed[k] = v;
+      }
+    }
+    onApproveWithEdits(step.toolCallId, parsed);
+    setEditing(false);
+  }, [editedArgs, step.toolCallId, onApproveWithEdits]);
 
   return (
     <div className={`p-3 rounded-xl border ${risk.border} ${risk.bg} space-y-2`}>
@@ -170,7 +195,7 @@ function PlanStepCard({
         {step.status === "failed" && <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />}
       </div>
 
-      {Object.keys(step.arguments).length > 0 && (
+      {!editing && Object.keys(step.arguments).length > 0 && (
         <div className="flex flex-wrap gap-1">
           {Object.entries(step.arguments).slice(0, 4).map(([k, v]) => (
             <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-muted/20 text-muted-foreground/50">
@@ -180,7 +205,39 @@ function PlanStepCard({
         </div>
       )}
 
-      {step.status === "pending" && step.riskLevel !== "low" && (
+      {editing && (
+        <div className="space-y-1.5 pt-1">
+          {Object.entries(editedArgs).map(([k, v]) => (
+            <div key={k} className="flex items-start gap-2">
+              <label className="text-[10px] text-muted-foreground/60 min-w-[60px] pt-1.5 shrink-0">{k}</label>
+              <input
+                type="text"
+                value={v}
+                onChange={(e) => setEditedArgs((prev) => ({ ...prev, [k]: e.target.value }))}
+                className="flex-1 text-[11px] px-2 py-1 rounded-lg bg-muted/20 border border-border/30 text-foreground/80 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/40"
+              />
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={handleSaveEdits}
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] text-[11px] font-medium hover:bg-[hsl(var(--kf-accent1))]/25 transition-all disabled:opacity-50"
+            >
+              {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+              Approve with edits
+            </button>
+            <button
+              onClick={() => setEditing(false)}
+              className="px-3 py-1.5 rounded-lg bg-muted/20 text-muted-foreground/60 text-[11px] hover:bg-muted/30 transition-all"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step.status === "pending" && step.riskLevel !== "low" && !editing && (
         <div className="flex items-center gap-2 pt-1">
           <button
             onClick={() => onApprove(step.toolCallId)}
@@ -190,6 +247,16 @@ function PlanStepCard({
             {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
             Approve
           </button>
+          {Object.keys(step.arguments).length > 0 && (
+            <button
+              onClick={startEditing}
+              disabled={loading}
+              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] text-[11px] font-medium hover:bg-[hsl(var(--kf-accent1))]/20 transition-all disabled:opacity-50"
+            >
+              <Edit3 className="w-3 h-3" />
+              Edit
+            </button>
+          )}
           <button
             onClick={() => onReject(step.toolCallId)}
             disabled={loading}
@@ -715,6 +782,82 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     }
   }, [processFlowResponse, loadSidebarData]);
 
+  const handlePlanActionWithEdits = useCallback(async (toolCallId: string, editedArgs: Record<string, unknown>, msg: ChatMessage) => {
+    const biz = getStoredBusinessId();
+    if (!biz || !msg.pendingConfirmations) return;
+    const pc = msg.pendingConfirmations.find((p) => p.toolCallId === toolCallId);
+    if (!pc) return;
+
+    setResolvingId(toolCallId);
+
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.timestamp !== msg.timestamp || !m.plan) return m;
+        return {
+          ...m,
+          plan: m.plan.map((s) =>
+            s.toolCallId === toolCallId
+              ? { ...s, status: "executing" as const, arguments: editedArgs }
+              : s
+          ),
+        };
+      })
+    );
+
+    try {
+      const res = await confirmFlowAction(biz, toolCallId, pc.name, editedArgs, true);
+      if (res.data) {
+        const resultMsg = processFlowResponse(res.data);
+
+        let derivedStatus: "completed" | "rejected" | "failed" = "completed";
+        let derivedError: string | undefined;
+
+        if (res.data.toolResults?.length) {
+          const matchingResult = res.data.toolResults.find((tr) => tr.toolCallId === toolCallId);
+          if (matchingResult && matchingResult.success === false) {
+            derivedStatus = "failed";
+            derivedError = typeof matchingResult.result === "string" ? matchingResult.result : "Execution failed";
+          }
+        }
+
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.timestamp !== msg.timestamp || !m.plan) return m;
+            return {
+              ...m,
+              plan: m.plan.map((s) =>
+                s.toolCallId === toolCallId
+                  ? { ...s, status: derivedStatus, error: derivedError }
+                  : s
+              ),
+            };
+          })
+        );
+
+        if (resultMsg.content) {
+          setMessages((prev) => [...prev, resultMsg]);
+        }
+
+        loadSidebarData();
+      }
+    } catch {
+      toast.error("Failed to process edited action");
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.timestamp !== msg.timestamp || !m.plan) return m;
+          return {
+            ...m,
+            plan: m.plan.map((s) =>
+              s.toolCallId === toolCallId ? { ...s, status: "failed" as const, error: "Execution failed" } : s
+            ),
+          };
+        })
+      );
+    } finally {
+      setResolvingId(null);
+    }
+  }, [processFlowResponse, loadSidebarData]);
+
   const handleApprove = useCallback(async (id: string) => {
     const biz = getStoredBusinessId();
     if (!biz) return;
@@ -1138,6 +1281,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                                 step={step}
                                 onApprove={(id) => handlePlanAction(id, true, msg)}
                                 onReject={(id) => handlePlanAction(id, false, msg)}
+                                onApproveWithEdits={(id, editedArgs) => handlePlanActionWithEdits(id, editedArgs, msg)}
                                 loading={resolvingId === step.toolCallId}
                               />
                             ))}

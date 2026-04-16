@@ -27,7 +27,7 @@ const ICON_MAP: Record<string, typeof Sparkles> = {
 const PRIORITY_STYLES: Record<string, string> = {
   high: "border-l-amber-500 bg-amber-500/[0.03]",
   medium: "border-l-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/[0.02]",
-  low: "border-l-muted-foreground/30 bg-white/[0.01]",
+  low: "border-l-muted-foreground/30 bg-[hsl(var(--kf-muted)/0.01)]",
 };
 
 function SuggestionCard({
@@ -83,7 +83,7 @@ function SuggestionCard({
             <span className="text-xs font-semibold text-foreground/90">{suggestion.title}</span>
             <button
               onClick={onDismiss}
-              className="p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-all min-w-[32px] min-h-[32px] flex items-center justify-center"
+              className="p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[hsl(var(--kf-muted)/0.1)] transition-all min-w-[32px] min-h-[32px] flex items-center justify-center"
             >
               <X className="w-3 h-3 text-muted-foreground/50" />
             </button>
@@ -159,13 +159,13 @@ export function ModuleAiAssistant({
           <button
             onClick={ai.refreshSuggestions}
             disabled={ai.loading}
-            className="p-1.5 rounded-lg hover:bg-white/[0.04] disabled:opacity-30 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-[hsl(var(--kf-muted)/0.04)] disabled:opacity-30 transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-muted-foreground/50 ${ai.loading ? "animate-spin" : ""}`} />
           </button>
           <button
             onClick={ai.togglePanel}
-            className="p-1.5 rounded-lg hover:bg-white/[0.04] transition-colors"
+            className="p-1.5 rounded-lg hover:bg-[hsl(var(--kf-muted)/0.04)] transition-colors"
           >
             <X className="w-3.5 h-3.5 text-muted-foreground/50" />
           </button>

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 
 export type AiSuggestion = {
   id: string;
-  type: "action" | "insight" | "risk" | "opportunity";
+  type: "action" | "insight" | "risk" | "opportunity" | "warning";
   title: string;
   description: string;
   explanation?: string;
