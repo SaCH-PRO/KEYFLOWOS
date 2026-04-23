@@ -77,6 +77,7 @@ describe('AiUsageService', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.useFakeTimers();
     mockPrismaClient.aiUsageLog.create.mockResolvedValue({});
     mockPrismaClient.aiUsageLog.aggregate.mockResolvedValue({ _sum: { creditsUsed: 0, estimatedCost: 0 } });
