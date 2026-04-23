@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@keyflow/ui": "workspace:*",
+    "@supabase/supabase-js": "^2.94.0",
     "@tiptap/extension-link": "^3.20.1",
     "@tiptap/extension-placeholder": "^3.20.1",
     "@tiptap/extension-text-align": "^3.20.1",

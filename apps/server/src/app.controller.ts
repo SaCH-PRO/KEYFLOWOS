@@ -2,6 +2,7 @@ import { Controller, Get, Inject, Req } from '@nestjs/common';
 import { AppService } from './app.service';
 import { SupabaseAuthService } from './core/auth/supabase-auth.service';
 import { Request } from 'express';
+import { CurrentUser, AuthenticatedUser } from './core/decorators/current-user.decorator';
 
 @Controller()
 export class AppController {
@@ -53,6 +54,16 @@ export class AppController {
         id: user.id,
         email: user.email ?? null,
       },
+    };
+  }
+
+  @Get('auth/whoami')
+  whoAmI(@CurrentUser() user: AuthenticatedUser | undefined) {
+    return {
+      authenticated: !!user?.id,
+      userId: user?.id ?? null,
+      email: user?.email ?? null,
+      role: user?.role ?? null,
     };
   }
 }

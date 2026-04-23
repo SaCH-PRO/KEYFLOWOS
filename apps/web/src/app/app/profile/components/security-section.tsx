@@ -5,9 +5,7 @@ import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Moon, Sun, Monitor } from
 import { Button, Input } from "@keyflow/ui";
 import { useTheme } from "next-themes";
 import { AccordionSection, AccordionGroup } from "../../store/components/accordion-section";
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 function PasswordStrength({ password }: { password: string }) {
   const checks = [
@@ -78,7 +76,7 @@ export default function SecuritySection({ onStatus }: SecuritySectionProps) {
 
   const handleChangePassword = async () => {
     const token = localStorage.getItem("kf_token");
-    if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+    if (!token) return;
     if (!passwordForm.newPassword) { onStatus({ type: "error", message: "Please enter a new password" }); return; }
     if (passwordForm.newPassword !== passwordForm.confirmPassword) { onStatus({ type: "error", message: "Passwords do not match" }); return; }
     if (passwordForm.newPassword.length < 8) { onStatus({ type: "error", message: "Password must be at least 8 characters" }); return; }
@@ -86,17 +84,18 @@ export default function SecuritySection({ onStatus }: SecuritySectionProps) {
     setSavingPassword(true);
     onStatus(null);
     try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ password: passwordForm.newPassword }),
-      });
-      if (res.ok) {
+      const client = getSupabaseBrowserClient();
+      if (!client) {
+        onStatus({ type: "error", message: "Supabase client not configured" });
+        setSavingPassword(false);
+        return;
+      }
+      const { error } = await client.auth.updateUser({ password: passwordForm.newPassword });
+      if (!error) {
         onStatus({ type: "success", message: "Password updated successfully" });
         setPasswordForm({ newPassword: "", confirmPassword: "" });
       } else {
-        const err = await res.json();
-        onStatus({ type: "error", message: err.message || "Failed to update password" });
+        onStatus({ type: "error", message: error.message || "Failed to update password" });
       }
     } catch {
       onStatus({ type: "error", message: "Network error" });

@@ -6,7 +6,8 @@
   "module": "./src/client.ts",
   "types": "./src/client.ts",
   "scripts": {
-    "db:generate": "prisma generate --schema=./prisma/schema.prisma"
+    "db:generate": "prisma generate --schema=./prisma/schema.prisma",
+    "db:migrate:dev": "prisma migrate dev --schema=./prisma/schema.prisma"
   },
   "exports": {
     ".": {
