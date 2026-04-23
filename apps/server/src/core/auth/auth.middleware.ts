@@ -27,7 +27,6 @@ export class AuthMiddleware implements NestMiddleware {
       typeof header === 'string' && header.startsWith('Bearer ')
         ? header.replace('Bearer ', '').trim()
         : undefined;
-
     this.logger.debug(`Auth header: ${header ? `${String(header).slice(0, 12)}...` : 'none'}`);
 
     try {

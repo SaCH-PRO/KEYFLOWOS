@@ -24,6 +24,18 @@ const identityServiceMock = {
     this.items.push(item);
     return item;
   },
+  bootstrapUser(input: { userId: string; email: string; firstName?: string; lastName?: string }) {
+    return {
+      user: {
+        id: input.userId,
+        email: input.email,
+        firstName: input.firstName ?? null,
+        lastName: input.lastName ?? null,
+        role: 'USER',
+      },
+      business: { id: 'biz_bootstrap', name: 'Workspace' },
+    };
+  },
 };
 
 const aiUsageServiceMock = {};
@@ -85,5 +97,17 @@ describe('Identity e2e', () => {
     const res = await agent.get('/identity/businesses').expect(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].name).toBe('Acme');
+  });
+
+  it('bootstraps identity when middleware user has id-only and body provides email', async () => {
+    const agent = request(app.getHttpServer());
+    const res = await agent
+      .post('/identity/bootstrap')
+      .send({ email: 'id.only@example.com', firstName: 'Id', lastName: 'Only' })
+      .expect(201);
+
+    expect(res.body.user.id).toBe('user_1');
+    expect(res.body.user.email).toBe('id.only@example.com');
+    expect(res.body.business.id).toBe('biz_bootstrap');
   });
 });

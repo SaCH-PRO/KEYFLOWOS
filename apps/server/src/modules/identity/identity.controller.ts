@@ -385,13 +385,18 @@ export class IdentityController {
   @UseGuards(AuthGuard)
   @Post('bootstrap')
   async bootstrap(@Body() body: BootstrapDto, @CurrentUser() user: AuthenticatedUser) {
-    if (!user?.id || !user?.email) {
+    if (!user?.id) {
       throw new UnauthorizedException('Missing authenticated user');
+    }
+
+    const email = body.email ?? user.email;
+    if (!email) {
+      throw new UnauthorizedException('Missing authenticated user email');
     }
 
     return this.identity.bootstrapUser({
       userId: user.id,
-      email: body.email ?? user.email,
+      email,
       username: body.username,
       name: body.name,
       firstName: body.firstName,
