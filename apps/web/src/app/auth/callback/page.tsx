@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
 import { persistSessionToken } from "@/lib/session-client";
@@ -35,7 +35,6 @@ function decodeAccessToken(token: string): DecodedToken | null {
 
 export default function AuthCallback() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [status, setStatus] = useState<"loading" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +44,8 @@ export default function AuthCallback() {
         const hash = window.location.hash.substring(1);
         const params = new URLSearchParams(hash);
         const accessToken = params.get("access_token");
-        const errorDescription = searchParams?.get("error_description");
+        const queryParams = new URLSearchParams(window.location.search);
+        const errorDescription = queryParams.get("error_description");
         
         if (errorDescription) {
           throw new Error(errorDescription);
@@ -127,7 +127,7 @@ export default function AuthCallback() {
     };
 
     handleCallback();
-  }, [router, searchParams]);
+  }, [router]);
 
   if (status === "error") {
     return (

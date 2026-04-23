@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Layers,
@@ -74,8 +74,7 @@ const FEATURES = [
 
 export default function AuthLogin() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const verified = useMemo(() => searchParams?.get("verified") === "1", [searchParams]);
+  const [verified, setVerified] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -84,6 +83,12 @@ export default function AuthLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [resetSent, setResetSent] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setVerified(params.get("verified") === "1");
+  }, []);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
