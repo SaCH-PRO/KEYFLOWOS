@@ -774,8 +774,11 @@ export class DiagnosticsService {
       { key: 'DATABASE_URL', label: 'Database URL', format: /^postgresql:\/\// },
       { key: 'SUPABASE_URL', label: 'Supabase URL', format: /^https?:\/\// },
       { key: 'SUPABASE_ANON_KEY', label: 'Supabase Anon Key' },
-      { key: 'AI_INTEGRATIONS_OPENAI_API_KEY', label: 'OpenAI API Key (preferred)', format: /^sk-/ },
-      { key: 'OPENAI_API_KEY', label: 'OpenAI API Key (legacy fallback)', format: /^sk-/ },
+      {
+        key: 'AI_INTEGRATIONS_OPENAI_API_KEY',
+        label: 'OpenAI API Key (AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY)',
+        format: /^sk-/,
+      },
       { key: 'GOOGLE_CLIENT_ID', label: 'Google Client ID' },
       { key: 'GOOGLE_CLIENT_SECRET', label: 'Google Client Secret' },
       { key: 'GOOGLE_STATE_SECRET', label: 'Google State Secret' },
@@ -802,7 +805,9 @@ export class DiagnosticsService {
     const checks: CheckResult[] = [];
 
     for (const r of required) {
-      const val = process.env[r.key];
+      const val = r.key === 'AI_INTEGRATIONS_OPENAI_API_KEY'
+        ? process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY
+        : process.env[r.key];
       const present = !!val;
       const formatOk = !r.format || (present && r.format.test(val!));
       let status: CheckStatus = 'pass';
@@ -810,7 +815,9 @@ export class DiagnosticsService {
 
       if (!present) {
         status = 'fail';
-        message = `${r.label}: MISSING — set ${r.key}`;
+        message = r.key === 'AI_INTEGRATIONS_OPENAI_API_KEY'
+          ? `${r.label}: MISSING — set AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY`
+          : `${r.label}: MISSING — set ${r.key}`;
       } else if (!formatOk) {
         status = 'warn';
         message = `${r.label}: present but unexpected format`;
@@ -900,7 +907,9 @@ export class DiagnosticsService {
   }
 
   private runEnvVarCheck(key: string): CheckResult {
-    const val = process.env[key];
+    const val = key === 'AI_INTEGRATIONS_OPENAI_API_KEY'
+      ? process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY
+      : process.env[key];
     const formatMap: Record<string, RegExp> = {
       DATABASE_URL: /^postgresql:\/\//,
       SUPABASE_URL: /^https?:\/\//,
@@ -910,7 +919,7 @@ export class DiagnosticsService {
     const format = formatMap[key];
     const required = new Set([
       'DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
-      'AI_INTEGRATIONS_OPENAI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
+      'AI_INTEGRATIONS_OPENAI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
       'GOOGLE_STATE_SECRET',
     ]);
 
