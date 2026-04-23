@@ -47,11 +47,15 @@ export class SupabaseAuthService {
     if (!token) return null;
     const supabase = this.supabase;
     if (supabase) {
-      const { data, error } = await supabase.auth.getUser(token);
-      if (error) {
-        this.logger.debug(`Supabase auth error: ${error.message}`);
-      } else if (data?.user) {
-        return data.user;
+      try {
+        const { data, error } = await supabase.auth.getUser(token);
+        if (error) {
+          this.logger.debug(`Supabase auth error: ${error.message}`);
+        } else if (data?.user) {
+          return data.user;
+        }
+      } catch (err) {
+        this.logger.debug(`Supabase auth request threw: ${(err as Error).message}`);
       }
     }
 
