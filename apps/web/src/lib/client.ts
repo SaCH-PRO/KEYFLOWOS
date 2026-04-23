@@ -6696,6 +6696,7 @@ export interface ConciergeState {
   dismissed: boolean;
   templateId?: string;
   onboardingComplete: boolean;
+  metaData?: Record<string, unknown> | null;
 }
 
 export interface IndustryTemplatePreview {

@@ -159,7 +159,7 @@ export default function ControlTowerPage() {
         moduleName: "Command Flow",
         onAction: handleAiAction,
       }}
-      metricStrip={metricItems.length > 0 ? <WorkspaceMetricStrip items={metricItems} columns={7} compact /> : undefined}
+      metricStrip={metricItems.length > 0 ? <WorkspaceMetricStrip items={metricItems} columns={6} compact /> : undefined}
       headerRight={
         <button
           onClick={d.refresh}
