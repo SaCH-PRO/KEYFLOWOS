@@ -83,12 +83,13 @@ export default function AuthCallback() {
           throw new Error("Could not determine authenticated email");
         }
 
-        const fullName = userInfo.user_metadata?.full_name || userInfo.user_metadata?.name || "";
-        const avatarUrl = userInfo.user_metadata?.avatar_url || userInfo.user_metadata?.picture || "";
+        const metadata = userInfo?.user_metadata;
+        const fullName = metadata?.full_name || metadata?.name || "";
+        const avatarUrl = metadata?.avatar_url || metadata?.picture || "";
         
         const nameParts = fullName.split(" ");
-        const firstName = userInfo.user_metadata?.given_name || nameParts[0] || "";
-        const lastName = userInfo.user_metadata?.family_name || nameParts.slice(1).join(" ") || "";
+        const firstName = metadata?.given_name || nameParts[0] || "";
+        const lastName = metadata?.family_name || nameParts.slice(1).join(" ") || "";
         
         if (email) {
           window.localStorage.setItem("kf_email", email);

@@ -75,7 +75,7 @@ export function OverviewTab({ project, onStageChange, milestones = [], deliverab
   }, [project.dueDate]);
 
   const milestonesCompleted = milestones.filter((m) => m.completed).length;
-  const missingDeliverables = deliverables.filter((d) => !d.completed).length;
+  const missingDeliverables = deliverables.filter((d) => !d.url?.trim()).length;
 
   const warnings: { icon: React.ElementType; text: string; color: string; severity: "critical" | "warning" }[] = [];
   if (overdueTasks > 0) {

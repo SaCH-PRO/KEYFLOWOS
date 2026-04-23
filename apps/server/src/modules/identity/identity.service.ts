@@ -314,7 +314,7 @@ export class IdentityService {
           orderBy: { createdAt: 'desc' },
         },
         services: {
-          select: { id: true, name: true, price: true, currency: true, durationMins: true, description: true },
+          select: { id: true, name: true, price: true, duration: true, description: true },
           take: 6,
           orderBy: { createdAt: 'desc' },
         },
