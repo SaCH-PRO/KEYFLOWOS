@@ -1,7 +1,8 @@
 "use client";
 
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
-import { usePathname } from "next/navigation";
 
 export interface NavigationEntry {
   route: string;
@@ -152,6 +153,14 @@ const NavigationContext = createContext<NavigationContextValue>({
 });
 
 export function NavigationContextProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<>{children}</>}>
+      <NavigationContextProviderInner>{children}</NavigationContextProviderInner>
+    </Suspense>
+  );
+}
+
+function NavigationContextProviderInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [stack, setStack] = useState<NavigationEntry[]>(() => loadStack());
   const [taskOrigin, setTaskOriginState] = useState<NavigationEntry | null>(() => loadTaskOrigin());

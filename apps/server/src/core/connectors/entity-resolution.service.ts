@@ -154,11 +154,7 @@ export class EntityResolutionService {
     if (opts.externalId) {
       const existing = await this.prisma.client.payment.findFirst({
         where: { businessId, providerPaymentId: opts.externalId },
-        include: {
-          invoice: {
-            select: { contactId: true },
-          },
-        },
+        include: { invoice: { select: { contactId: true } } },
       });
       if (existing) {
         return {
@@ -173,12 +169,8 @@ export class EntityResolutionService {
     if (opts.invoiceId) {
       const byInvoice = await this.prisma.client.payment.findFirst({
         where: { businessId, invoiceId: opts.invoiceId },
+        include: { invoice: { select: { contactId: true } } },
         orderBy: { createdAt: 'desc' },
-        include: {
-          invoice: {
-            select: { contactId: true },
-          },
-        },
       });
       if (byInvoice) {
         return {

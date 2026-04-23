@@ -23,7 +23,7 @@ interface MetricStripItem {
 
 interface WorkspaceMetricStripProps {
   items: MetricStripItem[];
-  columns?: 2 | 3 | 4 | 5 | 6;
+  columns?: 2 | 3 | 4 | 5 | 6 | 7;
   compact?: boolean;
   className?: string;
 }
@@ -56,6 +56,7 @@ const COL_MAP: Record<number, string> = {
   4: "grid-cols-2 md:grid-cols-4",
   5: "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5",
   6: "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6",
+  7: "grid-cols-2 sm:grid-cols-4 xl:grid-cols-7",
 };
 
 export function WorkspaceMetricStrip({
@@ -64,7 +65,7 @@ export function WorkspaceMetricStrip({
   compact = false,
   className = "",
 }: WorkspaceMetricStripProps) {
-  const cols = columns ?? Math.min(items.length, 6) as 2 | 3 | 4 | 5 | 6;
+  const cols = columns ?? Math.min(items.length, 7) as 2 | 3 | 4 | 5 | 6 | 7;
   const gridCls = COL_MAP[cols] ?? COL_MAP[4];
 
   return (

@@ -4,9 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
 import { persistSessionToken } from "@/lib/session-client";
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type DecodedToken = {
   email?: string;
@@ -57,21 +55,21 @@ export default function AuthCallback() {
 
         await persistSessionToken(accessToken);
 
+        window.localStorage.setItem("kf_token", accessToken);
+        const supabase = getSupabaseBrowserClient();
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: params.get("refresh_token") || "",
+        });
+        const userInfoRes = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/user`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "",
+          },
+        });
         let userInfo: DecodedToken | null = null;
-        if (SUPABASE_URL && SUPABASE_ANON_KEY) {
-          const userInfoRes = await fetch(
-            `${SUPABASE_URL}/auth/v1/user`,
-            {
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                apikey: SUPABASE_ANON_KEY,
-              },
-            }
-          );
-
-          if (userInfoRes.ok) {
-            userInfo = (await userInfoRes.json()) as DecodedToken;
-          }
+        if (userInfoRes.ok) {
+          userInfo = (await userInfoRes.json()) as DecodedToken;
         }
 
         if (!userInfo) {

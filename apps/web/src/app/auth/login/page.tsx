@@ -22,47 +22,32 @@ import {
 } from "lucide-react";
 import { bootstrapIdentity } from "@/lib/client";
 import { persistSessionToken } from "@/lib/session-client";
+import { getRuntimeSiteUrl } from "@/lib/runtime-env";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-function getSiteUrl() {
-  if (typeof window !== "undefined") {
-    return window.location.origin;
-  }
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "";
-}
+const SITE_URL = getRuntimeSiteUrl();
 
 async function supabaseSignIn(email: string, password: string) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, password }),
-  });
-  const json = await res.json().catch(() => null);
-  if (!res.ok || !json?.access_token) throw new Error(json?.error_description ?? json?.msg ?? "Sign in failed");
-  return json as { access_token: string };
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data.session?.access_token) {
+    throw new Error(error?.message ?? "Sign in failed");
+  }
+  return { access_token: data.session.access_token };
 }
 
 function signInWithGoogle() {
-  if (!SUPABASE_URL) return;
-  const redirectTo = `${getSiteUrl().replace(/\/$/, "")}/auth/callback`;
-  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+  const supabase = getSupabaseBrowserClient();
+  const redirectTo = `${SITE_URL.replace(/\/$/, "")}/auth/callback`;
+  supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo } }).catch(() => undefined);
 }
 
 async function supabaseResetPassword(email: string) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
-  const siteUrl = getSiteUrl();
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, redirectTo: `${siteUrl.replace(/\/$/, "")}/auth/login` }),
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${SITE_URL.replace(/\/$/, "")}/auth/login`,
   });
-  if (!res.ok) {
-    const json = await res.json().catch(() => null);
-    throw new Error(json?.error_description ?? json?.msg ?? "Failed to send reset email");
-  }
+  if (error) throw new Error(error.message || "Failed to send reset email");
 }
 
 const FEATURES = [

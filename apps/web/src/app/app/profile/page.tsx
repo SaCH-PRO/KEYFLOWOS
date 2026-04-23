@@ -20,6 +20,7 @@ import { ReadinessTab } from "./components/readiness-tab";
 import { IntelligenceTab } from "./components/intelligence-tab";
 import { OutputsTab } from "./components/outputs-tab";
 import SecuritySection from "./components/security-section";
+import SupabaseProfileExample from "./components/supabase-profile-example";
 import { ProfileSectionErrorBoundary } from "./components/profile-section-error-boundary";
 import type { ProfileBusinessData, ProfileCompletenessField, StatusMessage, TabId } from "./components/profile-types";
 
@@ -455,6 +456,11 @@ export default function ProfileSettingsPage() {
               <div className="kf-card p-6">
                 <ProfileSectionErrorBoundary sectionName="Security & Preferences">
                   <SecuritySection onStatus={setStatus} />
+                </ProfileSectionErrorBoundary>
+              </div>
+              <div className="kf-card p-6">
+                <ProfileSectionErrorBoundary sectionName="Supabase Profile (RLS)">
+                  <SupabaseProfileExample />
                 </ProfileSectionErrorBoundary>
               </div>
             </div>

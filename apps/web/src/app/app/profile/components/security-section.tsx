@@ -5,7 +5,7 @@ import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Moon, Sun, Monitor } from
 import { Button, Input } from "@keyflow/ui";
 import { useTheme } from "next-themes";
 import { AccordionSection, AccordionGroup } from "../../store/components/accordion-section";
-import { apiPostSimple } from "@/lib/api";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 function PasswordStrength({ password }: { password: string }) {
   const checks = [
@@ -82,14 +82,18 @@ export default function SecuritySection({ onStatus }: SecuritySectionProps) {
     setSavingPassword(true);
     onStatus(null);
     try {
-      const res = await apiPostSimple<{ success: boolean }>("/identity/me/password", {
-        newPassword: passwordForm.newPassword,
-      });
-      if (res.data?.success) {
+      const client = getSupabaseBrowserClient();
+      if (!client) {
+        onStatus({ type: "error", message: "Supabase client not configured" });
+        setSavingPassword(false);
+        return;
+      }
+      const { error } = await client.auth.updateUser({ password: passwordForm.newPassword });
+      if (!error) {
         onStatus({ type: "success", message: "Password updated successfully" });
         setPasswordForm({ newPassword: "", confirmPassword: "" });
       } else {
-        onStatus({ type: "error", message: res.error || "Failed to update password" });
+        onStatus({ type: "error", message: error.message || "Failed to update password" });
       }
     } catch {
       onStatus({ type: "error", message: "Network error" });

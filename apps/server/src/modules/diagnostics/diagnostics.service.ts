@@ -71,23 +71,23 @@ export class DiagnosticsService {
 
   async checkSupabase(): Promise<CheckResult> {
     const start = Date.now();
-    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const url = process.env.SUPABASE_URL;
+    const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 
-    if (!url || !anonKey) {
+    if (!url || !publishableKey) {
       return {
         name: 'Supabase Auth',
         status: 'warn',
         latencyMs: Date.now() - start,
         checkedAt: new Date().toISOString(),
         message: 'Supabase env vars not configured',
-        detail: 'SUPABASE_URL and SUPABASE_ANON_KEY are required',
+        detail: 'SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are required',
       };
     }
 
     try {
       const res = await fetch(`${url}/auth/v1/health`, {
-        headers: { apikey: anonKey },
+        headers: { apikey: publishableKey },
         signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
@@ -771,7 +771,7 @@ export class DiagnosticsService {
     const required: Array<{ key: string; label: string; format?: RegExp }> = [
       { key: 'DATABASE_URL', label: 'Database URL', format: /^postgresql:\/\// },
       { key: 'SUPABASE_URL', label: 'Supabase URL', format: /^https?:\/\// },
-      { key: 'SUPABASE_ANON_KEY', label: 'Supabase Anon Key' },
+      { key: 'SUPABASE_PUBLISHABLE_KEY', label: 'Supabase Publishable Key' },
       { key: 'AI_INTEGRATIONS_OPENAI_API_KEY', label: 'OpenAI API Key', format: /^sk-/ },
       { key: 'GOOGLE_CLIENT_ID', label: 'Google Client ID' },
       { key: 'GOOGLE_CLIENT_SECRET', label: 'Google Client Secret' },
@@ -884,7 +884,7 @@ export class DiagnosticsService {
 
   private isKnownEnvKey(key: string): boolean {
     const known = new Set([
-      'DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
+      'DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY',
       'AI_INTEGRATIONS_OPENAI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
       'GOOGLE_STATE_SECRET', 'STRIPE_SECRET_KEY', 'PAYPAL_CLIENT_ID',
       'PAYPAL_CLIENT_SECRET', 'WIPAY_API_KEY', 'WIPAY_ACCOUNT_NUMBER',
@@ -905,7 +905,7 @@ export class DiagnosticsService {
     };
     const format = formatMap[key];
     const required = new Set([
-      'DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
+      'DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY',
       'AI_INTEGRATIONS_OPENAI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
       'GOOGLE_STATE_SECRET',
     ]);

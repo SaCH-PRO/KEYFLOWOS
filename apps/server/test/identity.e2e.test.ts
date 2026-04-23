@@ -5,8 +5,15 @@ import request from 'supertest';
 import { describe, beforeAll, afterAll, it, expect } from 'vitest';
 import { IdentityController } from '../src/modules/identity/identity.controller';
 import { IdentityService } from '../src/modules/identity/identity.service';
+import { AiUsageService } from '../src/modules/ai/ai-usage.service';
+import { BusinessContextService } from '../src/modules/identity/business-context.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
+import { OptionalAuthGuard } from '../src/core/auth/optional-auth.guard';
+import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
+import { PlanLimitGuard } from '../src/modules/subscriptions/plan-limit.guard';
+import { FeatureFlagGuard } from '../src/modules/crm/guards/feature-flag.guard';
+import { SupabaseAuthService } from '../src/core/auth/supabase-auth.service';
 
 const identityServiceMock = {
   items: [] as any[],
@@ -18,6 +25,27 @@ const identityServiceMock = {
     this.items.push(item);
     return item;
   },
+  bootstrapUser(input: { userId: string; email: string; firstName?: string; lastName?: string }) {
+    return {
+      user: {
+        id: input.userId,
+        email: input.email,
+        firstName: input.firstName ?? null,
+        lastName: input.lastName ?? null,
+        role: 'USER',
+      },
+      business: { id: 'biz_bootstrap', name: 'Workspace' },
+    };
+  },
+};
+
+const aiUsageServiceMock = {};
+const businessContextServiceMock = {
+  gatherContext: async () => ({}),
+  buildContextBlock: () => '',
+};
+const supabaseAuthServiceMock = {
+  updatePassword: async () => undefined,
 };
 
 describe('Identity e2e', () => {
@@ -29,11 +57,22 @@ describe('Identity e2e', () => {
       controllers: [IdentityController],
       providers: [
         { provide: IdentityService, useValue: identityServiceMock },
+        { provide: AiUsageService, useValue: aiUsageServiceMock },
+        { provide: BusinessContextService, useValue: businessContextServiceMock },
+        { provide: SupabaseAuthService, useValue: supabaseAuthServiceMock },
       ],
     })
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(BusinessGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(OptionalAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(ModuleScopeGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(PlanLimitGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(FeatureFlagGuard)
       .useValue({ canActivate: () => true })
       .compile();
 
@@ -54,7 +93,9 @@ describe('Identity e2e', () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   it('creates and lists businesses', async () => {
@@ -63,5 +104,17 @@ describe('Identity e2e', () => {
     const res = await agent.get('/identity/businesses').expect(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].name).toBe('Acme');
+  });
+
+  it('bootstraps identity when middleware user has id-only and body provides email', async () => {
+    const agent = request(app.getHttpServer());
+    const res = await agent
+      .post('/identity/bootstrap')
+      .send({ email: 'id.only@example.com', firstName: 'Id', lastName: 'Only' })
+      .expect(201);
+
+    expect(res.body.user.id).toBe('user_1');
+    expect(res.body.user.email).toBe('id.only@example.com');
+    expect(res.body.business.id).toBe('biz_bootstrap');
   });
 });

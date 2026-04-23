@@ -1,4 +1,6 @@
-import { API_BASE } from "./api-base";
+import { getRuntimeApiBase } from "./runtime-env";
+
+const API_BASE = getRuntimeApiBase();
 const AI_SUGGEST_URL = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
 type FetchOptions = {

@@ -561,12 +561,12 @@ export class ExpensesService {
       const svcInvoiceItems = await this.prisma.client.invoiceItem.findMany({
         where: {
           invoice: { businessId, issueDate: { gte: startDate, lte: endDate }, status: { in: ['PAID', 'SENT', 'OVERDUE'] } },
-          productId: { in: serviceIds.length > 0 ? serviceIds : ['__none__'] },
+          productId: { in: serviceIds },
         },
         select: { total: true, productId: true },
       });
       for (const item of svcInvoiceItems) {
-        const sid = item.productId ?? undefined;
+        const sid = item.productId;
         if (sid && byService[sid]) {
           byService[sid].revenue += item.total;
         }

@@ -48,7 +48,6 @@ export class AuthMiddleware implements NestMiddleware {
         : undefined;
     const cookieToken = this.readSessionCookie(req.headers.cookie);
     const token = headerToken || cookieToken;
-
     this.logger.debug(`Auth header: ${header ? `${String(header).slice(0, 12)}...` : 'none'}`);
 
     try {

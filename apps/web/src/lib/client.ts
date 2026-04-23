@@ -1484,6 +1484,20 @@ export async function fetchMe() {
   return apiGetSimple<{ id: string; email: string; name?: string | null; firstName?: string | null; lastName?: string | null; phone?: string | null; avatarUrl?: string | null; role: string }>(`/identity/me`);
 }
 
+export type UserProfileRow = {
+  id: string;
+  displayName: string | null;
+  createdAt: string;
+};
+
+export async function fetchMyProfile() {
+  return apiGetSimple<UserProfileRow>(`/profiles/me`);
+}
+
+export async function upsertMyProfile(input: { displayName: string }) {
+  return apiPostSimple<UserProfileRow>(`/profiles/me`, input);
+}
+
 export type Business = {
   id: string;
   name: string;

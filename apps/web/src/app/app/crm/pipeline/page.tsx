@@ -3,7 +3,8 @@
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -38,7 +39,8 @@ import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 
-export default function ContactsPage() {
+function ContactsPageContent() {
+  const searchParams = useSearchParams();
   const router = useRouter();
   const googleHandled = useRef(false);
   const state = useContactsPipeline();
@@ -295,5 +297,13 @@ export default function ContactsPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function ContactsPage() {
+  return (
+    <Suspense fallback={<KanbanSkeleton />}>
+      <ContactsPageContent />
+    </Suspense>
   );
 }
