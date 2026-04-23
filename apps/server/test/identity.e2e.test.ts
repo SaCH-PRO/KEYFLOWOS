@@ -5,8 +5,14 @@ import request from 'supertest';
 import { describe, beforeAll, afterAll, it, expect } from 'vitest';
 import { IdentityController } from '../src/modules/identity/identity.controller';
 import { IdentityService } from '../src/modules/identity/identity.service';
+import { AiUsageService } from '../src/modules/ai/ai-usage.service';
+import { BusinessContextService } from '../src/modules/identity/business-context.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
+import { OptionalAuthGuard } from '../src/core/auth/optional-auth.guard';
+import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
+import { PlanLimitGuard } from '../src/modules/subscriptions/plan-limit.guard';
+import { FeatureFlagGuard } from '../src/modules/crm/guards/feature-flag.guard';
 
 const identityServiceMock = {
   items: [] as any[],
@@ -20,6 +26,12 @@ const identityServiceMock = {
   },
 };
 
+const aiUsageServiceMock = {};
+const businessContextServiceMock = {
+  gatherContext: async () => ({}),
+  buildContextBlock: () => '',
+};
+
 describe('Identity e2e', () => {
   let app: INestApplication;
 
@@ -29,11 +41,21 @@ describe('Identity e2e', () => {
       controllers: [IdentityController],
       providers: [
         { provide: IdentityService, useValue: identityServiceMock },
+        { provide: AiUsageService, useValue: aiUsageServiceMock },
+        { provide: BusinessContextService, useValue: businessContextServiceMock },
       ],
     })
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(BusinessGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(OptionalAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(ModuleScopeGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(PlanLimitGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(FeatureFlagGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

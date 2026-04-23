@@ -24,6 +24,9 @@ class PrismaMock implements Partial<PrismaService> {
         return item;
       }),
     },
+    availability: {
+      findMany: vi.fn(() => []),
+    },
     service: {
       findFirstOrThrow: vi.fn(({ where }: any) => {
         const match = this.services.find((s) => s.id === where.id && s.businessId === where.businessId && s.deletedAt === null);
