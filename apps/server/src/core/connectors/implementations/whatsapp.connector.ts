@@ -31,10 +31,11 @@ export class WhatsAppConnector implements IConnector {
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
-    const integration = await this.prisma.client.integration.findFirst({
-      where: { businessId, provider: 'WHATSAPP', status: 'ACTIVE' },
+    const connection = await this.prisma.client.channelConnection.findFirst({
+      where: { businessId, provider: 'WHATSAPP' },
+      orderBy: { createdAt: 'desc' },
     }).catch(() => null);
-    const hasBusinessConfig = !!integration;
+    const hasBusinessConfig = !!connection;
     const hasGlobalToken = !!process.env.WHATSAPP_ACCESS_TOKEN;
     const realStatus = (hasBusinessConfig || hasGlobalToken) ? 'connected' : 'disconnected';
 
@@ -46,7 +47,7 @@ export class WhatsAppConnector implements IConnector {
       lastError: stored?.lastError ?? null,
       errorCount: stored?.errorCount ?? 0,
       syncCount: stored?.syncCount ?? 0,
-      connectedAt: stored?.connectedAt ?? integration?.createdAt ?? null,
+      connectedAt: stored?.connectedAt ?? connection?.createdAt ?? null,
       connectedAccount: stored?.connectedAccount ?? process.env.WHATSAPP_PHONE_NUMBER_ID ?? null,
     };
   }

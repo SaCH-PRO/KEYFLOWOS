@@ -339,7 +339,7 @@ export class CommunityService {
             orderBy: { createdAt: 'desc' },
           },
           services: {
-            select: { id: true, name: true, price: true, currency: true },
+            select: { id: true, name: true, price: true },
             take: 3,
             orderBy: { createdAt: 'desc' },
           },

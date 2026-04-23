@@ -24,7 +24,7 @@ const QUADRANTS: { key: QuadrantKey; label: string; icon: React.ElementType; col
 ];
 
 function classifyRecommendation(rec: WorkspaceRecommendation): QuadrantKey {
-  if (rec.severity === "critical" || rec.priority === "high") return "matters_now";
+  if (rec.severity >= 4 || rec.priority === "high") return "matters_now";
   if (rec.type === "risk") return "inaction_risk";
   if (rec.type === "opportunity" || rec.type === "action") return "ai_can_do";
   return "whats_next";

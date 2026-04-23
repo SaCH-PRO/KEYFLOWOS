@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeColorsProvider } from "@/lib/theme-context";
@@ -71,7 +72,9 @@ export default function RootLayout({
               closeButton
               richColors
             />
-            {children}
+            <Suspense fallback={<div className="min-h-screen bg-background" />}>
+              {children}
+            </Suspense>
           </ThemeColorsProvider>
         </ThemeProvider>
       </body>

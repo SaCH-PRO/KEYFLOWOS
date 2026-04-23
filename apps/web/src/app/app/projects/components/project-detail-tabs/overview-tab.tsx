@@ -75,7 +75,7 @@ export function OverviewTab({ project, onStageChange, milestones = [], deliverab
   }, [project.dueDate]);
 
   const milestonesCompleted = milestones.filter((m) => m.completed).length;
-  const missingDeliverables = deliverables.filter((d) => !d.completed).length;
+  const missingDeliverables = deliverables.filter((d) => !d.url).length;
 
   const warnings: { icon: React.ElementType; text: string; color: string; severity: "critical" | "warning" }[] = [];
   if (overdueTasks > 0) {
@@ -98,7 +98,7 @@ export function OverviewTab({ project, onStageChange, milestones = [], deliverab
     warnings.push({ icon: Clock, text: `Due in ${daysUntilDue} day${daysUntilDue > 1 ? "s" : ""} with only ${progress}% progress`, color: "hsl(var(--kf-warning))", severity: "warning" });
   }
   if (missingDeliverables > 0 && normalizeStatus(project.status) === "REVIEW") {
-    warnings.push({ icon: FileText, text: `${missingDeliverables} deliverable${missingDeliverables > 1 ? "s" : ""} incomplete before review`, color: "hsl(var(--kf-warning))", severity: "warning" });
+    warnings.push({ icon: FileText, text: `${missingDeliverables} deliverable${missingDeliverables > 1 ? "s" : ""} missing link before review`, color: "hsl(var(--kf-warning))", severity: "warning" });
   }
 
   const recommendations: { icon: React.ElementType; text: string; color: string }[] = [];

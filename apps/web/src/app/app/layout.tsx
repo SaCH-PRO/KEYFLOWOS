@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
@@ -275,11 +275,13 @@ const mobileBottomNav = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <NavigationContextProvider>
-      <AiContextProvider>
-        <AppLayoutInner>{children}</AppLayoutInner>
-      </AiContextProvider>
-    </NavigationContextProvider>
+    <Suspense fallback={<div className="min-h-screen bg-background">{children}</div>}>
+      <NavigationContextProvider>
+        <AiContextProvider>
+          <AppLayoutInner>{children}</AppLayoutInner>
+        </AiContextProvider>
+      </NavigationContextProvider>
+    </Suspense>
   );
 }
 

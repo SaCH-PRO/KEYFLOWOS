@@ -4,7 +4,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from '../subscriptions/plans';
 import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
 import { OutputTemplateService } from './output-template.service';
-import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus } from './model-gateway.service';
+import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider } from './model-gateway.service';
 
 /**
  * responseMode controls quality directive injection and output validation:
@@ -475,16 +475,25 @@ export class AiUsageService {
       budgetStatus?.byProvider?.map(b => [b.provider, b]) || [],
     );
 
+    const toAiProvider = (provider: string): AiProvider | null => (
+      provider === "openai" || provider === "anthropic" || provider === "xai"
+        ? provider
+        : null
+    );
+
     return {
-      byProvider: byProvider.map(p => ({
-        provider: p.provider,
-        calls: p._count,
-        credits: p._sum.creditsUsed ?? 0,
-        cost: Math.round((p._sum.estimatedCost ?? 0) * 100) / 100,
-        tokens: p._sum.totalTokens ?? 0,
-        avgLatencyMs: Math.round(p._avg.latencyMs ?? 0),
-        budget: providerBudgetMap.get(p.provider) || null,
-      })),
+      byProvider: byProvider.map((p) => {
+        const providerKey = toAiProvider(p.provider);
+        return {
+          provider: p.provider,
+          calls: p._count,
+          credits: p._sum.creditsUsed ?? 0,
+          cost: Math.round((p._sum.estimatedCost ?? 0) * 100) / 100,
+          tokens: p._sum.totalTokens ?? 0,
+          avgLatencyMs: Math.round(p._avg.latencyMs ?? 0),
+          budget: providerKey ? providerBudgetMap.get(providerKey) || null : null,
+        };
+      }),
       fallbackCount: fallbackStats,
       avgLatencyMs: Math.round(avgLatency._avg.latencyMs ?? 0),
       overallBudget: budgetStatus?.overall || null,
