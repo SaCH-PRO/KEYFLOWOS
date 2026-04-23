@@ -1,4 +1,6 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+import { getRuntimeApiBase } from "./runtime-env";
+
+const API_BASE = getRuntimeApiBase();
 const AI_SUGGEST_URL = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
 type FetchOptions = {

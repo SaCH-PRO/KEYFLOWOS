@@ -26,10 +26,11 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { bootstrapIdentity } from "@/lib/client";
+import { getRuntimeSiteUrl } from "@/lib/runtime-env";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
+const SITE_URL = getRuntimeSiteUrl();
 
 function signUpWithGoogle() {
   if (!SUPABASE_URL) return;

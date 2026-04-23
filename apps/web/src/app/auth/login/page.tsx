@@ -21,10 +21,11 @@ import {
   Loader2,
 } from "lucide-react";
 import { bootstrapIdentity } from "@/lib/client";
+import { getRuntimeSiteUrl } from "@/lib/runtime-env";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "");
+const SITE_URL = getRuntimeSiteUrl();
 
 async function supabaseSignIn(email: string, password: string) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
