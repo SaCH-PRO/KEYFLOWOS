@@ -35,7 +35,7 @@ describe('Auth debug endpoint', () => {
             getUserFromToken,
             inspectAuthEnv: vi.fn().mockResolvedValue({
               hasSupabaseUrl: true,
-              hasSupabaseAnonKey: true,
+              hasSupabasePublishableKey: true,
             }),
             inspectToken,
           },

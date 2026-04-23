@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 export default function AuthCallback() {
   const router = useRouter();
@@ -27,13 +28,18 @@ export default function AuthCallback() {
         }
 
         window.localStorage.setItem("kf_token", accessToken);
+        const supabase = getSupabaseBrowserClient();
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: params.get("refresh_token") || "",
+        });
 
         const userInfoRes = await fetch(
           `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/user`,
           {
             headers: {
               Authorization: `Bearer ${accessToken}`,
-              apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
+              apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "",
             },
           }
         );

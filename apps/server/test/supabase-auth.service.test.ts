@@ -21,7 +21,7 @@ describe('SupabaseAuthService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.SUPABASE_URL = 'https://example.supabase.co';
-    process.env.SUPABASE_ANON_KEY = 'anon-key';
+    process.env.SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_test';
   });
 
   it('falls back to local JWT decode when Supabase getUser throws', async () => {

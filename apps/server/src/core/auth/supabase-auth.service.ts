@@ -17,15 +17,15 @@ export class SupabaseAuthService {
   private get supabase(): SupabaseClient | null {
     if (this.client) return this.client;
 
-    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const url = process.env.SUPABASE_URL;
+    const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 
-    if (!url || !anonKey) {
-      this.logger.warn('Supabase env vars missing; auth will be treated as optional.');
+    if (!url || !publishableKey) {
+      this.logger.warn('Supabase server auth env vars missing; auth will be treated as optional.');
       return null;
     }
 
-    this.client = createClient(url, anonKey, { auth: { persistSession: false } });
+    this.client = createClient(url, publishableKey, { auth: { persistSession: false } });
     return this.client;
   }
 
@@ -135,6 +135,15 @@ export class SupabaseAuthService {
       fallbackDecoded: true,
       userId,
       email: typeof decoded?.email === 'string' ? decoded.email : undefined,
+    };
+  }
+
+  async inspectAuthEnv(): Promise<{ hasSupabaseUrl: boolean; hasSupabasePublishableKey: boolean }> {
+    const url = process.env.SUPABASE_URL;
+    const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+    return {
+      hasSupabaseUrl: !!url,
+      hasSupabasePublishableKey: !!publishableKey,
     };
   }
 }

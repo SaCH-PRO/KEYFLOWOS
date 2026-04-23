@@ -27,43 +27,54 @@ import {
 } from "lucide-react";
 import { bootstrapIdentity } from "@/lib/client";
 import { getRuntimeSiteUrl } from "@/lib/runtime-env";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SITE_URL = getRuntimeSiteUrl();
 
 function signUpWithGoogle() {
-  if (!SUPABASE_URL) return;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) return;
   const redirectTo = `${SITE_URL.replace(/\/$/, "")}/auth/callback`;
-  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+  window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
 }
 
 async function supabaseSignUp(email: string, password: string) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, password, options: { emailRedirectTo: `${SITE_URL.replace(/\/$/, "")}/auth/login?verified=1` } }),
+  const { data, error } = await getSupabaseBrowserClient().auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: `${SITE_URL.replace(/\/$/, "")}/auth/login?verified=1` },
   });
-  const json = await res.json().catch(() => null);
-  if (!res.ok) {
-    const detail = (json && typeof json === "object" && ("error_description" in json || "msg" in json || "error" in json)
-      ? (json.error_description as string) || (json.msg as string) || (json.error as string) : null) || res.statusText;
-    throw new Error(detail || "Signup failed");
-  }
-  return json as { access_token?: string | null };
+  if (error) throw new Error(error.message || "Signup failed");
+  return { access_token: data.session?.access_token ?? undefined } as { access_token?: string | null };
 }
 
 async function isUsernameAvailable(username: string): Promise<boolean> {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !username) return true;
+  if (!username) return true;
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?username=eq.${encodeURIComponent(username)}&select=id&limit=1`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-    });
-    if (!res.ok) return true;
-    const data = await res.json().catch(() => []);
-    return !Array.isArray(data) || data.length === 0;
-  } catch { return true; }
+    const supabase = getSupabaseBrowserClient();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      console.info("signup.username-check: no active session; skipping RLS profile query");
+      return true;
+    }
+
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select("id")
+      .eq("username", username)
+      .limit(1);
+
+    if (error) {
+      console.warn("signup.username-check: query failed");
+      return true;
+    }
+
+    return !data || data.length === 0;
+  } catch {
+    return true;
+  }
 }
 
 const FEATURES = [
