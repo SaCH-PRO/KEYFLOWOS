@@ -284,8 +284,11 @@ export class ModelGatewayService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {
+    const openAiApiKey =
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY ||
+      process.env.OPENAI_API_KEY;
     this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      apiKey: openAiApiKey || 'not-configured',
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
     });
 
@@ -301,7 +304,7 @@ export class ModelGatewayService {
       : randomBytes(32);
 
     this.providerClients.set('openai', {
-      configured: !!process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      configured: !!openAiApiKey,
     });
     this.providerClients.set('anthropic', {
       configured: !!process.env.ANTHROPIC_API_KEY,
@@ -984,7 +987,11 @@ export class ModelGatewayService {
 
   private isProviderAvailable(provider: AiProvider, preferences: AiPreferences): boolean {
     if (provider === 'openai') {
-      return !!(preferences.byokOpenai || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+      return !!(
+        preferences.byokOpenai ||
+        process.env.AI_INTEGRATIONS_OPENAI_API_KEY ||
+        process.env.OPENAI_API_KEY
+      );
     }
     if (provider === 'anthropic') {
       return !!(preferences.byokAnthropic || process.env.ANTHROPIC_API_KEY);

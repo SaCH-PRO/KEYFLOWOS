@@ -15,16 +15,25 @@ interface ExtractedContact {
 @Injectable()
 export class CrmVisionService {
   private readonly logger = new Logger(CrmVisionService.name);
-  private openai: OpenAI;
+  private openai: OpenAI | null;
 
   constructor() {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
+    const apiKey =
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY ||
+      process.env.OPENAI_API_KEY;
+    this.openai = apiKey
+      ? new OpenAI({
+          apiKey,
+          baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+        })
+      : null;
   }
 
   async extractContactFromImage(imageBase64: string): Promise<ExtractedContact> {
+    if (!this.openai) {
+      throw new Error('OpenAI API key is not configured');
+    }
+
     try {
       const response = await this.openai.chat.completions.create({
         model: 'gpt-4o',

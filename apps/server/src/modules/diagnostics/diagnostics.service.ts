@@ -263,7 +263,9 @@ export class DiagnosticsService {
 
   async checkOpenAI(): Promise<CheckResult> {
     const start = Date.now();
-    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    const apiKey =
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY ||
+      process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
       return {
@@ -271,7 +273,7 @@ export class DiagnosticsService {
         status: 'warn',
         latencyMs: Date.now() - start,
         checkedAt: new Date().toISOString(),
-        message: 'AI_INTEGRATIONS_OPENAI_API_KEY not configured',
+        message: 'OpenAI API key not configured (set AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY)',
       };
     }
 
@@ -772,7 +774,8 @@ export class DiagnosticsService {
       { key: 'DATABASE_URL', label: 'Database URL', format: /^postgresql:\/\// },
       { key: 'SUPABASE_URL', label: 'Supabase URL', format: /^https?:\/\// },
       { key: 'SUPABASE_ANON_KEY', label: 'Supabase Anon Key' },
-      { key: 'AI_INTEGRATIONS_OPENAI_API_KEY', label: 'OpenAI API Key', format: /^sk-/ },
+      { key: 'AI_INTEGRATIONS_OPENAI_API_KEY', label: 'OpenAI API Key (preferred)', format: /^sk-/ },
+      { key: 'OPENAI_API_KEY', label: 'OpenAI API Key (legacy fallback)', format: /^sk-/ },
       { key: 'GOOGLE_CLIENT_ID', label: 'Google Client ID' },
       { key: 'GOOGLE_CLIENT_SECRET', label: 'Google Client Secret' },
       { key: 'GOOGLE_STATE_SECRET', label: 'Google State Secret' },
@@ -885,7 +888,7 @@ export class DiagnosticsService {
   private isKnownEnvKey(key: string): boolean {
     const known = new Set([
       'DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
-      'AI_INTEGRATIONS_OPENAI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
+      'AI_INTEGRATIONS_OPENAI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
       'GOOGLE_STATE_SECRET', 'STRIPE_SECRET_KEY', 'PAYPAL_CLIENT_ID',
       'PAYPAL_CLIENT_SECRET', 'WIPAY_API_KEY', 'WIPAY_ACCOUNT_NUMBER',
       'FACEBOOK_APP_ID', 'FACEBOOK_APP_SECRET', 'LINKEDIN_CLIENT_ID',
@@ -902,11 +905,12 @@ export class DiagnosticsService {
       DATABASE_URL: /^postgresql:\/\//,
       SUPABASE_URL: /^https?:\/\//,
       AI_INTEGRATIONS_OPENAI_API_KEY: /^sk-/,
+      OPENAI_API_KEY: /^sk-/,
     };
     const format = formatMap[key];
     const required = new Set([
       'DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
-      'AI_INTEGRATIONS_OPENAI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
+      'AI_INTEGRATIONS_OPENAI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
       'GOOGLE_STATE_SECRET',
     ]);
 

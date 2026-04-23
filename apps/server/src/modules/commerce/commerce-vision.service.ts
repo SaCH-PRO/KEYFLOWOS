@@ -15,18 +15,28 @@ export interface ExtractedProduct {
 @Injectable()
 export class CommerceVisionService {
   private readonly logger = new Logger(CommerceVisionService.name);
-  private openai: OpenAI;
+  private openai: OpenAI | null;
 
   constructor(
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
+    const apiKey =
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY ||
+      process.env.OPENAI_API_KEY;
+    this.openai = apiKey
+      ? new OpenAI({
+          apiKey,
+          baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+        })
+      : null;
   }
 
   async extractProductsFromImage(imageBase64: string, businessCurrency?: string): Promise<ExtractedProduct[]> {
+    if (!this.openai) {
+      this.logger.warn('OpenAI API key is not configured; skipping image extraction');
+      return [];
+    }
+
     try {
       const response = await this.openai.chat.completions.create({
         model: 'gpt-4o',
