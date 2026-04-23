@@ -71,7 +71,7 @@ export class DiagnosticsService {
 
   async checkSupabase(): Promise<CheckResult> {
     const start = Date.now();
-    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const url = process.env.SUPABASE_URL;
     const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 
     if (!url || !publishableKey) {
