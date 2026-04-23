@@ -1,20 +1,23 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --kf-bg: #0d0d0e;
-  --kf-surface: #1f2225;
-  --kf-glass: rgba(31, 34, 37, 0.7);
-  --kf-border: rgba(213, 215, 218, 0.12);
-  --kf-text: #e7eaee;
-  --kf-text-muted: #a9afb8;
+  --kf-bg: #0a0a0c;
+  --kf-surface: #141416;
+  --kf-glass: rgba(20, 20, 22, 0.75);
+  --kf-border: rgba(255, 255, 255, 0.08);
+  --kf-border-strong: rgba(255, 255, 255, 0.12);
+  --kf-text: #f0f0f2;
+  --kf-text-secondary: #a0a0a8;
+  --kf-text-muted: #6b6b74;
   --kf-electric: #4ea8ff;
   --kf-pulse: #a374ff;
   --kf-mint: #4cffce;
   --kf-amber: #ffc34d;
   --kf-red: #ff4e4e;
-  --kf-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
-  --kf-glow: 0 0 24px rgba(78, 168, 255, 0.35);
-  --kf-radius: 16px;
+  --kf-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --kf-radius: 12px;
+  --kf-radius-sm: 8px;
+  --kf-radius-lg: 16px;
 }
 
 body {

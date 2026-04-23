@@ -1,0 +1,712 @@
+"use client";
+
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { InfoBadge } from "@/components/ui/info-badge";
+import { motion, AnimatePresence } from "framer-motion";
+import { Button, Input } from "@keyflow/ui";
+import {
+  RefreshCw,
+  Plus,
+  X,
+  Pencil,
+  Trash2,
+  Play,
+  Pause,
+  Calendar,
+  User,
+  Clock,
+  Minus,
+  DollarSign,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle,
+  Sparkles,
+} from "lucide-react";
+import {
+  fetchRecurringInvoices,
+  createRecurringInvoice,
+  updateRecurringInvoice,
+  deleteRecurringInvoice,
+  toggleRecurringInvoice,
+  RecurringInvoice,
+  Product,
+  Contact,
+} from "@/lib/client";
+import { ContactSelect } from "@/components/contacts";
+import {
+  InvoiceLineItem,
+  CATEGORIES,
+  generateItemId,
+} from "../components/commerce-types";
+import { useModuleEmit } from "@/hooks/use-module-events";
+import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE, type DateRange } from "../components/date-range-filter";
+import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
+
+interface RecurringPanelProps {
+  businessId: string | null;
+  contacts: Contact[];
+  products: Product[];
+  triggerNew?: number;
+  currency?: string;
+}
+
+const FREQUENCIES = [
+  { value: "WEEKLY", label: "Weekly" },
+  { value: "BIWEEKLY", label: "Every 2 Weeks" },
+  { value: "MONTHLY", label: "Monthly" },
+  { value: "QUARTERLY", label: "Quarterly" },
+  { value: "YEARLY", label: "Yearly" },
+];
+
+export default function RecurringPanel({ businessId, contacts, products, triggerNew, currency = "TTD" }: RecurringPanelProps) {
+  const emitEvent = useModuleEmit();
+  const [recurring, setRecurring] = useState<RecurringInvoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
+  const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const [form, setForm] = useState({
+    name: "",
+    contactId: "",
+    frequency: "MONTHLY",
+    nextRunDate: "",
+    endDate: "",
+    notes: "",
+    taxRate: "12.5",
+    discountType: "PERCENT" as "PERCENT" | "FIXED",
+    discountValue: "",
+    items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }] as InvoiceLineItem[],
+  });
+
+  useEffect(() => {
+    if (!businessId) return;
+    const load = async () => {
+      setLoading(true);
+      const res = await fetchRecurringInvoices(businessId);
+      if (res.data) setRecurring(res.data);
+      setLoading(false);
+    };
+    void load();
+  }, [businessId]);
+
+  function resetForm() {
+    setEditingId(null);
+    setForm({
+      name: "",
+      contactId: "",
+      frequency: "MONTHLY",
+      nextRunDate: "",
+      endDate: "",
+      notes: "",
+      taxRate: "12.5",
+      discountType: "PERCENT",
+      discountValue: "",
+      items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
+    });
+  }
+
+  useEffect(() => {
+    if (triggerNew && triggerNew > 0) {
+      resetForm();
+      setShowBuilder(true);
+    }
+  }, [triggerNew]);
+
+  function addItem() {
+    setForm((f) => ({
+      ...f,
+      items: [...f.items, { id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
+    }));
+  }
+
+  function removeItem(itemId: string) {
+    setForm((f) => ({
+      ...f,
+      items: f.items.filter((i) => i.id !== itemId),
+    }));
+  }
+
+  function updateItem(itemId: string, field: keyof InvoiceLineItem, value: string) {
+    setForm((f) => ({
+      ...f,
+      items: f.items.map((i) => (i.id === itemId ? { ...i, [field]: value } : i)),
+    }));
+  }
+
+  function selectProduct(itemId: string, productId: string) {
+    const product = products.find((p) => p.id === productId);
+    if (product) {
+      setForm((f) => ({
+        ...f,
+        items: f.items.map((i) =>
+          i.id === itemId
+            ? { ...i, productId, description: product.name, unitPrice: String(product.price) }
+            : i
+        ),
+      }));
+    } else {
+      setForm((f) => ({
+        ...f,
+        items: f.items.map((i) => (i.id === itemId ? { ...i, productId: "" } : i)),
+      }));
+    }
+  }
+
+  function openEdit(rec: RecurringInvoice) {
+    setEditingId(rec.id);
+    setForm({
+      name: rec.name,
+      contactId: rec.contactId,
+      frequency: rec.frequency,
+      nextRunDate: rec.nextRunDate ? rec.nextRunDate.split("T")[0] : "",
+      endDate: rec.endDate ? rec.endDate.split("T")[0] : "",
+      notes: rec.notes || "",
+      taxRate: String(rec.taxRate ?? 0),
+      discountType: (rec.discountType as "PERCENT" | "FIXED") || "PERCENT",
+      discountValue: rec.discountValue ? String(rec.discountValue) : "",
+      items: (rec.lineItems ?? []).map((item: any) => ({
+        id: generateItemId(),
+        productId: "",
+        description: item.description,
+        quantity: String(item.quantity),
+        unitPrice: String(item.unitPrice),
+      })),
+    });
+    setShowBuilder(true);
+  }
+
+  async function handleSave() {
+    if (!businessId) return;
+    setError(null);
+    const validItems = form.items.filter((i) => i.description.trim() && parseFloat(i.unitPrice) > 0);
+    if (!form.name.trim()) { setError("Schedule name is required"); return; }
+    if (!form.contactId) { setError("Contact is required"); return; }
+    if (validItems.length === 0) { setError("At least one line item is required"); return; }
+
+    const payload: any = {
+      name: form.name,
+      contactId: form.contactId,
+      frequency: form.frequency,
+      nextRunDate: form.nextRunDate || undefined,
+      endDate: form.endDate || undefined,
+      notes: form.notes || undefined,
+      taxRate: parseFloat(form.taxRate) || 0,
+      discountType: form.discountValue ? form.discountType : undefined,
+      discountValue: form.discountValue ? parseFloat(form.discountValue) : undefined,
+      lineItems: validItems.map((i) => ({
+        description: i.description,
+        quantity: parseInt(i.quantity) || 1,
+        unitPrice: parseFloat(i.unitPrice),
+      })),
+    };
+
+    if (editingId) {
+      const res = await updateRecurringInvoice(businessId, editingId, payload);
+      if (res.data) {
+        setRecurring((prev) => prev.map((r) => (r.id === editingId ? res.data! : r)));
+        setShowBuilder(false);
+        resetForm();
+        toast.success("Schedule updated");
+      } else {
+        setError(res.error || "Failed to update");
+        toast.error(res.error || "Failed to update schedule");
+      }
+    } else {
+      const res = await createRecurringInvoice(businessId, payload);
+      if (res.data) {
+        setRecurring((prev) => [res.data!, ...prev]);
+        setShowBuilder(false);
+        resetForm();
+        toast.success("Recurring schedule created");
+        emitEvent("billing:schedule_created", "commerce", { scheduleId: res.data.id });
+      } else {
+        setError(res.error || "Failed to create");
+        toast.error(res.error || "Failed to create schedule");
+      }
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!businessId) return;
+    setConfirmState({
+      open: true,
+      action: async () => {
+        await deleteRecurringInvoice(businessId!, id);
+        setRecurring((prev) => prev.filter((r) => r.id !== id));
+        toast.success("Recurring schedule deleted");
+      },
+    });
+  }
+
+  async function handleToggle(id: string) {
+    if (!businessId) return;
+    const res = await toggleRecurringInvoice(businessId, id);
+    if (res.data) {
+      setRecurring((prev) => prev.map((r) => (r.id === id ? res.data! : r)));
+      emitEvent("billing:schedule_toggled", "commerce", { scheduleId: id, active: res.data.isActive });
+    }
+  }
+
+  const dateFiltered = useMemo(
+    () => filterByDateRange(recurring, (r) => r.nextRunDate, dateRange),
+    [recurring, dateRange],
+  );
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleBulkDelete = useCallback(() => {
+    if (!businessId) return;
+    setConfirmState({
+      open: true,
+      action: async () => {
+        const ids = Array.from(selectedIds);
+        await Promise.all(ids.map((id) => deleteRecurringInvoice(businessId!, id)));
+        setRecurring((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+        setSelectedIds(new Set());
+        toast.success(`${ids.length} schedule(s) deleted`);
+      },
+    });
+  }, [businessId, selectedIds]);
+
+  const handleExportCsv = useCallback(() => {
+    const items = dateFiltered.filter((r) => selectedIds.size === 0 || selectedIds.has(r.id));
+    exportToCsv(
+      items as unknown as Record<string, unknown>[],
+      [
+        { key: "name", header: "Name" },
+        { key: "frequency", header: "Frequency" },
+        { key: "isActive", header: "Status", format: (v: unknown) => (v ? "Active" : "Paused") },
+        { key: "total", header: `Amount (${currency})`, format: (v: unknown) => Number(v).toFixed(2) },
+        { key: "nextRunDate", header: "Next Run", format: (v: unknown) => (v ? new Date(v as string).toLocaleDateString() : "—") },
+        { key: "runCount", header: "Run Count" },
+      ],
+      `recurring-invoices-${new Date().toISOString().slice(0, 10)}`,
+    );
+    toast.success("CSV exported");
+  }, [dateFiltered, selectedIds, currency]);
+
+  const totals = useMemo(() => {
+    const subtotal = form.items.reduce((s, i) => s + (parseInt(i.quantity) || 0) * (parseFloat(i.unitPrice) || 0), 0);
+    const tax = (subtotal * (parseFloat(form.taxRate) || 0)) / 100;
+    const disc = form.discountType === "PERCENT" ? (subtotal * (parseFloat(form.discountValue) || 0)) / 100 : parseFloat(form.discountValue) || 0;
+    return { subtotal, tax, discount: disc, total: subtotal + tax - disc };
+  }, [form.items, form.taxRate, form.discountType, form.discountValue]);
+
+  return (
+    <motion.div
+      key="recurring"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="space-y-4"
+    >
+      <AnimatePresence>
+        {showBuilder && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="rounded-2xl border border-primary/30 bg-card/80 backdrop-blur-sm p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-primary" />
+                  {editingId ? "Edit Schedule" : "New Recurring Invoice"}
+                </h3>
+                <button onClick={() => { setShowBuilder(false); resetForm(); }} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {error && <div className="text-xs text-amber-400 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2">{error}</div>}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Schedule Name *</label>
+                  <input
+                    type="text"
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g. Monthly Retainer, Weekly Service"
+                  />
+                </div>
+                <ContactSelect
+                  value={form.contactId}
+                  onChange={(id) => setForm((f) => ({ ...f, contactId: id }))}
+                  contacts={contacts}
+                  label="Contact"
+                  required
+                />
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 inline-flex items-center gap-1">Frequency * <InfoBadge title="Recurring Frequency" body="How often this invoice is auto-generated and sent. Monthly is most common for retainers. The system creates a new invoice each cycle and optionally sends it to the client." side="right" iconSize={10} /></label>
+                  <select
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    value={form.frequency}
+                    onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))}
+                  >
+                    {FREQUENCIES.map((fr) => (
+                      <option key={fr.value} value={fr.value}>{fr.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Next Invoice Date"
+                  type="date"
+                  value={form.nextRunDate}
+                  onChange={(e) => setForm((f) => ({ ...f, nextRunDate: e.target.value }))}
+                />
+                <Input
+                  label="End Date (optional)"
+                  type="date"
+                  value={form.endDate}
+                  onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">Line Items</label>
+                  <Button variant="outline" onClick={addItem} className="text-xs gap-1 px-2 py-1">
+                    <Plus className="w-3 h-3" /> Add Item
+                  </Button>
+                </div>
+                {form.items.map((item) => (
+                  <div key={item.id} className="p-3 rounded-xl bg-muted/30 border border-border/40">
+                    <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-12 md:col-span-3">
+                        <label className="text-xs text-muted-foreground mb-1 block">Product/Service</label>
+                        <select
+                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
+                          value={item.productId}
+                          onChange={(e) => selectProduct(item.id, e.target.value)}
+                        >
+                          <option value="">Select or type below...</option>
+                          {products.filter((p) => p.isActive !== false).map((p) => (
+                            <option key={p.id} value={p.id}>{p.name} - {p.currency} {Number(p.price).toLocaleString()}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-span-12 md:col-span-4">
+                        <label className="text-xs text-muted-foreground mb-1 block">Description</label>
+                        <input
+                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
+                          value={item.description}
+                          onChange={(e) => updateItem(item.id, "description", e.target.value)}
+                          placeholder="Item description"
+                        />
+                      </div>
+                      <div className="col-span-4 md:col-span-2">
+                        <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
+                        <input className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm" type="number" min="1" value={item.quantity} onChange={(e) => updateItem(item.id, "quantity", e.target.value)} />
+                      </div>
+                      <div className="col-span-6 md:col-span-2">
+                        <label className="text-xs text-muted-foreground mb-1 block">Price ({currency})</label>
+                        <input className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm" type="number" step="0.01" value={item.unitPrice} onChange={(e) => updateItem(item.id, "unitPrice", e.target.value)} placeholder="0.00" />
+                      </div>
+                      <div className="col-span-2 md:col-span-1 flex justify-center">
+                        {form.items.length > 1 && (
+                          <button onClick={() => removeItem(item.id)} className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors">
+                            <Minus className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 rounded-xl bg-muted/20 border border-border/40">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Tax Rate (%)</label>
+                  <input type="number" step="0.01" min="0" max="100" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.taxRate} onChange={(e) => setForm((f) => ({ ...f, taxRate: e.target.value }))} placeholder="12.5" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Discount Type</label>
+                  <select className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.discountType} onChange={(e) => setForm((f) => ({ ...f, discountType: e.target.value as "PERCENT" | "FIXED" }))}>
+                    <option value="PERCENT">Percentage (%)</option>
+                    <option value="FIXED">Fixed ({currency})</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Discount {form.discountType === "PERCENT" ? "(%)" : `(${currency})`}</label>
+                  <input type="number" step="0.01" min="0" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.discountValue} onChange={(e) => setForm((f) => ({ ...f, discountValue: e.target.value }))} placeholder="0" />
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-muted/30 border border-border/40 space-y-1 max-w-xs ml-auto">
+                <div className="flex justify-between text-sm text-muted-foreground"><span>Subtotal:</span><span>{currency} {totals.subtotal.toFixed(2)}</span></div>
+                {totals.tax > 0 && <div className="flex justify-between text-sm text-muted-foreground"><span>Tax:</span><span>{currency} {totals.tax.toFixed(2)}</span></div>}
+                {totals.discount > 0 && <div className="flex justify-between text-sm text-emerald-400"><span>Discount:</span><span>-{currency} {totals.discount.toFixed(2)}</span></div>}
+                <div className="flex justify-between text-sm font-bold text-primary border-t border-border/40 pt-1"><span>Per Invoice:</span><span>{currency} {totals.total.toFixed(2)}</span></div>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</label>
+                <input type="text" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Internal notes for this schedule..." />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button variant="outline" onClick={() => { setShowBuilder(false); resetForm(); }}>Cancel</Button>
+                <Button onClick={handleSave}>{editingId ? "Update Schedule" : "Create Schedule"}</Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {recurring.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap text-[10px] px-1">
+          {(() => {
+            const active = recurring.filter((r) => r.isActive).length;
+            const inactive = recurring.length - active;
+            const projectedMonthly = recurring
+              .filter((r) => r.isActive)
+              .reduce((sum, r) => {
+                const scheduleTotal = Number(r.total ?? 0);
+                const multiplier = r.frequency === "WEEKLY" ? 4 : r.frequency === "BIWEEKLY" ? 2 : r.frequency === "QUARTERLY" ? 0.33 : r.frequency === "YEARLY" ? 0.083 : 1;
+                return sum + scheduleTotal * multiplier;
+              }, 0);
+            const nextRun = recurring
+              .filter((r) => r.isActive && r.nextRunDate)
+              .sort((a, b) => new Date(a.nextRunDate!).getTime() - new Date(b.nextRunDate!).getTime())[0];
+            const nextRunLabel = nextRun?.nextRunDate ? new Date(nextRun.nextRunDate).toLocaleDateString("en-TT", { month: "short", day: "numeric" }) : null;
+            return (
+              <>
+                <span className="text-emerald-400 font-medium">{active} Active</span>
+                {inactive > 0 && <span className="text-muted-foreground/50 font-medium">{inactive} Paused</span>}
+                <span className="text-muted-foreground/30">|</span>
+                <span className="text-amber-400 font-medium">~{currency} {Math.round(projectedMonthly).toLocaleString()}/mo projected</span>
+                {nextRunLabel && (
+                  <>
+                    <span className="text-muted-foreground/30">|</span>
+                    <span className="text-blue-400 font-medium">Next: {nextRunLabel}</span>
+                  </>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <DateRangeFilter value={dateRange} onChange={setDateRange} />
+      </div>
+
+      {loading ? (
+        <div className="space-y-3 animate-pulse">
+          {[1, 2, 3].map((i) => <div key={i} className="h-20 bg-muted/30 rounded-xl border border-border/50" />)}
+        </div>
+      ) : recurring.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
+            <RefreshCw className="w-7 h-7 text-muted-foreground/50" />
+          </div>
+          <h3 className="text-lg font-semibold mb-1">Automate Your Revenue</h3>
+          <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-3">
+            Set up recurring billing schedules to automate invoice generation for retainer clients, subscriptions, and regular services.
+          </p>
+          <div className="grid grid-cols-2 gap-2 max-w-xs mx-auto mb-5">
+            {[
+              { label: "Subscriptions", desc: "Monthly memberships" },
+              { label: "Retainers", desc: "Ongoing client work" },
+              { label: "Service Plans", desc: "Recurring services" },
+              { label: "Auto-billing", desc: "Hands-off invoicing" },
+            ].map((item) => (
+              <div key={item.label} className="rounded-lg border border-border/30 p-2 text-left">
+                <p className="text-[11px] font-medium">{item.label}</p>
+                <p className="text-[9px] text-muted-foreground/50">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+          <Button onClick={() => { resetForm(); setShowBuilder(true); }} className="gap-2">
+            <Plus className="w-4 h-4" /> Create Your First Schedule
+          </Button>
+        </div>
+      ) : dateFiltered.length === 0 ? (
+        <div className="py-10 text-center text-muted-foreground text-sm">
+          No recurring invoices match the selected date range.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {dateFiltered.map((rec) => (
+            <motion.div
+              key={rec.id}
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`rounded-xl border bg-card p-4 transition-all ${rec.isActive ? "border-border/50 hover:border-border/70" : "border-border/30 opacity-60"} ${selectedIds.has(rec.id) ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(rec.id)}
+                    onChange={() => toggleSelect(rec.id)}
+                    className="w-4 h-4 rounded border-border accent-[hsl(var(--kf-accent1))]"
+                  />
+                </label>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3">
+                    <h3 className="font-semibold text-base truncate">{rec.name}</h3>
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${rec.isActive ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" : "bg-slate-500/20 text-slate-400 border-slate-500/40"}`}>
+                      {rec.isActive ? "Active" : "Paused"}
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20">
+                      <RefreshCw className="w-3 h-3" />
+                      {FREQUENCIES.find((f) => f.value === rec.frequency)?.label ?? rec.frequency}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <User className="w-3.5 h-3.5" />
+                      {rec.contact ? `${rec.contact.firstName ?? ""} ${rec.contact.lastName ?? ""}`.trim() : "—"}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5" />
+                      Next: {rec.nextRunDate ? new Date(rec.nextRunDate).toLocaleDateString() : "—"}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" />
+                      {rec.runCount} generated
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-lg font-bold text-primary">
+                    {rec.currency} {Number(rec.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => handleToggle(rec.id)} className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${rec.isActive ? "hover:bg-amber-500/20 text-amber-400" : "hover:bg-emerald-500/20 text-emerald-400"}`} title={rec.isActive ? "Pause" : "Resume"}>
+                      {rec.isActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                    </button>
+                    <button onClick={() => openEdit(rec)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Edit">
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => handleDelete(rec.id)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-red-500/20 text-red-400 transition-colors" title="Delete">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-border/30 space-y-2.5">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      <DollarSign className="w-2.5 h-2.5 text-emerald-400" />
+                      <span className="text-[10px] text-muted-foreground/50">Revenue to Date</span>
+                    </div>
+                    <span className="text-sm font-bold text-emerald-400">
+                      {rec.currency} {(Number(rec.total) * rec.runCount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      <TrendingUp className="w-2.5 h-2.5 text-blue-400" />
+                      <span className="text-[10px] text-muted-foreground/50">Forecasted (12mo)</span>
+                    </div>
+                    <span className="text-sm font-bold text-blue-400">
+                      {rec.currency} {(() => {
+                        const total = Number(rec.total);
+                        const freqMultiplier: Record<string, number> = { WEEKLY: 52, BIWEEKLY: 26, MONTHLY: 12, QUARTERLY: 4, YEARLY: 1 };
+                        return (total * (freqMultiplier[rec.frequency] ?? 12)).toLocaleString(undefined, { minimumFractionDigits: 2 });
+                      })()}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      {rec.isActive ? <CheckCircle className="w-2.5 h-2.5 text-emerald-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />}
+                      <span className="text-[10px] text-muted-foreground/50">Status</span>
+                    </div>
+                    <span className={`text-sm font-bold ${rec.isActive ? "text-emerald-400" : "text-amber-400"}`}>
+                      {rec.isActive ? "Running" : "Paused"}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+                      <span className="text-[10px] text-muted-foreground/50">Last Run</span>
+                    </div>
+                    <span className="text-sm font-bold text-muted-foreground/70">
+                      {rec.lastRunDate ? new Date(rec.lastRunDate as string).toLocaleDateString() : rec.runCount > 0 ? "Completed" : "Pending"}
+                    </span>
+                  </div>
+                </div>
+
+                {rec.lineItems && rec.lineItems.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {rec.lineItems.map((item, idx) => (
+                      <span key={idx} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-muted/30 border border-border/30 text-xs">
+                        {item.description} x{item.quantity} @ {Number(item.unitPrice).toLocaleString()}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
+      <BulkActionBar
+        selectedCount={selectedIds.size}
+        totalCount={dateFiltered.length}
+        onSelectAll={() => setSelectedIds(new Set(dateFiltered.map((r) => r.id)))}
+        onClearSelection={() => setSelectedIds(new Set())}
+        onExportCsv={handleExportCsv}
+        onBulkDelete={handleBulkDelete}
+        statusOptions={[
+          { value: "activate", label: "Activate" },
+          { value: "pause", label: "Pause" },
+        ]}
+        onBulkStatusChange={async (action) => {
+          if (!businessId) return;
+          const wantActive = action === "activate";
+          const eligible = Array.from(selectedIds).filter((id) => {
+            const rec = recurring.find((r) => r.id === id);
+            return rec ? rec.isActive !== wantActive : false;
+          });
+          if (eligible.length === 0) {
+            toast.info(`All selected schedules are already ${wantActive ? "active" : "paused"}`);
+            return;
+          }
+          const results = await Promise.all(eligible.map((id) => toggleRecurringInvoice(businessId!, id)));
+          setRecurring((prev) =>
+            prev.map((r) => {
+              const match = results.find((res) => res.data?.id === r.id);
+              return match?.data ?? r;
+            }),
+          );
+          setSelectedIds(new Set());
+          toast.success(`${eligible.length} schedule(s) ${wantActive ? "activated" : "paused"}`);
+        }}
+        entityLabel="schedules"
+      />
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Delete?"
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}})}
+      />
+    </motion.div>
+  );
+}

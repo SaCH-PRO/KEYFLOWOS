@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { CrmService } from '../crm/crm.service';
 
 type AutomationEvent =
@@ -42,7 +42,7 @@ export class AutomationService {
   private readonly logger = new Logger(AutomationService.name);
   private readonly recent: { at: Date; event: string; contactId: string; businessId: string }[] = [];
 
-  constructor(private readonly crm: CrmService) {}
+  constructor(@Inject(forwardRef(() => CrmService)) private readonly crm: CrmService) {}
 
   health() {
     return { status: 'ok', recent: this.recent.slice(-10) };

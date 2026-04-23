@@ -17,8 +17,8 @@ export class SupabaseAuthService {
   private get supabase(): SupabaseClient | null {
     if (this.client) return this.client;
 
-    const url = process.env.SUPABASE_URL;
-    const anonKey = process.env.SUPABASE_ANON_KEY;
+    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!url || !anonKey) {
       this.logger.warn('Supabase env vars missing; auth will be treated as optional.');
@@ -69,5 +69,26 @@ export class SupabaseAuthService {
       created_at: '',
       updated_at: '',
     } as User;
+  }
+
+  async updatePassword(token: string, password: string): Promise<void> {
+    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !anonKey) {
+      throw new Error('Supabase auth is not configured.');
+    }
+    const res = await fetch(`${url}/auth/v1/user`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: anonKey,
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { message?: string; error_description?: string } | null;
+      throw new Error(data?.message || data?.error_description || 'Failed to update password');
+    }
   }
 }

@@ -1,0 +1,2168 @@
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { AiAdvisorService } from './ai-advisor.service';
+import { AiUsageService } from './ai-usage.service';
+import { AiExecutionLogService } from './ai-execution-log.service';
+import { GovernanceService } from './governance.service';
+import { BusinessGraphService } from './business-graph.service';
+import { PlannerService } from './planner.service';
+import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
+import { AiMemoryService } from './ai-memory.service';
+import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
+
+export interface FlowMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  toolCalls?: FlowToolCall[];
+  toolResults?: FlowToolResult[];
+  timestamp?: Date;
+}
+
+export interface FlowToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, any>;
+  riskLevel: RiskLevel;
+}
+
+export interface FlowToolResult {
+  toolCallId: string;
+  name: string;
+  result: any;
+  changedEntities: string[];
+  followOnSuggestions: string[];
+  family: string;
+  riskTier: number;
+  success: boolean;
+  error?: string;
+}
+
+export interface PendingConfirmation {
+  toolCallId: string;
+  name: string;
+  arguments: Record<string, any>;
+  description: string;
+  riskLevel: RiskLevel;
+}
+
+export interface FlowResponse {
+  reply: string;
+  toolCalls?: FlowToolCall[];
+  toolResults?: FlowToolResult[];
+  pendingConfirmations?: PendingConfirmation[];
+  requiresConfirmation?: boolean;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    creditsUsed: number;
+  };
+}
+
+export interface FlowStreamChunk {
+  type: 'content_delta' | 'tool_calls' | 'tool_results' | 'confirmation_required' | 'usage' | 'done' | 'error';
+  content?: string;
+  toolCalls?: FlowToolCall[];
+  toolResults?: FlowToolResult[];
+  pendingConfirmations?: PendingConfirmation[];
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    creditsUsed: number;
+  };
+  error?: string;
+}
+
+const FLOW_SYSTEM_PROMPT = `You are Flow, an AI assistant built into KeyFlowOS — a business operating system for Caribbean entrepreneurs. You have full access to the user's business data and can take real actions on their behalf.
+
+You have 4 tool families at your disposal:
+
+**Read** (safe, instant):
+- fetch_business_summary, fetch_client_health, fetch_schedule_health, fetch_revenue_risk
+- fetch_storefront_quality, fetch_project_status, fetch_expense_pressure
+
+**Draft** (AI-generated content, no side effects):
+- draft_followup_message, draft_campaign_bundle, draft_payment_reminder
+- draft_storefront_copy, draft_project_update
+
+**Organize** (structural changes, moderate risk):
+- create_task, create_followup_queue, tag_contact, segment_contacts, schedule_action
+
+**Execute** (high-impact actions, may require approval):
+- queue_campaign, send_message_with_approval, apply_storefront_recommendation
+- enable_flow_with_approval, update_status_with_confirmation
+
+**CRUD** (standard data operations):
+- CRM: search/create/update/list/delete contacts, add notes and tasks
+- Commerce: create/list invoices, quotes, products; mark invoices paid
+- Bookings: create/list/reschedule/cancel bookings, list services
+- Marketing: create/send/list campaigns
+- Social: create/publish/list posts
+- Automations: create/list/toggle playbooks
+
+Your personality:
+- Warm, efficient, Caribbean-friendly
+- Speak naturally and conversationally
+- Always use TTD currency unless the user specifies otherwise
+- Be concise in your confirmations (e.g. "Done! Created invoice #INV-001 for $500 TTD for John Smith.")
+- When you create or update something, confirm what you did clearly
+- If you need information to complete a task, ask for it specifically
+
+Important rules:
+- Always use function calling tools to take actions — never pretend to take an action
+- When you've completed an action, briefly confirm what was done
+- If you cannot find a contact by name, search for them first before creating an invoice or booking
+- For dates/times, use the current date context and interpret relative dates (e.g. "tomorrow at 2pm")
+- Prefer Read tools when the user asks questions about their business health or status
+- Use Draft tools to generate content the user can review before sending
+- Current date: {{CURRENT_DATE}}
+
+Business context:
+{{BUSINESS_CONTEXT}}`;
+
+@Injectable()
+export class FlowOrchestratorService {
+  private readonly logger = new Logger(FlowOrchestratorService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AiAdvisorService) private readonly advisor: AiAdvisorService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
+    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
+    @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
+    @Inject(AiMemoryService) private readonly memory: AiMemoryService,
+    @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+  ) {}
+
+  async chat(
+    businessId: string,
+    message: string,
+    conversationHistory: FlowMessage[] = [],
+    pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, any> },
+  ): Promise<FlowResponse> {
+    this.aiUsage.checkRateLimit(businessId);
+
+    const canProceed = await this.aiUsage.checkCredits(businessId, 2);
+    if (!canProceed.allowed) {
+      return {
+        reply: `I've reached the AI credit limit for your account (${canProceed.used}/${canProceed.limit} credits used this month). Please upgrade your plan to continue using Flow.`,
+      };
+    }
+
+    const snapshot = await this.businessGraph.getSnapshot(businessId);
+    const businessName = snapshot.business.name || 'your business';
+    const contextSnapshot = this.businessGraph.buildContextString(snapshot);
+
+    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    const memorySection = this.memory.buildPromptSection(memoryCtx);
+
+    const systemPrompt = FLOW_SYSTEM_PROMPT
+      .replace('{{CURRENT_DATE}}', new Date().toISOString())
+      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection);
+
+    const messages: GatewayMessage[] = [
+      { role: 'system', content: systemPrompt },
+    ];
+
+    for (const msg of conversationHistory) {
+      if (msg.role === 'user') {
+        messages.push({ role: 'user', content: msg.content });
+      } else if (msg.role === 'assistant') {
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          messages.push({
+            role: 'assistant',
+            content: msg.content || null,
+            tool_calls: msg.toolCalls.map((tc) => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: {
+                name: tc.name,
+                arguments: JSON.stringify(tc.arguments),
+              },
+            })),
+          });
+          if (msg.toolResults) {
+            for (const result of msg.toolResults) {
+              messages.push({
+                role: 'tool',
+                tool_call_id: result.toolCallId,
+                content: JSON.stringify(result.result),
+              });
+            }
+          }
+        } else {
+          messages.push({ role: 'assistant', content: msg.content });
+        }
+      }
+    }
+
+    if (pendingConfirmation) {
+      if (!pendingConfirmation.confirmed) {
+        return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
+      }
+      if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
+        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName);
+        if (!confirmDecision.allowed) {
+          return {
+            reply: `This action is blocked: ${confirmDecision.reason}`,
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+          };
+        }
+        if (confirmDecision.requiresFormalApproval) {
+          await this.governance.createApprovalItem(businessId, {
+            toolName: pendingConfirmation.toolName,
+            title: `Chat action: ${pendingConfirmation.toolName}`,
+            description: `User confirmed action via chat. Governance requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval (Tier ${confirmDecision.tier}).`,
+            rationale: confirmDecision.reason,
+            inputPayload: pendingConfirmation.toolArgs as Record<string, any>,
+          });
+          await this.executionLog.log({
+            businessId,
+            action: `approval_queued_chat`,
+            toolName: pendingConfirmation.toolName,
+            riskTier: confirmDecision.tier,
+            mode: 'assisted',
+            actor: 'system',
+            rationale: `Chat confirmation routed to approval queue — Tier ${confirmDecision.tier} requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
+            success: true,
+          });
+          return {
+            reply: confirmDecision.requiresAdminApproval
+              ? `This is a high-impact action (Tier ${confirmDecision.tier}) that requires admin approval. It has been added to your approval queue for an admin to review.`
+              : `This action requires formal approval before execution (Tier ${confirmDecision.tier}). It has been added to your approval queue.`,
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+          };
+        }
+        const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs);
+        return {
+          reply: result.success
+            ? `Done! ${this.formatToolSuccess(pendingConfirmation.toolName, result.result)}`
+            : `Something went wrong: ${result.error || 'Unknown error'}. Please try again or contact support.`,
+          toolResults: [result],
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 2 },
+        };
+      }
+    }
+
+    messages.push({ role: 'user', content: message });
+
+    try {
+      const gatewayResponse = await this.gateway.complete({
+        businessId,
+        taskCategory: 'tool-calling',
+        messages: messages as GatewayMessage[],
+        tools: getOpenAiToolDefinitions(),
+        toolChoice: 'auto',
+        maxTokens: 1000,
+        temperature: 0.7,
+      });
+
+      const assistantMessage = {
+        content: gatewayResponse.content,
+        tool_calls: gatewayResponse.toolCalls,
+      };
+      const promptTokens = gatewayResponse.usage.promptTokens;
+      const completionTokens = gatewayResponse.usage.completionTokens;
+      const totalTokens = gatewayResponse.usage.totalTokens;
+
+      await this.prisma.client.aiUsageLog.create({
+        data: {
+          businessId,
+          feature: 'flow_chat',
+          model: gatewayResponse.model,
+          provider: gatewayResponse.provider,
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          estimatedCost: gatewayResponse.usage.estimatedCost,
+          creditsUsed: 2,
+          latencyMs: gatewayResponse.latencyMs,
+          fallbackUsed: gatewayResponse.fallbackUsed,
+          fallbackProvider: gatewayResponse.fallbackProvider,
+          taskCategory: 'tool-calling',
+          metadata: { maxTokens: 1000, temperature: 0.7, outputCategory: 'general' },
+        },
+      });
+
+      const usage = { promptTokens, completionTokens, totalTokens, creditsUsed: 2 };
+
+      if (!assistantMessage.tool_calls || assistantMessage.tool_calls.length === 0) {
+        return {
+          reply: assistantMessage.content || 'I wasn\'t sure how to help with that. Could you rephrase?',
+          usage,
+        };
+      }
+
+      const toolCalls: FlowToolCall[] = assistantMessage.tool_calls.map((tc) => {
+        const tool = getToolByName(tc.function.name);
+        return {
+          id: tc.id,
+          name: tc.function.name,
+          arguments: JSON.parse(tc.function.arguments || '{}'),
+          riskLevel: tool?.riskLevel ?? 'low',
+        };
+      });
+
+      const governanceChecks = await Promise.all(
+        toolCalls.map(async (tc) => {
+          const decision = await this.governance.evaluate(businessId, tc.name);
+          return { tc, decision };
+        }),
+      );
+
+      const blocked = governanceChecks.filter(({ decision }) => !decision.allowed);
+      const needsQuickConfirm = governanceChecks.filter(({ decision }) => decision.requiresQuickConfirm && !decision.requiresFormalApproval);
+      const needsFormalApproval = governanceChecks.filter(({ decision }) => decision.requiresFormalApproval);
+
+      if (blocked.length > 0) {
+        return {
+          reply: `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`,
+          usage,
+        };
+      }
+
+      if (needsFormalApproval.length > 0) {
+        for (const { tc, decision } of needsFormalApproval) {
+          this.governance.createApprovalItem(businessId, {
+            toolName: tc.name,
+            title: this.describeToolCall(tc.name, tc.arguments),
+            description: `Tier ${decision.tier} action requested via Flow chat — requires ${decision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
+            rationale: decision.reason,
+            inputPayload: tc.arguments,
+          }).catch((e: unknown) => {
+            this.logger.error(`Failed to create approval item for ${tc.name}: ${e instanceof Error ? e.message : String(e)}`);
+          });
+        }
+
+        const approvalMessages = needsFormalApproval.map(({ tc, decision }) =>
+          `• ${this.describeToolCall(tc.name, tc.arguments)} (Tier ${decision.tier}${decision.requiresAdminApproval ? ', admin required' : ''})`
+        ).join('\n');
+
+        return {
+          reply: `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`,
+          usage,
+        };
+      }
+
+      if (needsQuickConfirm.length > 0) {
+        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc, decision }) => ({
+          toolCallId: tc.id,
+          name: tc.name,
+          arguments: tc.arguments,
+          description: this.describeToolCall(tc.name, tc.arguments),
+          riskLevel: tc.riskLevel,
+        }));
+
+        return {
+          reply: assistantMessage.content || 'I need your quick confirmation before proceeding with this action.',
+          toolCalls,
+          pendingConfirmations,
+          requiresConfirmation: true,
+          usage,
+        };
+      }
+
+      const toolResults: FlowToolResult[] = await Promise.all(
+        toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id)),
+      );
+
+      const followUpMessages: GatewayMessage[] = [
+        ...messages,
+        {
+          role: 'assistant' as const,
+          content: assistantMessage.content || null,
+          tool_calls: assistantMessage.tool_calls,
+        },
+        ...toolResults.map((result) => ({
+          role: 'tool' as const,
+          tool_call_id: result.toolCallId,
+          content: JSON.stringify(result.success ? result.result : { error: result.error }),
+        })),
+      ];
+
+      const followUpGateway = await this.gateway.complete({
+        businessId,
+        taskCategory: 'summarization',
+        messages: followUpMessages,
+        maxTokens: 500,
+        temperature: 0.7,
+      });
+
+      const finalReply = followUpGateway.content
+        || 'Done! The action was completed successfully.';
+
+      return {
+        reply: finalReply,
+        toolCalls,
+        toolResults,
+        usage,
+      };
+    } catch (error) {
+      this.logger.error(`Flow chat error: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  async *streamChat(
+    businessId: string,
+    message: string,
+    conversationHistory: FlowMessage[] = [],
+  ): AsyncGenerator<FlowStreamChunk> {
+    try {
+      this.aiUsage.checkRateLimit(businessId);
+    } catch (err) {
+      yield { type: 'error', error: (err as Error).message };
+      return;
+    }
+
+    const canProceed = await this.aiUsage.checkCredits(businessId, 2);
+    if (!canProceed.allowed) {
+      yield {
+        type: 'error',
+        error: `AI credit limit reached (${canProceed.used}/${canProceed.limit} credits used this month). Please upgrade your plan.`,
+      };
+      return;
+    }
+
+    const snapshot = await this.businessGraph.getSnapshot(businessId);
+    const contextSnapshot = this.businessGraph.buildContextString(snapshot);
+    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    const memorySection = this.memory.buildPromptSection(memoryCtx);
+
+    const systemPrompt = FLOW_SYSTEM_PROMPT
+      .replace('{{CURRENT_DATE}}', new Date().toISOString())
+      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection);
+
+    const messages: GatewayMessage[] = [
+      { role: 'system', content: systemPrompt },
+    ];
+
+    for (const msg of conversationHistory) {
+      if (msg.role === 'user') {
+        messages.push({ role: 'user', content: msg.content });
+      } else if (msg.role === 'assistant') {
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          messages.push({
+            role: 'assistant',
+            content: msg.content || null,
+            tool_calls: msg.toolCalls.map((tc) => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: {
+                name: tc.name,
+                arguments: JSON.stringify(tc.arguments),
+              },
+            })),
+          });
+          if (msg.toolResults) {
+            for (const result of msg.toolResults) {
+              messages.push({
+                role: 'tool',
+                tool_call_id: result.toolCallId,
+                content: JSON.stringify(result.result),
+              });
+            }
+          }
+        } else {
+          messages.push({ role: 'assistant', content: msg.content });
+        }
+      }
+    }
+
+    messages.push({ role: 'user', content: message });
+
+    try {
+      const stream = this.gateway.streamComplete({
+        businessId,
+        taskCategory: 'tool-calling',
+        messages,
+        tools: getOpenAiToolDefinitions(),
+        toolChoice: 'auto',
+        maxTokens: 1000,
+        temperature: 0.7,
+      });
+
+      let fullContent = '';
+      const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
+      let streamUsage: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost: number } | undefined;
+      let streamProvider = '';
+      let streamModel = '';
+
+      for await (const chunk of stream) {
+        if (chunk.provider) streamProvider = chunk.provider;
+        if (chunk.model) streamModel = chunk.model;
+
+        if (chunk.type === 'content_delta' && chunk.content) {
+          fullContent += chunk.content;
+          yield { type: 'content_delta', content: chunk.content };
+        }
+
+        if (chunk.type === 'tool_call_delta' && chunk.toolCall) {
+          const tc = chunk.toolCall;
+          if (!toolCallAccumulator.has(tc.index)) {
+            toolCallAccumulator.set(tc.index, { id: '', name: '', arguments: '' });
+          }
+          const acc = toolCallAccumulator.get(tc.index)!;
+          if (tc.id) acc.id = tc.id;
+          if (tc.name) acc.name = tc.name;
+          if (tc.argumentsDelta) acc.arguments += tc.argumentsDelta;
+        }
+
+        if (chunk.type === 'usage' && chunk.usage) {
+          streamUsage = chunk.usage;
+        }
+
+        if (chunk.type === 'error') {
+          yield { type: 'error', error: chunk.error };
+          return;
+        }
+      }
+
+      this.prisma.client.aiUsageLog.create({
+        data: {
+          businessId,
+          feature: 'flow_chat_stream',
+          model: streamModel,
+          provider: streamProvider,
+          promptTokens: streamUsage?.promptTokens ?? 0,
+          completionTokens: streamUsage?.completionTokens ?? 0,
+          totalTokens: streamUsage?.totalTokens ?? 0,
+          estimatedCost: streamUsage?.estimatedCost ?? 0,
+          creditsUsed: 2,
+          latencyMs: 0,
+          fallbackUsed: false,
+          taskCategory: 'tool-calling',
+          metadata: { maxTokens: 1000, temperature: 0.7, streaming: true },
+        },
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log streaming usage: ${e instanceof Error ? e.message : String(e)}`);
+      });
+
+      const usage = {
+        promptTokens: streamUsage?.promptTokens ?? 0,
+        completionTokens: streamUsage?.completionTokens ?? 0,
+        totalTokens: streamUsage?.totalTokens ?? 0,
+        creditsUsed: 2,
+      };
+
+      if (toolCallAccumulator.size === 0) {
+        yield { type: 'usage', usage };
+        yield { type: 'done' };
+        return;
+      }
+
+      const toolCalls: FlowToolCall[] = [];
+      for (const [, acc] of toolCallAccumulator) {
+        const tool = getToolByName(acc.name);
+        toolCalls.push({
+          id: acc.id,
+          name: acc.name,
+          arguments: JSON.parse(acc.arguments || '{}'),
+          riskLevel: tool?.riskLevel ?? 'low',
+        });
+      }
+
+      yield { type: 'tool_calls', toolCalls };
+
+      const governanceChecks = await Promise.all(
+        toolCalls.map(async (tc) => {
+          const decision = await this.governance.evaluate(businessId, tc.name);
+          return { tc, decision };
+        }),
+      );
+
+      const blocked = governanceChecks.filter(({ decision }) => !decision.allowed);
+      const needsQuickConfirm = governanceChecks.filter(({ decision }) => decision.requiresQuickConfirm && !decision.requiresFormalApproval);
+      const needsFormalApproval = governanceChecks.filter(({ decision }) => decision.requiresFormalApproval);
+
+      if (blocked.length > 0) {
+        yield {
+          type: 'content_delta',
+          content: `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`,
+        };
+        yield { type: 'usage', usage };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (needsFormalApproval.length > 0) {
+        for (const { tc, decision } of needsFormalApproval) {
+          this.governance.createApprovalItem(businessId, {
+            toolName: tc.name,
+            title: this.describeToolCall(tc.name, tc.arguments),
+            description: `Tier ${decision.tier} action requested via Flow chat — requires ${decision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
+            rationale: decision.reason,
+            inputPayload: tc.arguments,
+          }).catch((e: unknown) => {
+            this.logger.error(`Failed to create approval item for ${tc.name}: ${e instanceof Error ? e.message : String(e)}`);
+          });
+        }
+
+        const approvalMessages = needsFormalApproval.map(({ tc, decision }) =>
+          `• ${this.describeToolCall(tc.name, tc.arguments)} (Tier ${decision.tier}${decision.requiresAdminApproval ? ', admin required' : ''})`
+        ).join('\n');
+
+        yield {
+          type: 'content_delta',
+          content: `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`,
+        };
+        yield { type: 'usage', usage };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (needsQuickConfirm.length > 0) {
+        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc }) => ({
+          toolCallId: tc.id,
+          name: tc.name,
+          arguments: tc.arguments,
+          description: this.describeToolCall(tc.name, tc.arguments),
+          riskLevel: tc.riskLevel,
+        }));
+
+        yield {
+          type: 'confirmation_required',
+          pendingConfirmations,
+          toolCalls,
+        };
+        yield { type: 'usage', usage };
+        yield { type: 'done' };
+        return;
+      }
+
+      const toolResults: FlowToolResult[] = await Promise.all(
+        toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id)),
+      );
+
+      yield { type: 'tool_results', toolResults };
+
+      const followUpMessages: GatewayMessage[] = [
+        ...messages,
+        {
+          role: 'assistant' as const,
+          content: fullContent || null,
+          tool_calls: toolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+          })),
+        },
+        ...toolResults.map((result) => ({
+          role: 'tool' as const,
+          tool_call_id: result.toolCallId,
+          content: JSON.stringify(result.success ? result.result : { error: result.error }),
+        })),
+      ];
+
+      const followUpStream = this.gateway.streamComplete({
+        businessId,
+        taskCategory: 'summarization',
+        messages: followUpMessages,
+        maxTokens: 500,
+        temperature: 0.7,
+      });
+
+      for await (const chunk of followUpStream) {
+        if (chunk.type === 'content_delta' && chunk.content) {
+          yield { type: 'content_delta', content: chunk.content };
+        }
+      }
+
+      yield { type: 'usage', usage };
+      yield { type: 'done' };
+    } catch (error) {
+      this.logger.error(`Flow stream chat error: ${(error as Error).message}`);
+      yield { type: 'error', error: (error as Error).message };
+    }
+  }
+
+  private async executeTool(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+    toolCallId?: string,
+    planContext?: { planId: string; planStepId: string },
+  ): Promise<FlowToolResult> {
+    const id = toolCallId ?? `manual_${toolName}`;
+    const startTime = Date.now();
+    try {
+      this.validateToolInput(toolName, args);
+      const rawResult = await this.executeToolAction(businessId, toolName, args);
+      const envelope = wrapToolResult(toolName, rawResult);
+      const durationMs = Date.now() - startTime;
+      const tier = this.governance.getToolTier(toolName);
+      this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
+        riskTier: tier,
+        planId: planContext?.planId,
+        planStepId: planContext?.planStepId,
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log tool execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      this.businessGraph.invalidateCache(businessId);
+      return {
+        toolCallId: id,
+        name: toolName,
+        result: envelope.result,
+        changedEntities: envelope.changedEntities,
+        followOnSuggestions: envelope.followOnSuggestions,
+        family: envelope.family,
+        riskTier: envelope.riskTier,
+        success: true,
+      };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      const tier = this.governance.getToolTier(toolName);
+      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+        riskTier: tier,
+        planId: planContext?.planId,
+        planStepId: planContext?.planStepId,
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log tool execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      const errorEnvelope = wrapToolResult(toolName, null);
+      return {
+        toolCallId: id,
+        name: toolName,
+        result: null,
+        changedEntities: errorEnvelope.changedEntities,
+        followOnSuggestions: errorEnvelope.followOnSuggestions,
+        family: errorEnvelope.family,
+        riskTier: errorEnvelope.riskTier,
+        success: false,
+        error: (error as Error).message,
+      };
+    }
+  }
+
+  private validateToolInput(toolName: string, args: Record<string, any>): void {
+    const tool = getToolByName(toolName);
+    if (!tool) return;
+
+    const missing = tool.parameters.required.filter(
+      (field) => args[field] === undefined || args[field] === null || args[field] === '',
+    );
+    if (missing.length > 0) {
+      throw new Error(`Missing required fields for ${toolName}: ${missing.join(', ')}`);
+    }
+
+    for (const [key, value] of Object.entries(args)) {
+      const schema = tool.parameters.properties[key];
+      if (!schema) continue;
+      if (schema.type === 'string' && typeof value !== 'string') {
+        throw new Error(`Field "${key}" for ${toolName} must be a string`);
+      }
+      if (schema.type === 'number' && typeof value !== 'number') {
+        const num = Number(value);
+        if (isNaN(num)) throw new Error(`Field "${key}" for ${toolName} must be a number`);
+        args[key] = num;
+      }
+      if (schema.type === 'boolean' && typeof value !== 'boolean') {
+        if (value === 'true') args[key] = true;
+        else if (value === 'false') args[key] = false;
+        else throw new Error(`Field "${key}" for ${toolName} must be a boolean`);
+      }
+      if (schema.type === 'array' && !Array.isArray(value)) {
+        throw new Error(`Field "${key}" for ${toolName} must be an array`);
+      }
+      if (schema.enum && typeof value === 'string' && !schema.enum.includes(value)) {
+        throw new Error(`Field "${key}" for ${toolName} must be one of: ${schema.enum.join(', ')}`);
+      }
+    }
+  }
+
+  private async executeToolAction(businessId: string, toolName: string, args: Record<string, any>): Promise<any> {
+    switch (toolName) {
+      case 'crm_search_contacts': {
+        const q = args.query?.trim();
+        if (!q) return { contacts: [] };
+        const containsFilter = { contains: q, mode: 'insensitive' as const };
+        const contacts = await this.prisma.client.contact.findMany({
+          where: {
+            businessId,
+            deletedAt: null,
+            OR: [
+              { firstName: containsFilter },
+              { lastName: containsFilter },
+              { displayName: containsFilter },
+              { email: containsFilter },
+              { phone: containsFilter },
+            ],
+          },
+          select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true, displayName: true },
+          take: 10,
+        });
+        return { contacts, count: contacts.length };
+      }
+
+      case 'crm_list_contacts': {
+        const contacts = await this.prisma.client.contact.findMany({
+          where: { businessId, deletedAt: null, ...(args.status ? { status: args.status } : {}) },
+          select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true, displayName: true },
+          take: args.limit ?? 10,
+          orderBy: { createdAt: 'desc' },
+        });
+        return { contacts, count: contacts.length };
+      }
+
+      case 'crm_create_contact': {
+        const contact = await this.prisma.client.contact.create({
+          data: {
+            businessId,
+            firstName: args.firstName ?? null,
+            lastName: args.lastName ?? null,
+            email: args.email ?? null,
+            phone: args.phone ?? null,
+            companyName: args.companyName ?? null,
+            status: args.status ?? 'LEAD',
+          },
+        });
+        return { contact, id: contact.id };
+      }
+
+      case 'crm_update_contact': {
+        const updateData: Record<string, any> = {};
+        if (args.firstName !== undefined) updateData.firstName = args.firstName;
+        if (args.lastName !== undefined) updateData.lastName = args.lastName;
+        if (args.email !== undefined) updateData.email = args.email;
+        if (args.phone !== undefined) updateData.phone = args.phone;
+        if (args.status !== undefined) updateData.status = args.status;
+        if (args.companyName !== undefined) updateData.companyName = args.companyName;
+        const contact = await this.prisma.client.contact.update({
+          where: { id: args.contactId, businessId },
+          data: updateData,
+        });
+        return { contact, id: contact.id };
+      }
+
+      case 'crm_add_note': {
+        const contact = await this.prisma.client.contact.findFirst({
+          where: { id: args.contactId, businessId },
+          select: { id: true },
+        });
+        if (!contact) throw new Error('Contact not found');
+        const note = await this.prisma.client.contactNote.create({
+          data: {
+            contactId: args.contactId,
+            businessId,
+            body: args.body,
+            source: 'flow_ai',
+          },
+        });
+        return { note, id: note.id };
+      }
+
+      case 'crm_add_task': {
+        const contact = await this.prisma.client.contact.findFirst({
+          where: { id: args.contactId, businessId },
+          select: { id: true },
+        });
+        if (!contact) throw new Error('Contact not found');
+        const task = await this.prisma.client.contactTask.create({
+          data: {
+            contactId: args.contactId,
+            businessId,
+            title: args.title,
+            dueDate: args.dueDate ? new Date(args.dueDate) : null,
+            priority: args.priority ?? 'MEDIUM',
+            status: 'OPEN',
+            source: 'flow_ai',
+          },
+        });
+        return { task, id: task.id };
+      }
+
+      case 'crm_delete_contact': {
+        await this.prisma.client.contact.update({
+          where: { id: args.contactId, businessId },
+          data: { deletedAt: new Date() },
+        });
+        return { success: true, deletedId: args.contactId };
+      }
+
+      case 'commerce_list_invoices': {
+        const invoices = await this.prisma.client.invoice.findMany({
+          where: { businessId, deletedAt: null },
+          include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+          take: args.limit ?? 10,
+          orderBy: { createdAt: 'desc' },
+        });
+        return { invoices, count: invoices.length };
+      }
+
+      case 'commerce_create_invoice': {
+        const items = args.items ?? [];
+        const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0);
+        const invoiceCount = await this.prisma.client.invoice.count({ where: { businessId } });
+        const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, '0')}`;
+        const invoice = await this.prisma.client.invoice.create({
+          data: {
+            businessId,
+            contactId: args.contactId ?? null,
+            items: items,
+            invoiceNumber,
+            subtotal,
+            taxAmount: 0,
+            total: subtotal,
+            currency: args.currency ?? 'TTD',
+            dueDate: args.dueDate ? new Date(args.dueDate) : null,
+            notes: args.notes ?? null,
+            status: 'DRAFT',
+          },
+        });
+        return { invoice, id: invoice.id, invoiceNumber: invoice.invoiceNumber };
+      }
+
+      case 'commerce_mark_invoice_paid': {
+        const invoice = await this.prisma.client.invoice.update({
+          where: { id: args.invoiceId, businessId },
+          data: { status: 'PAID', paidAt: new Date() },
+        });
+        return { invoice, id: invoice.id };
+      }
+
+      case 'commerce_create_product': {
+        const product = await this.prisma.client.product.create({
+          data: {
+            businessId,
+            name: args.name,
+            price: args.price,
+            currency: args.currency ?? 'TTD',
+            description: args.description ?? null,
+            category: args.category ?? 'PRODUCT',
+            isActive: true,
+          },
+        });
+        return { product, id: product.id };
+      }
+
+      case 'commerce_create_quote': {
+        const items = args.items ?? [];
+        const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0);
+        const quoteCount = await this.prisma.client.quote.count({ where: { businessId } });
+        const quoteNumber = `QT-${String(quoteCount + 1).padStart(4, '0')}`;
+        const quote = await this.prisma.client.quote.create({
+          data: {
+            businessId,
+            contactId: args.contactId,
+            items,
+            quoteNumber,
+            subtotal,
+            taxAmount: 0,
+            total: subtotal,
+            currency: args.currency ?? 'TTD',
+            expiryDate: args.expiryDate ? new Date(args.expiryDate) : null,
+            status: 'DRAFT',
+          },
+        });
+        return { quote, id: quote.id, quoteNumber: quote.quoteNumber };
+      }
+
+      case 'commerce_delete_invoice': {
+        await this.prisma.client.invoice.update({
+          where: { id: args.invoiceId, businessId },
+          data: { deletedAt: new Date() },
+        });
+        return { success: true, deletedId: args.invoiceId };
+      }
+
+      case 'bookings_list_bookings': {
+        const bookings = await this.prisma.client.booking.findMany({
+          where: { businessId, deletedAt: null },
+          include: {
+            contact: { select: { firstName: true, lastName: true, email: true } },
+            service: { select: { name: true } },
+          },
+          take: args.limit ?? 10,
+          orderBy: { startTime: 'asc' },
+        });
+        return { bookings, count: bookings.length };
+      }
+
+      case 'bookings_list_services': {
+        const services = await this.prisma.client.service.findMany({
+          where: { businessId, deletedAt: null },
+          orderBy: { name: 'asc' },
+        });
+        return { services, count: services.length };
+      }
+
+      case 'bookings_create_booking': {
+        const booking = await this.prisma.client.booking.create({
+          data: {
+            businessId,
+            contactId: args.contactId,
+            serviceId: args.serviceId ?? null,
+            staffId: args.staffId ?? null,
+            startTime: new Date(args.startTime),
+            endTime: new Date(args.endTime),
+            notes: args.notes ?? null,
+            status: 'CONFIRMED',
+          },
+        });
+        return { booking, id: booking.id };
+      }
+
+      case 'bookings_reschedule_booking': {
+        const booking = await this.prisma.client.booking.findFirst({
+          where: { id: args.bookingId, businessId },
+        });
+        if (!booking) throw new Error('Booking not found');
+        const duration = booking.endTime.getTime() - booking.startTime.getTime();
+        const newStart = new Date(args.startTime);
+        const newEnd = new Date(newStart.getTime() + duration);
+        const updated = await this.prisma.client.booking.update({
+          where: { id: args.bookingId },
+          data: { startTime: newStart, endTime: newEnd },
+        });
+        return { booking: updated, id: updated.id };
+      }
+
+      case 'bookings_cancel_booking': {
+        const updated = await this.prisma.client.booking.update({
+          where: { id: args.bookingId, businessId },
+          data: { status: 'CANCELLED' },
+        });
+        return { booking: updated, id: updated.id };
+      }
+
+      case 'marketing_list_campaigns': {
+        const campaigns = await this.prisma.client.emailCampaign.findMany({
+          where: { businessId, deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { id: true, name: true, subject: true, status: true, createdAt: true },
+        });
+        return { campaigns, count: campaigns.length };
+      }
+
+      case 'marketing_create_campaign': {
+        const campaign = await this.prisma.client.emailCampaign.create({
+          data: {
+            businessId,
+            name: args.name,
+            subject: args.subject,
+            body: args.body,
+            status: 'DRAFT',
+            scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : null,
+          },
+        });
+        return { campaign, id: campaign.id };
+      }
+
+      case 'marketing_send_campaign': {
+        const campaign = await this.prisma.client.emailCampaign.findFirst({
+          where: { id: args.campaignId, businessId },
+        });
+        if (!campaign) throw new Error('Campaign not found');
+        const updated = await this.prisma.client.emailCampaign.update({
+          where: { id: args.campaignId },
+          data: { status: 'SENT', sentAt: new Date() },
+        });
+        return { campaign: updated, id: updated.id };
+      }
+
+      case 'social_list_posts': {
+        const posts = await this.prisma.client.socialPost.findMany({
+          where: { businessId, deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { id: true, content: true, status: true, scheduledAt: true, createdAt: true },
+        });
+        return { posts, count: posts.length };
+      }
+
+      case 'social_create_post': {
+        const post = await this.prisma.client.socialPost.create({
+          data: {
+            businessId,
+            content: args.content,
+            mediaUrls: [],
+            status: args.scheduledFor ? 'SCHEDULED' : 'DRAFT',
+            scheduledAt: args.scheduledFor ? new Date(args.scheduledFor) : null,
+            channelIds: [],
+          },
+        });
+        return { post, id: post.id };
+      }
+
+      case 'social_publish_post': {
+        const post = await this.prisma.client.socialPost.findFirst({
+          where: { id: args.postId, businessId },
+        });
+        if (!post) throw new Error('Post not found');
+        const updated = await this.prisma.client.socialPost.update({
+          where: { id: args.postId },
+          data: { status: 'PUBLISHED', postedAt: new Date() },
+        });
+        return { post: updated, id: updated.id };
+      }
+
+      case 'automations_list_playbooks': {
+        const playbooks = await this.prisma.client.automation.findMany({
+          where: { businessId, deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, name: true, trigger: true, enabled: true, runCount: true, lastRunAt: true },
+        });
+        return { playbooks, count: playbooks.length };
+      }
+
+      case 'automations_create_playbook': {
+        const playbook = await this.prisma.client.automation.create({
+          data: {
+            businessId,
+            name: args.name,
+            trigger: args.triggerEvent,
+            condition: args.condition ?? null,
+            actionData: [],
+            enabled: true,
+          },
+        });
+        return { playbook, id: playbook.id };
+      }
+
+      case 'automations_toggle_playbook': {
+        const playbook = await this.prisma.client.automation.update({
+          where: { id: args.playbookId, businessId },
+          data: { enabled: args.enabled },
+        });
+        return { playbook, id: playbook.id, enabled: playbook.enabled };
+      }
+
+      // ========== READ FAMILY ==========
+
+      case 'fetch_business_summary': {
+        const snapshot = await this.businessGraph.getSnapshot(businessId);
+        return {
+          businessName: snapshot.business.name,
+          industry: snapshot.business.industry,
+          momentumScore: snapshot.momentumScore,
+          contacts: snapshot.contacts,
+          revenue: snapshot.revenue,
+          bookings: snapshot.bookings,
+          expenses: snapshot.expenses,
+        };
+      }
+
+      case 'fetch_client_health': {
+        const now = new Date();
+        const fourteenDaysAgo = new Date(now.getTime() - 14 * 86400000);
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+
+        if (args.contactId) {
+          const contact = await this.prisma.client.contact.findFirst({
+            where: { id: args.contactId, businessId, deletedAt: null },
+            select: { id: true, firstName: true, lastName: true, email: true, status: true, updatedAt: true, tags: true },
+          });
+          if (!contact) throw new Error('Contact not found');
+          const invoiceTotal = await this.prisma.client.invoice.aggregate({
+            where: { businessId, contactId: args.contactId, deletedAt: null, status: 'PAID' },
+            _sum: { total: true },
+            _count: true,
+          });
+          const bookingCount = await this.prisma.client.booking.count({
+            where: { businessId, contactId: args.contactId, deletedAt: null },
+          });
+          const isStale = contact.updatedAt < fourteenDaysAgo;
+          return {
+            contact,
+            totalSpend: invoiceTotal._sum.total ?? 0,
+            invoiceCount: invoiceTotal._count ?? 0,
+            bookingCount,
+            isStale,
+            daysSinceActivity: Math.floor((now.getTime() - contact.updatedAt.getTime()) / 86400000),
+          };
+        }
+
+        const [totalContacts, staleLeads, atRiskClients, topSpenders] = await Promise.all([
+          this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
+          this.prisma.client.contact.count({
+            where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: fourteenDaysAgo } },
+          }),
+          this.prisma.client.contact.count({
+            where: { businessId, deletedAt: null, status: 'CLIENT', updatedAt: { lt: thirtyDaysAgo } },
+          }),
+          this.prisma.client.invoice.groupBy({
+            by: ['contactId'],
+            where: { businessId, deletedAt: null, status: 'PAID' },
+            _sum: { total: true },
+            orderBy: { _sum: { total: 'desc' } },
+            take: 5,
+          }),
+        ]);
+
+        const topSpenderIds = topSpenders.map(s => s.contactId);
+        const topSpenderContacts = topSpenderIds.length > 0
+          ? await this.prisma.client.contact.findMany({
+              where: { id: { in: topSpenderIds }, businessId },
+              select: { id: true, firstName: true, lastName: true, email: true },
+            })
+          : [];
+
+        return {
+          totalContacts,
+          staleLeads,
+          atRiskClients,
+          topSpenders: topSpenders.map(s => {
+            const c = topSpenderContacts.find(tc => tc.id === s.contactId);
+            return { contactId: s.contactId, name: c ? `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() : 'Unknown', totalSpend: s._sum.total ?? 0 };
+          }),
+          healthScore: totalContacts > 0 ? Math.max(0, 100 - Math.round((staleLeads + atRiskClients) / totalContacts * 100)) : 0,
+        };
+      }
+
+      case 'fetch_schedule_health': {
+        const daysAhead = args.days ?? 7;
+        const now = new Date();
+        const futureDate = new Date(now.getTime() + daysAhead * 86400000);
+
+        const [upcomingBookings, totalServices, cancelledRecent] = await Promise.all([
+          this.prisma.client.booking.findMany({
+            where: { businessId, deletedAt: null, startTime: { gte: now, lte: futureDate }, status: { in: ['PENDING', 'CONFIRMED'] } },
+            select: { id: true, startTime: true, endTime: true, status: true },
+            orderBy: { startTime: 'asc' },
+          }),
+          this.prisma.client.service.count({ where: { businessId, deletedAt: null } }),
+          this.prisma.client.booking.count({
+            where: { businessId, deletedAt: null, status: 'CANCELLED', updatedAt: { gte: new Date(now.getTime() - 7 * 86400000) } },
+          }),
+        ]);
+
+        const bookingsByDay: Record<string, number> = {};
+        for (const b of upcomingBookings) {
+          const day = b.startTime.toISOString().slice(0, 10);
+          bookingsByDay[day] = (bookingsByDay[day] ?? 0) + 1;
+        }
+
+        const emptyDays = [];
+        for (let d = 0; d < daysAhead; d++) {
+          const dayStr = new Date(now.getTime() + d * 86400000).toISOString().slice(0, 10);
+          if (!bookingsByDay[dayStr]) emptyDays.push(dayStr);
+        }
+
+        return {
+          totalUpcoming: upcomingBookings.length,
+          bookingsByDay,
+          emptyDays,
+          cancelledLast7Days: cancelledRecent,
+          totalServices,
+          utilizationPct: daysAhead > 0 ? Math.round((Object.keys(bookingsByDay).length / daysAhead) * 100) : 0,
+        };
+      }
+
+      case 'fetch_revenue_risk': {
+        const now = new Date();
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+        const sixtyDaysAgo = new Date(now.getTime() - 60 * 86400000);
+
+        const [overdueInvoices, recentPaid, previousPaid, topClientRevenue] = await Promise.all([
+          this.prisma.client.invoice.findMany({
+            where: { businessId, deletedAt: null, status: { in: ['SENT', 'DRAFT'] }, dueDate: { lt: now } },
+            select: { id: true, invoiceNumber: true, total: true, dueDate: true, contactId: true },
+            orderBy: { dueDate: 'asc' },
+            take: 20,
+          }),
+          this.prisma.client.invoice.aggregate({
+            where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: thirtyDaysAgo } },
+            _sum: { total: true },
+            _count: true,
+          }),
+          this.prisma.client.invoice.aggregate({
+            where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } },
+            _sum: { total: true },
+            _count: true,
+          }),
+          this.prisma.client.invoice.groupBy({
+            by: ['contactId'],
+            where: { businessId, deletedAt: null, status: 'PAID' },
+            _sum: { total: true },
+            orderBy: { _sum: { total: 'desc' } },
+            take: 3,
+          }),
+        ]);
+
+        const recentRevenue = recentPaid._sum.total ?? 0;
+        const previousRevenue = previousPaid._sum.total ?? 0;
+        const totalOverdue = overdueInvoices.reduce((s, inv) => s + inv.total, 0);
+        const totalPaidAll = await this.prisma.client.invoice.aggregate({
+          where: { businessId, deletedAt: null, status: 'PAID' },
+          _sum: { total: true },
+        });
+        const allRevenue = totalPaidAll._sum.total ?? 1;
+        const topClientPct = topClientRevenue.length > 0 ? Math.round(((topClientRevenue[0]._sum.total ?? 0) / allRevenue) * 100) : 0;
+        const trend = previousRevenue > 0 ? Math.round(((recentRevenue - previousRevenue) / previousRevenue) * 100) : 0;
+
+        return {
+          overdueCount: overdueInvoices.length,
+          overdueTotal: totalOverdue,
+          overdueInvoices: overdueInvoices.slice(0, 5),
+          revenueThisMonth: recentRevenue,
+          revenueTrend: trend,
+          trendLabel: trend > 5 ? 'growing' : trend < -5 ? 'declining' : 'stable',
+          topClientConcentration: topClientPct,
+          concentrationRisk: topClientPct > 50 ? 'high' : topClientPct > 30 ? 'medium' : 'low',
+        };
+      }
+
+      case 'fetch_storefront_quality': {
+        const products = await this.prisma.client.product.findMany({
+          where: { businessId, deletedAt: null },
+          select: { id: true, name: true, description: true, price: true, category: true, isActive: true, imageUrl: true },
+        });
+
+        let score = 100;
+        const issues: string[] = [];
+        const noDescription = products.filter(p => !p.description || p.description.length < 20);
+        const noPrice = products.filter(p => !p.price || p.price <= 0);
+        const noImage = products.filter(p => !p.imageUrl);
+        const inactive = products.filter(p => !p.isActive);
+
+        if (noDescription.length > 0) {
+          score -= Math.min(30, noDescription.length * 5);
+          issues.push(`${noDescription.length} product(s) missing descriptions`);
+        }
+        if (noPrice.length > 0) {
+          score -= Math.min(20, noPrice.length * 5);
+          issues.push(`${noPrice.length} product(s) with no price`);
+        }
+        if (noImage.length > 0) {
+          score -= Math.min(20, noImage.length * 3);
+          issues.push(`${noImage.length} product(s) missing images`);
+        }
+        if (inactive.length > 0) {
+          issues.push(`${inactive.length} inactive product(s)`);
+        }
+        if (products.length === 0) {
+          score = 0;
+          issues.push('No products in storefront');
+        }
+
+        return {
+          totalProducts: products.length,
+          activeProducts: products.length - inactive.length,
+          qualityScore: Math.max(0, score),
+          issues,
+          productsNeedingWork: noDescription.map(p => ({ id: p.id, name: p.name, issue: 'missing description' }))
+            .concat(noPrice.map(p => ({ id: p.id, name: p.name, issue: 'no price' }))),
+        };
+      }
+
+      case 'fetch_project_status': {
+        const projectWhere: any = { businessId, deletedAt: null };
+        if (args.projectId) projectWhere.id = args.projectId;
+
+        const projects = await this.prisma.client.project.findMany({
+          where: projectWhere,
+          include: {
+            tasks: {
+              where: { deletedAt: null },
+              select: { id: true, title: true, isCompleted: true, dueDate: true, priority: true },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: args.projectId ? 1 : 20,
+        });
+
+        const now = new Date();
+        return {
+          projects: projects.map(p => {
+            const totalTasks = p.tasks.length;
+            const completedTasks = p.tasks.filter(t => t.isCompleted).length;
+            const overdueTasks = p.tasks.filter(t => !t.isCompleted && t.dueDate && new Date(t.dueDate) < now).length;
+            const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+            return {
+              id: p.id,
+              name: p.name,
+              status: p.status,
+              priority: p.priority,
+              totalTasks,
+              completedTasks,
+              overdueTasks,
+              progress,
+              healthLabel: overdueTasks > 0 ? 'at-risk' : progress >= 75 ? 'on-track' : progress >= 25 ? 'in-progress' : 'starting',
+            };
+          }),
+          totalProjects: projects.length,
+        };
+      }
+
+      case 'fetch_expense_pressure': {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+        const [thisMonth, lastMonth, byCategory, revenueThisMonth] = await Promise.all([
+          this.prisma.client.expense.aggregate({
+            where: { businessId, deletedAt: null, date: { gte: startOfMonth } },
+            _sum: { amount: true },
+            _count: true,
+          }),
+          this.prisma.client.expense.aggregate({
+            where: { businessId, deletedAt: null, date: { gte: startOfLastMonth, lt: startOfMonth } },
+            _sum: { amount: true },
+          }),
+          this.prisma.client.expense.groupBy({
+            by: ['categoryId'],
+            where: { businessId, deletedAt: null, date: { gte: startOfMonth } },
+            _sum: { amount: true },
+            orderBy: { _sum: { amount: 'desc' } },
+            take: 10,
+          }),
+          this.prisma.client.invoice.aggregate({
+            where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: startOfMonth } },
+            _sum: { total: true },
+          }),
+        ]);
+
+        const currentExpenses = thisMonth._sum.amount ?? 0;
+        const lastMonthExpenses = lastMonth._sum.amount ?? 0;
+        const revenue = revenueThisMonth._sum.total ?? 0;
+        const momChange = lastMonthExpenses > 0 ? Math.round(((currentExpenses - lastMonthExpenses) / lastMonthExpenses) * 100) : 0;
+        const expenseRatio = revenue > 0 ? Math.round((currentExpenses / revenue) * 100) : 0;
+
+        return {
+          currentMonthTotal: currentExpenses,
+          lastMonthTotal: lastMonthExpenses,
+          monthOverMonthChange: momChange,
+          trendLabel: momChange > 10 ? 'increasing' : momChange < -10 ? 'decreasing' : 'stable',
+          expenseToRevenueRatio: expenseRatio,
+          revenueThisMonth: revenue,
+          transactionCount: thisMonth._count ?? 0,
+          topCategories: byCategory.map(c => ({ categoryId: c.categoryId, total: c._sum.amount ?? 0 })),
+          pressure: expenseRatio > 80 ? 'high' : expenseRatio > 50 ? 'moderate' : 'low',
+        };
+      }
+
+      // ========== DRAFT FAMILY ==========
+
+      case 'draft_followup_message': {
+        const contact = await this.prisma.client.contact.findFirst({
+          where: { id: args.contactId, businessId, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true, email: true, status: true, companyName: true },
+        });
+        if (!contact) throw new Error('Contact not found');
+
+        const recentNotes = await this.prisma.client.contactNote.findMany({
+          where: { contactId: args.contactId, businessId },
+          orderBy: { createdAt: 'desc' },
+          take: 3,
+          select: { body: true, createdAt: true },
+        });
+
+        const name = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || contact.email || 'there';
+        const channel = args.channel ?? 'email';
+        const tone = args.tone ?? 'friendly';
+        const notesCtx = recentNotes.map(n => n.body).join('\n') || 'No recent notes.';
+
+        const result = await this.aiUsage.callAi({
+          businessId,
+          feature: 'flow_draft_followup',
+          messages: [
+            { role: 'system', content: `Draft a ${tone} follow-up ${channel} message for ${name} (${contact.status}). Company: ${contact.companyName ?? 'N/A'}. Recent notes:\n${notesCtx}\n\nRespond ONLY with valid JSON: {"subject":"...","body":"...","callToAction":"..."}` },
+            { role: 'user', content: `Draft a ${tone} follow-up for ${name} via ${channel}.` },
+          ],
+          maxTokens: 500,
+          temperature: 0.6,
+          outputCategory: 'messages',
+        });
+
+        try {
+          const parsed = JSON.parse(result.content);
+          return { subject: parsed.subject ?? '', body: parsed.body ?? '', channel, contactName: name };
+        } catch {
+          return { subject: `Follow up with ${name}`, body: result.content, channel, contactName: name };
+        }
+      }
+
+      case 'draft_campaign_bundle': {
+        const objective = args.objective;
+        const audience = args.audience ?? 'all contacts';
+        const tone = args.tone ?? 'professional';
+
+        const business = await this.prisma.client.business.findUnique({
+          where: { id: businessId },
+          select: { name: true, industry: true },
+        });
+
+        const result = await this.aiUsage.callAi({
+          businessId,
+          feature: 'flow_draft_campaign',
+          messages: [
+            { role: 'system', content: `You are a Caribbean marketing expert. Draft a campaign bundle for "${business?.name ?? 'this business'}" (${business?.industry ?? 'general'}).\nObjective: ${objective}\nAudience: ${audience}\nTone: ${tone}\n\nRespond ONLY with valid JSON: {"name":"...","subject":"...","preheader":"...","body":"...","callToAction":"...","suggestedSendTime":"..."}` },
+            { role: 'user', content: `Create a ${tone} campaign for: ${objective}` },
+          ],
+          maxTokens: 800,
+          temperature: 0.7,
+          outputCategory: 'messages',
+        });
+
+        try {
+          const parsed = JSON.parse(result.content);
+          return { subject: parsed.subject ?? objective, body: parsed.body ?? '', cta: parsed.callToAction ?? '', audience };
+        } catch {
+          return { subject: objective, body: result.content, cta: '', audience };
+        }
+      }
+
+      case 'draft_payment_reminder': {
+        const invoice = await this.prisma.client.invoice.findFirst({
+          where: { id: args.invoiceId, businessId, deletedAt: null },
+          include: {
+            contact: { select: { firstName: true, lastName: true, email: true } },
+            business: { select: { name: true } },
+          },
+        });
+        if (!invoice) throw new Error('Invoice not found');
+
+        const contactName = invoice.contact ? `${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`.trim() || invoice.contact.email || 'Customer' : 'Customer';
+        const now = new Date();
+        const daysOverdue = invoice.dueDate ? Math.max(0, Math.floor((now.getTime() - new Date(invoice.dueDate).getTime()) / 86400000)) : 0;
+        const urgency = args.urgency ?? (daysOverdue > 14 ? 'firm' : 'gentle');
+
+        const result = await this.aiUsage.callAi({
+          businessId,
+          feature: 'flow_draft_reminder',
+          messages: [
+            { role: 'system', content: `Draft a ${urgency} payment reminder for invoice #${invoice.invoiceNumber} ($${invoice.total} ${invoice.currency}) to ${contactName}. Days overdue: ${daysOverdue}. Business: ${invoice.business?.name ?? 'our business'}.\n\nRespond ONLY with valid JSON: {"subject":"...","body":"...","tone":"${urgency}"}` },
+            { role: 'user', content: `Draft a ${urgency} payment reminder for invoice #${invoice.invoiceNumber}.` },
+          ],
+          maxTokens: 500,
+          temperature: 0.5,
+          outputCategory: 'messages',
+        });
+
+        try {
+          const parsed = JSON.parse(result.content);
+          return { subject: parsed.subject ?? `Payment Reminder - #${invoice.invoiceNumber}`, body: parsed.body ?? '', invoiceNumber: invoice.invoiceNumber, amountDue: Number(invoice.total) };
+        } catch {
+          return { subject: `Payment Reminder - #${invoice.invoiceNumber}`, body: result.content, invoiceNumber: invoice.invoiceNumber, amountDue: Number(invoice.total) };
+        }
+      }
+
+      case 'draft_storefront_copy': {
+        const product = await this.prisma.client.product.findFirst({
+          where: { id: args.productId, businessId, deletedAt: null },
+          select: { id: true, name: true, description: true, price: true, category: true, currency: true },
+        });
+        if (!product) throw new Error('Product not found');
+
+        const style = args.style ?? 'benefit-focused';
+        const result = await this.aiUsage.callAi({
+          businessId,
+          feature: 'flow_draft_storefront',
+          messages: [
+            { role: 'system', content: `Write ${style} storefront copy for "${product.name}" ($${product.price} ${product.currency}, category: ${product.category}). Current description: "${product.description ?? 'None'}".\n\nRespond ONLY with valid JSON: {"headline":"...","description":"...","bulletPoints":["..."],"seoMetaDescription":"..."}` },
+            { role: 'user', content: `Write ${style} product copy for "${product.name}".` },
+          ],
+          maxTokens: 600,
+          temperature: 0.7,
+          outputCategory: 'general',
+        });
+
+        try {
+          const parsed = JSON.parse(result.content);
+          return { productName: product.name, description: parsed.description ?? '', tagline: parsed.headline ?? product.name };
+        } catch {
+          return { productName: product.name, description: result.content, tagline: product.name };
+        }
+      }
+
+      case 'draft_project_update': {
+        const project = await this.prisma.client.project.findFirst({
+          where: { id: args.projectId, businessId, deletedAt: null },
+          include: {
+            tasks: {
+              where: { deletedAt: null },
+              select: { title: true, isCompleted: true, dueDate: true },
+              orderBy: { sortOrder: 'asc' },
+            },
+          },
+        });
+        if (!project) throw new Error('Project not found');
+
+        const totalTasks = project.tasks.length;
+        const completedTasks = project.tasks.filter(t => t.isCompleted).length;
+        const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+        const includeTimeline = args.includeTimeline !== false;
+
+        const taskSummary = project.tasks.slice(0, 10).map(t => `- ${t.isCompleted ? '✓' : '○'} ${t.title}${t.dueDate ? ` (due ${new Date(t.dueDate).toLocaleDateString('en-TT')})` : ''}`).join('\n');
+
+        const result = await this.aiUsage.callAi({
+          businessId,
+          feature: 'flow_draft_project_update',
+          messages: [
+            { role: 'system', content: `Draft a professional project status update for "${project.name}" (${project.status}, ${progress}% complete, ${completedTasks}/${totalTasks} tasks done).${includeTimeline ? `\nTasks:\n${taskSummary}` : ''}\n\nRespond ONLY with valid JSON: {"subject":"...","body":"...","nextSteps":["..."]}` },
+            { role: 'user', content: `Draft a client-facing update for project "${project.name}".` },
+          ],
+          maxTokens: 600,
+          temperature: 0.6,
+          outputCategory: 'messages',
+        });
+
+        try {
+          const parsed = JSON.parse(result.content);
+          return { subject: parsed.subject ?? `Update: ${project.name}`, body: parsed.body ?? '', projectName: project.name, progress };
+        } catch {
+          return { subject: `Update: ${project.name}`, body: result.content, projectName: project.name, progress };
+        }
+      }
+
+      // ========== ORGANIZE FAMILY ==========
+
+      case 'create_task': {
+        const contact = await this.prisma.client.contact.findFirst({
+          where: { id: args.contactId, businessId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!contact) throw new Error('Contact not found');
+        const task = await this.prisma.client.contactTask.create({
+          data: {
+            businessId,
+            contactId: args.contactId,
+            title: args.title,
+            dueDate: args.dueDate ? new Date(args.dueDate) : null,
+            priority: args.priority ?? 'MEDIUM',
+            status: 'OPEN',
+            source: 'flow_ai',
+          },
+        });
+        return { id: task.id, title: task.title, contactId: task.contactId };
+      }
+
+      case 'create_followup_queue': {
+        const staleDays = args.staleDays ?? 14;
+        const maxContacts = Math.min(args.maxContacts ?? 20, 50);
+        const titleTemplate = args.taskTitle ?? 'Follow up with {name}';
+        const cutoff = new Date(Date.now() - staleDays * 86400000);
+
+        const staleContacts = await this.prisma.client.contact.findMany({
+          where: { businessId, deletedAt: null, status: { in: ['LEAD', 'PROSPECT'] }, updatedAt: { lt: cutoff } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+          take: maxContacts,
+          orderBy: { updatedAt: 'asc' },
+        });
+
+        const createdTasks = [];
+        for (const c of staleContacts) {
+          const name = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || c.email || 'Contact';
+          const task = await this.prisma.client.contactTask.create({
+            data: {
+              businessId,
+              contactId: c.id,
+              title: titleTemplate.replace('{name}', name),
+              priority: 'HIGH',
+              status: 'OPEN',
+              source: 'flow_ai',
+              dueDate: new Date(Date.now() + 2 * 86400000),
+            },
+          });
+          createdTasks.push({ taskId: task.id, contactId: c.id, contactName: name });
+        }
+
+        return { created: createdTasks.length, contacts: createdTasks };
+      }
+
+      case 'tag_contact': {
+        const contact = await this.prisma.client.contact.findFirst({
+          where: { id: args.contactId, businessId, deletedAt: null },
+          select: { id: true, tags: true },
+        });
+        if (!contact) throw new Error('Contact not found');
+
+        const existingTags = contact.tags ?? [];
+        const newTags = Array.isArray(args.tags) ? args.tags : [args.tags];
+        const mergedTags = [...new Set([...existingTags, ...newTags])];
+
+        const updated = await this.prisma.client.contact.update({
+          where: { id: args.contactId },
+          data: { tags: mergedTags },
+          select: { id: true, firstName: true, lastName: true, tags: true },
+        });
+
+        return { contactId: updated.id, tags: mergedTags };
+      }
+
+      case 'segment_contacts': {
+        const where: any = { businessId, deletedAt: null };
+        if (args.status) where.status = args.status;
+        if (args.tag) where.tags = { has: args.tag };
+
+        let contacts = await this.prisma.client.contact.findMany({
+          where,
+          select: { id: true, firstName: true, lastName: true, email: true, status: true },
+        });
+
+        if (args.minSpend) {
+          const spenders = await this.prisma.client.invoice.groupBy({
+            by: ['contactId'],
+            where: { businessId, deletedAt: null, status: 'PAID' },
+            _sum: { total: true },
+            having: { total: { _sum: { gte: args.minSpend } } },
+          });
+          const spenderIds = new Set(spenders.map(s => s.contactId));
+          contacts = contacts.filter(c => spenderIds.has(c.id));
+        }
+
+        return {
+          segmentName: args.name,
+          criteria: args.criteria ?? `Status: ${args.status ?? 'any'}, Tag: ${args.tag ?? 'any'}, Min Spend: ${args.minSpend ?? 'any'}`,
+          matchedCount: contacts.length,
+          contacts: contacts.slice(0, 50),
+        };
+      }
+
+      case 'schedule_action': {
+        let parsedPayload = null;
+        if (args.payload) {
+          try { parsedPayload = JSON.parse(args.payload); }
+          catch { parsedPayload = { raw: args.payload }; }
+        }
+        const scheduledAction = await this.prisma.client.activity.create({
+          data: {
+            businessId,
+            module: 'ai',
+            action: 'scheduled_action',
+            entityType: args.actionType,
+            entityId: args.targetId ?? null,
+            title: args.description,
+            detail: JSON.stringify({
+              actionType: args.actionType,
+              scheduledFor: args.scheduledFor,
+              payload: parsedPayload,
+              status: 'scheduled',
+            }),
+            tone: 'info',
+          },
+        });
+
+        return {
+          id: scheduledAction.id,
+          actionType: args.actionType,
+          scheduledFor: args.scheduledFor,
+          description: args.description,
+          status: 'scheduled',
+        };
+      }
+
+      // ========== EXECUTE FAMILY ==========
+
+      case 'queue_campaign': {
+        const campaign = await this.prisma.client.emailCampaign.findFirst({
+          where: { id: args.campaignId, businessId },
+        });
+        if (!campaign) throw new Error('Campaign not found');
+        if (campaign.status !== 'DRAFT') throw new Error(`Campaign must be in DRAFT status to queue (current: ${campaign.status})`);
+
+        const sendDate = new Date(args.scheduledAt);
+        if (isNaN(sendDate.getTime())) throw new Error('Invalid scheduledAt date format');
+
+        const updated = await this.prisma.client.emailCampaign.update({
+          where: { id: args.campaignId },
+          data: { status: 'SCHEDULED', scheduledAt: sendDate },
+        });
+
+        return { id: updated.id, name: updated.name, status: updated.status, scheduledAt: updated.scheduledAt };
+      }
+
+      case 'send_message_with_approval': {
+        const contact = await this.prisma.client.contact.findFirst({
+          where: { id: args.contactId, businessId, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        });
+        if (!contact) throw new Error('Contact not found');
+
+        const note = await this.prisma.client.contactNote.create({
+          data: {
+            contactId: args.contactId,
+            businessId,
+            body: `[${args.channel.toUpperCase()} Draft]\nSubject: ${args.subject ?? 'N/A'}\n\n${args.body}`,
+            source: 'flow_ai',
+          },
+        });
+
+        await this.prisma.client.activity.create({
+          data: {
+            businessId,
+            module: 'ai',
+            action: 'message_queued',
+            entityType: 'contact',
+            entityId: args.contactId,
+            title: `Message queued for ${contact.firstName ?? ''} ${contact.lastName ?? ''} via ${args.channel}`,
+            detail: args.body.slice(0, 200),
+            tone: 'info',
+          },
+        });
+
+        return {
+          id: note.id,
+          contactName: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim(),
+          channel: args.channel,
+          status: 'queued_for_review',
+        };
+      }
+
+      case 'apply_storefront_recommendation': {
+        const product = await this.prisma.client.product.findFirst({
+          where: { id: args.productId, businessId, deletedAt: null },
+        });
+        if (!product) throw new Error('Product not found');
+
+        const updateData: Record<string, any> = {};
+        if (args.description !== undefined) updateData.description = args.description;
+        if (args.price !== undefined) updateData.price = args.price;
+        if (args.category !== undefined) updateData.category = args.category;
+
+        if (Object.keys(updateData).length === 0) throw new Error('No updates specified');
+
+        const updated = await this.prisma.client.product.update({
+          where: { id: args.productId },
+          data: updateData,
+        });
+
+        return {
+          id: updated.id,
+          name: updated.name,
+          fieldsUpdated: Object.keys(updateData),
+        };
+      }
+
+      case 'enable_flow_with_approval': {
+        const playbook = await this.prisma.client.automation.findFirst({
+          where: { id: args.playbookId, businessId, deletedAt: null },
+        });
+        if (!playbook) throw new Error('Playbook not found');
+
+        const updated = await this.prisma.client.automation.update({
+          where: { id: args.playbookId },
+          data: { enabled: true },
+        });
+
+        return { id: updated.id, name: updated.name, status: updated.enabled ? 'ACTIVE' : 'INACTIVE' };
+      }
+
+      case 'update_status_with_confirmation': {
+        const entityType = args.entityType;
+        const ids: string[] = Array.isArray(args.ids) ? args.ids : [args.ids];
+        const newStatus = args.newStatus;
+
+        if (entityType === 'contact') {
+          const result = await this.prisma.client.contact.updateMany({
+            where: { id: { in: ids }, businessId, deletedAt: null },
+            data: { status: newStatus },
+          });
+          return { entityType, updatedCount: result.count, newStatus };
+        }
+
+        if (entityType === 'invoice') {
+          const updateData: any = { status: newStatus };
+          if (newStatus === 'PAID') updateData.paidAt = new Date();
+          const result = await this.prisma.client.invoice.updateMany({
+            where: { id: { in: ids }, businessId, deletedAt: null },
+            data: updateData,
+          });
+          return { entityType, updatedCount: result.count, newStatus };
+        }
+
+        throw new Error(`Unsupported entity type: ${entityType}`);
+      }
+
+      default:
+        throw new Error(`Unknown tool: ${toolName}`);
+    }
+  }
+
+  private describeToolCall(toolName: string, args: Record<string, any>): string {
+    switch (toolName) {
+      case 'crm_delete_contact':
+        return `Delete contact (ID: ${args.contactId})`;
+      case 'commerce_delete_invoice':
+        return `Delete invoice (ID: ${args.invoiceId})`;
+      case 'bookings_cancel_booking':
+        return `Cancel booking (ID: ${args.bookingId})`;
+      case 'marketing_send_campaign':
+        return `Send email campaign (ID: ${args.campaignId}) to all eligible contacts`;
+      case 'social_publish_post':
+        return `Publish social media post (ID: ${args.postId}) to connected channels`;
+      case 'queue_campaign':
+        return `Queue campaign (ID: ${args.campaignId}) for sending at ${args.scheduledAt}`;
+      case 'send_message_with_approval':
+        return `Send ${args.channel} message to contact (ID: ${args.contactId})`;
+      case 'apply_storefront_recommendation':
+        return `Update storefront product (ID: ${args.productId})`;
+      case 'enable_flow_with_approval':
+        return `Enable automation playbook (ID: ${args.playbookId})`;
+      case 'update_status_with_confirmation':
+        return `Bulk-update ${args.ids?.length ?? 0} ${args.entityType}(s) to status "${args.newStatus}"`;
+      case 'create_followup_queue':
+        return `Create follow-up tasks for stale contacts (${args.staleDays ?? 14}+ days inactive)`;
+      default:
+        return `Execute ${toolName.replace(/_/g, ' ')}`;
+    }
+  }
+
+  private formatToolSuccess(toolName: string, result: any): string {
+    switch (toolName) {
+      case 'crm_create_contact':
+        return `Contact created: ${result?.contact?.firstName ?? ''} ${result?.contact?.lastName ?? ''}.`;
+      case 'commerce_create_invoice':
+        return `Invoice ${result?.invoiceNumber ?? ''} created.`;
+      case 'bookings_create_booking':
+        return `Booking confirmed (ID: ${result?.id ?? ''}).`;
+      case 'marketing_send_campaign':
+        return `Campaign sent successfully.`;
+      case 'social_publish_post':
+        return `Post published.`;
+      case 'bookings_cancel_booking':
+        return `Booking cancelled.`;
+      case 'crm_delete_contact':
+        return `Contact deleted.`;
+      case 'create_task':
+        return `Task created: "${result?.title ?? ''}".`;
+      case 'create_followup_queue':
+        return `Created ${result?.created ?? 0} follow-up tasks.`;
+      case 'tag_contact':
+        return `Tags updated for contact.`;
+      case 'segment_contacts':
+        return `Segment "${result?.segmentName ?? ''}" matched ${result?.matchedCount ?? 0} contacts.`;
+      case 'queue_campaign':
+        return `Campaign queued for sending.`;
+      case 'send_message_with_approval':
+        return `Message queued for ${result?.contactName ?? 'contact'} via ${result?.channel ?? 'email'}.`;
+      case 'apply_storefront_recommendation':
+        return `Product updated: ${result?.fieldsUpdated?.join(', ') ?? 'fields'} changed.`;
+      case 'enable_flow_with_approval':
+        return `Playbook "${result?.name ?? ''}" enabled.`;
+      case 'update_status_with_confirmation':
+        return `Updated ${result?.updatedCount ?? 0} ${result?.entityType ?? 'entity'}(s) to "${result?.newStatus ?? ''}".`;
+      default:
+        return 'Action completed.';
+    }
+  }
+
+  async getConversationHistory(businessId: string, sessionId: string): Promise<FlowMessage[]> {
+    const session = await this.prisma.client.flowSession.findFirst({
+      where: { id: sessionId, businessId },
+      select: { messages: true },
+    });
+    if (!session) return [];
+    return (session.messages as any[]) || [];
+  }
+
+  async saveConversationHistory(businessId: string, sessionId: string, messages: FlowMessage[]): Promise<void> {
+    await this.prisma.client.flowSession.upsert({
+      where: { id: sessionId },
+      create: { id: sessionId, businessId, messages: messages as any },
+      update: { messages: messages as any, updatedAt: new Date() },
+    });
+  }
+
+  async listSessions(businessId: string) {
+    return this.prisma.client.flowSession.findMany({
+      where: { businessId },
+      orderBy: { updatedAt: 'desc' },
+      take: 20,
+      select: { id: true, createdAt: true, updatedAt: true, messages: true },
+    });
+  }
+
+  async clearSession(businessId: string, sessionId: string) {
+    await this.prisma.client.flowSession.updateMany({
+      where: { id: sessionId, businessId },
+      data: { messages: [] },
+    });
+  }
+
+  async deleteSession(businessId: string, sessionId: string) {
+    await this.prisma.client.flowSession.deleteMany({
+      where: { id: sessionId, businessId },
+    });
+  }
+
+  async executePlan(businessId: string, planId: string): Promise<{
+    planId: string;
+    status: string;
+    stepsExecuted: number;
+    stepsFailed: number;
+    stepsSkipped: number;
+    results: Array<{ stepId: string; action: string; status: string; error?: string }>;
+  }> {
+    const plan = await this.prisma.client.aiPlan.findFirst({
+      where: { id: planId, businessId },
+      include: { steps: { orderBy: { order: 'asc' } } },
+    });
+    if (!plan) throw new NotFoundException(`Plan ${planId} not found`);
+    if (plan.status !== 'approved') {
+      throw new BadRequestException(`Plan must be in "approved" state to execute (current: "${plan.status}"). Approve the plan first.`);
+    }
+
+    await this.planner.updatePlanStatus(planId, businessId, 'executing');
+
+    await this.executionLog.log({
+      businessId,
+      action: 'plan:start',
+      module: 'planner',
+      riskTier: plan.maxRiskTier,
+      mode: 'plan_execution',
+      actor: 'flow',
+      rationale: `Executing plan: ${plan.objective}`,
+      planId,
+      success: true,
+    });
+
+    const results: Array<{ stepId: string; action: string; status: string; error?: string }> = [];
+    let stepsExecuted = 0;
+    let stepsFailed = 0;
+    let stepsSkipped = 0;
+    const completedStepIds = new Set<string>();
+
+    for (const step of plan.steps) {
+      if (step.dependsOn.length > 0) {
+        const depsOk = step.dependsOn.every(depId => completedStepIds.has(depId));
+        if (!depsOk) {
+          await this.planner.updateStepStatus(step.id, 'skipped', null, 'Dependency not met');
+          stepsSkipped++;
+          results.push({ stepId: step.id, action: step.action, status: 'skipped', error: 'Dependency not met' });
+          continue;
+        }
+      }
+
+      if (step.toolName) {
+        const decision = await this.governance.evaluate(businessId, step.toolName);
+        if (!decision.allowed) {
+          await this.planner.updateStepStatus(step.id, 'blocked', null, decision.reason);
+          stepsSkipped++;
+          results.push({ stepId: step.id, action: step.action, status: 'blocked', error: decision.reason });
+          continue;
+        }
+        if (decision.requiresFormalApproval) {
+          await this.governance.createApprovalItem(businessId, {
+            toolName: step.toolName,
+            title: step.action,
+            description: `${step.description ?? step.action} — requires ${decision.requiresAdminApproval ? 'admin' : 'formal'} approval (Tier ${decision.tier})`,
+            rationale: decision.reason,
+            inputPayload: step.inputPayload as Record<string, any> | undefined,
+            planId,
+            planStepId: step.id,
+          });
+          await this.planner.updateStepStatus(step.id, 'awaiting_approval');
+          stepsSkipped++;
+          results.push({ stepId: step.id, action: step.action, status: 'awaiting_approval' });
+          continue;
+        }
+        if (decision.requiresQuickConfirm) {
+          this.logger.log(`Tier 2 quick-confirm for ${step.toolName} implicitly satisfied by plan approval — proceeding`);
+        }
+      }
+
+      if (!step.toolName) {
+        await this.planner.updateStepStatus(step.id, 'completed', { note: 'No tool to execute — informational step' });
+        completedStepIds.add(step.id);
+        stepsExecuted++;
+        results.push({ stepId: step.id, action: step.action, status: 'completed' });
+        continue;
+      }
+
+      await this.planner.updateStepStatus(step.id, 'executing');
+      const startTime = Date.now();
+
+      try {
+        const toolResult = await this.executeTool(
+          businessId,
+          step.toolName,
+          (step.inputPayload as Record<string, any>) ?? {},
+          undefined,
+          { planId, planStepId: step.id },
+        );
+        const durationMs = Date.now() - startTime;
+
+        if (toolResult.success) {
+          await this.planner.updateStepStatus(step.id, 'completed', toolResult.result, undefined, durationMs);
+          completedStepIds.add(step.id);
+          stepsExecuted++;
+          results.push({ stepId: step.id, action: step.action, status: 'completed' });
+        } else {
+          await this.planner.updateStepStatus(step.id, 'failed', null, toolResult.error, durationMs);
+          stepsFailed++;
+          results.push({ stepId: step.id, action: step.action, status: 'failed', error: toolResult.error });
+        }
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const durationMs = Date.now() - startTime;
+        await this.planner.updateStepStatus(step.id, 'failed', null, errorMessage, durationMs);
+        stepsFailed++;
+        results.push({ stepId: step.id, action: step.action, status: 'failed', error: errorMessage });
+      }
+    }
+
+    const finalStatus = stepsFailed > 0 ? 'partial' : stepsSkipped > 0 ? 'partial' : 'completed';
+    await this.planner.updatePlanStatus(planId, businessId, finalStatus);
+
+    await this.executionLog.log({
+      businessId,
+      action: 'plan:complete',
+      module: 'planner',
+      mode: 'plan_execution',
+      actor: 'flow',
+      rationale: `Plan finished: ${stepsExecuted} executed, ${stepsFailed} failed, ${stepsSkipped} skipped`,
+      planId,
+      success: stepsFailed === 0,
+    });
+
+    this.businessGraph.invalidateCache(businessId);
+
+    return { planId, status: finalStatus, stepsExecuted, stepsFailed, stepsSkipped, results };
+  }
+
+  async executeToolDirect(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+    planId?: string,
+    planStepId?: string,
+  ): Promise<FlowToolResult> {
+    const planContext = planId && planStepId ? { planId, planStepId } : undefined;
+    return this.executeTool(businessId, toolName, args, undefined, planContext);
+  }
+
+  async autoExecuteToolForMonitoring(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+  ): Promise<{ success: boolean; result?: any; error?: string; blocked?: boolean }> {
+    const decision = await this.governance.evaluate(businessId, toolName, 'pro_auto');
+    if (!decision.allowed) {
+      return { success: false, error: decision.reason || `Tool ${toolName} blocked by governance`, blocked: true };
+    }
+
+    const startTime = Date.now();
+    try {
+      this.validateToolInput(toolName, args);
+      const rawResult = await this.executeToolAction(businessId, toolName, args);
+      const envelope = wrapToolResult(toolName, rawResult);
+      const durationMs = Date.now() - startTime;
+      const tier = this.governance.getToolTier(toolName);
+      this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
+        riskTier: tier,
+        mode: 'pro_auto',
+        rationale: 'Auto-executed by Pro Auto monitoring engine (governance approved)',
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      this.businessGraph.invalidateCache(businessId);
+      return { success: true, result: envelope.result };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      const tier = this.governance.getToolTier(toolName);
+      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+        riskTier: tier,
+        mode: 'pro_auto',
+        rationale: 'Auto-execution attempt by Pro Auto monitoring engine',
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log auto-execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      return { success: false, error: (error as Error).message };
+    }
+  }
+}

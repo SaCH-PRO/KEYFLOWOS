@@ -1,10 +1,10 @@
 import { Type } from 'class-transformer';
-import { IsISO8601, IsNotEmpty, IsString } from 'class-validator';
+import { IsISO8601, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateBookingDto {
   @IsString()
-  @IsNotEmpty()
-  contactId!: string;
+  @IsOptional()
+  contactId?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -21,4 +21,8 @@ export class CreateBookingDto {
   @IsISO8601()
   @Type(() => Date)
   endTime!: Date;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
 }

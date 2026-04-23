@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CreateProductDto {
   @IsString()
@@ -15,4 +15,24 @@ export class CreateProductDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsString()
+  @IsOptional()
+  category?: string; // SERVICE, PRODUCT, PACKAGE
+
+  @IsNumber()
+  @IsOptional()
+  duration?: number; // Duration in minutes (for services)
+
+  @IsString()
+  @IsOptional()
+  imageUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  sku?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 }

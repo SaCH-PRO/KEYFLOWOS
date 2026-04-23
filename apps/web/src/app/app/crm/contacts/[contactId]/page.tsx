@@ -3,7 +3,11 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useNavigationContext } from "@/lib/navigation-context";
+import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { Badge, Button, Input } from "@keyflow/ui";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Contact,
   ContactPlaybook,
@@ -20,6 +24,7 @@ import {
   fetchContactPlaybook,
   updateContactPlaybook,
 } from "@/lib/client";
+import { loadInterruptedTasks, markSourceChanged } from "@/lib/resume-task-registry";
 
 type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[] };
 type TaskWithContactTags = Omit<ContactTask, "contact"> & { contact?: ContactWithTags | null };
@@ -48,6 +53,7 @@ export default function ContactDetailPage() {
   const params = useParams();
   const router = useRouter();
   const isMobile = useIsMobile();
+  const { setCurrentMeta, getOriginContext } = useNavigationContext();
   const contactId = params?.contactId as string;
   const [data, setData] = useState<Detail | null>(null);
   const [noteBody, setNoteBody] = useState("");
@@ -67,6 +73,7 @@ export default function ContactDetailPage() {
   const [eventFilter, setEventFilter] = useState<string>("ALL");
   const [notesQuery, setNotesQuery] = useState("");
   const [playbookEdit, setPlaybookEdit] = useState(false);
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
 
   const normalizeContact = useCallback(
     (contact?: Contact | null): ContactWithTags | null => (contact ? { ...contact, tags: contact.tags ?? [] } : null),
@@ -111,16 +118,26 @@ export default function ContactDetailPage() {
       setEventFilter("ALL");
       setNotesQuery("");
       setPlaybookEdit(false);
+      if (normalized?.contact) {
+        const c = normalized.contact;
+        const label = `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.email || "Contact";
+        setCurrentMeta({ selectedEntityId: contactId, selectedEntityLabel: label });
+      }
     };
     if (contactId) void load();
-  }, [contactId, refreshDetail, loadPlaybook]);
+  }, [contactId, refreshDetail, loadPlaybook, setCurrentMeta]);
 
   const addNoteAction = useCallback(() => {
     if (!noteBody.trim()) return;
     startTransition(async () => {
-      await addContactNote(contactId, noteBody);
-      setNoteBody("");
-      await refreshDetail();
+      try {
+        await addContactNote(contactId, noteBody);
+        setNoteBody("");
+        await refreshDetail();
+        toast.success("Note added");
+      } catch {
+        toast.error("Failed to add note");
+      }
     });
   }, [contactId, noteBody, refreshDetail]);
 
@@ -156,23 +173,41 @@ export default function ContactDetailPage() {
       const normalized = await refreshDetail();
       setStatus(normalized?.contact?.status ?? status);
       setTags(normalized?.contact?.tags?.join(", ") ?? tags);
+      const relatedTasks = loadInterruptedTasks().filter(
+        (t) => t.draftId === contactId || t.formData?.contactId === contactId
+      );
+      relatedTasks.forEach((t) => markSourceChanged(t.id));
     });
   };
 
   const deleteAction = async () => {
-    if (!confirm("Delete this contact?")) return;
-    startTransition(async () => {
-      await deleteContact(contactId);
-      router.push("/app/crm/pipeline");
+    setConfirmState({
+      open: true,
+      action: () => {
+        startTransition(async () => {
+          try {
+            await deleteContact(contactId);
+            toast.success("Contact deleted");
+            router.push("/app/crm/pipeline");
+          } catch {
+            toast.error("Failed to delete contact");
+          }
+        });
+      },
     });
   };
 
   const mergeAction = async () => {
     if (!mergeId.trim()) return;
     startTransition(async () => {
-      await mergeContacts({ contactId, duplicateId: mergeId });
-      setMergeId("");
-      await refreshDetail();
+      try {
+        await mergeContacts({ contactId, duplicateId: mergeId });
+        setMergeId("");
+        await refreshDetail();
+        toast.success("Contacts merged");
+      } catch {
+        toast.error("Failed to merge contacts");
+      }
     });
   };
 
@@ -195,19 +230,29 @@ export default function ContactDetailPage() {
   const addTaskAction = useCallback(() => {
     if (!taskTitle.trim()) return;
     startTransition(async () => {
-      await addContactTask(contactId, taskTitle, { dueDate: taskDue || undefined, assigneeId: taskAssignee || undefined });
-      setTaskTitle("");
-      setTaskDue("");
-      setTaskAssignee("");
-      await refreshDetail();
+      try {
+        await addContactTask(contactId, taskTitle, { dueDate: taskDue || undefined, assigneeId: taskAssignee || undefined });
+        setTaskTitle("");
+        setTaskDue("");
+        setTaskAssignee("");
+        await refreshDetail();
+        toast.success("Task added");
+      } catch {
+        toast.error("Failed to add task");
+      }
     });
   }, [contactId, refreshDetail, taskAssignee, taskDue, taskTitle]);
 
   const completeTaskAction = useCallback(
     (taskId: string) => {
       startTransition(async () => {
-        await completeContactTask(taskId);
-        await refreshDetail();
+        try {
+          await completeContactTask(taskId);
+          await refreshDetail();
+          toast.success("Task completed");
+        } catch {
+          toast.error("Failed to complete task");
+        }
       });
     },
     [refreshDetail],
@@ -381,12 +426,42 @@ export default function ContactDetailPage() {
   );
 
   if (!data) return <div className="p-4 text-sm text-muted-foreground">Loading contact...</div>;
-  if (!contact) return <div className="p-4 text-sm text-muted-foreground">Contact not found.</div>;
+
+  if (!contact) {
+    const origin = getOriginContext();
+    return (
+      <div className="p-4 space-y-4">
+        {origin && (
+          <TaskContinuityHeader
+            taskLabel="Contact Detail"
+            returnHref={origin.route}
+            returnLabel={`Back to ${origin.workspace ?? "CRM"}${origin.tab ? ` › ${origin.tab}` : ""}`}
+          />
+        )}
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">Contact not found</p>
+          <p className="mt-1">This contact may have been deleted or you may not have access.</p>
+          {origin && (
+            <button
+              onClick={() => router.push(origin.route)}
+              className="mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+            >
+              ← Return to {origin.workspace ?? "CRM"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const c = contact;
 
   return (
     <div className="space-y-4">
+      <TaskContinuityHeader
+        taskLabel={`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.email || "Contact"}
+        returnHref={getOriginContext()?.route ?? "/app/crm/pipeline"}
+      />
       <div className="flex items-start justify-between gap-3 md:sticky md:top-0 md:bg-slate-950/80 md:backdrop-blur md:p-2 md:rounded-xl md:z-10">
         <div>
           <h1 className="text-xl font-semibold">{`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}</h1>
@@ -514,6 +589,42 @@ export default function ContactDetailPage() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-2">
+        <div className="text-sm font-semibold">Quick Actions</div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/commerce?tab=invoices&contactId=${contactId}`)}
+          >
+            Create Invoice
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/commerce?tab=quotes&contactId=${contactId}`)}
+          >
+            Create Quote
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/bookings?contactId=${contactId}`)}
+          >
+            Book Appointment
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/projects?contactId=${contactId}`)}
+          >
+            Create Project
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/app/marketing?tab=campaigns&contactId=${contactId}`)}
+          >
+            Create Campaign
+          </Button>
+        </div>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-3">
           <div className="flex gap-2">
@@ -535,6 +646,15 @@ export default function ContactDetailPage() {
           ))}
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Delete Contact"
+        message="Are you sure you want to delete this contact?"
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}})}
+      />
     </div>
   );
 }

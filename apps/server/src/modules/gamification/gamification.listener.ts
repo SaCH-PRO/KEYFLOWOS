@@ -1,13 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { BookingCreatedPayload, InvoicePaidPayload, PostPublishedPayload } from '../../core/event-bus/events.types';
+import { BookingCreatedPayload, InvoicePaidPayload, PostPublishedPayload, ProductCreatedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
 export class GamificationListener {
   private readonly logger = new Logger(GamificationListener.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   @OnEvent('invoice.paid')
   async handleInvoicePaid(payload: InvoicePaidPayload) {
@@ -62,6 +62,24 @@ export class GamificationListener {
         data: { metaData: { ...metaData, firstBooking: true } },
       });
       this.logger.debug(`Gamification: marked firstBooking for business ${payload.businessId}`);
+    }
+  }
+
+  @OnEvent('product.created')
+  async handleProductCreated(payload: ProductCreatedPayload) {
+    this.logger.debug(`Gamification observed product.created`, payload as any);
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: payload.businessId },
+      select: { metaData: true },
+    });
+    if (!business) return;
+    const metaData = (business.metaData as Record<string, unknown>) || {};
+    if (!metaData.firstProductCreated) {
+      await this.prisma.client.business.update({
+        where: { id: payload.businessId },
+        data: { metaData: { ...metaData, firstProductCreated: true } },
+      });
+      this.logger.debug(`Gamification: marked firstProductCreated for business ${payload.businessId}`);
     }
   }
 }

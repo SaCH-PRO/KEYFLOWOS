@@ -30,10 +30,11 @@ describe('IdentityService', () => {
     await service.createBusiness({ name: 'Beta', ownerId: 'user_2' });
 
     const owned = await service.listBusinesses('user_1');
-    const all = await service.listBusinesses(undefined);
+    const user2Businesses = await service.listBusinesses('user_2');
 
     expect(owned).toHaveLength(1);
     expect(owned[0].name).toBe('Acme');
-    expect(all).toHaveLength(2);
+    expect(user2Businesses).toHaveLength(1);
+    expect(user2Businesses[0].name).toBe('Beta');
   });
 });

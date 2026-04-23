@@ -1,0 +1,1843 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Lightbulb, Rocket, Settings, TrendingUp, ChevronRight,
+  Sparkles, Target, DollarSign, BarChart3,
+  FileText, Calendar,
+  CheckCircle2, ArrowRight, Zap, Brain, Loader2,
+  X, ArrowLeft, AlertTriangle, Shield,
+  Briefcase, Flag, Pencil, Save, ExternalLink,
+  Plus, FolderOpen, Download, Mail, Printer, HardDrive,
+  Eye, Award, ClipboardList, Activity,
+  BookOpen, Scale, Gauge,
+} from "lucide-react";
+import { apiGet, apiPatch, apiPost, apiPostSimple, apiPut } from "@/lib/api";
+import { getStoredBusinessId } from "@/lib/workspace";
+import type {
+  ProgressKey, Phase, BusinessModelCanvas,
+  RoadmapPhase, ActionItem, Risk, FinancialOutlook,
+  CompetitiveAnalysis, UnitEconomics, ExecutiveBrief,
+  AssumptionEntry, GovernanceFramework, QualityScore,
+  GeneratedModel, IntakeForm,
+} from "./business-builder-types";
+import {
+  DOCUMENT_SLUG_NAMES, MODULE_ROUTES, TAB_QUICK_LINKS,
+  INTAKE_STEPS, STAGE_OPTIONS, LEGAL_STRUCTURE_OPTIONS,
+  TIMELINE_OPTIONS, INTERACTION_MODE_OPTIONS, CANVAS_LABELS,
+  PROGRESS_PHASES, INITIAL_INTAKE, safeArray, validateModel,
+} from "./business-builder-constants";
+import type { QuickLink } from "./business-builder-constants";
+
+interface ServerPlan {
+  id: string;
+  version: number;
+  name: string;
+  status: string;
+  intake: IntakeForm;
+  model: GeneratedModel;
+  createdAt: string;
+}
+
+function useBusinessProgress(businessId: string | null) {
+  const [progress, setProgress] = useState<Record<ProgressKey, boolean> | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!businessId) { setLoading(false); return; }
+    const settle = <T,>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> =>
+      p.then((v) => ({ ok: true as const, value: v })).catch(() => ({ ok: false as const }));
+
+    Promise.all([
+      settle(apiGet<Record<string, unknown>>(`/identity/businesses/${businessId}`)),
+      settle(apiGet<unknown[]>(`/bookings/businesses/${businessId}/services`)),
+      settle(apiGet<unknown[]>(`/crm/businesses/${businessId}/contacts?limit=1`)),
+      settle(apiGet<unknown[]>(`/commerce/businesses/${businessId}/invoices?limit=1`)),
+      settle(apiGet<unknown[]>(`/documents/businesses/${businessId}/instances`)),
+      settle(apiGet<unknown[]>(`/expenses/businesses/${businessId}?limit=1`)),
+      settle(apiGet<unknown[]>(`/projects/businesses/${businessId}?limit=1`)),
+      settle(apiGet<unknown[]>(`/bookings/businesses/${businessId}?limit=1`)),
+      settle(apiGet<unknown[]>(`/businesses/${businessId}/campaigns?limit=1`)),
+      settle(apiGet<Record<string, unknown>>(`/commerce/businesses/${businessId}/recurring-invoices?limit=1`)),
+    ]).then(([bizRes, servicesRes, contactsRes, invoicesRes, docsRes, expensesRes, projectsRes, bookingsRes, campaignsRes, recurringRes]) => {
+      const biz = bizRes.ok ? (bizRes.value.data as Record<string, unknown> | null) : null;
+      const hasRecurringData = recurringRes.ok && recurringRes.value.data;
+      const recurringArr = hasRecurringData ? safeArray(
+        Array.isArray(recurringRes.value.data) ? recurringRes.value.data : (recurringRes.value.data as Record<string, unknown>)?.invoices
+      ) : [];
+      setProgress({
+        hasProfile: !!(biz?.name && biz?.industry),
+        hasServices: safeArray(servicesRes.ok ? servicesRes.value.data : []).length > 0,
+        hasStore: !!biz?.storeEnabled,
+        storeEnabled: !!biz?.storeEnabled,
+        hasDocs: safeArray(docsRes.ok ? docsRes.value.data : []).length > 0,
+        hasContacts: safeArray(contactsRes.ok ? contactsRes.value.data : []).length > 0,
+        hasBookings: safeArray(bookingsRes.ok ? bookingsRes.value.data : []).length > 0,
+        hasInvoices: safeArray(invoicesRes.ok ? invoicesRes.value.data : []).length > 0,
+        hasExpenses: safeArray(expensesRes.ok ? expensesRes.value.data : []).length > 0,
+        hasProjects: safeArray(projectsRes.ok ? projectsRes.value.data : []).length > 0,
+        hasSequences: false,
+        hasRecurring: recurringArr.length > 0,
+        hasCampaigns: safeArray(campaignsRes.ok ? campaignsRes.value.data : []).length > 0,
+        hasReports: safeArray(invoicesRes.ok ? invoicesRes.value.data : []).length > 0 || safeArray(expensesRes.ok ? expensesRes.value.data : []).length > 0,
+        hasAI: safeArray(docsRes.ok ? docsRes.value.data : []).length > 0 || safeArray(contactsRes.ok ? contactsRes.value.data : []).length > 0,
+        hasAutomations: false,
+      });
+      setLoading(false);
+    });
+  }, [businessId]);
+
+  return { progress, loading };
+}
+
+type ViewMode = "overview" | "intake" | "results";
+type ResultTab = "overview" | "canvas" | "swot" | "financials" | "roadmap" | "actions" | "risks" | "governance";
+
+export default function BusinessBuilderCard() {
+  const router = useRouter();
+  const businessId = typeof window !== "undefined" ? getStoredBusinessId() : null;
+  const { progress, loading: progressLoading } = useBusinessProgress(businessId);
+
+  const [viewMode, setViewMode] = useState<ViewMode>("overview");
+  const [intakeStep, setIntakeStep] = useState(0);
+  const [intakeForm, setIntakeForm] = useState<IntakeForm>({ ...INITIAL_INTAKE });
+  const [formPreFilled, setFormPreFilled] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generatedModel, setGeneratedModel] = useState<GeneratedModel | null>(null);
+  const [serverPlanId, setServerPlanId] = useState<string | null>(null);
+  const [planVersion, setPlanVersion] = useState<number>(0);
+  const [resultTab, setResultTab] = useState<ResultTab>("overview");
+  const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [serverLoaded, setServerLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!businessId || serverLoaded) return;
+    apiGet<{ plan: ServerPlan | null }>(`/ai/businesses/${businessId}/ai/business-plan`)
+      .then(({ data }) => {
+        if (data?.plan) {
+          const validModel = validateModel(data.plan.model);
+          setGeneratedModel(validModel);
+          setServerPlanId(data.plan.id);
+          setPlanVersion(data.plan.version);
+          if (data.plan.intake) {
+            setIntakeForm({ ...INITIAL_INTAKE, ...data.plan.intake });
+            setFormPreFilled(true);
+          }
+        }
+        setServerLoaded(true);
+      })
+      .catch((err) => {
+        console.error("Failed to load business plan:", err);
+        setServerLoaded(true);
+      });
+  }, [businessId, serverLoaded]);
+
+  useEffect(() => {
+    if (!businessId || formPreFilled || !serverLoaded) return;
+    apiGet<Record<string, unknown>>(`/identity/businesses/${businessId}`)
+      .then(({ data }) => {
+        if (!data) return;
+        const biz = data as Record<string, string | undefined>;
+
+        const ideaParts: string[] = [];
+        if (biz.businessIntent) ideaParts.push(biz.businessIntent);
+        else {
+          if (biz.name) ideaParts.push(biz.name);
+          if (biz.industry) ideaParts.push(`in the ${biz.industry.replace(/_/g, " ").toLowerCase()} industry`);
+          if (biz.description) ideaParts.push(`— ${biz.description}`);
+          else if (biz.tagline) ideaParts.push(`— ${biz.tagline}`);
+        }
+
+        const stageMap: Record<string, string> = {
+          IDEA: "IDEA", STARTUP: "STARTUP", GROWTH: "GROWING",
+          ESTABLISHED: "LAUNCHED", SCALING: "GROWING",
+        };
+
+        const ideaText = ideaParts.join(" ");
+        const hasAnyData = ideaText || biz.tagline || biz.revenueModel || biz.businessStage;
+
+        if (hasAnyData) {
+          setIntakeForm((prev) => ({
+            ...prev,
+            businessIdea: prev.businessIdea || ideaText,
+            targetMarket: prev.targetMarket || "",
+            valueProposition: prev.valueProposition || (biz.tagline || ""),
+            revenueModel: prev.revenueModel || (biz.revenueModel?.replace(/_/g, " ") || ""),
+            goals: prev.goals || "",
+            stage: prev.stage || (stageMap[biz.businessStage || ""] || ""),
+            challenges: prev.challenges || "",
+            location: prev.location || (biz.city ? `${biz.city}${biz.country ? `, ${biz.country}` : ""}` : ""),
+            industry: prev.industry || (biz.industry?.replace(/_/g, " ") || ""),
+          }));
+          setFormPreFilled(true);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to pre-fill business form:", err);
+      });
+  }, [businessId, formPreFilled, serverLoaded]);
+
+  const persistIntakeToGuidanceProfiles = useCallback(async (form: IntakeForm) => {
+    if (!businessId) return;
+    const profilePayloads: { name: string; data: Record<string, unknown> }[] = [];
+
+    if (form.salesApproach.trim()) {
+      profilePayloads.push({ name: 'sales', data: { salesProcess: form.salesApproach } });
+    }
+    if (form.marketingStrategy.trim()) {
+      profilePayloads.push({ name: 'marketingStrategy', data: { brandVoice: form.marketingStrategy } });
+    }
+    if (form.peopleStrategy.trim()) {
+      profilePayloads.push({ name: 'people', data: { companyCulture: form.peopleStrategy } });
+    }
+    if (form.technologyStack.trim()) {
+      profilePayloads.push({ name: 'technology', data: { digitalMaturity: form.technologyStack } });
+    }
+    if (form.partnerships.trim()) {
+      profilePayloads.push({ name: 'partnerships', data: { vendorRelationships: form.partnerships } });
+    }
+    if (form.intellectualProperty.trim()) {
+      profilePayloads.push({ name: 'intellectualProperty', data: { ipProtectionStrategy: form.intellectualProperty } });
+    }
+
+    const results = await Promise.allSettled(
+      profilePayloads.map(({ name, data }) =>
+        apiPatch(`/identity/businesses/${businessId}/guidance/${name}`, data)
+      )
+    );
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      console.warn(`Failed to persist ${failures.length} guidance profile(s)`);
+    }
+  }, [businessId]);
+
+  const handleGenerate = async () => {
+    if (!businessId || !intakeForm.businessIdea.trim()) return;
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await apiPost<{ success: boolean; model: GeneratedModel; error?: string }>({
+        path: `/ai/businesses/${businessId}/ai/business-model`,
+        body: intakeForm,
+      });
+      if (res.data?.success && res.data.model) {
+        const validModel = validateModel(res.data.model);
+        setGeneratedModel(validModel);
+        setPlanVersion((v) => v + 1);
+        setViewMode("results");
+        setResultTab("overview");
+        apiGet<{ plan: ServerPlan | null }>(`/ai/businesses/${businessId}/ai/business-plan`)
+          .then(({ data }) => { if (data?.plan) setServerPlanId(data.plan.id); })
+          .catch((err) => {
+            console.error("Failed to fetch generated plan id:", err);
+          });
+        persistIntakeToGuidanceProfiles(intakeForm).catch((err) => {
+          console.error("Failed to persist intake to guidance profiles:", err);
+        });
+      } else {
+        setError(res.data?.error || res.error || "Failed to generate. Please try again.");
+      }
+    } catch {
+      setError("Something went wrong. Please try again.");
+    }
+    setGenerating(false);
+  };
+
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const handleSaveEdit = async (updatedModel: GeneratedModel) => {
+    setGeneratedModel(updatedModel);
+    setSaveError(null);
+    if (serverPlanId && businessId) {
+      try {
+        await apiPut(`/ai/businesses/${businessId}/ai/business-plan/${serverPlanId}`, { model: updatedModel });
+      } catch {
+        setSaveError("Changes saved locally but failed to sync to server.");
+        setTimeout(() => setSaveError(null), 4000);
+      }
+    }
+  };
+
+  const getPhaseProgress = useCallback((phase: Phase) => {
+    if (!progress) return { done: 0, total: phase.actions.length, pct: 0 };
+    const done = phase.actions.filter((a) => progress[a.doneKey]).length;
+    return { done, total: phase.actions.length, pct: Math.round((done / phase.actions.length) * 100) };
+  }, [progress]);
+
+  const totalDone = PROGRESS_PHASES.reduce((acc, p) => acc + getPhaseProgress(p).done, 0);
+  const totalActions = PROGRESS_PHASES.reduce((acc, p) => acc + p.actions.length, 0);
+  const overallPct = Math.round((totalDone / totalActions) * 100);
+
+  if (viewMode === "intake") {
+    return <IntakeWizard
+      step={intakeStep}
+      form={intakeForm}
+      prefilled={formPreFilled}
+      generating={generating}
+      error={error}
+      onFormChange={setIntakeForm}
+      onStepChange={setIntakeStep}
+      onGenerate={handleGenerate}
+      onBack={() => { setViewMode("overview"); setIntakeStep(0); }}
+    />;
+  }
+
+  if (viewMode === "results" && generatedModel) {
+    return <ResultsPanel
+      model={generatedModel}
+      tab={resultTab}
+      version={planVersion}
+      businessId={businessId}
+      saveError={saveError}
+      onTabChange={setResultTab}
+      onBack={() => setViewMode("overview")}
+      onRegenerate={() => { setViewMode("intake"); setIntakeStep(0); }}
+      onSaveEdit={handleSaveEdit}
+    />;
+  }
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
+      <div className="p-5 relative overflow-hidden" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.08), hsl(var(--kf-accent2) / 0.06))" }}>
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-[0.03]" style={{ background: "radial-gradient(circle, hsl(var(--kf-accent1)), transparent 70%)" }} />
+        <div className="flex items-start gap-4 relative">
+          <div className="h-11 w-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))", boxShadow: "0 4px 12px hsl(var(--kf-accent1) / 0.3)" }}>
+            <Rocket className="w-5 h-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-base font-semibold text-[hsl(var(--kf-foreground))]">Business Intelligence Engine</h3>
+            <p className="text-xs text-[hsl(var(--kf-muted-foreground))] mt-0.5">Premium autonomous strategy, execution, and documentation system</p>
+          </div>
+          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+            {progressLoading ? (
+              <Loader2 className="w-5 h-5 animate-spin text-[hsl(var(--kf-muted-foreground))]" />
+            ) : (
+              <>
+                <span className="text-lg font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>{overallPct}%</span>
+                <span className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{totalDone}/{totalActions} complete</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-1.5">
+          {PROGRESS_PHASES.map((phase, i) => {
+            const { pct } = getPhaseProgress(phase);
+            const activePhaseIndex = PROGRESS_PHASES.findIndex((p) => getPhaseProgress(p).pct < 100);
+            const isActive = i === (activePhaseIndex >= 0 ? activePhaseIndex : PROGRESS_PHASES.length - 1);
+            return (
+              <div key={phase.id} className="flex-1 flex flex-col items-center gap-1.5">
+                <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted) / 0.2)" }}>
+                  <motion.div className="h-full rounded-full" style={{ background: `hsl(var(${phase.colorVar}))` }} initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.6, delay: i * 0.1 }} />
+                </div>
+                <div className="flex items-center gap-1">
+                  {isActive && <div className="w-1 h-1 rounded-full animate-pulse" style={{ background: `hsl(var(${phase.colorVar}))` }} />}
+                  <span className={`text-[9px] font-medium ${isActive ? "" : "text-[hsl(var(--kf-muted-foreground))]"}`} style={isActive ? { color: `hsl(var(${phase.colorVar}))` } : undefined}>{phase.label}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="p-4 space-y-3" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+        <button
+          onClick={() => setViewMode("intake")}
+          className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all text-left group min-h-[56px] hover:scale-[1.01]"
+          style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.1), hsl(var(--kf-accent2) / 0.06))", border: "1px solid hsl(var(--kf-accent1) / 0.2)" }}
+        >
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.15)" }}>
+            <Brain className="w-4.5 h-4.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-semibold text-[hsl(var(--kf-foreground))]">
+              {generatedModel ? "Rebuild Intelligence Package" : "Generate Intelligence Package"}
+            </span>
+            <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">
+              Premium business model, strategy, financials, governance, and execution plan
+            </p>
+          </div>
+          <ArrowRight className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))] group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
+        </button>
+
+        {generatedModel && (
+          <button
+            onClick={() => setViewMode("results")}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left group min-h-[48px]"
+            style={{ background: "hsl(var(--kf-success) / 0.06)", border: "1px solid hsl(var(--kf-success) / 0.15)" }}
+          >
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-success) / 0.12)" }}>
+              <CheckCircle2 className="w-4 h-4" style={{ color: "hsl(var(--kf-success))" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">View Intelligence Package</span>
+              <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">
+                {planVersion > 0 ? `v${planVersion} · ` : ""}
+                {generatedModel.qualityScore?.overallGrade ? `Grade ${generatedModel.qualityScore.overallGrade} · ` : ""}
+                {generatedModel.summary?.slice(0, 50)}...
+              </p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
+          </button>
+        )}
+      </div>
+
+      <div className="divide-y" style={{ borderColor: "hsl(var(--kf-border) / 0.1)" }}>
+        {PROGRESS_PHASES.map((phase) => {
+          const PhaseIcon = phase.icon;
+          const { done, total, pct } = getPhaseProgress(phase);
+          const isExpanded = expandedPhase === phase.id;
+          const isComplete = pct === 100;
+          return (
+            <div key={phase.id}>
+              <button onClick={() => setExpandedPhase(isExpanded ? null : phase.id)} className="w-full flex items-center gap-3 px-5 py-3 hover:bg-[hsl(var(--kf-muted)/0.06)] transition-colors text-left min-h-[48px]">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: isComplete ? `hsl(var(${phase.colorVar}) / 0.1)` : "hsl(var(--kf-muted) / 0.1)", border: `1px solid ${isComplete ? `hsl(var(${phase.colorVar}) / 0.2)` : "hsl(var(--kf-border) / 0.15)"}` }}>
+                  {isComplete ? <CheckCircle2 className="w-3.5 h-3.5" style={{ color: `hsl(var(${phase.colorVar}))` }} /> : <PhaseIcon className="w-3.5 h-3.5" style={{ color: `hsl(var(${phase.colorVar}))` }} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">{phase.label}</span>
+                  <span className="text-[10px] text-[hsl(var(--kf-muted-foreground))] ml-2">{phase.tagline}</span>
+                </div>
+                <span className="text-[11px] font-medium text-[hsl(var(--kf-muted-foreground))]">{done}/{total}</span>
+                <ChevronRight className="w-3.5 h-3.5 text-[hsl(var(--kf-muted-foreground))] transition-transform" style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0)" }} />
+              </button>
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
+                    <div className="px-5 pb-3 space-y-1">
+                      {phase.actions.map((action) => {
+                        const ActionIcon = action.icon;
+                        const isDone = progress ? progress[action.doneKey] : false;
+                        return (
+                          <button key={action.label} onClick={() => router.push(action.route)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[hsl(var(--kf-muted)/0.08)] transition-all text-left group min-h-[40px]" style={{ border: isDone ? `1px solid hsl(var(${phase.colorVar}) / 0.15)` : "1px solid transparent", background: isDone ? `hsl(var(${phase.colorVar}) / 0.04)` : "transparent" }}>
+                            <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: isDone ? `hsl(var(${phase.colorVar}) / 0.1)` : "hsl(var(--kf-muted) / 0.08)" }}>
+                              {isDone ? <CheckCircle2 className="w-3 h-3" style={{ color: `hsl(var(${phase.colorVar}))` }} /> : <ActionIcon className="w-3 h-3 text-[hsl(var(--kf-muted-foreground))]" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className={`text-xs font-medium ${isDone ? "text-[hsl(var(--kf-muted-foreground))]" : "text-[hsl(var(--kf-foreground))]"}`}>{action.label}</span>
+                              <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{action.description}</p>
+                            </div>
+                            <ArrowRight className="w-3 h-3 text-[hsl(var(--kf-muted-foreground))] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SelectionStep({ options, value, onChange, prompt }: {
+  options: { value: string; label: string; description: string }[];
+  value: string;
+  onChange: (v: string) => void;
+  prompt: string;
+}) {
+  return (
+    <motion.div key="selection" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
+      <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">{prompt}</p>
+      <div className="space-y-2">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all min-h-[48px]"
+            style={{
+              background: value === opt.value ? "hsl(var(--kf-accent1) / 0.08)" : "transparent",
+              border: `1px solid ${value === opt.value ? "hsl(var(--kf-accent1) / 0.3)" : "hsl(var(--kf-border) / 0.15)"}`,
+            }}
+          >
+            <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ border: `2px solid ${value === opt.value ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground) / 0.4)"}` }}>
+              {value === opt.value && <div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent1))" }} />}
+            </div>
+            <div>
+              <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">{opt.label}</span>
+              <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{opt.description}</p>
+            </div>
+          </button>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function InteractionModeStep({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <motion.div key="interaction-mode" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
+      <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">Choose how you want the AI to approach your business plan. Each mode shapes the analysis, tone, and focus of the output.</p>
+      <div className="grid grid-cols-1 gap-1.5">
+        {INTERACTION_MODE_OPTIONS.map((opt) => {
+          const MIcon = opt.icon;
+          const isSelected = value === opt.value;
+          return (
+            <button
+              key={opt.value}
+              onClick={() => onChange(opt.value)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
+              style={{
+                background: isSelected ? "hsl(var(--kf-accent1) / 0.08)" : "transparent",
+                border: `1px solid ${isSelected ? "hsl(var(--kf-accent1) / 0.3)" : "hsl(var(--kf-border) / 0.15)"}`,
+              }}
+            >
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: isSelected ? "hsl(var(--kf-accent1) / 0.15)" : "hsl(var(--kf-muted) / 0.1)" }}>
+                <MIcon className="w-3.5 h-3.5" style={{ color: isSelected ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-medium text-[hsl(var(--kf-foreground))]">{opt.label}</span>
+                <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{opt.description}</p>
+              </div>
+              {isSelected && <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />}
+            </button>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+}
+
+const SELECTION_STEPS = [
+  { id: "stage", label: "Business Stage", field: "stage" as const, options: STAGE_OPTIONS, prompt: "Where are you in your business journey?" },
+  { id: "timeline", label: "Launch Timeline", field: "timeline" as const, options: TIMELINE_OPTIONS, prompt: "When do you plan to launch or reach your next milestone?" },
+  { id: "legalStructure", label: "Legal Structure", field: "legalStructure" as const, options: LEGAL_STRUCTURE_OPTIONS, prompt: "What legal structure are you considering for your business?" },
+];
+
+const PREMIUM_BUILD_PHASES = [
+  { id: 1, label: "Diagnostic", description: "Concept structuring & hypothesis" },
+  { id: 2, label: "Strategic", description: "Market & competitive design" },
+  { id: 3, label: "Financial", description: "Revenue & operating model" },
+  { id: 4, label: "Governance", description: "Risk & compliance mapping" },
+  { id: 5, label: "Execution", description: "Milestones & implementation" },
+  { id: 6, label: "Review", description: "KPIs & adaptation protocol" },
+];
+
+function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, onStepChange, onGenerate, onBack }: {
+  step: number;
+  form: IntakeForm;
+  prefilled: boolean;
+  generating: boolean;
+  error: string | null;
+  onFormChange: (f: IntakeForm) => void;
+  onStepChange: (s: number) => void;
+  onGenerate: () => void;
+  onBack: () => void;
+}) {
+  const totalSteps = INTAKE_STEPS.length + SELECTION_STEPS.length + 1;
+  const isInteractionModeStep = step === INTAKE_STEPS.length;
+  const isSelectionPhase = step > INTAKE_STEPS.length;
+  const selectionIdx = step - INTAKE_STEPS.length - 1;
+  const isLastStep = step === totalSteps - 1;
+  const currentTextStep = step < INTAKE_STEPS.length ? INTAKE_STEPS[step] : null;
+  const currentSelectionStep = isSelectionPhase ? SELECTION_STEPS[selectionIdx] : null;
+
+  const canProceed = step === 0
+    ? form.businessIdea.trim().length > 10
+    : true;
+
+  const handleNext = () => {
+    if (isLastStep) {
+      onGenerate();
+    } else {
+      onStepChange(step + 1);
+    }
+  };
+
+  const stepLabel = isInteractionModeStep
+    ? "Intelligence Mode"
+    : isSelectionPhase && currentSelectionStep
+      ? currentSelectionStep.label
+      : currentTextStep?.label || "";
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
+      <div className="p-4 flex items-center gap-3" style={{ borderBottom: "1px solid hsl(var(--kf-border) / 0.15)" }}>
+        <button onClick={step > 0 ? () => onStepChange(step - 1) : onBack} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[hsl(var(--kf-muted)/0.1)] transition-colors">
+          <ArrowLeft className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
+        </button>
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-[hsl(var(--kf-foreground))]">{stepLabel}</h3>
+          <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">Step {step + 1} of {totalSteps}</p>
+        </div>
+        <button onClick={onBack} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[hsl(var(--kf-muted)/0.1)] transition-colors">
+          <X className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
+        </button>
+      </div>
+
+      <div className="px-4 pt-2 pb-1 flex gap-1">
+        {Array.from({ length: totalSteps }).map((_, i) => (
+          <div key={i} className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted) / 0.15)" }}>
+            <div className="h-full rounded-full transition-all duration-300" style={{ width: i < step ? "100%" : i === step ? "50%" : "0%", background: "hsl(var(--kf-accent1))" }} />
+          </div>
+        ))}
+      </div>
+
+      {generating && (
+        <div className="px-4 pt-3">
+          <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent1) / 0.04)", border: "1px solid hsl(var(--kf-accent1) / 0.12)" }}>
+            <div className="flex items-center gap-2 mb-2">
+              <Loader2 className="w-4 h-4 animate-spin" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <span className="text-xs font-semibold text-[hsl(var(--kf-foreground))]">Premium Build Mode Active</span>
+            </div>
+            <div className="grid grid-cols-6 gap-1">
+              {PREMIUM_BUILD_PHASES.map((phase) => (
+                <div key={phase.id} className="flex flex-col items-center gap-1">
+                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted) / 0.2)" }}>
+                    <motion.div
+                      className="h-full rounded-full"
+                      style={{ background: "hsl(var(--kf-accent1))" }}
+                      initial={{ width: "0%" }}
+                      animate={{ width: "100%" }}
+                      transition={{ duration: 3, delay: (phase.id - 1) * 3 }}
+                    />
+                  </div>
+                  <span className="text-[7px] text-[hsl(var(--kf-muted-foreground))] text-center leading-tight">{phase.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="p-5">
+        <AnimatePresence mode="wait">
+          {isInteractionModeStep ? (
+            <InteractionModeStep
+              key="interaction-mode"
+              value={form.interactionMode}
+              onChange={(v) => onFormChange({ ...form, interactionMode: v })}
+            />
+          ) : isSelectionPhase && currentSelectionStep ? (
+            <SelectionStep
+              key={currentSelectionStep.id}
+              options={currentSelectionStep.options}
+              value={form[currentSelectionStep.field]}
+              onChange={(v) => onFormChange({ ...form, [currentSelectionStep.field]: v })}
+              prompt={currentSelectionStep.prompt}
+            />
+          ) : currentTextStep ? (
+            <motion.div key={currentTextStep.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
+              <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">{currentTextStep.hint}</p>
+              {form[currentTextStep.field].trim() && prefilled && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: "hsl(var(--kf-accent2) / 0.08)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}>
+                  <Sparkles className="w-3 h-3" style={{ color: "hsl(var(--kf-accent2))" }} />
+                  <span className="text-[10px] font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>Pre-filled from your business profile — edit as needed</span>
+                </div>
+              )}
+              <textarea
+                value={form[currentTextStep.field]}
+                onChange={(e) => onFormChange({ ...form, [currentTextStep.field]: e.target.value })}
+                placeholder={currentTextStep.placeholder}
+                rows={5}
+                className="w-full resize-none rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all placeholder:text-[hsl(var(--kf-muted-foreground)/0.5)]"
+                style={{
+                  background: "hsl(var(--kf-muted) / 0.08)",
+                  border: "1px solid hsl(var(--kf-border) / 0.2)",
+                  color: "hsl(var(--kf-foreground))",
+                }}
+              />
+              {step > 0 && !form[currentTextStep.field].trim() && (
+                <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))] italic">This field is optional — skip it if you&apos;re unsure</p>
+              )}
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+
+        {error && (
+          <div className="mt-3 px-3 py-2 rounded-lg text-xs" style={{ background: "hsl(var(--kf-error) / 0.08)", border: "1px solid hsl(var(--kf-error) / 0.2)", color: "hsl(var(--kf-error))" }}>
+            {error}
+          </div>
+        )}
+
+        <div className="mt-4 flex gap-2">
+          {step > 0 && currentTextStep && (
+            <button
+              onClick={() => onStepChange(step + 1)}
+              className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors min-h-[40px]"
+              style={{ color: "hsl(var(--kf-muted-foreground))", border: "1px solid hsl(var(--kf-border) / 0.2)" }}
+            >
+              Skip
+            </button>
+          )}
+          <button
+            onClick={handleNext}
+            disabled={!canProceed || generating}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all min-h-[40px] disabled:opacity-50"
+            style={{ background: canProceed ? "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" : "hsl(var(--kf-muted) / 0.3)" }}
+          >
+            {generating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Building intelligence package...</span>
+              </>
+            ) : isLastStep ? (
+              <>
+                <Sparkles className="w-4 h-4" />
+                <span>Generate Intelligence Package</span>
+              </>
+            ) : (
+              <>
+                <span>{step === 0 ? "Continue" : "Next"}</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const RESULT_TABS: { id: ResultTab; label: string; icon: React.ElementType }[] = [
+  { id: "overview", label: "Brief", icon: Eye },
+  { id: "canvas", label: "Canvas", icon: BarChart3 },
+  { id: "swot", label: "SWOT", icon: Target },
+  { id: "financials", label: "Finance", icon: DollarSign },
+  { id: "roadmap", label: "Roadmap", icon: Flag },
+  { id: "actions", label: "Actions", icon: Zap },
+  { id: "risks", label: "Risks", icon: AlertTriangle },
+  { id: "governance", label: "Govern", icon: Scale },
+];
+
+function modelToSections(model: GeneratedModel): Array<{ sectionName: string; content: string }> {
+  const sections: Array<{ sectionName: string; content: string }> = [];
+
+  sections.push({ sectionName: "Executive Summary", content: model.summary });
+
+  if (model.executiveBrief) {
+    const eb = model.executiveBrief;
+    const briefLines = [
+      `Business Thesis: ${eb.businessThesis}`,
+      `\nConcept Summary: ${eb.conceptSummary}`,
+      `\nOpportunity Size: ${eb.opportunitySize}`,
+      `\nConfidence Level: ${eb.confidenceLevel}`,
+      `Rationale: ${eb.confidenceRationale}`,
+    ];
+    if (eb.keyAssumptions?.length) briefLines.push(`\nKey Assumptions:\n${eb.keyAssumptions.map((a) => `  • ${a}`).join("\n")}`);
+    if (eb.validationNeeded?.length) briefLines.push(`\nValidation Required:\n${eb.validationNeeded.map((v) => `  ⚠ ${v}`).join("\n")}`);
+    if (eb.expertReviewAreas?.length) briefLines.push(`\nExpert Review Areas:\n${eb.expertReviewAreas.map((e) => `  → ${e}`).join("\n")}`);
+    sections.push({ sectionName: "Executive Brief", content: briefLines.join("\n") });
+  }
+
+  const canvasLabels: Record<string, string> = {
+    valueProposition: "Value Proposition", customerSegments: "Customer Segments",
+    channels: "Channels", customerRelationships: "Customer Relationships",
+    revenueStreams: "Revenue Streams", keyResources: "Key Resources",
+    keyActivities: "Key Activities", keyPartnerships: "Key Partnerships",
+    costStructure: "Cost Structure",
+  };
+  const canvasContent = Object.entries(model.canvas)
+    .map(([k, v]) => `${canvasLabels[k] || k}: ${v}`)
+    .join("\n\n");
+  sections.push({ sectionName: "Business Model Canvas", content: canvasContent });
+
+  if (model.competitiveAnalysis) {
+    const ca = model.competitiveAnalysis;
+    const compLines: string[] = [];
+    if (ca.swot) {
+      compLines.push("SWOT Analysis:");
+      if (ca.swot.strengths?.length) compLines.push(`  Strengths:\n${ca.swot.strengths.map((s) => `    • ${s}`).join("\n")}`);
+      if (ca.swot.weaknesses?.length) compLines.push(`  Weaknesses:\n${ca.swot.weaknesses.map((w) => `    • ${w}`).join("\n")}`);
+      if (ca.swot.opportunities?.length) compLines.push(`  Opportunities:\n${ca.swot.opportunities.map((o) => `    • ${o}`).join("\n")}`);
+      if (ca.swot.threats?.length) compLines.push(`  Threats:\n${ca.swot.threats.map((t) => `    • ${t}`).join("\n")}`);
+    }
+    if (ca.competitorLandscape) compLines.push(`\nCompetitor Landscape: ${ca.competitorLandscape}`);
+    if (ca.differentiators?.length) compLines.push(`\nDifferentiators:\n${ca.differentiators.map((d) => `  • ${d}`).join("\n")}`);
+    if (ca.marketEntry) compLines.push(`\nMarket Entry Strategy: ${ca.marketEntry}`);
+    sections.push({ sectionName: "Competitive Analysis", content: compLines.join("\n") });
+  }
+
+  if (model.unitEconomics) {
+    const ue = model.unitEconomics;
+    const ueLines = [
+      `Customer Acquisition Cost (CAC): ${ue.customerAcquisitionCost}`,
+      `Lifetime Value (LTV): ${ue.lifetimeValue}`,
+      `LTV:CAC Ratio: ${ue.ltvCacRatio}`,
+      `Average Revenue Per User: ${ue.averageRevenue}`,
+      `Gross Margin: ${ue.grossMargin}`,
+      `Contribution Margin: ${ue.contributionMargin}`,
+      `Payback Period: ${ue.paybackPeriod}`,
+      `Break-Even Units: ${ue.breakEvenUnits}`,
+    ];
+    sections.push({ sectionName: "Unit Economics", content: ueLines.join("\n") });
+  }
+
+  if (model.roadmap?.length > 0) {
+    const roadmapContent = model.roadmap.map((p, i) => {
+      const lines = [`Phase ${i + 1}: ${p.phase} (${p.timeline})`];
+      if (p.estimatedCost) lines.push(`Budget: ${p.estimatedCost}`);
+      if (p.objectives?.length) lines.push(`Objectives:\n${p.objectives.map((o) => `  • ${o}`).join("\n")}`);
+      if (p.milestones?.length) lines.push(`Milestones:\n${p.milestones.map((m) => `  ✓ ${m}`).join("\n")}`);
+      if (p.dependencies?.length) lines.push(`Dependencies:\n${p.dependencies.map((d) => `  ⇒ ${d}`).join("\n")}`);
+      if (p.reviewPoints?.length) lines.push(`Review Points:\n${p.reviewPoints.map((r) => `  ◉ ${r}`).join("\n")}`);
+      return lines.join("\n");
+    }).join("\n\n");
+    sections.push({ sectionName: "Execution Roadmap", content: roadmapContent });
+  }
+
+  if (model.actionPlan?.length > 0) {
+    const actionsContent = model.actionPlan.map((a, i) =>
+      `${i + 1}. [${a.priority}] ${a.action}\n   Category: ${a.category} · Timeframe: ${a.timeframe}\n   ${a.details}`
+    ).join("\n\n");
+    sections.push({ sectionName: "Action Plan", content: actionsContent });
+  }
+
+  if (model.financialOutlook) {
+    const f = model.financialOutlook;
+    const finLines = [
+      `Startup Costs: ${f.startupCosts}`,
+      `Monthly Burn: ${f.monthlyBurn}`,
+      `Break-Even Timeline: ${f.breakEvenTimeline}`,
+      `Year One Revenue: ${f.yearOneRevenue}`,
+    ];
+    if (f.fundingStrategy) finLines.push(`\nFunding Strategy: ${f.fundingStrategy}`);
+    if (f.cashFlowProjection) finLines.push(`\nCash Flow Projection: ${f.cashFlowProjection}`);
+    if (f.sensitivityAnalysis) finLines.push(`\nSensitivity Analysis: ${f.sensitivityAnalysis}`);
+    if (f.keyMetrics?.length) finLines.push(`\nKey Metrics:\n${f.keyMetrics.map((m) => `  • ${m}`).join("\n")}`);
+    sections.push({ sectionName: "Financial Outlook", content: finLines.join("\n") });
+  }
+
+  if (model.risks?.length > 0) {
+    const risksContent = model.risks.map((r, i) => {
+      const lines = [`${i + 1}. ${r.risk} [Impact: ${r.impact}${r.likelihood ? ` | Likelihood: ${r.likelihood}` : ""}${r.category ? ` | ${r.category}` : ""}]`];
+      lines.push(`   Mitigation: ${r.mitigation}`);
+      if (r.contingency) lines.push(`   Contingency: ${r.contingency}`);
+      if (r.owner) lines.push(`   Owner: ${r.owner}`);
+      return lines.join("\n");
+    }).join("\n\n");
+    sections.push({ sectionName: "Risk Assessment", content: risksContent });
+  }
+
+  if (model.assumptionsRegister?.length > 0) {
+    const assumptionsContent = model.assumptionsRegister.map((a, i) => {
+      const entry = typeof a === "object" && a !== null ? a as AssumptionEntry : null;
+      if (!entry) return `${i + 1}. ${String(a)}`;
+      return `${i + 1}. ${entry.assumption} [${entry.category || "GENERAL"} | Confidence: ${entry.confidence || "MEDIUM"}]\n   Validation: ${entry.validationMethod || "TBD"}\n   Impact if Wrong: ${entry.impactIfWrong || "Unknown"}`;
+    }).join("\n\n");
+    sections.push({ sectionName: "Assumptions Register", content: assumptionsContent });
+  }
+
+  if (model.governanceFramework) {
+    const gf = model.governanceFramework;
+    const govLines = [];
+    if (gf.operatingModel) govLines.push(`Operating Model: ${gf.operatingModel}`);
+    if (gf.reviewCadence) govLines.push(`\nReview Cadence: ${gf.reviewCadence}`);
+    if (gf.decisionRights) govLines.push(`\nDecision Rights: ${gf.decisionRights}`);
+    if (gf.escalationPathways) govLines.push(`\nEscalation Pathways: ${gf.escalationPathways}`);
+    if (gf.kpiFramework?.length) govLines.push(`\nKPI Framework:\n${gf.kpiFramework.map((k) => `  • ${k}`).join("\n")}`);
+    sections.push({ sectionName: "Governance Framework", content: govLines.join("\n") });
+  }
+
+  if (model.qualityScore) {
+    const q = model.qualityScore;
+    const avg = Math.round((q.logicalCoherence + q.comprehensiveness + q.contextSpecificity + q.commercialRelevance + q.actionability + q.financialSensibility + q.operationalFeasibility + q.riskIdentification) / 8 * 10) / 10;
+    const qLines = [
+      `Overall Grade: ${q.overallGrade} (Average: ${avg}/10)`,
+      `Logical Coherence: ${q.logicalCoherence}/10`,
+      `Comprehensiveness: ${q.comprehensiveness}/10`,
+      `Context Specificity: ${q.contextSpecificity}/10`,
+      `Commercial Relevance: ${q.commercialRelevance}/10`,
+      `Actionability: ${q.actionability}/10`,
+      `Financial Sensibility: ${q.financialSensibility}/10`,
+      `Operational Feasibility: ${q.operationalFeasibility}/10`,
+      `Risk Identification: ${q.riskIdentification}/10`,
+    ];
+    if (q.improvementAreas?.length) qLines.push(`\nAreas for Improvement:\n${q.improvementAreas.map((a) => `  • ${a}`).join("\n")}`);
+    sections.push({ sectionName: "Quality Assessment", content: qLines.join("\n") });
+  }
+
+  return sections;
+}
+
+function modelToPayload(model: GeneratedModel, version: number) {
+  return {
+    title: "Business Intelligence Package",
+    sections: modelToSections(model),
+    documentType: "Business Plan",
+    category: "Business Strategy",
+    version,
+  };
+}
+
+function QualityScoreBadge({ score }: { score: QualityScore }) {
+  const avg = Math.round((score.logicalCoherence + score.comprehensiveness + score.contextSpecificity + score.commercialRelevance + score.actionability + score.financialSensibility + score.operationalFeasibility + score.riskIdentification) / 8 * 10) / 10;
+  const gradeColor = score.overallGrade === "A" ? "--kf-success" : score.overallGrade === "B" ? "--kf-accent2" : score.overallGrade === "C" ? "--kf-warning" : "--kf-error";
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1 px-2 py-1 rounded-lg" style={{ background: `hsl(var(${gradeColor}) / 0.1)`, border: `1px solid hsl(var(${gradeColor}) / 0.2)` }}>
+        <Award className="w-3 h-3" style={{ color: `hsl(var(${gradeColor}))` }} />
+        <span className="text-[10px] font-bold" style={{ color: `hsl(var(${gradeColor}))` }}>Grade {score.overallGrade}</span>
+      </div>
+      <span className="text-[9px] text-[hsl(var(--kf-muted-foreground))]">{avg}/10</span>
+    </div>
+  );
+}
+
+function ConfidenceBadge({ level }: { level: string }) {
+  const colorVar = level === "HIGH" ? "--kf-success" : level === "LOW" ? "--kf-error" : "--kf-warning";
+  return (
+    <div className="flex items-center gap-1 px-2 py-1 rounded-lg" style={{ background: `hsl(var(${colorVar}) / 0.1)`, border: `1px solid hsl(var(${colorVar}) / 0.2)` }}>
+      <Gauge className="w-3 h-3" style={{ color: `hsl(var(${colorVar}))` }} />
+      <span className="text-[10px] font-medium" style={{ color: `hsl(var(${colorVar}))` }}>{level} Confidence</span>
+    </div>
+  );
+}
+
+function ResultsPanel({ model, tab, version, businessId, saveError, onTabChange, onBack, onRegenerate, onSaveEdit }: {
+  model: GeneratedModel;
+  tab: ResultTab;
+  version: number;
+  businessId: string | null;
+  saveError: string | null;
+  onTabChange: (t: ResultTab) => void;
+  onBack: () => void;
+  onRegenerate: () => void;
+  onSaveEdit: (m: GeneratedModel) => void;
+}) {
+  const router = useRouter();
+  const [exportLoading, setExportLoading] = useState<string | null>(null);
+  const [exportMsg, setExportMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const showMsg = (type: "success" | "error", text: string) => {
+    setExportMsg({ type, text });
+    setTimeout(() => setExportMsg(null), 4000);
+  };
+
+  const handleDownloadPlan = () => {
+    const sections = modelToSections(model);
+    const text = [
+      "BUSINESS INTELLIGENCE PACKAGE",
+      `Version ${version || 1}`,
+      `Generated by KeyflowOS · ${new Date().toLocaleDateString()}`,
+      `Overall Grade: ${model.qualityScore?.overallGrade || "N/A"} · Confidence: ${model.executiveBrief?.confidenceLevel || "N/A"}`,
+      "",
+      "\u2550".repeat(60),
+      "",
+      ...sections.flatMap((s) => [
+        s.sectionName.toUpperCase(),
+        "\u2500".repeat(40),
+        s.content,
+        "",
+      ]),
+      "\u2550".repeat(60),
+      "This intelligence package was generated by KeyflowOS Business Intelligence Engine",
+    ].join("\n");
+
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Business_Intelligence_Package_v${version || 1}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showMsg("success", "Intelligence package downloaded");
+  };
+
+  const handleEmailPlan = async () => {
+    if (!businessId) return;
+    setExportLoading("email");
+    const payload = modelToPayload(model, version || 1);
+    const res = await apiPostSimple<{ sent: boolean; reason?: string }>(
+      `/drive/businesses/${businessId}/email-content`,
+      payload,
+    );
+    if (res.data?.sent) {
+      showMsg("success", "Intelligence package emailed to your inbox");
+    } else {
+      showMsg("error", res.data?.reason || res.error || "Failed to send email. Make sure Gmail is connected.");
+    }
+    setExportLoading(null);
+  };
+
+  const handleSaveToDrive = async () => {
+    if (!businessId) return;
+    setExportLoading("drive");
+    const payload = modelToPayload(model, version || 1);
+    const res = await apiPostSimple<{ fileId: string; webViewLink: string }>(
+      `/drive/businesses/${businessId}/save-document`,
+      payload,
+    );
+    if (res.data) {
+      showMsg("success", "Intelligence package saved to Google Drive");
+    } else {
+      showMsg("error", res.error || "Failed to save. Make sure Drive is connected.");
+    }
+    setExportLoading(null);
+  };
+
+  const handlePrintPlan = async () => {
+    if (!businessId) return;
+    setExportLoading("print");
+    const payload = modelToPayload(model, version || 1);
+    const res = await apiPostSimple<{ html: string }>(
+      `/drive/businesses/${businessId}/export-html`,
+      payload,
+    );
+    if (res.data?.html) {
+      const printWindow = window.open("", "_blank", "width=800,height=600");
+      if (printWindow) {
+        printWindow.document.write(res.data.html);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => printWindow.print(), 500);
+      }
+    } else {
+      showMsg("error", "Failed to generate print view");
+    }
+    setExportLoading(null);
+  };
+
+  const handleDocumentClick = (slug: string) => {
+    router.push(`/app/profile?tab=outputs&generate=${slug}`);
+  };
+
+  const exportActions = [
+    { id: "download", label: "Download", icon: Download, handler: handleDownloadPlan },
+    { id: "email", label: "Email", icon: Mail, handler: handleEmailPlan },
+    { id: "drive", label: "Drive", icon: HardDrive, handler: handleSaveToDrive },
+    { id: "print", label: "Print", icon: Printer, handler: handlePrintPlan },
+  ];
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
+      <div className="p-4 flex items-center gap-3" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.08), hsl(var(--kf-accent2) / 0.06))", borderBottom: "1px solid hsl(var(--kf-border) / 0.15)" }}>
+        <button onClick={onBack} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[hsl(var(--kf-muted)/0.1)] transition-colors">
+          <ArrowLeft className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
+        </button>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-semibold text-[hsl(var(--kf-foreground))]">Business Intelligence Package</h3>
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            {version > 0 && <span className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">v{version}</span>}
+            {model.qualityScore && <QualityScoreBadge score={model.qualityScore} />}
+            {model.executiveBrief?.confidenceLevel && <ConfidenceBadge level={model.executiveBrief.confidenceLevel} />}
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          {exportActions.map((ea) => {
+            const EIcon = ea.icon;
+            const isLoading = exportLoading === ea.id;
+            return (
+              <button
+                key={ea.id}
+                onClick={ea.handler}
+                disabled={!!exportLoading}
+                title={ea.label}
+                className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-[hsl(var(--kf-muted)/0.15)] disabled:opacity-40"
+                style={{ color: "hsl(var(--kf-muted-foreground))" }}
+              >
+                {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <EIcon className="w-3.5 h-3.5" />}
+              </button>
+            );
+          })}
+          <div className="w-px h-4 mx-1" style={{ background: "hsl(var(--kf-border) / 0.2)" }} />
+          <button onClick={onRegenerate} className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors" style={{ color: "hsl(var(--kf-accent1))", border: "1px solid hsl(var(--kf-accent1) / 0.2)" }}>
+            Regenerate
+          </button>
+        </div>
+      </div>
+
+      {exportMsg && (
+        <div className="mx-4 mt-3 px-3 py-2 rounded-lg text-xs flex items-center gap-2" style={{
+          background: exportMsg.type === "success" ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--kf-error) / 0.08)",
+          border: `1px solid ${exportMsg.type === "success" ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--kf-error) / 0.2)"}`,
+          color: exportMsg.type === "success" ? "hsl(var(--kf-success))" : "hsl(var(--kf-error))",
+        }}>
+          {exportMsg.type === "success" ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />}
+          {exportMsg.text}
+        </div>
+      )}
+
+      <div className="p-4" style={{ borderBottom: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+        <p className="text-sm text-[hsl(var(--kf-foreground))] leading-relaxed">{model.summary}</p>
+      </div>
+
+      {saveError && (
+        <div className="mx-4 mt-3 px-3 py-2 rounded-lg text-xs" style={{ background: "hsl(var(--kf-warning) / 0.08)", border: "1px solid hsl(var(--kf-warning) / 0.2)", color: "hsl(var(--kf-warning))" }}>
+          {saveError}
+        </div>
+      )}
+
+      <div className="flex gap-0.5 p-1.5 mx-3 mt-3 rounded-lg overflow-x-auto" style={{ background: "hsl(var(--kf-muted) / 0.1)" }}>
+        {RESULT_TABS.map((t) => {
+          const Icon = t.icon;
+          const isActive = tab === t.id;
+          return (
+            <button key={t.id} onClick={() => onTabChange(t.id)} className="flex items-center justify-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all whitespace-nowrap flex-shrink-0" style={{ background: isActive ? "hsl(var(--kf-card))" : "transparent", color: isActive ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))", boxShadow: isActive ? "0 1px 3px hsl(0 0% 0% / 0.1)" : "none" }}>
+              <Icon className="w-3 h-3" />
+              <span className="hidden sm:inline">{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="p-4">
+        <AnimatePresence mode="wait">
+          {tab === "overview" && <OverviewView key="overview" brief={model.executiveBrief} score={model.qualityScore} />}
+          {tab === "canvas" && <CanvasView key="canvas" canvas={model.canvas} model={model} onSaveEdit={onSaveEdit} />}
+          {tab === "swot" && <SWOTView key="swot" analysis={model.competitiveAnalysis} economics={model.unitEconomics} />}
+          {tab === "financials" && <FinancialsView key="financials" outlook={model.financialOutlook} />}
+          {tab === "roadmap" && <RoadmapView key="roadmap" roadmap={model.roadmap} />}
+          {tab === "actions" && <ActionsView key="actions" actions={model.actionPlan} businessId={businessId} />}
+          {tab === "risks" && <RisksView key="risks" risks={model.risks} assumptions={model.assumptionsRegister} />}
+          {tab === "governance" && <GovernanceView key="governance" governance={model.governanceFramework} />}
+        </AnimatePresence>
+      </div>
+
+      {model.recommendedDocuments?.length > 0 && (
+        <div className="px-4 pb-4">
+          <div className="rounded-xl p-4" style={{ background: "hsl(var(--kf-accent2) / 0.06)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}>
+            <div className="flex items-center gap-2 mb-2">
+              <FileText className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+              <span className="text-xs font-semibold text-[hsl(var(--kf-foreground))]">Recommended Document Ecosystem</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {model.recommendedDocuments.map((slug) => {
+                const name = DOCUMENT_SLUG_NAMES[slug] || slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                return (
+                  <button
+                    key={slug}
+                    onClick={() => handleDocumentClick(slug)}
+                    className="text-[10px] px-2 py-1 rounded-md font-medium flex items-center gap-1 transition-all hover:scale-105"
+                    style={{ background: "hsl(var(--kf-accent2) / 0.1)", color: "hsl(var(--kf-accent2))" }}
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    {name}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => router.push("/app/profile?tab=outputs")}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-white transition-all min-h-[36px]"
+              style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent2)), hsl(var(--kf-accent1)))" }}
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              View All Documents
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuickLinks({ tabId }: { tabId: string }) {
+  const router = useRouter();
+  const links = TAB_QUICK_LINKS[tabId];
+  if (!links?.length) return null;
+  return (
+    <div className="mt-4 pt-3" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+      <div className="flex items-center gap-1.5 mb-2">
+        <ExternalLink className="w-3 h-3 text-[hsl(var(--kf-muted-foreground))]" />
+        <span className="text-[9px] font-semibold uppercase tracking-wider text-[hsl(var(--kf-muted-foreground))]">Take Action</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {links.map((link) => {
+          const LIcon = link.icon;
+          return (
+            <button
+              key={link.path}
+              onClick={() => router.push(link.path)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{
+                background: `hsl(var(${link.colorVar}) / 0.06)`,
+                border: `1px solid hsl(var(${link.colorVar}) / 0.15)`,
+                color: `hsl(var(${link.colorVar}))`,
+              }}
+            >
+              <LIcon className="w-3 h-3" />
+              {link.label}
+              <ArrowRight className="w-2.5 h-2.5 opacity-50" />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function OverviewView({ brief, score }: { brief: ExecutiveBrief; score: QualityScore }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      {brief.businessThesis && (
+        <div className="rounded-xl p-4" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.06), hsl(var(--kf-accent2) / 0.04))", border: "1px solid hsl(var(--kf-accent1) / 0.15)" }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <Lightbulb className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>Business Thesis</span>
+          </div>
+          <p className="text-xs text-[hsl(var(--kf-foreground))] leading-relaxed">{brief.businessThesis}</p>
+        </div>
+      )}
+
+      {brief.conceptSummary && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <BookOpen className="w-3.5 h-3.5 text-[hsl(var(--kf-muted-foreground))]" />
+            <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))]">Concept Summary</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{brief.conceptSummary}</p>
+        </div>
+      )}
+
+      {brief.opportunitySize && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent2) / 0.04)", border: "1px solid hsl(var(--kf-accent2) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <TrendingUp className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>Market Opportunity</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{brief.opportunitySize}</p>
+        </div>
+      )}
+
+      {brief.confidenceRationale && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-info) / 0.04)", border: "1px solid hsl(var(--kf-info) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Gauge className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-info))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-info))" }}>Confidence Assessment</span>
+            <ConfidenceBadge level={brief.confidenceLevel} />
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{brief.confidenceRationale}</p>
+        </div>
+      )}
+
+      {brief.keyAssumptions?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-warning) / 0.04)", border: "1px solid hsl(var(--kf-warning) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <AlertTriangle className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-warning))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>Key Assumptions</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>{brief.keyAssumptions.length}</span>
+          </div>
+          <div className="space-y-1">
+            {brief.keyAssumptions.map((a, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-[9px] font-bold flex-shrink-0 mt-0.5" style={{ color: "hsl(var(--kf-warning))" }}>{i + 1}.</span>
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{String(a)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        {brief.validationNeeded?.length > 0 && (
+          <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent1) / 0.04)", border: "1px solid hsl(var(--kf-accent1) / 0.12)" }}>
+            <div className="flex items-center gap-1.5 mb-2">
+              <ClipboardList className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <span className="text-[9px] font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>Needs Validation</span>
+            </div>
+            <div className="space-y-1">
+              {brief.validationNeeded.map((v, i) => (
+                <div key={i} className="flex items-start gap-1.5">
+                  <div className="w-1 h-1 rounded-full mt-1.5 flex-shrink-0" style={{ background: "hsl(var(--kf-accent1))" }} />
+                  <span className="text-[10px] text-[hsl(var(--kf-foreground))] leading-tight">{String(v)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {brief.expertReviewAreas?.length > 0 && (
+          <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-error) / 0.04)", border: "1px solid hsl(var(--kf-error) / 0.12)" }}>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Shield className="w-3 h-3" style={{ color: "hsl(var(--kf-error))" }} />
+              <span className="text-[9px] font-semibold" style={{ color: "hsl(var(--kf-error))" }}>Expert Review Needed</span>
+            </div>
+            <div className="space-y-1">
+              {brief.expertReviewAreas.map((e, i) => (
+                <div key={i} className="flex items-start gap-1.5">
+                  <div className="w-1 h-1 rounded-full mt-1.5 flex-shrink-0" style={{ background: "hsl(var(--kf-error))" }} />
+                  <span className="text-[10px] text-[hsl(var(--kf-foreground))] leading-tight">{String(e)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {score && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <Award className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>Quality Scorecard</span>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {[
+              { label: "Logic", value: score.logicalCoherence },
+              { label: "Depth", value: score.comprehensiveness },
+              { label: "Context", value: score.contextSpecificity },
+              { label: "Commercial", value: score.commercialRelevance },
+              { label: "Actionable", value: score.actionability },
+              { label: "Financial", value: score.financialSensibility },
+              { label: "Feasibility", value: score.operationalFeasibility },
+              { label: "Risk ID", value: score.riskIdentification },
+            ].map(({ label, value }) => {
+              const color = value >= 8 ? "--kf-success" : value >= 6 ? "--kf-accent2" : value >= 4 ? "--kf-warning" : "--kf-error";
+              return (
+                <div key={label} className="flex flex-col items-center gap-1 py-1.5 px-1 rounded-lg" style={{ background: `hsl(var(${color}) / 0.04)` }}>
+                  <span className="text-[8px] text-[hsl(var(--kf-muted-foreground))] text-center">{label}</span>
+                  <span className="text-xs font-bold" style={{ color: `hsl(var(${color}))` }}>{value}</span>
+                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted) / 0.15)" }}>
+                    <div className="h-full rounded-full" style={{ width: `${value * 10}%`, background: `hsl(var(${color}))` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {score.improvementAreas?.length > 0 && (
+            <div className="mt-2 pt-2" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+              <span className="text-[9px] font-medium text-[hsl(var(--kf-muted-foreground))] block mb-1">Strengthen with more information:</span>
+              {score.improvementAreas.map((area, i) => (
+                <div key={i} className="flex items-start gap-1.5 mt-0.5">
+                  <ArrowRight className="w-2.5 h-2.5 mt-0.5 flex-shrink-0 text-[hsl(var(--kf-muted-foreground))]" />
+                  <span className="text-[10px] text-[hsl(var(--kf-foreground))]">{String(area)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <QuickLinks tabId="overview" />
+    </motion.div>
+  );
+}
+
+function CanvasView({ canvas, model, onSaveEdit }: { canvas: BusinessModelCanvas; model: GeneratedModel; onSaveEdit: (m: GeneratedModel) => void }) {
+  const [editingKey, setEditingKey] = useState<keyof BusinessModelCanvas | null>(null);
+  const [editValue, setEditValue] = useState("");
+
+  const startEdit = (key: keyof BusinessModelCanvas) => {
+    setEditingKey(key);
+    setEditValue(canvas[key]);
+  };
+
+  const saveEdit = () => {
+    if (!editingKey) return;
+    const updatedCanvas = { ...canvas, [editingKey]: editValue };
+    onSaveEdit({ ...model, canvas: updatedCanvas });
+    setEditingKey(null);
+    setEditValue("");
+  };
+
+  const cancelEdit = () => {
+    setEditingKey(null);
+    setEditValue("");
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="grid grid-cols-2 gap-2">
+      {CANVAS_LABELS.map(({ key, label, icon: Icon, colorVar }) => (
+        <div key={key} className={`rounded-xl p-3 group relative ${key === "valueProposition" ? "col-span-2" : ""}`} style={{ background: `hsl(var(${colorVar}) / 0.04)`, border: `1px solid hsl(var(${colorVar}) / 0.12)` }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Icon className="w-3 h-3" style={{ color: `hsl(var(${colorVar}))` }} />
+            <span className="text-[10px] font-semibold" style={{ color: `hsl(var(${colorVar}))` }}>{label}</span>
+            {editingKey !== key && (
+              <button onClick={() => startEdit(key)} className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[hsl(var(--kf-muted)/0.15)]">
+                <Pencil className="w-2.5 h-2.5 text-[hsl(var(--kf-muted-foreground))]" />
+              </button>
+            )}
+          </div>
+          {editingKey === key ? (
+            <div className="space-y-2">
+              <textarea
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                rows={3}
+                className="w-full resize-none rounded-lg px-3 py-2 text-[11px] focus:outline-none focus:ring-1"
+                style={{ background: "hsl(var(--kf-muted) / 0.1)", border: "1px solid hsl(var(--kf-border) / 0.2)", color: "hsl(var(--kf-foreground))" }}
+                autoFocus
+              />
+              <div className="flex gap-1.5 justify-end">
+                <button onClick={cancelEdit} className="px-2 py-1 rounded text-[10px] font-medium" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Cancel</button>
+                <button onClick={saveEdit} className="px-2 py-1 rounded text-[10px] font-medium flex items-center gap-1" style={{ background: `hsl(var(${colorVar}) / 0.15)`, color: `hsl(var(${colorVar}))` }}>
+                  <Save className="w-2.5 h-2.5" />Save
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{canvas[key]}</p>
+          )}
+        </div>
+      ))}
+      <div className="col-span-2">
+        <QuickLinks tabId="canvas" />
+      </div>
+    </motion.div>
+  );
+}
+
+function RoadmapView({ roadmap }: { roadmap: RoadmapPhase[] }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      {roadmap.map((phase, i) => (
+        <div key={i} className="relative pl-6">
+          {i < roadmap.length - 1 && <div className="absolute left-[9px] top-6 bottom-0 w-px" style={{ background: "hsl(var(--kf-accent1) / 0.2)" }} />}
+          <div className="absolute left-0 top-1 w-[18px] h-[18px] rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{ background: "hsl(var(--kf-accent1))" }}>{i + 1}</div>
+          <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.06)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-semibold text-[hsl(var(--kf-foreground))]">{phase.phase}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}>{phase.timeline}</span>
+            </div>
+            {phase.estimatedCost && <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))] mb-2">Budget: {phase.estimatedCost}</p>}
+            <div className="space-y-1">
+              {phase.objectives?.map((obj, j) => (
+                <div key={j} className="flex items-start gap-1.5">
+                  <Target className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent2))" }} />
+                  <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{obj}</span>
+                </div>
+              ))}
+              {phase.milestones?.map((m, j) => (
+                <div key={`m-${j}`} className="flex items-start gap-1.5">
+                  <Flag className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
+                  <span className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{m}</span>
+                </div>
+              ))}
+              {phase.dependencies?.length ? (
+                <div className="mt-1.5 pt-1.5" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.08)" }}>
+                  {phase.dependencies.map((d, j) => (
+                    <div key={`d-${j}`} className="flex items-start gap-1.5">
+                      <ArrowRight className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-warning))" }} />
+                      <span className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{d}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {phase.reviewPoints?.length ? (
+                <div className="mt-1 pt-1" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.08)" }}>
+                  {phase.reviewPoints.map((r, j) => (
+                    <div key={`r-${j}`} className="flex items-start gap-1.5">
+                      <Eye className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-info))" }} />
+                      <span className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{r}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ))}
+      <QuickLinks tabId="roadmap" />
+    </motion.div>
+  );
+}
+
+function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessId: string | null }) {
+  const router = useRouter();
+  const [creatingTask, setCreatingTask] = useState<number | null>(null);
+  const [createdTasks, setCreatedTasks] = useState<Set<number>>(new Set());
+  const [taskError, setTaskError] = useState<string | null>(null);
+
+  const priorityColor = (p: string) => p === "HIGH" ? "--kf-error" : p === "MEDIUM" ? "--kf-warning" : "--kf-success";
+
+  const handleCreateTask = async (action: ActionItem, idx: number) => {
+    if (!businessId) return;
+    setCreatingTask(idx);
+    try {
+      const projRes = await apiGet<{ id: string }[]>(`/projects/businesses/${businessId}?limit=1`);
+      let projectId: string | null = null;
+      if (projRes.data && Array.isArray(projRes.data) && projRes.data.length > 0) {
+        projectId = projRes.data[0].id;
+      } else {
+        const newProj = await apiPost<{ id: string }>({
+          path: `/projects/businesses/${businessId}`,
+          body: { name: "Business Intelligence Actions", description: "Tasks generated from your AI intelligence package" },
+        });
+        projectId = newProj.data?.id ?? null;
+      }
+      if (projectId) {
+        await apiPost({
+          path: `/projects/businesses/${businessId}/projects/${projectId}/tasks`,
+          body: {
+            title: action.action,
+            description: `${action.details}\n\nCategory: ${action.category}\nTimeframe: ${action.timeframe}\nPriority: ${action.priority}${action.requiresExternal ? "\n⚠ Requires external help" : ""}`,
+            priority: action.priority,
+            status: "TODO",
+          },
+        });
+        setCreatedTasks((prev) => new Set(prev).add(idx));
+      }
+    } catch {
+      setTaskError("Failed to create task. Please try again.");
+      setTimeout(() => setTaskError(null), 4000);
+    }
+    setCreatingTask(null);
+  };
+
+  const handleGoToModule = (mod: string) => {
+    const route = MODULE_ROUTES[mod];
+    if (route) router.push(route);
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-1.5">
+      {taskError && (
+        <div className="px-3 py-2 rounded-lg text-xs" style={{ background: "hsl(var(--kf-error) / 0.08)", border: "1px solid hsl(var(--kf-error) / 0.2)", color: "hsl(var(--kf-error))" }}>
+          {taskError}
+        </div>
+      )}
+      {actions.map((action, i) => (
+        <div key={i} className="rounded-xl px-3 py-2.5" style={{ background: "hsl(var(--kf-muted) / 0.04)", border: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+          <div className="flex items-start gap-3">
+            <div className="flex flex-col items-center gap-1 flex-shrink-0 mt-0.5">
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${priorityColor(action.priority)}) / 0.12)`, color: `hsl(var(${priorityColor(action.priority)}))` }}>{action.priority}</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-xs font-medium text-[hsl(var(--kf-foreground))]">{action.action}</span>
+              </div>
+              <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{action.details}</p>
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{action.category}</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{action.timeframe}</span>
+                {action.canParallel && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-info) / 0.1)", color: "hsl(var(--kf-info))" }}>Parallelizable</span>
+                )}
+                {action.requiresExternal && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>External Help</span>
+                )}
+                {action.module && (
+                  <button
+                    onClick={() => handleGoToModule(action.module!)}
+                    className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors hover:opacity-80"
+                    style={{ background: "hsl(var(--kf-accent2) / 0.1)", color: "hsl(var(--kf-accent2))" }}
+                  >
+                    <ExternalLink className="w-2 h-2" />
+                    {action.module}
+                  </button>
+                )}
+                {createdTasks.has(i) ? (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1" style={{ background: "hsl(var(--kf-success) / 0.1)", color: "hsl(var(--kf-success))" }}>
+                    <CheckCircle2 className="w-2 h-2" />
+                    Task created
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleCreateTask(action, i)}
+                    disabled={creatingTask === i}
+                    className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors hover:opacity-80 disabled:opacity-50"
+                    style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}
+                  >
+                    {creatingTask === i ? <Loader2 className="w-2 h-2 animate-spin" /> : <Plus className="w-2 h-2" />}
+                    Create task
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+      <QuickLinks tabId="actions" />
+    </motion.div>
+  );
+}
+
+function SWOTView({ analysis, economics }: { analysis: CompetitiveAnalysis; economics: UnitEconomics }) {
+  const swotQuadrants = [
+    { label: "Strengths", items: analysis.swot.strengths, colorVar: "--kf-success", icon: TrendingUp },
+    { label: "Weaknesses", items: analysis.swot.weaknesses, colorVar: "--kf-error", icon: AlertTriangle },
+    { label: "Opportunities", items: analysis.swot.opportunities, colorVar: "--kf-accent2", icon: Sparkles },
+    { label: "Threats", items: analysis.swot.threats, colorVar: "--kf-warning", icon: Shield },
+  ];
+
+  const econMetrics = [
+    { label: "CAC", value: economics.customerAcquisitionCost, colorVar: "--kf-accent1" },
+    { label: "LTV", value: economics.lifetimeValue, colorVar: "--kf-accent2" },
+    { label: "LTV:CAC", value: economics.ltvCacRatio, colorVar: "--kf-success" },
+    { label: "ARPU", value: economics.averageRevenue, colorVar: "--kf-info" },
+    { label: "Gross Margin", value: economics.grossMargin, colorVar: "--kf-accent1" },
+    { label: "Contribution Margin", value: economics.contributionMargin, colorVar: "--kf-accent2" },
+    { label: "Payback Period", value: economics.paybackPeriod, colorVar: "--kf-warning" },
+    { label: "Break-Even Units", value: economics.breakEvenUnits, colorVar: "--kf-success" },
+  ];
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        {swotQuadrants.map(({ label, items, colorVar, icon: Icon }) => (
+          <div key={label} className="rounded-xl p-3" style={{ background: `hsl(var(${colorVar}) / 0.04)`, border: `1px solid hsl(var(${colorVar}) / 0.12)` }}>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Icon className="w-3 h-3" style={{ color: `hsl(var(${colorVar}))` }} />
+              <span className="text-[10px] font-semibold" style={{ color: `hsl(var(${colorVar}))` }}>{label}</span>
+            </div>
+            <div className="space-y-1">
+              {items.map((item, i) => (
+                <div key={i} className="flex items-start gap-1.5">
+                  <div className="w-1 h-1 rounded-full mt-1.5 flex-shrink-0" style={{ background: `hsl(var(${colorVar}))` }} />
+                  <span className="text-[11px] text-[hsl(var(--kf-foreground))] leading-tight">{String(item)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {analysis.competitorLandscape && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-1.5 block">Competitor Landscape</span>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{analysis.competitorLandscape}</p>
+        </div>
+      )}
+
+      {analysis.differentiators?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent1) / 0.04)", border: "1px solid hsl(var(--kf-accent1) / 0.12)" }}>
+          <span className="text-[10px] font-semibold mb-2 block" style={{ color: "hsl(var(--kf-accent1))" }}>Competitive Differentiators</span>
+          <div className="space-y-1.5">
+            {analysis.differentiators.map((d, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <Zap className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{String(d)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {analysis.marketEntry && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent2) / 0.04)", border: "1px solid hsl(var(--kf-accent2) / 0.12)" }}>
+          <span className="text-[10px] font-semibold mb-1.5 block" style={{ color: "hsl(var(--kf-accent2))" }}>Market Entry Strategy</span>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{analysis.marketEntry}</p>
+        </div>
+      )}
+
+      <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+        <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Unit Economics</span>
+        <div className="grid grid-cols-2 gap-2">
+          {econMetrics.map(({ label, value, colorVar }) => (
+            <div key={label} className="px-2.5 py-2 rounded-lg" style={{ background: `hsl(var(${colorVar}) / 0.04)` }}>
+              <span className="text-[9px] font-medium block mb-0.5" style={{ color: `hsl(var(${colorVar}))` }}>{label}</span>
+              <span className="text-[11px] font-semibold text-[hsl(var(--kf-foreground))]">{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <QuickLinks tabId="swot" />
+    </motion.div>
+  );
+}
+
+function FinancialsView({ outlook }: { outlook: FinancialOutlook }) {
+  const items = [
+    { label: "Startup Costs", value: outlook.startupCosts, icon: DollarSign, colorVar: "--kf-accent1" },
+    { label: "Monthly Burn", value: outlook.monthlyBurn, icon: TrendingUp, colorVar: "--kf-warning" },
+    { label: "Break-Even", value: outlook.breakEvenTimeline, icon: Target, colorVar: "--kf-success" },
+    { label: "Year 1 Revenue", value: outlook.yearOneRevenue, icon: BarChart3, colorVar: "--kf-accent2" },
+  ];
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      {items.map(({ label, value, icon: Icon, colorVar }) => (
+        <div key={label} className="rounded-xl p-3" style={{ background: `hsl(var(${colorVar}) / 0.04)`, border: `1px solid hsl(var(${colorVar}) / 0.12)` }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Icon className="w-3.5 h-3.5" style={{ color: `hsl(var(${colorVar}))` }} />
+            <span className="text-[10px] font-semibold" style={{ color: `hsl(var(${colorVar}))` }}>{label}</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{value}</p>
+        </div>
+      ))}
+
+      {outlook.fundingStrategy && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-info) / 0.04)", border: "1px solid hsl(var(--kf-info) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Briefcase className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-info))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-info))" }}>Funding Strategy</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{outlook.fundingStrategy}</p>
+        </div>
+      )}
+
+      {outlook.cashFlowProjection && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-1.5 block">Cash Flow Projection</span>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{outlook.cashFlowProjection}</p>
+        </div>
+      )}
+
+      {outlook.sensitivityAnalysis && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-warning) / 0.04)", border: "1px solid hsl(var(--kf-warning) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Activity className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-warning))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>Sensitivity Analysis</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{outlook.sensitivityAnalysis}</p>
+        </div>
+      )}
+
+      {outlook.keyMetrics?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Key Performance Indicators</span>
+          <div className="space-y-1.5">
+            {outlook.keyMetrics.map((m, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <Gauge className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{m}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <QuickLinks tabId="financials" />
+    </motion.div>
+  );
+}
+
+function RisksView({ risks, assumptions }: { risks: Risk[]; assumptions: AssumptionEntry[] }) {
+  const severityColor = (level: string) => {
+    if (level === "CRITICAL") return "--kf-error";
+    if (level === "HIGH") return "--kf-accent1";
+    if (level === "MEDIUM") return "--kf-warning";
+    return "--kf-success";
+  };
+
+  const confidenceColor = (level: string) => {
+    if (level === "HIGH") return "--kf-success";
+    if (level === "LOW") return "--kf-error";
+    return "--kf-warning";
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      <div className="space-y-1.5">
+        {risks.map((risk, i) => (
+          <div key={i} className="rounded-xl p-3" style={{ background: `hsl(var(${severityColor(risk.impact)}) / 0.03)`, border: `1px solid hsl(var(${severityColor(risk.impact)}) / 0.1)` }}>
+            <div className="flex items-start gap-2 mb-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: `hsl(var(${severityColor(risk.impact)}))` }} />
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-medium text-[hsl(var(--kf-foreground))]">{risk.risk}</span>
+                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                  <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${severityColor(risk.impact)}) / 0.12)`, color: `hsl(var(${severityColor(risk.impact)}))` }}>{risk.impact}</span>
+                  {risk.likelihood && <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>Likelihood: {risk.likelihood}</span>}
+                  {risk.category && <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{risk.category}</span>}
+                  {risk.owner && <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-info) / 0.1)", color: "hsl(var(--kf-info))" }}>{risk.owner}</span>}
+                </div>
+              </div>
+            </div>
+            <div className="ml-5.5 space-y-1">
+              <div>
+                <span className="text-[9px] font-semibold text-[hsl(var(--kf-muted-foreground))]">Mitigation:</span>
+                <p className="text-[10px] text-[hsl(var(--kf-foreground))] mt-0.5">{risk.mitigation}</p>
+              </div>
+              {risk.contingency && (
+                <div>
+                  <span className="text-[9px] font-semibold text-[hsl(var(--kf-muted-foreground))]">Contingency:</span>
+                  <p className="text-[10px] text-[hsl(var(--kf-foreground))] mt-0.5">{risk.contingency}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {assumptions?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-warning) / 0.04)", border: "1px solid hsl(var(--kf-warning) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <ClipboardList className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-warning))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>Assumptions Register</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>{assumptions.length}</span>
+          </div>
+          <div className="space-y-2">
+            {assumptions.map((a, i) => {
+              const entry = typeof a === "object" && a !== null ? a as AssumptionEntry : null;
+              if (!entry) return (
+                <div key={i} className="text-[11px] text-[hsl(var(--kf-foreground))]">{String(a)}</div>
+              );
+              return (
+                <div key={i} className="rounded-lg p-2" style={{ background: "hsl(var(--kf-muted) / 0.06)" }}>
+                  <div className="flex items-start gap-2">
+                    <span className="text-[9px] font-bold flex-shrink-0 mt-0.5" style={{ color: "hsl(var(--kf-warning))" }}>{i + 1}.</span>
+                    <div className="flex-1">
+                      <span className="text-[11px] font-medium text-[hsl(var(--kf-foreground))]">{entry.assumption}</span>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        {entry.category && <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{entry.category}</span>}
+                        {entry.confidence && <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${confidenceColor(entry.confidence)}) / 0.1)`, color: `hsl(var(${confidenceColor(entry.confidence)}))` }}>{entry.confidence}</span>}
+                      </div>
+                      {entry.validationMethod && (
+                        <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))] mt-1">Validate: {entry.validationMethod}</p>
+                      )}
+                      {entry.impactIfWrong && (
+                        <p className="text-[10px] mt-0.5" style={{ color: "hsl(var(--kf-error))" }}>If wrong: {entry.impactIfWrong}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <QuickLinks tabId="risks" />
+    </motion.div>
+  );
+}
+
+function GovernanceView({ governance }: { governance: GovernanceFramework }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      {governance.operatingModel && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent1) / 0.04)", border: "1px solid hsl(var(--kf-accent1) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Settings className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>Operating Model</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{governance.operatingModel}</p>
+        </div>
+      )}
+
+      {governance.decisionRights && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent2) / 0.04)", border: "1px solid hsl(var(--kf-accent2) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Scale className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>Decision Rights</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{governance.decisionRights}</p>
+        </div>
+      )}
+
+      {governance.reviewCadence && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-info) / 0.04)", border: "1px solid hsl(var(--kf-info) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Calendar className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-info))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-info))" }}>Review Cadence</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{governance.reviewCadence}</p>
+        </div>
+      )}
+
+      {governance.escalationPathways && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-warning) / 0.04)", border: "1px solid hsl(var(--kf-warning) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <AlertTriangle className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-warning))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>Escalation Pathways</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{governance.escalationPathways}</p>
+        </div>
+      )}
+
+      {governance.kpiFramework?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-success) / 0.04)", border: "1px solid hsl(var(--kf-success) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <Gauge className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-success))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-success))" }}>KPI Framework</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-success) / 0.1)", color: "hsl(var(--kf-success))" }}>{governance.kpiFramework.length} KPIs</span>
+          </div>
+          <div className="space-y-1.5">
+            {governance.kpiFramework.map((kpi, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-[9px] font-bold flex-shrink-0 w-4 text-right" style={{ color: "hsl(var(--kf-success))" }}>{i + 1}.</span>
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{kpi}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <QuickLinks tabId="governance" />
+    </motion.div>
+  );
+}

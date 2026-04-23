@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode, useEffect, useMemo, useState, useTransition } from "react";
+import { useReturnNavigation } from "@/lib/use-return-navigation";
 import Link from "next/link";
 import { Badge, Button, Card, CardGrid, ContentContainer, Drawer, Input, PageHeader } from "@keyflow/ui";
 import {
@@ -30,7 +31,6 @@ function SectionCard({
     <Card
       className={`space-y-3 rounded-xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow ${className}`}
       padding="lg"
-      shadow="sm"
     >
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-slate-900">{title}</p>
@@ -42,6 +42,7 @@ function SectionCard({
 }
 
 export default function CrmDashboardPage() {
+  useReturnNavigation({ restoreScrollOnMount: true });
   const [segments, setSegments] = useState<SegmentCounts>({});
   const [tasks, setTasks] = useState<ContactTask[]>([]);
   const [events, setEvents] = useState<ContactEvent[]>([]);
@@ -70,7 +71,7 @@ export default function CrmDashboardPage() {
     startTransition(() => {
       void fetchContacts(undefined, { includeStats: true, take: 10 })
         .then(({ data }) => {
-          const sorted = (data ?? []).sort(
+          const sorted = (data?.contacts ?? []).sort(
             (a, b) => (b.meta?.leadScore ?? 0) - (a.meta?.leadScore ?? 0),
           );
           setTopContacts(sorted.slice(0, 6));

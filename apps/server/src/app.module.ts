@@ -1,4 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './core/prisma/prisma.module';
@@ -16,8 +17,34 @@ import { AiModule } from './modules/ai/ai.module';
 import { FlowModule } from './modules/flow/flow.module';
 import { GamificationModule } from './modules/gamification/gamification.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { AuthMiddleware } from './core/auth/auth.middleware';
+import { CorrelationIdMiddleware } from './core/middleware/correlation-id.middleware';
+import { LoggingInterceptor } from './core/interceptors/logging.interceptor';
 import { ActionsModule } from './modules/actions/actions.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
+import { AutopilotModule } from './modules/autopilot/autopilot.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
+import { ProjectsModule } from './modules/projects/projects.module';
+import { ExpensesModule } from './modules/expenses/expenses.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { EmailMarketingModule } from './modules/email-marketing/email-marketing.module';
+import { LeadFormsModule } from './modules/lead-forms/lead-forms.module';
+import { TemplatesModule } from './modules/templates/templates.module';
+import { EducationModule } from './modules/education/education.module';
+import { CommunityModule } from './modules/community/community.module';
+import { MarketplaceModule } from './modules/marketplace/marketplace.module';
+import { SupplierModule } from './modules/supplier/supplier.module';
+import { MomentumModule } from './modules/momentum/momentum.module';
+import { SeedModule } from './core/seed/seed.module';
+import { OnboardingConciergeModule } from './modules/onboarding-concierge/onboarding-concierge.module';
+import { DocumentsModule } from './modules/documents/documents.module';
+import { GoogleDriveModule } from './modules/google-drive/google-drive.module';
+import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
+import { CommunicationsModule } from './modules/communications/communications.module';
+import { ConnectorModule } from './core/connectors/connector.module';
 
 @Module({
   imports: [
@@ -25,7 +52,8 @@ import { ActionsModule } from './modules/actions/actions.module';
     PrismaModule,
     EventBusModule,
     AuthModule,
-    TrpcModule, // <-- IMPORT THE TRPC MODULE
+    TrpcModule,
+    ConnectorModule,
 
     // Feature Modules
     IdentityModule,
@@ -39,13 +67,41 @@ import { ActionsModule } from './modules/actions/actions.module';
     FlowModule,
     GamificationModule,
     WebhooksModule,
+    ApiKeysModule,
     ActionsModule,
+    UploadsModule,
+    AutopilotModule,
+    NotificationsModule,
+    PaymentsModule,
+    SubscriptionsModule,
+    ProjectsModule,
+    ExpensesModule,
+    ReportsModule,
+    EmailMarketingModule,
+    LeadFormsModule,
+    TemplatesModule,
+    EducationModule,
+    CommunityModule,
+    MarketplaceModule,
+    SupplierModule,
+    MomentumModule,
+    SeedModule,
+    OnboardingConciergeModule,
+    DocumentsModule,
+    GoogleDriveModule,
+    DiagnosticsModule,
+    CommunicationsModule,
   ],
   controllers: [AppController],
-  providers: [AppService, AuthMiddleware],
+  providers: [
+    AppService,
+    AuthMiddleware,
+    { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
+    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
     consumer.apply(AuthMiddleware).forRoutes('*');
   }
 }

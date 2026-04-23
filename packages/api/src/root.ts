@@ -7,6 +7,8 @@ import { socialRouter } from './routers/social';
 import { automationRouter } from './routers/automation';
 import { siteRouter } from './routers/site';
 import { adminRouter } from './routers/admin';
+import { diagnosticsRouter } from './routers/diagnostics';
+import { supplierRouter } from './routers/supplier';
 
 export const appRouter = router({
   identity: identityRouter,
@@ -17,6 +19,8 @@ export const appRouter = router({
   automation: automationRouter,
   site: siteRouter,
   admin: adminRouter,
+  diagnostics: diagnosticsRouter,
+  supplier: supplierRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -3,12 +3,18 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as trpcExpress from '@trpc/server/adapters/express';
 import { appRouter, type AppContext } from '@keyflow/api';
 import { db } from '@keyflow/db';
+import { DiagnosticsService } from './modules/diagnostics/diagnostics.service';
+import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 
-@Module({})
+@Module({ imports: [DiagnosticsModule] })
 export class TrpcModule implements NestModule {
-  constructor(private readonly events: EventEmitter2) {}
+  constructor(
+    private readonly events: EventEmitter2,
+    private readonly diagnosticsService: DiagnosticsService,
+  ) {}
 
   configure(consumer: MiddlewareConsumer) {
+    const diagnostics = this.diagnosticsService;
     consumer
       .apply(
         trpcExpress.createExpressMiddleware({
@@ -20,6 +26,7 @@ export class TrpcModule implements NestModule {
               user,
               business,
               eventBus: this.events,
+              diagnostics,
             };
           },
         }),
