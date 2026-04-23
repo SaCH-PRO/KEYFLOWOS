@@ -24,7 +24,13 @@ import { bootstrapIdentity } from "@/lib/client";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "");
+
+function getSiteUrl() {
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_SITE_URL ?? "";
+}
 
 async function supabaseSignIn(email: string, password: string) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
@@ -40,16 +46,17 @@ async function supabaseSignIn(email: string, password: string) {
 
 function signInWithGoogle() {
   if (!SUPABASE_URL) return;
-  const redirectTo = `${SITE_URL.replace(/\/$/, "")}/auth/callback`;
+  const redirectTo = `${getSiteUrl().replace(/\/$/, "")}/auth/callback`;
   window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
 }
 
 async function supabaseResetPassword(email: string) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
+  const siteUrl = getSiteUrl();
   const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, redirectTo: `${SITE_URL.replace(/\/$/, "")}/auth/login` }),
+    body: JSON.stringify({ email, redirectTo: `${siteUrl.replace(/\/$/, "")}/auth/login` }),
   });
   if (!res.ok) {
     const json = await res.json().catch(() => null);

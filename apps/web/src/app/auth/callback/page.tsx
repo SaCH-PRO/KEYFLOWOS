@@ -4,6 +4,34 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+type DecodedToken = {
+  email?: string;
+  user_metadata?: {
+    full_name?: string;
+    name?: string;
+    given_name?: string;
+    family_name?: string;
+    avatar_url?: string;
+    picture?: string;
+  };
+};
+
+function decodeAccessToken(token: string): DecodedToken | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const payload = parts[1];
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = atob(normalized);
+    return JSON.parse(decoded) as DecodedToken;
+  } catch {
+    return null;
+  }
+}
+
 export default function AuthCallback() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -28,22 +56,32 @@ export default function AuthCallback() {
 
         window.localStorage.setItem("kf_token", accessToken);
 
-        const userInfoRes = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/user`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-            },
+        let userInfo: DecodedToken | null = null;
+        if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+          const userInfoRes = await fetch(
+            `${SUPABASE_URL}/auth/v1/user`,
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                apikey: SUPABASE_ANON_KEY,
+              },
+            }
+          );
+
+          if (userInfoRes.ok) {
+            userInfo = (await userInfoRes.json()) as DecodedToken;
           }
-        );
-        
-        if (!userInfoRes.ok) {
-          throw new Error("Failed to get user info");
         }
-        
-        const userInfo = await userInfoRes.json();
-        const email = userInfo.email;
+
+        if (!userInfo) {
+          userInfo = decodeAccessToken(accessToken);
+        }
+
+        const email = userInfo?.email;
+        if (!email) {
+          throw new Error("Could not determine authenticated email");
+        }
+
         const fullName = userInfo.user_metadata?.full_name || userInfo.user_metadata?.name || "";
         const avatarUrl = userInfo.user_metadata?.avatar_url || userInfo.user_metadata?.picture || "";
         
