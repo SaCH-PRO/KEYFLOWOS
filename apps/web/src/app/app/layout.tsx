@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
@@ -277,7 +277,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <NavigationContextProvider>
       <AiContextProvider>
-        <AppLayoutInner>{children}</AppLayoutInner>
+        <Suspense fallback={<div className="min-h-screen bg-background" />}>
+          <AppLayoutInner>{children}</AppLayoutInner>
+        </Suspense>
       </AiContextProvider>
     </NavigationContextProvider>
   );
@@ -285,9 +287,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const router = useRouter();
   const { pushContext, setTaskOrigin, current } = useNavigationContext();
+  const [activeTabQuery, setActiveTabQuery] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sync = () => {
+      const params = new URLSearchParams(window.location.search);
+      setActiveTabQuery(params.get("tab"));
+    };
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, [pathname]);
+
 
   const activePrimary = useMemo(() => detectPrimarySection(pathname), [pathname]);
   const copilotModule = useMemo((): CopilotModule => {
@@ -314,13 +327,13 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const isSecondaryActive = useCallback((item: NavItem) => {
     const basePath = item.href.split("?")[0];
     if (item.matchTab) {
-      return pathname === basePath && searchParams.get("tab") === item.matchTab;
+      return pathname === basePath && activeTabQuery === item.matchTab;
     }
     if (item.exactMatch) {
-      return pathname === basePath && !searchParams.get("tab");
+      return pathname === basePath && !activeTabQuery;
     }
     return pathname === basePath || pathname.startsWith(basePath + "/");
-  }, [pathname, searchParams]);
+  }, [pathname, activeTabQuery]);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);

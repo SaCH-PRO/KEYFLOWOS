@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Layers,
@@ -21,10 +21,17 @@ import {
   Loader2,
 } from "lucide-react";
 import { bootstrapIdentity } from "@/lib/client";
+import { persistSessionToken } from "@/lib/session-client";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "");
+
+function getSiteUrl() {
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_SITE_URL ?? "";
+}
 
 async function supabaseSignIn(email: string, password: string) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
@@ -40,16 +47,17 @@ async function supabaseSignIn(email: string, password: string) {
 
 function signInWithGoogle() {
   if (!SUPABASE_URL) return;
-  const redirectTo = `${SITE_URL.replace(/\/$/, "")}/auth/callback`;
+  const redirectTo = `${getSiteUrl().replace(/\/$/, "")}/auth/callback`;
   window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
 }
 
 async function supabaseResetPassword(email: string) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
+  const siteUrl = getSiteUrl();
   const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, redirectTo: `${SITE_URL.replace(/\/$/, "")}/auth/login` }),
+    body: JSON.stringify({ email, redirectTo: `${siteUrl.replace(/\/$/, "")}/auth/login` }),
   });
   if (!res.ok) {
     const json = await res.json().catch(() => null);
@@ -66,8 +74,7 @@ const FEATURES = [
 
 export default function AuthLogin() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const verified = useMemo(() => searchParams?.get("verified") === "1", [searchParams]);
+  const [verified, setVerified] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -76,6 +83,12 @@ export default function AuthLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [resetSent, setResetSent] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setVerified(params.get("verified") === "1");
+  }, []);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -95,7 +108,7 @@ export default function AuthLogin() {
     setLoading(true);
     try {
       const session = await supabaseSignIn(email, password);
-      window.localStorage.setItem("kf_token", session.access_token);
+      await persistSessionToken(session.access_token);
       const draft = JSON.parse(window.localStorage.getItem("kf_profile_draft") || "{}");
       const bootstrap = await bootstrapIdentity({
         email, firstName: draft.firstName, lastName: draft.lastName,

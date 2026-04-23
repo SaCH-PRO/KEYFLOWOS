@@ -1,9 +1,9 @@
 "use client";
 
 import { bootstrapIdentity } from "./client";
+import { clearWebSession } from "./session-client";
 
 const BUSINESS_ID_KEY = "kf_business_id";
-const TOKEN_KEY = "kf_token";
 const BUSINESS_CACHE_KEY = "kf_business_cache";
 const USER_CACHE_KEY = "kf_user_cache";
 
@@ -90,11 +90,27 @@ export function setStoredBusinessId(id: string) {
 export function clearStoredBusinessId() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(BUSINESS_ID_KEY);
-  window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_CACHE_KEY);
   window.localStorage.removeItem(BUSINESS_CACHE_KEY);
   userCache = null;
   businessCache = null;
+  void clearWebSession();
+}
+
+async function hasActiveSession(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  try {
+    const res = await fetch("/api/session", {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!res.ok) return false;
+    const json = (await res.json().catch(() => null)) as { hasSession?: boolean } | null;
+    return Boolean(json?.hasSession);
+  } catch {
+    return false;
+  }
 }
 
 export async function ensureWorkspace(): Promise<string | null> {
@@ -102,8 +118,8 @@ export async function ensureWorkspace(): Promise<string | null> {
   const existing = getStoredBusinessId();
   if (existing) return existing;
 
-  const token = window.localStorage.getItem(TOKEN_KEY);
-  if (!token) return null;
+  const hasSession = await hasActiveSession();
+  if (!hasSession) return null;
 
   const result = await bootstrapIdentity({});
   if (result.data?.business?.id) {
@@ -120,8 +136,8 @@ export async function ensureWorkspace(): Promise<string | null> {
 export async function refreshWorkspace(): Promise<string | null> {
   if (typeof window === "undefined") return null;
   
-  const token = window.localStorage.getItem(TOKEN_KEY);
-  if (!token) return null;
+  const hasSession = await hasActiveSession();
+  if (!hasSession) return null;
 
   const result = await bootstrapIdentity({});
   if (result.data?.business?.id) {

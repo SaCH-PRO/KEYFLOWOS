@@ -4,7 +4,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from '../subscriptions/plans';
 import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
 import { OutputTemplateService } from './output-template.service';
-import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus } from './model-gateway.service';
+import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider } from './model-gateway.service';
 
 /**
  * responseMode controls quality directive injection and output validation:
@@ -471,9 +471,12 @@ export class AiUsageService {
     } catch {
     }
 
-    const providerBudgetMap = new Map(
-      budgetStatus?.byProvider?.map(b => [b.provider, b]) || [],
-    );
+    const providerBudgetMap = new Map<AiProvider, BudgetStatus['byProvider'][number]>();
+    for (const b of budgetStatus?.byProvider ?? []) {
+      if (b.provider === 'openai' || b.provider === 'anthropic' || b.provider === 'xai') {
+        providerBudgetMap.set(b.provider, b);
+      }
+    }
 
     return {
       byProvider: byProvider.map(p => ({
@@ -483,7 +486,10 @@ export class AiUsageService {
         cost: Math.round((p._sum.estimatedCost ?? 0) * 100) / 100,
         tokens: p._sum.totalTokens ?? 0,
         avgLatencyMs: Math.round(p._avg.latencyMs ?? 0),
-        budget: providerBudgetMap.get(p.provider) || null,
+        budget:
+          p.provider === 'openai' || p.provider === 'anthropic' || p.provider === 'xai'
+            ? providerBudgetMap.get(p.provider) || null
+            : null,
       })),
       fallbackCount: fallbackStats,
       avgLatencyMs: Math.round(avgLatency._avg.latencyMs ?? 0),

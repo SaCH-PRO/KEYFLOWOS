@@ -18,6 +18,7 @@ import {
   aiSuggestPreviewText, aiSuggestAudienceSegments, aiSuggestContentIdeas,
 } from "@/lib/client";
 import type { ChannelDestination, OutboundContent } from "@/lib/client";
+import { API_BASE } from "@/lib/api";
 import { ChannelSelector } from "./channel-selector";
 import { ChannelVariantsPanel, type VariantData } from "./channel-variants-panel";
 import { ChannelPreviewPanel } from "./channel-preview-panel";
@@ -104,14 +105,6 @@ const TIMEZONES = [
   { value: "America/Jamaica", label: "Jamaica (EST)" },
   { value: "America/Barbados", label: "Barbados (AST)" },
 ];
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
-
-function getAuthHeaders(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  const token = window.localStorage?.getItem("kf_token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 function inferContentType(destinations: ChannelDestination[]): ContentTypeOption {
   if (destinations.length === 0) return "social";
@@ -556,7 +549,7 @@ export function UnifiedComposer({
 
         const res = await fetch(`${API_BASE}/upload/businesses/${encodeURIComponent(businessId)}/media`, {
           method: "POST",
-          headers: getAuthHeaders(),
+          credentials: "include",
           body: formData,
         });
         if (res.ok) {

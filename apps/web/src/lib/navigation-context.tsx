@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 export interface NavigationEntry {
   route: string;
@@ -85,6 +85,11 @@ function buildFilters(searchParams: URLSearchParams): Record<string, string> {
   return filters;
 }
 
+function getClientSearchParams(): URLSearchParams {
+  if (typeof window === "undefined") return new URLSearchParams();
+  return new URLSearchParams(window.location.search);
+}
+
 const STACK_STORAGE_KEY = "kf-nav-stack";
 const TASK_ORIGIN_KEY = "kf-task-origin";
 const MAX_STACK_SIZE = 20;
@@ -148,7 +153,6 @@ const NavigationContext = createContext<NavigationContextValue>({
 
 export function NavigationContextProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [stack, setStack] = useState<NavigationEntry[]>(() => loadStack());
   const [taskOrigin, setTaskOriginState] = useState<NavigationEntry | null>(() => loadTaskOrigin());
   const metaOverrideRef = useRef<Partial<NavigationEntry>>({});
@@ -158,6 +162,7 @@ export function NavigationContextProvider({ children }: { children: React.ReactN
 
   const buildEntry = useCallback(
     (route: string, overrides: Partial<NavigationEntry> = {}): NavigationEntry => {
+      const searchParams = getClientSearchParams();
       const tab = searchParams.get("tab");
       const workspace = getWorkspaceFromRoute(route);
       const filters = buildFilters(searchParams);
@@ -173,11 +178,12 @@ export function NavigationContextProvider({ children }: { children: React.ReactN
         ...overrides,
       };
     },
-    [searchParams]
+    []
   );
 
   useEffect(() => {
     if (!pathname) return;
+    const searchParams = getClientSearchParams();
 
     const currentTab = searchParams.get("tab");
     const isNewRoute = pathname !== prevRouteRef.current;
@@ -220,7 +226,7 @@ export function NavigationContextProvider({ children }: { children: React.ReactN
 
     prevRouteRef.current = pathname;
     prevTabRef.current = currentTab;
-  }, [pathname, searchParams, buildEntry]);
+  }, [pathname, buildEntry]);
 
   const current = stack.length > 0 ? stack[stack.length - 1] : null;
   const previous = stack.length > 1 ? stack[stack.length - 2] : null;

@@ -5,6 +5,7 @@ import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIE
 @Injectable()
 export class IdentityService {
   private readonly logger = new Logger(IdentityService.name);
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   listBusinesses(userId: string) {
@@ -313,7 +314,7 @@ export class IdentityService {
           orderBy: { createdAt: 'desc' },
         },
         services: {
-          select: { id: true, name: true, price: true, currency: true, durationMins: true, description: true },
+          select: { id: true, name: true, price: true, duration: true, description: true },
           take: 6,
           orderBy: { createdAt: 'desc' },
         },

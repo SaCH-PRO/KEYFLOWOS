@@ -94,11 +94,6 @@ type Props = {
   connections?: SocialConnection[];
 };
 
-function getAuthToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage?.getItem("kf_token");
-}
-
 function normalizeMediaUrl(url: string): string {
   const trimmed = url.trim();
   const driveMatch = trimmed.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
@@ -189,13 +184,10 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
     setMediaFiles(prev => [...prev, { id, file, url: "", uploading: true, preview }]);
 
     try {
-      const token = getAuthToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
       const res = await fetch(`${API_BASE}/uploads/request-url`, {
         method: "POST",
-        headers,
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
       });
       if (!res.ok) throw new Error("Failed to get upload URL");

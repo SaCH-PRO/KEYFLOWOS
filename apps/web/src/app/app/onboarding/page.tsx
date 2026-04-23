@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -143,6 +143,61 @@ const STEP_KEY_MAP: Record<string, number> = {
   storefront: 2,
   payments: 2,
 };
+
+const PAIN_OPTIONS = [
+  "Missed follow-ups",
+  "Late invoice payments",
+  "Underbooked calendar",
+  "Unclear daily priorities",
+] as const;
+
+const AUTOMATION_OPTIONS = [
+  "Overdue invoice reminders",
+  "Lead follow-up sequence",
+  "Booking confirmation flow",
+  "Daily priorities summary",
+] as const;
+
+const REPLACING_OPTIONS = [
+  "Spreadsheets",
+  "Multiple disconnected apps",
+  "Mostly manual process",
+  "First business system",
+] as const;
+
+type FirstWinId = "invoice" | "followup" | "booking" | "payments";
+
+const FIRST_WIN_OPTIONS: Array<{
+  id: FirstWinId;
+  title: string;
+  description: string;
+  route: string;
+}> = [
+  {
+    id: "invoice",
+    title: "Send first invoice",
+    description: "Create and send your first invoice now.",
+    route: "/app/commerce?tab=invoices",
+  },
+  {
+    id: "followup",
+    title: "Launch lead follow-up",
+    description: "Create a follow-up sequence for stale leads.",
+    route: "/app/crm/pipeline",
+  },
+  {
+    id: "booking",
+    title: "Publish booking page",
+    description: "Share your booking link and fill your calendar.",
+    route: "/app/bookings",
+  },
+  {
+    id: "payments",
+    title: "Connect payment methods",
+    description: "Enable faster collection and reminders.",
+    route: "/app/settings/connections",
+  },
+];
 
 function getPublicPageUrl(businessId: string): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -456,6 +511,37 @@ export default function OnboardingPage() {
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [activationProfile, setActivationProfile] = useState({
+    businessType: "",
+    primaryPain: "",
+    firstAutomation: "",
+    replacingSystem: "",
+  });
+  const [selectedFirstWin, setSelectedFirstWin] = useState<FirstWinId | null>(null);
+  const [savingFirstWin, setSavingFirstWin] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
+
+  const profileComplete = useMemo(
+    () =>
+      Boolean(
+        activationProfile.businessType &&
+          activationProfile.primaryPain &&
+          activationProfile.firstAutomation &&
+          activationProfile.replacingSystem
+      ),
+    [activationProfile],
+  );
+
+  const checklist = useMemo(
+    () => [
+      { label: "Business profile answers", done: profileComplete },
+      { label: "Template selected", done: Boolean(selectedTemplate) },
+      { label: "First offering configured", done: step >= 2 && products.some((p) => p.included && p.name.trim()) },
+      { label: "Public page live", done: Boolean(publicUrl) },
+      { label: "First win selected", done: Boolean(selectedFirstWin) },
+    ],
+    [profileComplete, products, publicUrl, selectedFirstWin, selectedTemplate, step],
+  );
 
   useEffect(() => {
     originSnapshotRef.current = getOriginContext();
@@ -478,6 +564,38 @@ export default function OnboardingPage() {
       try {
         const stateRes = await fetchConciergeState(bid);
         if (stateRes.data) {
+          const profileFromMeta =
+            stateRes.data.metaData &&
+            typeof stateRes.data.metaData === "object" &&
+            "activationProfile" in stateRes.data.metaData
+              ? (stateRes.data.metaData.activationProfile as
+                  | {
+                      businessType?: string;
+                      primaryPain?: string;
+                      firstAutomation?: string;
+                      replacingSystem?: string;
+                    }
+                  | null)
+              : null;
+          if (profileFromMeta) {
+            setActivationProfile((prev) => ({
+              businessType: profileFromMeta.businessType ?? prev.businessType,
+              primaryPain: profileFromMeta.primaryPain ?? prev.primaryPain,
+              firstAutomation: profileFromMeta.firstAutomation ?? prev.firstAutomation,
+              replacingSystem: profileFromMeta.replacingSystem ?? prev.replacingSystem,
+            }));
+          }
+
+          const firstWinFromMeta =
+            stateRes.data.metaData &&
+            typeof stateRes.data.metaData === "object" &&
+            "firstWin" in stateRes.data.metaData
+              ? (stateRes.data.metaData.firstWin as FirstWinId | null)
+              : null;
+          if (firstWinFromMeta) {
+            setSelectedFirstWin(firstWinFromMeta);
+          }
+
           if (stateRes.data.templateId) {
             setSelectedTemplate(stateRes.data.templateId);
             const previewRes = await fetchConciergeTemplatePreview(bid, stateRes.data.templateId);
@@ -523,6 +641,11 @@ export default function OnboardingPage() {
 
   const handleSelectTemplate = async (templateId: string) => {
     if (!businessId) return;
+    if (!profileComplete) {
+      setSetupError("Answer all four setup questions first so we can tailor your onboarding.");
+      return;
+    }
+    setSetupError(null);
     setSelectedTemplate(templateId);
     const template = TEMPLATES.find((t) => t.id === templateId);
 
@@ -534,6 +657,7 @@ export default function OnboardingPage() {
         industry: template?.label || templateId,
         metaData: {
           conciergeTemplateId: templateId,
+          activationProfile,
           onboardingStep: 1,
         },
       });
@@ -674,9 +798,30 @@ export default function OnboardingPage() {
       await markConciergeComplete(businessId);
     }
     if (resumeTaskId) markTaskCompleted(resumeTaskId);
+    const firstWinTarget = FIRST_WIN_OPTIONS.find((option) => option.id === selectedFirstWin)?.route;
     const returnEntry = getTaskOrigin();
     setTaskOrigin(null);
-    router.push(returnEntry?.route ?? "/app");
+    router.push(firstWinTarget ?? returnEntry?.route ?? "/app");
+  };
+
+  const handleSelectFirstWin = async (firstWin: FirstWinId) => {
+    if (!businessId || savingFirstWin) return;
+    setSavingFirstWin(true);
+    setSelectedFirstWin(firstWin);
+    try {
+      await updateBusiness({
+        businessId,
+        metaData: {
+          onboardingStep: 3,
+          firstWin,
+          activationProfile,
+        },
+      });
+    } catch (err) {
+      console.error("Failed to save first win:", err);
+    } finally {
+      setSavingFirstWin(false);
+    }
   };
 
   const handleSkip = async () => {
@@ -754,6 +899,34 @@ export default function OnboardingPage() {
         </div>
       </div>
 
+      <div className="px-4 sm:px-6 pt-4">
+        <div
+          className="rounded-xl p-3"
+          style={{
+            background: "hsl(var(--kf-muted) / 0.12)",
+            border: "1px solid hsl(var(--kf-border) / 0.35)",
+          }}
+        >
+          <p className="text-xs font-semibold mb-2">Setup progress checklist</p>
+          <div className="grid gap-1 sm:grid-cols-2">
+            {checklist.map((item) => (
+              <div key={item.label} className="flex items-center gap-2 text-xs">
+                <div
+                  className="w-4 h-4 rounded-full flex items-center justify-center"
+                  style={{
+                    background: item.done ? "hsl(var(--kf-success) / 0.18)" : "hsl(var(--kf-muted) / 0.3)",
+                    color: item.done ? "hsl(var(--kf-success))" : "hsl(var(--kf-muted-foreground))",
+                  }}
+                >
+                  {item.done ? <Check className="w-2.5 h-2.5" /> : item.label[0]}
+                </div>
+                <span className="text-muted-foreground">{item.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="flex-1 overflow-y-auto">
         <AnimatePresence mode="wait">
           {step === 0 && (
@@ -787,6 +960,122 @@ export default function OnboardingPage() {
                 </p>
               </div>
 
+              <div
+                className="rounded-xl p-4 mb-6 space-y-3"
+                style={{
+                  background: "hsl(var(--kf-muted) / 0.12)",
+                  border: "1px solid hsl(var(--kf-border) / 0.35)",
+                }}
+              >
+                <p className="text-sm font-semibold">Quick setup profile</p>
+
+                <div>
+                  <p className="text-xs mb-1 text-muted-foreground">What business type best matches you?</p>
+                  <div className="flex flex-wrap gap-2">
+                    {["Services", "Products", "Mixed"].map((option) => (
+                      <button
+                        key={option}
+                        onClick={() => setActivationProfile((prev) => ({ ...prev, businessType: option }))}
+                        className="px-2.5 py-1.5 rounded-lg text-xs transition-all"
+                        style={{
+                          background:
+                            activationProfile.businessType === option
+                              ? "hsl(var(--kf-accent1) / 0.16)"
+                              : "hsl(var(--kf-muted) / 0.25)",
+                          color:
+                            activationProfile.businessType === option
+                              ? "hsl(var(--kf-accent1))"
+                              : "hsl(var(--kf-muted-foreground))",
+                        }}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs mb-1 text-muted-foreground">Biggest pain right now?</p>
+                  <div className="flex flex-wrap gap-2">
+                    {PAIN_OPTIONS.map((option) => (
+                      <button
+                        key={option}
+                        onClick={() => setActivationProfile((prev) => ({ ...prev, primaryPain: option }))}
+                        className="px-2.5 py-1.5 rounded-lg text-xs transition-all"
+                        style={{
+                          background:
+                            activationProfile.primaryPain === option
+                              ? "hsl(var(--kf-accent1) / 0.16)"
+                              : "hsl(var(--kf-muted) / 0.25)",
+                          color:
+                            activationProfile.primaryPain === option
+                              ? "hsl(var(--kf-accent1))"
+                              : "hsl(var(--kf-muted-foreground))",
+                        }}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs mb-1 text-muted-foreground">What should we automate first?</p>
+                  <div className="flex flex-wrap gap-2">
+                    {AUTOMATION_OPTIONS.map((option) => (
+                      <button
+                        key={option}
+                        onClick={() => setActivationProfile((prev) => ({ ...prev, firstAutomation: option }))}
+                        className="px-2.5 py-1.5 rounded-lg text-xs transition-all"
+                        style={{
+                          background:
+                            activationProfile.firstAutomation === option
+                              ? "hsl(var(--kf-accent1) / 0.16)"
+                              : "hsl(var(--kf-muted) / 0.25)",
+                          color:
+                            activationProfile.firstAutomation === option
+                              ? "hsl(var(--kf-accent1))"
+                              : "hsl(var(--kf-muted-foreground))",
+                        }}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs mb-1 text-muted-foreground">What are you replacing?</p>
+                  <div className="flex flex-wrap gap-2">
+                    {REPLACING_OPTIONS.map((option) => (
+                      <button
+                        key={option}
+                        onClick={() => setActivationProfile((prev) => ({ ...prev, replacingSystem: option }))}
+                        className="px-2.5 py-1.5 rounded-lg text-xs transition-all"
+                        style={{
+                          background:
+                            activationProfile.replacingSystem === option
+                              ? "hsl(var(--kf-accent1) / 0.16)"
+                              : "hsl(var(--kf-muted) / 0.25)",
+                          color:
+                            activationProfile.replacingSystem === option
+                              ? "hsl(var(--kf-accent1))"
+                              : "hsl(var(--kf-muted-foreground))",
+                        }}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {setupError && (
+                  <p className="text-xs" style={{ color: "hsl(var(--kf-error))" }}>
+                    {setupError}
+                  </p>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {TEMPLATES.map((t) => {
                   const Icon = t.icon;
@@ -795,6 +1084,7 @@ export default function OnboardingPage() {
                     <button
                       key={t.id}
                       onClick={() => handleSelectTemplate(t.id)}
+                      disabled={!profileComplete}
                       className="relative rounded-xl p-4 text-left transition-all hover:scale-[1.02]"
                       style={{
                         background: isSelected
@@ -803,6 +1093,7 @@ export default function OnboardingPage() {
                         border: isSelected
                           ? "2px solid hsl(var(--kf-accent1) / 0.5)"
                           : "1px solid hsl(var(--kf-border) / 0.3)",
+                        opacity: profileComplete ? 1 : 0.45,
                       }}
                     >
                       {isSelected && (
@@ -1246,16 +1537,53 @@ export default function OnboardingPage() {
                 </div>
               </div>
 
+              <div
+                className="rounded-xl p-4 mb-6"
+                style={{
+                  background:
+                    "linear-gradient(135deg, hsl(var(--kf-accent2) / 0.08), hsl(var(--kf-accent1) / 0.04))",
+                  border: "1px solid hsl(var(--kf-accent2) / 0.2)",
+                }}
+              >
+                <p className="text-sm font-semibold mb-1">Pick your first concrete win</p>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Choose what you want to complete in this first session.
+                </p>
+                <div className="space-y-2">
+                  {FIRST_WIN_OPTIONS.map((option) => {
+                    const active = selectedFirstWin === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        onClick={() => handleSelectFirstWin(option.id)}
+                        className="w-full text-left rounded-lg px-3 py-2.5 transition-all"
+                        style={{
+                          background: active ? "hsl(var(--kf-accent2) / 0.16)" : "hsl(var(--kf-muted) / 0.2)",
+                          border: active
+                            ? "1px solid hsl(var(--kf-accent2) / 0.45)"
+                            : "1px solid hsl(var(--kf-border) / 0.25)",
+                        }}
+                      >
+                        <p className="text-sm font-medium">{option.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{option.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <button
                 onClick={handleFinish}
+                disabled={!selectedFirstWin || savingFirstWin}
                 className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all hover:scale-[1.01]"
                 style={{
                   background:
                     "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
                   color: "hsl(var(--kf-foreground))",
+                  opacity: !selectedFirstWin ? 0.55 : 1,
                 }}
               >
-                Go to Dashboard
+                {savingFirstWin ? "Saving first win..." : "Start first win"}
                 <ArrowRight className="w-4 h-4" />
               </button>
             </motion.div>

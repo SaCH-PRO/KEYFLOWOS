@@ -1,12 +1,40 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
+import { persistSessionToken } from "@/lib/session-client";
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+type DecodedToken = {
+  email?: string;
+  user_metadata?: {
+    full_name?: string;
+    name?: string;
+    given_name?: string;
+    family_name?: string;
+    avatar_url?: string;
+    picture?: string;
+  };
+};
+
+function decodeAccessToken(token: string): DecodedToken | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const payload = parts[1];
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = atob(normalized);
+    return JSON.parse(decoded) as DecodedToken;
+  } catch {
+    return null;
+  }
+}
 
 export default function AuthCallback() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [status, setStatus] = useState<"loading" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
 
@@ -16,7 +44,8 @@ export default function AuthCallback() {
         const hash = window.location.hash.substring(1);
         const params = new URLSearchParams(hash);
         const accessToken = params.get("access_token");
-        const errorDescription = searchParams?.get("error_description");
+        const queryParams = new URLSearchParams(window.location.search);
+        const errorDescription = queryParams.get("error_description");
         
         if (errorDescription) {
           throw new Error(errorDescription);
@@ -26,30 +55,41 @@ export default function AuthCallback() {
           throw new Error("No access token received");
         }
 
-        window.localStorage.setItem("kf_token", accessToken);
+        await persistSessionToken(accessToken);
 
-        const userInfoRes = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/user`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-            },
+        let userInfo: DecodedToken | null = null;
+        if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+          const userInfoRes = await fetch(
+            `${SUPABASE_URL}/auth/v1/user`,
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                apikey: SUPABASE_ANON_KEY,
+              },
+            }
+          );
+
+          if (userInfoRes.ok) {
+            userInfo = (await userInfoRes.json()) as DecodedToken;
           }
-        );
-        
-        if (!userInfoRes.ok) {
-          throw new Error("Failed to get user info");
         }
-        
-        const userInfo = await userInfoRes.json();
-        const email = userInfo.email;
-        const fullName = userInfo.user_metadata?.full_name || userInfo.user_metadata?.name || "";
-        const avatarUrl = userInfo.user_metadata?.avatar_url || userInfo.user_metadata?.picture || "";
+
+        if (!userInfo) {
+          userInfo = decodeAccessToken(accessToken);
+        }
+
+        const email = userInfo?.email;
+        if (!email) {
+          throw new Error("Could not determine authenticated email");
+        }
+
+        const metadata = userInfo?.user_metadata;
+        const fullName = metadata?.full_name || metadata?.name || "";
+        const avatarUrl = metadata?.avatar_url || metadata?.picture || "";
         
         const nameParts = fullName.split(" ");
-        const firstName = userInfo.user_metadata?.given_name || nameParts[0] || "";
-        const lastName = userInfo.user_metadata?.family_name || nameParts.slice(1).join(" ") || "";
+        const firstName = metadata?.given_name || nameParts[0] || "";
+        const lastName = metadata?.family_name || nameParts.slice(1).join(" ") || "";
         
         if (email) {
           window.localStorage.setItem("kf_email", email);
@@ -87,7 +127,7 @@ export default function AuthCallback() {
     };
 
     handleCallback();
-  }, [router, searchParams]);
+  }, [router]);
 
   if (status === "error") {
     return (

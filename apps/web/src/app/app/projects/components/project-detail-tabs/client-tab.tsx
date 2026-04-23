@@ -49,10 +49,14 @@ export function ClientTab({ contactId }: ClientTabProps) {
         if (res.data?.contact) {
           const contact = res.data.contact;
           const meta = res.data.meta;
+          const contactWithMeta = contact as typeof contact & {
+            leadScore?: number | null;
+            lastInteractionAt?: string | null;
+          };
           setClient({
             ...contact,
-            leadScore: meta?.leadScore ?? contact.leadScore ?? null,
-            lastInteractionAt: meta?.lastInteractionAt ?? contact.lastInteractionAt ?? null,
+            leadScore: meta?.leadScore ?? contactWithMeta.leadScore ?? null,
+            lastInteractionAt: meta?.lastInteractionAt ?? contactWithMeta.lastInteractionAt ?? null,
           } as ClientData);
         } else if (res.error) {
           setError(res.error);

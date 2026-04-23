@@ -1,7 +1,9 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -37,7 +39,6 @@ import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage
 import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 
 export default function ContactsPage() {
-  const searchParams = useSearchParams();
   const router = useRouter();
   const googleHandled = useRef(false);
   const state = useContactsPipeline();
@@ -108,10 +109,11 @@ export default function ContactsPage() {
 
   useEffect(() => {
     if (googleHandled.current) return;
-    const googleSuccess = searchParams.get("google_success");
-    const googleError = searchParams.get("google_error");
-    const imported = searchParams.get("imported");
-    const action = searchParams.get("action");
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    const googleSuccess = params.get("google_success");
+    const googleError = params.get("google_error");
+    const imported = params.get("imported");
+    const action = params.get("action");
     if (googleSuccess) {
       googleHandled.current = true;
       toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
@@ -131,7 +133,7 @@ export default function ContactsPage() {
       state.setShowAddMenu(true);
       router.replace("/app/crm/pipeline");
     }
-  }, [searchParams, router, loadContacts, loadFlowData, state.setShowAddMenu]);
+  }, [router, loadContacts, loadFlowData, state.setShowAddMenu]);
 
   const confirmStateRef = useRef(confirmState);
   confirmStateRef.current = confirmState;
