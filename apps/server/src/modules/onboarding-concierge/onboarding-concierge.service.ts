@@ -62,6 +62,33 @@ interface AutoConfigureResult {
 }
 
 type BusinessMetaData = Record<string, Prisma.JsonValue | undefined>;
+const ONBOARDING_STAGES = ['not_started', 'profiled', 'configured', 'launched', 'activated', 'deferred', 'completed'] as const;
+type OnboardingStage = typeof ONBOARDING_STAGES[number];
+
+interface OnboardingStateSnapshot {
+  stage: OnboardingStage;
+  firstWin: 'storefront_live';
+  firstWinAchieved: boolean;
+  canSkip: boolean;
+  lastUpdatedAt?: string;
+  deferredAt?: string;
+  completedAt?: string;
+}
+
+interface OnboardingMilestone {
+  id: string;
+  label: string;
+  completed: boolean;
+  route: string;
+}
+
+interface NextBestAction {
+  id: string;
+  label: string;
+  description: string;
+  route: string;
+  priority: 'high' | 'medium' | 'low';
+}
 
 function parseMetaData(raw: Prisma.JsonValue | null | undefined): BusinessMetaData {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -73,11 +100,154 @@ function parseMetaData(raw: Prisma.JsonValue | null | undefined): BusinessMetaDa
 @Injectable()
 export class OnboardingConciergeService {
   private readonly logger = new Logger(OnboardingConciergeService.name);
+  private static readonly VALID_ONBOARDING_STAGES = new Set<OnboardingStage>(ONBOARDING_STAGES);
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
+
+  private deriveOnboardingStage(setupStatus: SetupStatus, meta: Record<string, Prisma.JsonValue> | null): OnboardingStage {
+    if (setupStatus.storefront) return 'launched';
+    if (meta && typeof meta.deferredAt === 'string') return 'deferred';
+    if (setupStatus.completedCount >= 4) return 'configured';
+    if (setupStatus.completedCount >= 2 || setupStatus.profile) return 'profiled';
+    return 'not_started';
+  }
+
+  private resolveOnboardingState(meta: BusinessMetaData, setupStatus: SetupStatus, onboardingComplete: boolean): OnboardingStateSnapshot {
+    const rawOnboardingState =
+      meta.onboardingState && typeof meta.onboardingState === 'object' && !Array.isArray(meta.onboardingState)
+        ? (meta.onboardingState as Record<string, Prisma.JsonValue>)
+        : null;
+    const rawStage = rawOnboardingState?.stage;
+    const explicitStage =
+      typeof rawStage === 'string' && OnboardingConciergeService.VALID_ONBOARDING_STAGES.has(rawStage as OnboardingStage)
+        ? (rawStage as OnboardingStage)
+        : null;
+    const stage = onboardingComplete
+      ? 'completed'
+      : explicitStage ?? this.deriveOnboardingStage(setupStatus, rawOnboardingState);
+
+    const firstWinAchieved =
+      Boolean(rawOnboardingState?.firstWinAchieved) || setupStatus.storefront || ['launched', 'activated', 'completed'].includes(stage);
+
+    return {
+      stage,
+      firstWin: 'storefront_live',
+      firstWinAchieved,
+      canSkip: !['completed', 'launched', 'activated'].includes(stage),
+      lastUpdatedAt: typeof rawOnboardingState?.lastUpdatedAt === 'string' ? rawOnboardingState.lastUpdatedAt : undefined,
+      deferredAt: typeof rawOnboardingState?.deferredAt === 'string' ? rawOnboardingState.deferredAt : undefined,
+      completedAt: typeof rawOnboardingState?.completedAt === 'string' ? rawOnboardingState.completedAt : undefined,
+    };
+  }
+
+  private buildMilestones(
+    setupStatus: SetupStatus,
+    onboardingState: OnboardingStateSnapshot,
+    onboardingComplete: boolean,
+  ): OnboardingMilestone[] {
+    return [
+      {
+        id: 'profileCaptured',
+        label: 'Business profile captured',
+        completed: setupStatus.profile,
+        route: '/app/onboarding?step=profile',
+      },
+      {
+        id: 'catalogConfigured',
+        label: 'Products or services configured',
+        completed: setupStatus.products,
+        route: '/app/onboarding?step=products',
+      },
+      {
+        id: 'hoursConfigured',
+        label: 'Business hours configured',
+        completed: setupStatus.businessHours,
+        route: '/app/onboarding?step=hours',
+      },
+      {
+        id: 'paymentsConfigured',
+        label: 'Payment methods configured',
+        completed: setupStatus.payments,
+        route: '/app/settings/business?tab=payments',
+      },
+      {
+        id: 'storefrontLive',
+        label: 'Storefront published (first win)',
+        completed: onboardingState.firstWinAchieved,
+        route: '/app/onboarding?step=storefront',
+      },
+      {
+        id: 'activationComplete',
+        label: 'Activation complete',
+        completed: onboardingComplete || onboardingState.stage === 'completed',
+        route: '/app/onboarding',
+      },
+    ];
+  }
+
+  private buildNextBestActions(setupStatus: SetupStatus, onboardingState: OnboardingStateSnapshot): NextBestAction[] {
+    const actions: NextBestAction[] = [];
+    if (!setupStatus.profile) {
+      actions.push({
+        id: 'capture-profile',
+        label: 'Capture business profile',
+        description: 'Answer setup questions so KeyFlowOS can personalize defaults.',
+        route: '/app/onboarding?step=profile',
+        priority: 'high',
+      });
+    }
+    if (!setupStatus.products) {
+      actions.push({
+        id: 'configure-catalog',
+        label: 'Configure first offering',
+        description: 'Add at least one service or product to power your storefront.',
+        route: '/app/onboarding?step=products',
+        priority: 'high',
+      });
+    }
+    if (!setupStatus.businessHours) {
+      actions.push({
+        id: 'set-hours',
+        label: 'Set business hours',
+        description: 'Define availability for bookings and storefront expectations.',
+        route: '/app/onboarding?step=hours',
+        priority: 'medium',
+      });
+    }
+    if (!setupStatus.storefront) {
+      actions.push({
+        id: 'launch-storefront',
+        label: 'Launch storefront',
+        description: 'Publish your storefront to unlock the Grand Opening milestone.',
+        route: '/app/onboarding?step=storefront',
+        priority: 'high',
+      });
+    }
+    if (setupStatus.storefront && !setupStatus.payments) {
+      actions.push({
+        id: 'connect-payments',
+        label: 'Connect payment gateway',
+        description: 'Enable checkout and capture revenue from your new storefront.',
+        route: '/app/settings/business?tab=payments',
+        priority: 'high',
+      });
+    }
+    if (actions.length === 0) {
+      actions.push({
+        id: 'review-and-optimize',
+        label: 'Review your live setup',
+        description: onboardingState.stage === 'completed'
+          ? 'Your activation is complete. Fine-tune offers and promotions.'
+          : 'Your core setup is ready. Review pricing and launch promotions.',
+        route: '/app/dashboard',
+        priority: 'low',
+      });
+    }
+    return actions;
+  }
 
   async getSetupStatus(businessId: string): Promise<SetupStatus> {
     const [business, productCount, contactCount] = await Promise.all([
@@ -224,6 +394,19 @@ export class OnboardingConciergeService {
 
       metaUpdates.conciergeTemplateId = templateId;
       metaUpdates.conciergeSetupAt = new Date().toISOString();
+      const existingOnboardingState =
+        meta.onboardingState && typeof meta.onboardingState === 'object' && !Array.isArray(meta.onboardingState)
+          ? (meta.onboardingState as Record<string, Prisma.JsonValue>)
+          : {};
+      const launchTimestamp = new Date().toISOString();
+      metaUpdates.onboardingState = {
+        ...existingOnboardingState,
+        stage: configureStorefront ? 'launched' : 'configured',
+        firstWin: 'storefront_live',
+        firstWinAchieved: configureStorefront ? true : Boolean(existingOnboardingState.firstWinAchieved),
+        ...(configureStorefront ? { launchedAt: launchTimestamp } : {}),
+        lastUpdatedAt: launchTimestamp,
+      } as unknown as Prisma.JsonValue;
 
       const businessUpdate: Prisma.BusinessUpdateInput = {
         metaData: metaUpdates as Prisma.InputJsonValue,
@@ -241,6 +424,9 @@ export class OnboardingConciergeService {
     });
 
     await this.awardSetupMilestone(businessId, 'conciergeSetupComplete');
+    if (configureStorefront) {
+      await this.awardSetupMilestone(businessId, 'storefrontLive');
+    }
 
     return {
       templateId: template.id,
@@ -693,24 +879,90 @@ ACTION:confirm|Set Up Salon Defaults`;
     ]);
 
     const meta = parseMetaData(business?.metaData);
+    const onboardingState = this.resolveOnboardingState(meta, setupStatus, business?.onboardingComplete ?? false);
+    const milestones = this.buildMilestones(setupStatus, onboardingState, business?.onboardingComplete ?? false);
+    const nextBestActions = this.buildNextBestActions(setupStatus, onboardingState);
 
     return {
       setupStatus,
       dismissed: !!(meta.conciergeDismissed),
       templateId: meta.conciergeTemplateId as string | undefined,
       onboardingComplete: business?.onboardingComplete ?? false,
+      onboardingState,
+      milestones,
+      nextBestActions,
+      metaData: meta as Record<string, Prisma.JsonValue>,
     };
   }
 
   async markOnboardingComplete(businessId: string) {
+    const existing = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    const meta = parseMetaData(existing?.metaData);
+    const existingOnboardingState =
+      meta.onboardingState && typeof meta.onboardingState === 'object' && !Array.isArray(meta.onboardingState)
+        ? (meta.onboardingState as Record<string, Prisma.JsonValue>)
+        : {};
+    const completedAt = new Date().toISOString();
+
     await this.prisma.client.business.update({
       where: { id: businessId },
-      data: { onboardingComplete: true },
+      data: {
+        onboardingComplete: true,
+        metaData: {
+          ...meta,
+          onboardingState: {
+            ...existingOnboardingState,
+            stage: 'completed',
+            firstWin: 'storefront_live',
+            firstWinAchieved: Boolean(existingOnboardingState.firstWinAchieved),
+            completedAt,
+            lastUpdatedAt: completedAt,
+          },
+        } as Prisma.InputJsonValue,
+      },
     });
 
     await this.awardSetupMilestone(businessId, 'onboardingComplete');
 
     return { complete: true };
+  }
+
+  async deferOnboarding(businessId: string) {
+    const existing = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    if (!existing) throw new NotFoundException('Business not found');
+
+    const meta = parseMetaData(existing.metaData);
+    const existingOnboardingState =
+      meta.onboardingState && typeof meta.onboardingState === 'object' && !Array.isArray(meta.onboardingState)
+        ? (meta.onboardingState as Record<string, Prisma.JsonValue>)
+        : {};
+    const deferredAt = new Date().toISOString();
+
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: {
+        onboardingComplete: false,
+        metaData: {
+          ...meta,
+          onboardingState: {
+            ...existingOnboardingState,
+            stage: 'deferred',
+            firstWin: 'storefront_live',
+            firstWinAchieved: Boolean(existingOnboardingState.firstWinAchieved),
+            deferredAt,
+            lastUpdatedAt: deferredAt,
+          },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    await this.awardSetupMilestone(businessId, 'onboardingDeferred');
+    return { deferred: true };
   }
 
   private async awardSetupMilestone(businessId: string, milestone: string) {

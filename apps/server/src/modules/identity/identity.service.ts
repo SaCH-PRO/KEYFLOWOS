@@ -19,7 +19,27 @@ export class IdentityService {
       where: { id: businessId },
     });
     if (!business) throw new NotFoundException('Business not found');
-    return business;
+    const rawMeta = business.metaData;
+    const parsedMeta =
+      rawMeta && typeof rawMeta === 'object' && !Array.isArray(rawMeta)
+        ? (rawMeta as Record<string, unknown>)
+        : null;
+    const onboardingState =
+      parsedMeta && parsedMeta.onboardingState && typeof parsedMeta.onboardingState === 'object' && !Array.isArray(parsedMeta.onboardingState)
+        ? (parsedMeta.onboardingState as Record<string, unknown>)
+        : null;
+    return {
+      ...business,
+      onboardingState: onboardingState
+        ? {
+            stage: typeof onboardingState.stage === 'string' ? onboardingState.stage : undefined,
+            firstWin: typeof onboardingState.firstWin === 'string' ? onboardingState.firstWin : undefined,
+            firstWinAchieved:
+              typeof onboardingState.firstWinAchieved === 'boolean' ? onboardingState.firstWinAchieved : undefined,
+            canSkip: typeof onboardingState.canSkip === 'boolean' ? onboardingState.canSkip : undefined,
+          }
+        : undefined,
+    };
   }
 
   private static readonly PUBLIC_BUSINESS_FIELDS = {

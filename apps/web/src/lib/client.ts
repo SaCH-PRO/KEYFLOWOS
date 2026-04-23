@@ -1485,7 +1485,17 @@ export async function sendQuoteEmail(input: {
 
 export type BootstrapIdentityResponse = {
   user: { id: string; email: string; name?: string | null; firstName?: string | null; lastName?: string | null; phone?: string | null; avatarUrl?: string | null; role: string };
-  business: { id: string; name: string; onboardingComplete?: boolean };
+  business: {
+    id: string;
+    name: string;
+    onboardingComplete?: boolean;
+    onboardingState?: {
+      stage?: string;
+      firstWin?: string;
+      firstWinAchieved?: boolean;
+      canSkip?: boolean;
+    };
+  };
 };
 
 export async function bootstrapIdentity(input: {
@@ -1523,6 +1533,13 @@ export type Business = {
   complianceData?: Record<string, boolean> | null;
   lastHealthCheck?: string | null;
   onboardingComplete?: boolean;
+  metaData?: Record<string, unknown> | null;
+  onboardingState?: {
+    stage?: string;
+    firstWin?: string;
+    firstWinAchieved?: boolean;
+    canSkip?: boolean;
+  };
   primaryColor?: string | null;
   secondaryColor?: string | null;
   tagline?: string | null;
@@ -1548,6 +1565,14 @@ export async function getBusinessById(businessId: string) {
     complianceStatus: z.string().nullable().optional(),
     complianceData: z.record(z.boolean()).nullable().optional(),
     lastHealthCheck: z.string().nullable().optional(),
+    onboardingComplete: z.boolean().optional(),
+    metaData: z.record(z.unknown()).nullable().optional(),
+    onboardingState: z.object({
+      stage: z.string().optional(),
+      firstWin: z.string().optional(),
+      firstWinAchieved: z.boolean().optional(),
+      canSkip: z.boolean().optional(),
+    }).optional(),
     businessHours: z.record(z.object({ open: z.string(), close: z.string(), closed: z.boolean().optional() })).nullable().optional(),
   });
   return apiGet(
@@ -6720,6 +6745,29 @@ export interface ConciergeState {
   dismissed: boolean;
   templateId?: string;
   onboardingComplete: boolean;
+  onboardingState?: {
+    stage: 'not_started' | 'profiled' | 'configured' | 'launched' | 'activated' | 'deferred' | 'completed';
+    firstWin: 'storefront_live';
+    firstWinAchieved: boolean;
+    canSkip: boolean;
+    lastUpdatedAt?: string;
+    deferredAt?: string;
+    completedAt?: string;
+  };
+  milestones?: Array<{
+    id: string;
+    label: string;
+    completed: boolean;
+    route: string;
+  }>;
+  nextBestActions?: Array<{
+    id: string;
+    label: string;
+    description: string;
+    route: string;
+    priority: 'high' | 'medium' | 'low';
+  }>;
+  metaData?: Record<string, unknown> | null;
 }
 
 export interface IndustryTemplatePreview {
@@ -6811,6 +6859,10 @@ export interface CompleteResult {
   complete: boolean;
 }
 
+export interface DeferResult {
+  deferred: boolean;
+}
+
 export async function conciergeAutoConfigure(
   businessId: string,
   templateId: string,
@@ -6865,6 +6917,13 @@ export async function resumeConcierge(businessId: string): Promise<ApiResult<Res
 export async function markConciergeComplete(businessId: string): Promise<ApiResult<CompleteResult>> {
   return apiPost<CompleteResult>({
     path: `/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/complete`,
+    body: {},
+  });
+}
+
+export async function deferConciergeOnboarding(businessId: string): Promise<ApiResult<DeferResult>> {
+  return apiPost<DeferResult>({
+    path: `/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/defer`,
     body: {},
   });
 }

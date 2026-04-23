@@ -100,4 +100,9 @@ export class OnboardingConciergeController {
   async markComplete(@Param('businessId') businessId: string) {
     return this.concierge.markOnboardingComplete(businessId);
   }
+
+  @Post('defer')
+  async defer(@Param('businessId') businessId: string) {
+    return this.concierge.deferOnboarding(businessId);
+  }
 }

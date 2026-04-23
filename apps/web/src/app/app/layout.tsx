@@ -283,6 +283,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
+type LayoutBusinessIdentity = {
+  primaryColor?: string;
+  secondaryColor?: string;
+  onboardingComplete?: boolean;
+  onboardingState?: {
+    stage?: string;
+    firstWinAchieved?: boolean;
+  };
+};
+
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -387,11 +397,22 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       if (businessId) {
         const res = await apiGet(`/identity/businesses/${businessId}`);
         if (res.data) {
-          const data = res.data as { primaryColor?: string; secondaryColor?: string; onboardingComplete?: boolean };
+          const data = res.data as LayoutBusinessIdentity;
           if (data.primaryColor) setAccent1(data.primaryColor);
           if (data.secondaryColor) setAccent2(data.secondaryColor);
-          
-          if (data.onboardingComplete === false && !pathname.startsWith("/app/onboarding")) {
+
+          const stage = data.onboardingState?.stage;
+          const firstWinAchieved = data.onboardingState?.firstWinAchieved === true;
+          const shouldRedirectToOnboarding =
+            !pathname.startsWith("/app/onboarding") &&
+            data.onboardingComplete === false &&
+            !firstWinAchieved &&
+            stage !== "launched" &&
+            stage !== "activated" &&
+            stage !== "completed" &&
+            stage !== "deferred";
+
+          if (shouldRedirectToOnboarding) {
             if (current) {
               setTaskOrigin(current);
             }

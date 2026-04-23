@@ -38,6 +38,9 @@ function checkFieldCompletion(key: string, bd: ProfileBusinessData | null): bool
     case "location": return !!(bd.city || bd.country);
     case "interests": return (bd.interests?.length ?? 0) > 0;
     case "taglineOrDescription": return !!(bd.tagline || bd.description);
+    case "positioningStatement": return !!bd.positioningStatement;
+    case "currentCapacity": return !!bd.currentCapacity;
+    case "preferredProjectTypes": return (bd.preferredProjectTypes?.length ?? 0) > 0;
     default: return false;
   }
 }

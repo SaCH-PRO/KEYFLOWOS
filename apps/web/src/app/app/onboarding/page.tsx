@@ -37,6 +37,7 @@ import {
   sendConciergeChat,
   conciergeAutoConfigure,
   conciergeDetectType,
+  deferConciergeOnboarding,
   markConciergeComplete,
   fetchConciergeTemplatePreview,
   updateBusiness,
@@ -614,7 +615,12 @@ export default function OnboardingPage() {
         metaData: {
           conciergeTemplateId: selectedTemplate,
           onboardingStep: 2,
-          onboardingComplete: true,
+          onboardingState: {
+            stage: "launched",
+            firstWin: "storefront_live",
+            firstWinAchieved: true,
+            lastUpdatedAt: new Date().toISOString(),
+          },
         },
       });
 
@@ -682,7 +688,7 @@ export default function OnboardingPage() {
   const handleSkip = async () => {
     if (resumeTaskId) markTaskCompleted(resumeTaskId);
     if (businessId) {
-      await markConciergeComplete(businessId);
+      await deferConciergeOnboarding(businessId);
     }
     const returnEntry = getTaskOrigin();
     setTaskOrigin(null);

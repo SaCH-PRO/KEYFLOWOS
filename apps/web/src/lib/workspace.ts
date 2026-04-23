@@ -17,6 +17,12 @@ export interface CachedBusiness {
   autopilotEnabled?: boolean;
   autopilotStage?: string | null;
   onboardingComplete?: boolean;
+  onboardingState?: {
+    stage?: string;
+    firstWin?: string;
+    firstWinAchieved?: boolean;
+    canSkip?: boolean;
+  };
   primaryColor?: string | null;
   secondaryColor?: string | null;
   currency?: string | null;
