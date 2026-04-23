@@ -8,7 +8,7 @@ import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
   title: "KEYFLOWOS",
-  description: "The Operating System for Service Businesses - Manage bookings, payments, contacts, and automations",
+  description: "Daily business autopilot for service businesses. See priorities, prevent missed revenue, and execute your next best action from one control tower.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,

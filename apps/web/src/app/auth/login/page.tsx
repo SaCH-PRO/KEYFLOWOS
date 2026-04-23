@@ -21,6 +21,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { bootstrapIdentity } from "@/lib/client";
+import { persistSessionToken } from "@/lib/session-client";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -102,7 +103,7 @@ export default function AuthLogin() {
     setLoading(true);
     try {
       const session = await supabaseSignIn(email, password);
-      window.localStorage.setItem("kf_token", session.access_token);
+      await persistSessionToken(session.access_token);
       const draft = JSON.parse(window.localStorage.getItem("kf_profile_draft") || "{}");
       const bootstrap = await bootstrapIdentity({
         email, firstName: draft.firstName, lastName: draft.lastName,

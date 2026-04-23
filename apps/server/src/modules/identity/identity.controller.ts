@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
@@ -19,7 +20,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import { UpdateBusinessDto } from './dto/update-business.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdatePasswordDto, UpdateUserDto } from './dto/update-user.dto';
 import { GenerateFieldDto } from './dto/generate-field.dto';
 import { GenerateProfileDto } from './dto/generate-profile.dto';
 import { BootstrapDto } from './dto/bootstrap.dto';
@@ -28,6 +29,8 @@ import { CurrentUser, AuthenticatedUser } from '../../core/decorators/current-us
 import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
 import { generateDocumentRecommendations } from './document-guidance.util';
 import { PROFILE_COMPLETENESS_FIELDS, COMPLETENESS_TIERS } from './profile-completeness.constants';
+import { SupabaseAuthService } from '../../core/auth/supabase-auth.service';
+import { Request } from 'express';
 
 @Controller('identity')
 export class IdentityController {
@@ -35,6 +38,7 @@ export class IdentityController {
     @Inject(IdentityService) private readonly identity: IdentityService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(BusinessContextService) private readonly bizContext: BusinessContextService,
+    @Inject(SupabaseAuthService) private readonly supabaseAuth: SupabaseAuthService,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -49,6 +53,27 @@ export class IdentityController {
   async updateMe(@CurrentUser() user: AuthenticatedUser, @Body() body: UpdateUserDto) {
     if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
     return this.identity.updateUser(user.id, body);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('me/password')
+  async updatePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+    @Body() body: UpdatePasswordDto,
+  ) {
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    if (!body.newPassword || body.newPassword.trim().length < 8) {
+      throw new BadRequestException('New password must be at least 8 characters');
+    }
+    const requestToken = ((req as Request & { authToken?: string }).authToken ?? '').trim();
+    const authToken = requestToken || (body.authTokenOverride ?? '').trim() || undefined;
+    if (!authToken) {
+      throw new UnauthorizedException('Missing session token for password update');
+    }
+
+    await this.supabaseAuth.updatePassword(authToken, body.newPassword.trim());
+    return { success: true };
   }
 
   @UseGuards(AuthGuard)

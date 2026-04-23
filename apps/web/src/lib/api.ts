@@ -48,9 +48,7 @@ function buildHeaders(initHeaders?: HeadersInit) {
 }
 
 function getAuthHeaders(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  const token = window.localStorage?.getItem("kf_token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return {};
 }
 
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {
@@ -61,6 +59,7 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
     const res = await fetch(`${API_BASE}${path}`, {
       method: "POST",
       headers,
+      credentials: "include",
       body: body ? JSON.stringify(body) : undefined,
       ...restInit,
     });
@@ -89,6 +88,7 @@ export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): 
     const res = await fetch(url, {
       method: "GET",
       headers: buildHeaders(),
+      credentials: "include",
       cache: "no-store",
       signal: opts?.signal,
     });
@@ -106,6 +106,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiRespo
     const res = await fetch(`${API_BASE}${path}`, {
       method: "PATCH",
       headers: buildHeaders(),
+      credentials: "include",
       body: JSON.stringify(body),
     });
     const data: unknown = await res.json().catch(() => null);
@@ -122,6 +123,7 @@ export async function apiDelete<T>(path: string, body?: unknown): Promise<ApiRes
     const res = await fetch(`${API_BASE}${path}`, {
       method: "DELETE",
       headers: buildHeaders(),
+      credentials: "include",
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const data: unknown = await res.json().catch(() => null);
@@ -142,6 +144,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<ApiRespons
     const res = await fetch(`${API_BASE}${path}`, {
       method: "PUT",
       headers: buildHeaders(),
+      credentials: "include",
       body: JSON.stringify(body),
     });
     const data: unknown = await res.json().catch(() => null);

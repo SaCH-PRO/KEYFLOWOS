@@ -25,25 +25,25 @@ import {
 import { useEffect, useState } from "react";
 
 const MODULES = [
-  { icon: Bot, title: "AI Command Center", desc: "Voice-powered AI assistant that manages your daily operations, creates tasks, and provides real-time business intelligence.", color: "from-orange-500/20 to-amber-500/20", iconColor: "text-orange-400" },
-  { icon: Users, title: "Smart CRM", desc: "Full pipeline management with AI-powered lead scoring, engagement sequences, and automated follow-ups.", color: "from-blue-500/20 to-cyan-500/20", iconColor: "text-blue-400" },
-  { icon: ShoppingBag, title: "Commerce Engine", desc: "Products, quotes, invoices, and recurring billing — all with automatic TTD formatting and Caribbean payment gateways.", color: "from-emerald-500/20 to-green-500/20", iconColor: "text-emerald-400" },
-  { icon: Calendar, title: "Smart Bookings", desc: "Online booking pages, automated confirmations, Google Calendar sync, and staff scheduling built in.", color: "from-violet-500/20 to-purple-500/20", iconColor: "text-violet-400" },
-  { icon: BarChart3, title: "ProfitLens Analytics", desc: "Revenue forecasts, expense tracking, cash flow projections, and actionable insights — all in real-time.", color: "from-rose-500/20 to-pink-500/20", iconColor: "text-rose-400" },
-  { icon: Mail, title: "Marketing Hub", desc: "Email campaigns, lead capture forms, WhatsApp integration, and audience segmentation on autopilot.", color: "from-teal-500/20 to-cyan-500/20", iconColor: "text-teal-400" },
+  { icon: Bot, title: "Start each day with clear priorities", desc: "Control Tower surfaces what matters now: risks, approvals, and next best actions so you stop guessing.", color: "from-orange-500/20 to-amber-500/20", iconColor: "text-orange-400" },
+  { icon: Users, title: "Stop losing leads to silence", desc: "Track stale leads and launch follow-ups faster, with AI-ready drafts when your pipeline cools down.", color: "from-blue-500/20 to-cyan-500/20", iconColor: "text-blue-400" },
+  { icon: ShoppingBag, title: "Collect cash faster", desc: "See overdue invoices early, send reminders quickly, and keep your revenue cycle moving.", color: "from-emerald-500/20 to-green-500/20", iconColor: "text-emerald-400" },
+  { icon: Calendar, title: "Fill your calendar predictably", desc: "Publish booking experiences, prevent missed confirmations, and monitor utilization in one flow.", color: "from-violet-500/20 to-purple-500/20", iconColor: "text-violet-400" },
+  { icon: BarChart3, title: "Know business health at a glance", desc: "Turn messy operations data into signals you can act on today, not just dashboards you admire.", color: "from-rose-500/20 to-pink-500/20", iconColor: "text-rose-400" },
+  { icon: Mail, title: "Execute growth actions with confidence", desc: "Run practical campaigns and reminders from one place instead of stitching together disconnected tools.", color: "from-teal-500/20 to-cyan-500/20", iconColor: "text-teal-400" },
 ];
 
 const STATS = [
-  { value: "80-90%", label: "Operations Automated" },
-  { value: "<5 min", label: "Daily Management" },
-  { value: "6", label: "Core Engines" },
-  { value: "TTD", label: "Caribbean-Native" },
+  { value: "1", label: "Daily command center" },
+  { value: "<5 min", label: "Daily operator check-in" },
+  { value: "TTD", label: "Caribbean-ready finance" },
+  { value: "24/7", label: "Business visibility" },
 ];
 
 const STEPS = [
-  { num: "01", title: "Sign up in seconds", desc: "Create your workspace with email or Google. No credit card required." },
-  { num: "02", title: "Tell us about your business", desc: "Our AI detects your industry and pre-configures everything automatically." },
-  { num: "03", title: "Go live on autopilot", desc: "Start accepting bookings, sending invoices, and managing clients — all automated." },
+  { num: "01", title: "Set your operating profile", desc: "Tell us your business type, your biggest pain, and what you want automated first." },
+  { num: "02", title: "Launch your first workflow", desc: "Publish your first offering and go live with the core flow that drives immediate value." },
+  { num: "03", title: "Complete one first win", desc: "Send an invoice, launch follow-ups, or publish bookings in your very first session." },
 ];
 
 function useTypingEffect(words: string[], speed = 100, pause = 2000) {
@@ -117,7 +117,7 @@ export default function Home() {
           <motion.div variants={fadeUp} transition={{ duration: 0.5 }}
             className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[hsl(24_95%_53%/0.08)] border border-[hsl(24_95%_53%/0.15)] text-sm font-medium text-[hsl(24_95%_63%)] mb-6">
             <Sparkles className="w-3.5 h-3.5" />
-            AI-Powered Business Operating System
+            Daily Business Autopilot
           </motion.div>
 
           <motion.h1 variants={fadeUp} transition={{ duration: 0.6 }}
@@ -133,7 +133,7 @@ export default function Home() {
 
           <motion.p variants={fadeUp} transition={{ duration: 0.5 }}
             className="text-base sm:text-lg text-[hsl(30_10%_55%)] max-w-xl mx-auto mb-10 leading-relaxed">
-            KeyFlowOS automates 80-90% of your daily operations. CRM, invoicing, bookings, marketing — managed by AI so you can focus on growth.
+            KeyFlowOS helps service businesses run the day from one command center — what is at risk, what will make money, and what to do next.
           </motion.p>
 
           <motion.div variants={fadeUp} transition={{ duration: 0.5 }}
@@ -168,9 +168,9 @@ export default function Home() {
       <section className="relative z-10 max-w-6xl mx-auto px-5 sm:px-8 pb-24">
         <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, margin: "-80px" }} variants={stagger}>
           <motion.div variants={fadeUp} transition={{ duration: 0.5 }} className="text-center mb-12">
-            <p className="text-xs font-semibold uppercase tracking-widest text-[hsl(24_95%_53%)] mb-3">Everything You Need</p>
-            <h2 className="text-3xl sm:text-4xl font-bold mb-3">Six engines. One platform.</h2>
-            <p className="text-[hsl(30_10%_50%)] max-w-lg mx-auto">Every module works together seamlessly — from first contact to recurring revenue.</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-[hsl(24_95%_53%)] mb-3">Outcome-led operations</p>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-3">One cockpit. Clear daily outcomes.</h2>
+            <p className="text-[hsl(30_10%_50%)] max-w-lg mx-auto">Built for owners who need fast execution, not another maze of disconnected admin tools.</p>
           </motion.div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
@@ -197,7 +197,7 @@ export default function Home() {
           <motion.div variants={fadeUp} transition={{ duration: 0.5 }} className="text-center mb-12">
             <p className="text-xs font-semibold uppercase tracking-widest text-[hsl(173_58%_50%)] mb-3">How It Works</p>
             <h2 className="text-3xl sm:text-4xl font-bold mb-3">Live in 3 steps</h2>
-            <p className="text-[hsl(30_10%_50%)] max-w-lg mx-auto">From sign-up to fully automated — in under 5 minutes.</p>
+            <p className="text-[hsl(30_10%_50%)] max-w-lg mx-auto">From setup to first measurable win — with clear guidance at each step.</p>
           </motion.div>
 
           <div className="grid md:grid-cols-3 gap-5 sm:gap-6">
@@ -225,9 +225,9 @@ export default function Home() {
         >
           <motion.div variants={fadeUp} transition={{ duration: 0.5 }}
             className="rounded-3xl border border-white/[0.08] bg-gradient-to-b from-white/[0.04] to-white/[0.01] p-10 sm:p-14">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Ready to automate your business?</h2>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Ready to run your business in minutes a day?</h2>
             <p className="text-[hsl(30_10%_50%)] max-w-md mx-auto mb-8">
-              Join Caribbean entrepreneurs who spend less than 5 minutes a day on operations.
+              Start with one urgent outcome, then unlock the full platform as your business grows.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center items-center mb-8">
               <Link href="/auth/signup"

@@ -45,6 +45,8 @@ export type ControlTowerState = {
   snapshot: BusinessGraphSnapshot | null;
   priorities: EnrichedPriority[];
   actionQueue: ActionQueueItem[];
+  dataHealth: "connected" | "partial" | "stale" | "failed";
+  staleMinutes: number | null;
   refresh: () => void;
   refreshSilent: () => void;
 };
@@ -357,6 +359,22 @@ export function useControlTowerData(): ControlTowerState {
     [ctPriorities, graphPriorities, snapshot, actionItems],
   );
 
+  const staleMinutes = useMemo(() => {
+    if (!snapshot?.timestamp) return null;
+    const ms = Date.now() - new Date(snapshot.timestamp).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    return Math.floor(ms / 60000);
+  }, [snapshot?.timestamp]);
+
+  const dataHealth: ControlTowerState["dataHealth"] = useMemo(() => {
+    if (error || (!data && !graph)) return "failed";
+    if (data && graph) {
+      if (staleMinutes !== null && staleMinutes > 30) return "stale";
+      return "connected";
+    }
+    return "partial";
+  }, [data, error, graph, staleMinutes]);
+
   return {
     loading,
     error,
@@ -366,6 +384,8 @@ export function useControlTowerData(): ControlTowerState {
     snapshot,
     priorities,
     actionQueue: actionItems,
+    dataHealth,
+    staleMinutes,
     refresh: () => load(false),
     refreshSilent,
   };

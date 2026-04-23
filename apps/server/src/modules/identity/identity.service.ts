@@ -1,10 +1,11 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
 
 @Injectable()
 export class IdentityService {
   private readonly logger = new Logger(IdentityService.name);
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   listBusinesses(userId: string) {
