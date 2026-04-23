@@ -74,4 +74,67 @@ export class SupabaseAuthService {
       updated_at: '',
     } as User;
   }
+
+  async inspectToken(token?: string): Promise<{
+    hasToken: boolean;
+    supabaseConfigured: boolean;
+    supabaseVerified: boolean;
+    fallbackDecoded: boolean;
+    userId?: string;
+    email?: string;
+    reason?: string;
+  }> {
+    if (!token) {
+      return {
+        hasToken: false,
+        supabaseConfigured: !!this.supabase,
+        supabaseVerified: false,
+        fallbackDecoded: false,
+        reason: 'no_token',
+      };
+    }
+
+    const supabase = this.supabase;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.auth.getUser(token);
+        if (!error && data?.user?.id) {
+          return {
+            hasToken: true,
+            supabaseConfigured: true,
+            supabaseVerified: true,
+            fallbackDecoded: false,
+            userId: data.user.id,
+            email: data.user.email ?? undefined,
+          };
+        }
+        if (error) {
+          this.logger.debug(`inspectToken supabase error: ${error.message}`);
+        }
+      } catch (err) {
+        this.logger.debug(`inspectToken supabase throw: ${(err as Error).message}`);
+      }
+    }
+
+    const decoded = this.decodeJwt(token);
+    const userId = decoded?.sub || decoded?.user_id;
+    if (!userId) {
+      return {
+        hasToken: true,
+        supabaseConfigured: !!supabase,
+        supabaseVerified: false,
+        fallbackDecoded: false,
+        reason: 'token_decode_failed_or_missing_sub',
+      };
+    }
+
+    return {
+      hasToken: true,
+      supabaseConfigured: !!supabase,
+      supabaseVerified: false,
+      fallbackDecoded: true,
+      userId,
+      email: typeof decoded?.email === 'string' ? decoded.email : undefined,
+    };
+  }
 }
