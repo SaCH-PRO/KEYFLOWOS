@@ -23,7 +23,7 @@ interface OverviewTabProps {
   deliverables?: Deliverable[];
 }
 
-export function OverviewTab({ project, onStageChange, milestones = [], deliverables = [] }: OverviewTabProps) {
+export function OverviewTab({ project, milestones = [], deliverables = [] }: OverviewTabProps) {
   const [clientName, setClientName] = useState<string | null>(null);
   const [clientEmail, setClientEmail] = useState<string | null>(null);
   const [projectExpenses, setProjectExpenses] = useState<Expense[]>([]);
@@ -75,7 +75,7 @@ export function OverviewTab({ project, onStageChange, milestones = [], deliverab
   }, [project.dueDate]);
 
   const milestonesCompleted = milestones.filter((m) => m.completed).length;
-  const missingDeliverables = deliverables.filter((d) => !d.completed).length;
+  const missingDeliverables = deliverables.filter((d) => !d.url && d.type !== "file").length;
 
   const warnings: { icon: React.ElementType; text: string; color: string; severity: "critical" | "warning" }[] = [];
   if (overdueTasks > 0) {

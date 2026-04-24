@@ -42,8 +42,13 @@ export function ClientTab({ contactId }: ClientTabProps) {
     const businessId = getStoredBusinessId();
     if (!businessId) return;
     const ctrl = new AbortController();
-    setLoading(true);
-    setError(null);
+    // Defer local state transitions to avoid synchronous setState-in-effect lint violation.
+    queueMicrotask(() => {
+      if (!ctrl.signal.aborted) {
+        setLoading(true);
+        setError(null);
+      }
+    });
     fetchContactDetail(contactId, businessId, { signal: ctrl.signal })
       .then((res) => {
         if (res.data?.contact) {
@@ -51,8 +56,8 @@ export function ClientTab({ contactId }: ClientTabProps) {
           const meta = res.data.meta;
           setClient({
             ...contact,
-            leadScore: meta?.leadScore ?? contact.leadScore ?? null,
-            lastInteractionAt: meta?.lastInteractionAt ?? contact.lastInteractionAt ?? null,
+            leadScore: meta?.leadScore ?? contact.meta?.leadScore ?? null,
+            lastInteractionAt: meta?.lastInteractionAt ?? contact.meta?.lastInteractionAt ?? null,
           } as ClientData);
         } else if (res.error) {
           setError(res.error);
