@@ -8,14 +8,16 @@ import { DeliveryQueueService } from './delivery-queue.service';
 import { ContentAiService } from './content-ai.service';
 import { WhatsAppAdapter } from './adapters/whatsapp-adapter';
 
-const TRACKING_SECRET = process.env.TRACKING_HMAC_SECRET || '';
+const TRACKING_SECRET = process.env.TRACKING_HMAC_SECRET;
 
 function signTrackingToken(deliveryId: string, extra?: string): string {
+  if (!TRACKING_SECRET) throw new Error('TRACKING_HMAC_SECRET is not configured');
   const data = extra ? `${deliveryId}:${extra}` : deliveryId;
   return createHmac('sha256', TRACKING_SECRET).update(data).digest('hex').slice(0, 16);
 }
 
 function verifyTrackingToken(deliveryId: string, token: string, extra?: string): boolean {
+  if (!TRACKING_SECRET) return false;
   return signTrackingToken(deliveryId, extra) === token;
 }
 

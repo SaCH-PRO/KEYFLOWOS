@@ -46,29 +46,14 @@ export class SupabaseAuthService {
   async getUserFromToken(token?: string): Promise<User | null> {
     if (!token) return null;
     const supabase = this.supabase;
-    if (supabase) {
-      const { data, error } = await supabase.auth.getUser(token);
-      if (error) {
-        this.logger.debug(`Supabase auth error: ${error.message}`);
-      } else if (data?.user) {
-        return data.user;
-      }
-    }
+    if (!supabase) return null;
 
-    // Fallback: decode JWT locally (dev-friendly to avoid hard failures)
-    const decoded = this.decodeJwt(token);
-    const userId = decoded?.sub || decoded?.user_id;
-    if (!userId) return null;
-    return {
-      id: userId,
-      aud: 'authenticated',
-      app_metadata: {},
-      user_metadata: {},
-      factors: [],
-      email: typeof decoded?.email === 'string' ? decoded.email : undefined,
-      created_at: '',
-      updated_at: '',
-    } as User;
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error) {
+      this.logger.debug(`Supabase auth error: ${error.message}`);
+      return null;
+    }
+    return data?.user ?? null;
   }
 
   async updatePassword(token: string, password: string): Promise<void> {

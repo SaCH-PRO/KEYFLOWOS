@@ -23,10 +23,16 @@ export async function GET(request: NextRequest) {
     
     const location = res.headers.get("location");
     if (location) {
-      const redirectUrl = location.startsWith("/") ? new URL(location, request.url) : new URL(location);
+      const appOrigin = new URL(request.url).origin;
+      const redirectUrl = location.startsWith("/")
+        ? new URL(location, request.url)
+        : new URL(location);
+      if (redirectUrl.origin !== appOrigin) {
+        return NextResponse.redirect(new URL("/app/commerce?gmail=error&reason=invalid_redirect", request.url));
+      }
       return NextResponse.redirect(redirectUrl);
     }
-    
+
     return NextResponse.redirect(new URL("/app/commerce?gmail=success", request.url));
   } catch (err) {
     console.error("Gmail callback proxy error:", err);
