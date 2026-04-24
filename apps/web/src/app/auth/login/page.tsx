@@ -87,7 +87,11 @@ export default function AuthLogin() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    setVerified(params.get("verified") === "1");
+    const isVerified = params.get("verified") === "1";
+    setVerified(isVerified);
+    if (isVerified) {
+      setBanner("Email verified! Sign in to continue.");
+    }
   }, []);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
