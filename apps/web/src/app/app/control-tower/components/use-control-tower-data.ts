@@ -45,6 +45,8 @@ export type ControlTowerState = {
   snapshot: BusinessGraphSnapshot | null;
   priorities: EnrichedPriority[];
   actionQueue: ActionQueueItem[];
+  dataHealth: "connected" | "partial" | "stale" | "failed";
+  staleMinutes: number | null;
   refresh: () => void;
   refreshSilent: () => void;
 };
@@ -141,7 +143,7 @@ function deriveGraphPriorities(snap: BusinessGraphSnapshot): ControlTowerPriorit
   return derived;
 }
 
-function buildActionSet(p: ControlTowerPriority, snap: BusinessGraphSnapshot | null): PriorityAction[] {
+function buildActionSet(p: ControlTowerPriority): PriorityAction[] {
   const acts: PriorityAction[] = [];
 
   if (p.type === "approval") {
@@ -226,7 +228,7 @@ function enrichPriorities(
   return merged.map((p) => {
     const enriched: EnrichedPriority = {
       ...p,
-      actions: buildActionSet(p, snapshot),
+      actions: buildActionSet(p),
     };
 
     if (snapshot) {
@@ -350,12 +352,26 @@ export function useControlTowerData(): ControlTowerState {
     () => (snapshot ? deriveGraphPriorities(snapshot) : []),
     [snapshot],
   );
-  const ctPriorities = data?.priorities ?? [];
-
   const priorities = useMemo(
-    () => enrichPriorities(ctPriorities, graphPriorities, snapshot, actionItems),
-    [ctPriorities, graphPriorities, snapshot, actionItems],
+    () => enrichPriorities(data?.priorities ?? [], graphPriorities, snapshot, actionItems),
+    [data?.priorities, graphPriorities, snapshot, actionItems],
   );
+
+  const staleMinutes = useMemo(() => {
+    if (!snapshot?.timestamp) return null;
+    const ms = Date.now() - new Date(snapshot.timestamp).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    return Math.floor(ms / 60000);
+  }, [snapshot?.timestamp]);
+
+  const dataHealth: ControlTowerState["dataHealth"] = useMemo(() => {
+    if (error || (!data && !graph)) return "failed";
+    if (data && graph) {
+      if (staleMinutes !== null && staleMinutes > 30) return "stale";
+      return "connected";
+    }
+    return "partial";
+  }, [data, error, graph, staleMinutes]);
 
   return {
     loading,
@@ -366,6 +382,8 @@ export function useControlTowerData(): ControlTowerState {
     snapshot,
     priorities,
     actionQueue: actionItems,
+    dataHealth,
+    staleMinutes,
     refresh: () => load(false),
     refreshSilent,
   };

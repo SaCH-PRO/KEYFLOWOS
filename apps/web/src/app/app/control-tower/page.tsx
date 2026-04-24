@@ -20,6 +20,7 @@ import { GrowthOpsPanel } from "./components/growth-ops-panel";
 import { ApprovalsQueue } from "./components/approvals-queue";
 import { RiskAlerts } from "./components/risk-alerts";
 import { StorefrontIntel } from "./components/storefront-intel";
+import { NextBestActionCard, type NextBestAction } from "./components/next-best-action-card";
 
 function formatTTD(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -53,6 +54,41 @@ export default function ControlTowerPage() {
       if (el) el.scrollIntoView({ behavior: "smooth" });
     }
   };
+
+  const nextBestAction = useMemo<NextBestAction | null>(() => {
+    const topPriority = d.priorities[0];
+    if (!topPriority) return null;
+
+    const defaultAction = {
+      actionLabel: topPriority.actionLabel ?? "Open task",
+      actionRoute: topPriority.actionRoute ?? "/app/control-tower",
+    };
+    const primaryAction = topPriority.actions.find((action) => action.toolName === "_navigate");
+
+    const confidence: NextBestAction["confidence"] =
+      topPriority.severity === "critical" || topPriority.urgency >= 75 ? "high" : "medium";
+
+    return {
+      title: topPriority.title,
+      reason: topPriority.description,
+      impact:
+        topPriority.severity === "critical"
+          ? "Prevents urgent operational or revenue risk from compounding."
+          : topPriority.type === "opportunity"
+          ? "Captures near-term upside by acting while conversion intent is high."
+          : "Improves today’s execution focus and keeps workflows moving.",
+      actionLabel:
+        primaryAction?.label ??
+        defaultAction.actionLabel,
+      actionRoute:
+        (primaryAction?.args?.route as string | undefined) ??
+        defaultAction.actionRoute,
+      confidence,
+    };
+  }, [d.priorities]);
+
+  const staleMinutes = d.staleMinutes;
+  const dataHealth = d.dataHealth;
 
   if (d.loading) return <ListPageSkeleton />;
 
@@ -126,7 +162,7 @@ export default function ControlTowerPage() {
         moduleName: "Command Flow",
         onAction: handleAiAction,
       }}
-      metricStrip={metricItems.length > 0 ? <WorkspaceMetricStrip items={metricItems} columns={7} compact /> : undefined}
+      metricStrip={metricItems.length > 0 ? <WorkspaceMetricStrip items={metricItems} columns={6} compact /> : undefined}
       headerRight={
         <button
           onClick={d.refresh}
@@ -156,6 +192,15 @@ export default function ControlTowerPage() {
             businessId={d.businessId}
             onActionExecuted={d.refreshSilent}
           />
+
+          {nextBestAction && (
+            <NextBestActionCard
+              recommendation={nextBestAction}
+              dataHealth={dataHealth}
+              staleMinutes={staleMinutes}
+              onOpenAction={(route) => router.push(route)}
+            />
+          )}
 
           <HealthOverview
             momentumScore={d.data.snapshot.momentumScore}
