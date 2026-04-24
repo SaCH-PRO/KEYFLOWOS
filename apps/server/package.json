@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@vercel/node": "^5.3.24",
     "@google-cloud/storage": "^7.18.0",
     "@keyflow/api": "workspace:*",
     "@keyflow/db": "workspace:*",

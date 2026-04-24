@@ -42,15 +42,22 @@ export default function AuthCallback() {
     const handleCallback = async () => {
       try {
         const hash = window.location.hash.substring(1);
-        const params = new URLSearchParams(hash);
-        const accessToken = params.get("access_token");
+        const hashParams = new URLSearchParams(hash);
+        const accessToken = hashParams.get("access_token");
         const queryParams = new URLSearchParams(window.location.search);
-        const errorDescription = queryParams.get("error_description");
-        
+        const errorDescription =
+          queryParams.get("error_description") ??
+          hashParams.get("error_description");
+        const providerError =
+          queryParams.get("error") ?? hashParams.get("error");
+
         if (errorDescription) {
           throw new Error(errorDescription);
         }
-        
+        if (providerError) {
+          throw new Error(providerError);
+        }
+
         if (!accessToken) {
           throw new Error("No access token received");
         }
