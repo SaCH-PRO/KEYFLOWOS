@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSyncExternalStore } from "react";
 import { ChevronRight, MapPin } from "lucide-react";
 import { useNavigationContext } from "@/lib/navigation-context";
 
@@ -84,6 +85,11 @@ function isUuid(s: string) {
 export function OriginAwareBreadcrumbs() {
   const pathname = usePathname();
   const { getOriginContext } = useNavigationContext();
+  const isHydrated = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return null;
@@ -99,7 +105,11 @@ export function OriginAwareBreadcrumbs() {
   const isDetailSurface = crumbs.length > 1 && DETAIL_SURFACES.has(topModule) && crumbs.some(isUuid);
 
   const origin = getOriginContext();
-  const showOriginContext = (isConfigSurface || isDetailSurface) && origin && origin.route !== pathname;
+  const showOriginContext =
+    isHydrated &&
+    (isConfigSurface || isDetailSurface) &&
+    origin &&
+    origin.route !== pathname;
 
   return (
     <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-xs text-muted-foreground px-1 py-1.5 flex-wrap">
