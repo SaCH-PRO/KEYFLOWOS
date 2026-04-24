@@ -22,6 +22,9 @@ const nextConfig: NextConfig = {
   },
   allowedDevOrigins: [
     "*.tunnelmole.net",
+    "*.replit.dev",
+    "*.worf.replit.dev",
+    "*.repl.co",
     "d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev",
     "nn0a4a-ip-18-216-70-93.tunnelmole.net",
     "127.0.0.1",
