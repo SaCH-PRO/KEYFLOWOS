@@ -45,23 +45,6 @@ export default function ControlTowerPage() {
 
   const aiHub = useControlTowerAiHub(aiCustomData);
 
-  const handleAiAction = (actionKey: string) => {
-    if (actionKey.startsWith("navigate:")) {
-      router.push(actionKey.replace("navigate:", ""));
-    } else if (actionKey.startsWith("switch_tab:")) {
-      const section = actionKey.replace("switch_tab:", "");
-      const el = document.getElementById(`tower-${section}`);
-      if (el) el.scrollIntoView({ behavior: "smooth" });
-    }
-  };
-
-  if (d.loading) return <ListPageSkeleton />;
-
-  const db = d.data?.dashboard;
-  const mods = d.data?.modules;
-  const graphData = d.graph;
-  const snap = d.snapshot;
-
   const nextBestAction = useMemo<NextBestAction | null>(() => {
     const topPriority = d.priorities[0];
     if (!topPriority) return null;
@@ -93,6 +76,23 @@ export default function ControlTowerPage() {
       confidence,
     };
   }, [d.priorities]);
+
+  const handleAiAction = (actionKey: string) => {
+    if (actionKey.startsWith("navigate:")) {
+      router.push(actionKey.replace("navigate:", ""));
+    } else if (actionKey.startsWith("switch_tab:")) {
+      const section = actionKey.replace("switch_tab:", "");
+      const el = document.getElementById(`tower-${section}`);
+      if (el) el.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  if (d.loading) return <ListPageSkeleton />;
+
+  const db = d.data?.dashboard;
+  const mods = d.data?.modules;
+  const graphData = d.graph;
+  const snap = d.snapshot;
 
   const metricItems: MetricStripItem[] = db && mods ? [
     {
