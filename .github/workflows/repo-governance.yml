@@ -1,0 +1,55 @@
+name: Repo Governance
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Validate branch naming
+        run: |
+          echo "Head ref: ${{ github.head_ref }}"
+          if [[ "${{ github.head_ref }}" != cursor/* ]]; then
+            echo "PR head branch must start with cursor/"
+            exit 1
+          fi
+
+      - name: Validate PR has unique commits ahead of base branch
+        run: |
+          BASE="${{ github.base_ref }}"
+          git fetch origin "${BASE}"
+          AHEAD_COUNT="$(git rev-list --left-right --count "origin/${BASE}...HEAD" | awk '{print $2}')"
+          echo "Ahead commits vs ${BASE}: ${AHEAD_COUNT}"
+          if [[ "${AHEAD_COUNT}" == "0" ]]; then
+            echo "PR branch has no unique commits ahead of ${BASE}."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run repo guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm repo:guard
+
