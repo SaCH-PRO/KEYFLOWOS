@@ -950,7 +950,6 @@ export default function OnboardingPage() {
           </button>
         </div>
       </div>
-
       <SetupChecklistStrip checklist={checklist} />
 
       <div className="flex-1 overflow-y-auto">
