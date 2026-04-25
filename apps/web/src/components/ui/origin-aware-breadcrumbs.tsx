@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { ChevronRight, MapPin } from "lucide-react";
 import { useNavigationContext } from "@/lib/navigation-context";
 
@@ -84,6 +85,11 @@ function isUuid(s: string) {
 export function OriginAwareBreadcrumbs() {
   const pathname = usePathname();
   const { getOriginContext } = useNavigationContext();
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return null;
@@ -98,7 +104,7 @@ export function OriginAwareBreadcrumbs() {
   const isConfigSurface = CONFIG_SURFACES.has(topModule);
   const isDetailSurface = crumbs.length > 1 && DETAIL_SURFACES.has(topModule) && crumbs.some(isUuid);
 
-  const origin = getOriginContext();
+  const origin = isHydrated ? getOriginContext() : null;
   const showOriginContext = (isConfigSurface || isDetailSurface) && origin && origin.route !== pathname;
 
   return (
