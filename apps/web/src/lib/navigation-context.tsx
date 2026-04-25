@@ -153,12 +153,20 @@ const NavigationContext = createContext<NavigationContextValue>({
 
 export function NavigationContextProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [stack, setStack] = useState<NavigationEntry[]>(() => loadStack());
-  const [taskOrigin, setTaskOriginState] = useState<NavigationEntry | null>(() => loadTaskOrigin());
+  const [stack, setStack] = useState<NavigationEntry[]>([]);
+  const [taskOrigin, setTaskOriginState] = useState<NavigationEntry | null>(null);
   const metaOverrideRef = useRef<Partial<NavigationEntry>>({});
+  const hydratedRef = useRef(false);
 
   const prevRouteRef = useRef<string>("");
   const prevTabRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    setStack(loadStack());
+    setTaskOriginState(loadTaskOrigin());
+  }, []);
 
   const buildEntry = useCallback(
     (route: string, overrides: Partial<NavigationEntry> = {}): NavigationEntry => {
