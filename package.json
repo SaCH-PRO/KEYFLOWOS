@@ -5,7 +5,10 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm --parallel --stream -r dev",
+    "dev:refresh": "pnpm --parallel --stream --filter server --filter web dev",
     "lint": "pnpm -r lint",
+    "verify:update": "bash scripts/verify-update.sh",
+    "hooks:update-gate:install": "bash scripts/install-update-gate-hook.sh",
     "db:generate": "pnpm --filter db run db:generate",
     "db:push": "pnpm --filter db exec prisma db push",
     "db:studio": "pnpm --filter db exec prisma studio",

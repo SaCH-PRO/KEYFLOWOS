@@ -6,7 +6,8 @@
     "dev": "tsx src/main.ts",
     "start": "node dist/src/main.js",
     "build": "tsc --project tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:smoke": "vitest run test/commerce.service.test.ts test/social.service.test.ts test/identity.service.test.ts"
   },
   "dependencies": {
     "@vercel/node": "^5.3.24",
