@@ -30,6 +30,8 @@ import {
   Trash2,
   Globe,
   CheckCircle2,
+  AlertTriangle,
+  WifiOff,
 } from "lucide-react";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import {
@@ -198,6 +200,15 @@ const FIRST_WIN_OPTIONS: Array<{
     route: "/app/settings/connections",
   },
 ];
+
+function normalizeErrorMessage(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message : "";
+  if (!raw) return fallback;
+  if (raw.includes("ECONNREFUSED") || raw.includes("Failed to fetch")) {
+    return "Cannot connect to backend (localhost:3001). Start the server to continue onboarding.";
+  }
+  return raw;
+}
 
 function getPublicPageUrl(businessId: string): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -520,6 +531,7 @@ export default function OnboardingPage() {
   const [selectedFirstWin, setSelectedFirstWin] = useState<FirstWinId | null>(null);
   const [savingFirstWin, setSavingFirstWin] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
+  const [connectivityWarning, setConnectivityWarning] = useState<string | null>(null);
 
   const profileComplete = useMemo(
     () =>
@@ -613,9 +625,12 @@ export default function OnboardingPage() {
           } else if (requestedStep === 0 || requestedStep === null) {
             setStep(0);
           }
+        } else if (stateRes.error) {
+          setConnectivityWarning(normalizeErrorMessage(stateRes.error, "Could not load onboarding state."));
         }
       } catch (err) {
         console.error("Failed to init onboarding:", err);
+        setConnectivityWarning(normalizeErrorMessage(err, "Could not initialize onboarding."));
       }
       setLoading(false);
 
@@ -707,6 +722,7 @@ export default function OnboardingPage() {
   const handleConfigure = async () => {
     if (!businessId || !selectedTemplate || configuring) return;
     setConfiguring(true);
+    setSetupError(null);
     try {
       const includedProducts = products.filter(
         (p) => p.included && p.name.trim()
@@ -746,6 +762,7 @@ export default function OnboardingPage() {
       setStep(2);
     } catch (err) {
       console.error("Configure error:", err);
+      setSetupError(normalizeErrorMessage(err, "We could not finish setup. Please try again."));
     }
     setConfiguring(false);
   };
@@ -955,10 +972,28 @@ export default function OnboardingPage() {
                   What type of business do you run?
                 </h1>
                 <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                  We'll set up your account with smart defaults — pricing in
+                  We&apos;ll set up your account with smart defaults — pricing in
                   TTD, hours, and services tailored to your industry.
                 </p>
               </div>
+
+              {connectivityWarning && (
+                <div
+                  className="rounded-xl px-3.5 py-3 mb-5 flex items-start gap-2.5"
+                  style={{
+                    background: "hsl(var(--kf-warning) / 0.1)",
+                    border: "1px solid hsl(var(--kf-warning) / 0.3)",
+                  }}
+                >
+                  <WifiOff className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-warning))" }} />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>
+                      Backend connectivity issue
+                    </p>
+                    <p className="text-xs mt-0.5 text-muted-foreground">{connectivityWarning}</p>
+                  </div>
+                </div>
+              )}
 
               <div
                 className="rounded-xl p-4 mb-6 space-y-3"
@@ -1070,9 +1105,12 @@ export default function OnboardingPage() {
                 </div>
 
                 {setupError && (
-                  <p className="text-xs" style={{ color: "hsl(var(--kf-error))" }}>
-                    {setupError}
-                  </p>
+                  <div className="flex items-start gap-2 rounded-lg px-2.5 py-2" style={{ background: "hsl(var(--kf-error) / 0.08)", border: "1px solid hsl(var(--kf-error) / 0.25)" }}>
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-error))" }} />
+                    <p className="text-xs" style={{ color: "hsl(var(--kf-error))" }}>
+                      {setupError}
+                    </p>
+                  </div>
                 )}
               </div>
 
@@ -1168,7 +1206,7 @@ export default function OnboardingPage() {
                   Your first offerings
                 </h1>
                 <p className="text-sm text-muted-foreground">
-                  We've pre-filled popular{" "}
+                  We&apos;ve pre-filled popular{" "}
                   {TEMPLATES.find((t) => t.id === selectedTemplate)?.label.toLowerCase() || "business"}{" "}
                   offerings with TTD pricing. Edit, add, or remove as needed.
                 </p>
@@ -1337,6 +1375,11 @@ export default function OnboardingPage() {
                   )}
                 </button>
               </div>
+              {setupError && (
+                <p className="mt-3 text-xs text-center text-muted-foreground">
+                  Tip: if this mentions connection refused, start the backend on port 3001 and retry.
+                </p>
+              )}
             </motion.div>
           )}
 
@@ -1365,7 +1408,7 @@ export default function OnboardingPage() {
                     style={{ color: "hsl(var(--kf-success))" }}
                   />
                 </motion.div>
-                <h1 className="text-xl font-bold mb-2">You're live!</h1>
+                <h1 className="text-xl font-bold mb-2">You&apos;re live!</h1>
                 <p className="text-sm text-muted-foreground max-w-sm mx-auto">
                   Your business is set up and ready for customers. Share your
                   link to start receiving bookings and orders.
@@ -1505,7 +1548,7 @@ export default function OnboardingPage() {
                   border: "1px solid hsl(var(--kf-accent1) / 0.15)",
                 }}
               >
-                <p className="text-sm font-medium mb-3">What's next?</p>
+                <p className="text-sm font-medium mb-3">What&apos;s next?</p>
                 <div className="space-y-2">
                   {[
                     {

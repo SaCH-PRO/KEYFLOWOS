@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   User, CheckCircle2, AlertCircle, FileText,
   Building2, Briefcase, Globe, Brain,
-  LayoutDashboard, Shield, Sparkles, Target,
+  LayoutDashboard, Shield, Sparkles, Target, RefreshCw, WifiOff, Link2,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -78,6 +78,20 @@ interface IntelligenceTier {
   description: string;
 }
 
+type DataProbeStatus = "idle" | "loading" | "ready" | "error";
+
+function normalizeApiError(error: string): string {
+  if (error.includes("ECONNREFUSED") || error.includes("Failed to fetch")) {
+    return "Cannot connect to backend (localhost:3001).";
+  }
+  return error;
+}
+
+function isConnectivityError(error?: string | null): boolean {
+  if (!error) return false;
+  return error.includes("ECONNREFUSED") || error.includes("Failed to fetch") || error.includes("localhost:3001");
+}
+
 export default function ProfileSettingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -105,6 +119,10 @@ export default function ProfileSettingsPage() {
   const [completenessFields, setCompletenessFields] = useState<ProfileCompletenessField[]>([]);
   const [intelligenceTiers, setIntelligenceTiers] = useState<IntelligenceTier[]>([]);
   const [overallIntelligenceScore, setOverallIntelligenceScore] = useState(0);
+  const [profileDataStatus, setProfileDataStatus] = useState<{ status: DataProbeStatus; detail: string | null }>({ status: "idle", detail: null });
+  const [businessDataStatus, setBusinessDataStatus] = useState<{ status: DataProbeStatus; detail: string | null }>({ status: "idle", detail: null });
+  const [documentsDataStatus, setDocumentsDataStatus] = useState<{ status: DataProbeStatus; detail: string | null }>({ status: "idle", detail: null });
+  const [tiersDataStatus, setTiersDataStatus] = useState<{ status: DataProbeStatus; detail: string | null }>({ status: "idle", detail: null });
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
 
@@ -151,6 +169,14 @@ export default function ProfileSettingsPage() {
   const handleBizDirtyChange = useCallback((dirty: boolean) => setIsBizDirty(dirty), []);
   const handleBizInfoDirtyChange = useCallback((dirty: boolean) => setIsBizInfoDirty(dirty), []);
 
+  const refreshProfileShell = useCallback(() => {
+    setStatus(null);
+    router.refresh();
+    if (typeof window !== "undefined") {
+      window.location.reload();
+    }
+  }, [router, setStatus]);
+
   const completenessItems: CompletenessItem[] = useMemo(() => {
     const hasPersonalName = !!(savedForm.firstName || savedForm.name);
     const hasPhone = !!savedForm.phone;
@@ -193,17 +219,26 @@ export default function ProfileSettingsPage() {
     if (bid) {
       setBusinessId(bid);
       setBusinessLoading(true);
+      setDocumentsDataStatus({ status: "loading", detail: null });
       apiGet<unknown[]>(`/documents/businesses/${bid}/instances`)
         .then(({ data }) => {
-          if (data) setDocCount(data.length);
+          if (data) {
+            setDocCount(data.length);
+            setDocumentsDataStatus({ status: "ready", detail: `${data.length} document${data.length === 1 ? "" : "s"} available` });
+          }
         })
         .catch((err) => {
           console.error("Failed to load document count:", err);
+          const message = normalizeApiError(err instanceof Error ? err.message : "Failed to load documents");
+          setDocumentsDataStatus({ status: "error", detail: message });
         });
+      setBusinessDataStatus({ status: "loading", detail: null });
       apiGet<ProfileBusinessData>(`/identity/businesses/${bid}`)
         .then(({ data, error }) => {
           if (error) {
-            setStatus({ type: "error", message: `Failed to load business data: ${error}` });
+            const normalized = normalizeApiError(error);
+            setStatus({ type: "error", message: `Failed to load business data: ${normalized}` });
+            setBusinessDataStatus({ status: "error", detail: normalized });
             return;
           }
           if (data) {
@@ -216,34 +251,44 @@ export default function ProfileSettingsPage() {
               twitter: data.twitter ?? null,
               linkedin: data.linkedin ?? null,
             });
+            setBusinessDataStatus({ status: "ready", detail: "Business profile loaded" });
           }
         })
-        .catch(() => {
-          setStatus({ type: "error", message: "Failed to load business data. Please refresh." });
+        .catch((err) => {
+          const normalized = normalizeApiError(err instanceof Error ? err.message : "Failed to load business data");
+          setStatus({ type: "error", message: `Failed to load business data: ${normalized}` });
+          setBusinessDataStatus({ status: "error", detail: normalized });
         })
         .finally(() => {
           setBusinessLoading(false);
         });
 
+      setTiersDataStatus({ status: "loading", detail: null });
       apiGet<{ overallScore: number; tiers: IntelligenceTier[] }>(`/identity/businesses/${bid}/tiered-completeness`)
         .then(({ data }) => {
           if (data) {
             setIntelligenceTiers(data.tiers || []);
             setOverallIntelligenceScore(data.overallScore || 0);
+            setTiersDataStatus({ status: "ready", detail: "Intelligence tiers loaded" });
           }
         })
         .catch((err) => {
           console.error("Failed to load intelligence tiers:", err);
+          const normalized = normalizeApiError(err instanceof Error ? err.message : "Failed to load intelligence tiers");
+          setTiersDataStatus({ status: "error", detail: normalized });
         });
     }
   }, []);
 
   useEffect(() => {
     const load = async () => {
+      setProfileDataStatus({ status: "loading", detail: null });
       try {
         const { data, error } = await apiGet<{ id: string; email: string; name?: string | null; firstName?: string | null; lastName?: string | null; phone?: string | null; avatarUrl?: string | null }>("/identity/me");
         if (error) {
-          setStatus({ type: "error", message: `Failed to load profile: ${error}` });
+          const normalized = normalizeApiError(error);
+          setStatus({ type: "error", message: `Failed to load profile: ${normalized}` });
+          setProfileDataStatus({ status: "error", detail: normalized });
         } else if (data) {
           const f = {
             email: data.email || "",
@@ -254,10 +299,13 @@ export default function ProfileSettingsPage() {
           };
           setSavedForm(f);
           setAvatarUrl(data.avatarUrl || null);
+          setProfileDataStatus({ status: "ready", detail: "Personal profile loaded" });
         }
       } catch (e) {
         console.error("Failed to load profile:", e);
-        setStatus({ type: "error", message: "Failed to load your profile. Please refresh the page." });
+        const normalized = normalizeApiError(e instanceof Error ? e.message : "Failed to load your profile");
+        setStatus({ type: "error", message: `Failed to load your profile: ${normalized}` });
+        setProfileDataStatus({ status: "error", detail: normalized });
       }
       setLoading(false);
     };
@@ -269,6 +317,16 @@ export default function ProfileSettingsPage() {
       <SkeletonProfile />
     </div>
   );
+
+  const dataProbes: Array<{ key: string; label: string; status: DataProbeStatus; detail: string | null }> = [
+    { key: "profile", label: "Personal profile", status: profileDataStatus.status, detail: profileDataStatus.detail },
+    { key: "business", label: "Business identity", status: businessDataStatus.status, detail: businessDataStatus.detail },
+    { key: "docs", label: "Documents", status: documentsDataStatus.status, detail: documentsDataStatus.detail },
+    { key: "tiers", label: "Intelligence tiers", status: tiersDataStatus.status, detail: tiersDataStatus.detail },
+  ];
+  const hasAnyProbeError = dataProbes.some((probe) => probe.status === "error");
+  const hasConnectivityIssue = dataProbes.some((probe) => probe.status === "error" && isConnectivityError(probe.detail));
+  const completedProbeCount = dataProbes.filter((probe) => probe.status === "ready").length;
 
   const maxWidth = activeTab === "intelligence" || activeTab === "outputs" ? "max-w-4xl" : "max-w-3xl";
 
@@ -315,9 +373,37 @@ export default function ProfileSettingsPage() {
         </div>
       </motion.div>
 
-      <motion.div variants={fadeUp}>
-        <JourneyIndicator items={completenessItems} onGoTo={handleTabChange} />
-      </motion.div>
+      {hasConnectivityIssue && (
+        <motion.div
+          variants={fadeUp}
+          className="rounded-xl px-4 py-3 flex items-start gap-3"
+          style={{
+            background: "hsl(var(--kf-warning) / 0.1)",
+            border: "1px solid hsl(var(--kf-warning) / 0.35)",
+          }}
+        >
+          <WifiOff className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-warning))" }} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>
+              Backend connection issue
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Start the backend on port 3001, then retry. Some profile sections are currently unavailable.
+            </p>
+          </div>
+          <button
+            onClick={refreshProfileShell}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all hover:scale-[1.02]"
+            style={{
+              background: "hsl(var(--kf-warning) / 0.18)",
+              color: "hsl(var(--kf-warning))",
+              border: "1px solid hsl(var(--kf-warning) / 0.4)",
+            }}
+          >
+            Retry
+          </button>
+        </motion.div>
+      )}
 
       <AnimatePresence>
         {status && (
@@ -340,127 +426,240 @@ export default function ProfileSettingsPage() {
         )}
       </AnimatePresence>
 
-      <motion.div
-        variants={fadeUp}
-        className="flex gap-1 p-1 rounded-xl overflow-x-auto"
-        style={{ background: "hsl(var(--kf-muted) / 0.15)", border: "1px solid hsl(var(--kf-border) / 0.2)" }}
-        role="tablist"
-        aria-label="Profile sections"
-      >
-        {TAB_CONFIG.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          const badge = tabBadge(tab.id);
-          return (
-            <button
-              key={tab.id}
-              role="tab"
-              aria-selected={isActive}
-              aria-controls={`tabpanel-${tab.id}`}
-              onClick={() => handleTabChange(tab.id)}
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-lg text-xs font-medium transition-all min-h-[44px] whitespace-nowrap"
+      <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-4">
+        <motion.aside variants={fadeUp} className="space-y-4 lg:sticky lg:top-4 self-start">
+          <JourneyIndicator items={completenessItems} onGoTo={handleTabChange} />
+          <div
+            className="rounded-xl p-3"
+            style={{
+              background: "hsl(var(--kf-card))",
+              border: "1px solid hsl(var(--kf-border) / 0.25)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold">Data pipeline health</p>
+              <button
+                onClick={refreshProfileShell}
+                className="p-1.5 rounded-md transition-all hover:bg-muted/25"
+                aria-label="Refresh profile data"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              {dataProbes.map((probe) => {
+                const tone =
+                  probe.status === "ready"
+                    ? { bg: "hsl(var(--kf-success) / 0.1)", fg: "hsl(var(--kf-success))", dot: "hsl(var(--kf-success))" }
+                    : probe.status === "error"
+                      ? { bg: "hsl(var(--kf-error) / 0.1)", fg: "hsl(var(--kf-error))", dot: "hsl(var(--kf-error))" }
+                      : probe.status === "loading"
+                        ? { bg: "hsl(var(--kf-warning) / 0.1)", fg: "hsl(var(--kf-warning))", dot: "hsl(var(--kf-warning))" }
+                        : { bg: "hsl(var(--kf-muted) / 0.2)", fg: "hsl(var(--kf-muted-foreground))", dot: "hsl(var(--kf-muted-foreground))" };
+                return (
+                  <div
+                    key={probe.key}
+                    className="rounded-lg px-2.5 py-2"
+                    style={{ background: tone.bg, border: "1px solid hsl(var(--kf-border) / 0.2)" }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full" style={{ background: tone.dot }} />
+                      <p className="text-[11px] font-medium flex-1">{probe.label}</p>
+                      <span className="text-[10px] uppercase tracking-wide" style={{ color: tone.fg }}>
+                        {probe.status}
+                      </span>
+                    </div>
+                    {probe.detail && (
+                      <p className="text-[10px] mt-1 text-muted-foreground leading-snug">{probe.detail}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] mt-2 text-muted-foreground">
+              {completedProbeCount}/{dataProbes.length} data sources healthy.
+            </p>
+          </div>
+          <div
+            className="rounded-xl p-3"
+            style={{
+              background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.09), hsl(var(--kf-accent2) / 0.05))",
+              border: "1px solid hsl(var(--kf-accent1) / 0.2)",
+            }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Link2 className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <p className="text-xs font-semibold">Flow actions</p>
+            </div>
+            <div className="space-y-1.5">
+              <button
+                onClick={() => router.push("/app/onboarding")}
+                className="w-full text-left rounded-lg px-2.5 py-2 text-[11px] transition-all hover:bg-muted/20"
+                style={{ border: "1px solid hsl(var(--kf-border) / 0.25)" }}
+              >
+                Continue onboarding
+              </button>
+              <button
+                onClick={() => handleTabChange("identity")}
+                className="w-full text-left rounded-lg px-2.5 py-2 text-[11px] transition-all hover:bg-muted/20"
+                style={{ border: "1px solid hsl(var(--kf-border) / 0.25)" }}
+              >
+                Update brand identity
+              </button>
+              <button
+                onClick={() => handleTabChange("outputs")}
+                className="w-full text-left rounded-lg px-2.5 py-2 text-[11px] transition-all hover:bg-muted/20"
+                style={{ border: "1px solid hsl(var(--kf-border) / 0.25)" }}
+              >
+                Generate strategic outputs
+              </button>
+            </div>
+          </div>
+        </motion.aside>
+
+        <motion.section variants={fadeUp} className="space-y-4 min-w-0">
+          {hasAnyProbeError && (
+            <div
+              className="rounded-xl px-3 py-2.5 flex items-start gap-2.5"
               style={{
-                background: isActive ? "hsl(var(--kf-card))" : "transparent",
-                color: isActive ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))",
-                boxShadow: isActive ? "0 1px 3px hsl(0 0% 0% / 0.1)" : "none",
-                border: isActive ? "1px solid hsl(var(--kf-border) / 0.3)" : "1px solid transparent",
+                background: "hsl(var(--kf-error) / 0.08)",
+                border: "1px solid hsl(var(--kf-error) / 0.25)",
               }}
             >
-              <Icon className="w-3.5 h-3.5" aria-hidden="true" />
-              <span className="hidden lg:inline">{tab.label}</span>
-              <span className="lg:hidden">{tab.shortLabel}</span>
-              {badge}
-            </button>
-          );
-        })}
-      </motion.div>
-
-      <AnimatePresence mode="wait">
-        {activeTab === "overview" && (
-          <motion.div key="overview" id="tabpanel-overview" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <OverviewTab
-              businessData={businessData}
-              profileCompleteness={profileCompleteness}
-              intelligenceTiers={intelligenceTiers}
-              overallIntelligenceScore={overallIntelligenceScore}
-              completenessItems={completenessItems}
-              onNavigateTab={handleTabChange}
-            />
-          </motion.div>
-        )}
-
-        {activeTab === "identity" && (
-          <motion.div key="identity" id="tabpanel-identity" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <IdentityTab
-              businessId={businessId}
-              businessData={businessData}
-              businessLoading={businessLoading}
-              savedForm={savedForm}
-              avatarUrl={avatarUrl}
-              onPersonalDirtyChange={handlePersonalDirtyChange}
-              onBizDirtyChange={handleBizDirtyChange}
-              onBrandDirtyChange={handleBizInfoDirtyChange}
-              onStatus={setStatus}
-              onPersonalSaved={(newForm, newAvatar) => {
-                setSavedForm({ ...newForm });
-                if (newAvatar !== undefined) setAvatarUrl(newAvatar);
-              }}
-              onBusinessSaved={(saved) => {
-                setBusinessData((prev) => prev ? { ...prev, ...saved } : prev);
-                if (typeof saved.profileCompleteness === "number") setProfileCompleteness(saved.profileCompleteness);
-              }}
-              onCompletenessChange={(pct) => setProfileCompleteness(pct)}
-            />
-          </motion.div>
-        )}
-
-        {activeTab === "readiness" && (
-          <motion.div key="readiness" id="tabpanel-readiness" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <ReadinessTab
-              businessId={businessId}
-              businessData={businessData}
-              profileCompleteness={profileCompleteness}
-              onNavigateTab={handleTabChange}
-            />
-          </motion.div>
-        )}
-
-        {activeTab === "intelligence" && (
-          <motion.div key="intelligence" id="tabpanel-intelligence" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <IntelligenceTab businessId={businessId} businessData={businessData} />
-          </motion.div>
-        )}
-
-        {activeTab === "outputs" && (
-          <motion.div key="outputs" id="tabpanel-outputs" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <OutputsTab businessId={businessId} businessData={businessData} profileCompleteness={profileCompleteness} />
-          </motion.div>
-        )}
-
-        {activeTab === "security" && (
-          <motion.div key="security" id="tabpanel-security" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <div className="space-y-4">
-              <div
-                className="rounded-xl p-3 flex items-center gap-2.5"
-                style={{
-                  background: "hsl(var(--kf-muted) / 0.06)",
-                  border: "1px solid hsl(var(--kf-border) / 0.15)",
-                }}
-              >
-                <Shield className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
-                <p className="text-[11px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-                  Security and appearance settings are isolated from your business data. Changes here do not affect your profile completeness or intelligence score.
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-error))" }} />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold" style={{ color: "hsl(var(--kf-error))" }}>
+                  Some sections are partially unavailable
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  You can still navigate tabs. Use Retry to reconnect and repopulate missing data.
                 </p>
               </div>
-              <div className="kf-card p-6">
-                <ProfileSectionErrorBoundary sectionName="Security & Preferences">
-                  <SecuritySection onStatus={setStatus} />
-                </ProfileSectionErrorBoundary>
-              </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+
+          <div
+            className="flex gap-1 p-1 rounded-xl overflow-x-auto"
+            style={{ background: "hsl(var(--kf-muted) / 0.15)", border: "1px solid hsl(var(--kf-border) / 0.2)" }}
+            role="tablist"
+            aria-label="Profile sections"
+          >
+            {TAB_CONFIG.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              const badge = tabBadge(tab.id);
+              return (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  aria-selected={isActive}
+                  aria-controls={`tabpanel-${tab.id}`}
+                  onClick={() => handleTabChange(tab.id)}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-lg text-xs font-medium transition-all min-h-[44px] whitespace-nowrap"
+                  style={{
+                    background: isActive ? "hsl(var(--kf-card))" : "transparent",
+                    color: isActive ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))",
+                    boxShadow: isActive ? "0 1px 3px hsl(0 0% 0% / 0.1)" : "none",
+                    border: isActive ? "1px solid hsl(var(--kf-border) / 0.3)" : "1px solid transparent",
+                  }}
+                >
+                  <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span className="hidden lg:inline">{tab.label}</span>
+                  <span className="lg:hidden">{tab.shortLabel}</span>
+                  {badge}
+                </button>
+              );
+            })}
+          </div>
+
+          <AnimatePresence mode="wait">
+            {activeTab === "overview" && (
+              <motion.div key="overview" id="tabpanel-overview" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                <OverviewTab
+                  businessData={businessData}
+                  profileCompleteness={profileCompleteness}
+                  intelligenceTiers={intelligenceTiers}
+                  overallIntelligenceScore={overallIntelligenceScore}
+                  completenessItems={completenessItems}
+                  onNavigateTab={handleTabChange}
+                />
+              </motion.div>
+            )}
+
+            {activeTab === "identity" && (
+              <motion.div key="identity" id="tabpanel-identity" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                <IdentityTab
+                  businessId={businessId}
+                  businessData={businessData}
+                  businessLoading={businessLoading}
+                  savedForm={savedForm}
+                  avatarUrl={avatarUrl}
+                  onPersonalDirtyChange={handlePersonalDirtyChange}
+                  onBizDirtyChange={handleBizDirtyChange}
+                  onBrandDirtyChange={handleBizInfoDirtyChange}
+                  onStatus={setStatus}
+                  onPersonalSaved={(newForm, newAvatar) => {
+                    setSavedForm({ ...newForm });
+                    if (newAvatar !== undefined) setAvatarUrl(newAvatar);
+                  }}
+                  onBusinessSaved={(saved) => {
+                    setBusinessData((prev) => prev ? { ...prev, ...saved } : prev);
+                    if (typeof saved.profileCompleteness === "number") setProfileCompleteness(saved.profileCompleteness);
+                  }}
+                  onCompletenessChange={(pct) => setProfileCompleteness(pct)}
+                />
+              </motion.div>
+            )}
+
+            {activeTab === "readiness" && (
+              <motion.div key="readiness" id="tabpanel-readiness" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                <ReadinessTab
+                  businessId={businessId}
+                  businessData={businessData}
+                  profileCompleteness={profileCompleteness}
+                  onNavigateTab={handleTabChange}
+                />
+              </motion.div>
+            )}
+
+            {activeTab === "intelligence" && (
+              <motion.div key="intelligence" id="tabpanel-intelligence" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                <IntelligenceTab businessId={businessId} businessData={businessData} />
+              </motion.div>
+            )}
+
+            {activeTab === "outputs" && (
+              <motion.div key="outputs" id="tabpanel-outputs" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                <OutputsTab businessId={businessId} businessData={businessData} profileCompleteness={profileCompleteness} />
+              </motion.div>
+            )}
+
+            {activeTab === "security" && (
+              <motion.div key="security" id="tabpanel-security" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                <div className="space-y-4">
+                  <div
+                    className="rounded-xl p-3 flex items-center gap-2.5"
+                    style={{
+                      background: "hsl(var(--kf-muted) / 0.06)",
+                      border: "1px solid hsl(var(--kf-border) / 0.15)",
+                    }}
+                  >
+                    <Shield className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
+                    <p className="text-[11px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                      Security and appearance settings are isolated from your business data. Changes here do not affect your profile completeness or intelligence score.
+                    </p>
+                  </div>
+                  <div className="kf-card p-6">
+                    <ProfileSectionErrorBoundary sectionName="Security & Preferences">
+                      <SecuritySection onStatus={setStatus} />
+                    </ProfileSectionErrorBoundary>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.section>
+      </div>
     </motion.div>
   );
 }
