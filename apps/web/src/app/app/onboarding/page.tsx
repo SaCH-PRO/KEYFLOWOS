@@ -269,6 +269,61 @@ function StepIndicator({ current }: { current: number }) {
   );
 }
 
+function SetupChecklistStrip({
+  checklist,
+}: {
+  checklist: Array<{ label: string; done: boolean }>;
+}) {
+  const completed = checklist.filter((item) => item.done).length;
+
+  return (
+    <div className="px-4 sm:px-6 pt-2 pb-1">
+      <div className="flex items-center justify-between gap-3">
+        <div
+          className="flex items-center overflow-x-auto"
+          aria-label="Setup progress checklist"
+        >
+          {checklist.map((item, index) => (
+            <div key={item.label} className="flex items-center">
+              {index > 0 && (
+                <div
+                  className="h-px w-2 sm:w-3"
+                  style={{
+                    background: item.done
+                      ? "hsl(var(--kf-info) / 0.55)"
+                      : "hsl(var(--kf-border) / 0.45)",
+                  }}
+                  aria-hidden="true"
+                />
+              )}
+              <div
+                className="h-3.5 w-3.5 rounded-[4px] border transition-all"
+                style={{
+                  background: item.done
+                    ? "hsl(var(--kf-info) / 0.22)"
+                    : "hsl(var(--kf-muted) / 0.24)",
+                  borderColor: item.done
+                    ? "hsl(var(--kf-info) / 0.75)"
+                    : "hsl(var(--kf-border) / 0.55)",
+                  boxShadow: item.done
+                    ? "0 0 0 1px hsl(var(--kf-info) / 0.12)"
+                    : "none",
+                }}
+                role="img"
+                aria-label={`${item.label}: ${item.done ? "complete" : "incomplete"}`}
+                title={`${item.label} — ${item.done ? "Complete" : "Incomplete"}`}
+              />
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground whitespace-nowrap">
+          {completed}/{checklist.length} complete
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function HelpDrawer({
   open,
   onClose,
@@ -915,34 +970,7 @@ export default function OnboardingPage() {
           </button>
         </div>
       </div>
-
-      <div className="px-4 sm:px-6 pt-4">
-        <div
-          className="rounded-xl p-3"
-          style={{
-            background: "hsl(var(--kf-muted) / 0.12)",
-            border: "1px solid hsl(var(--kf-border) / 0.35)",
-          }}
-        >
-          <p className="text-xs font-semibold mb-2">Setup progress checklist</p>
-          <div className="grid gap-1 sm:grid-cols-2">
-            {checklist.map((item) => (
-              <div key={item.label} className="flex items-center gap-2 text-xs">
-                <div
-                  className="w-4 h-4 rounded-full flex items-center justify-center"
-                  style={{
-                    background: item.done ? "hsl(var(--kf-success) / 0.18)" : "hsl(var(--kf-muted) / 0.3)",
-                    color: item.done ? "hsl(var(--kf-success))" : "hsl(var(--kf-muted-foreground))",
-                  }}
-                >
-                  {item.done ? <Check className="w-2.5 h-2.5" /> : item.label[0]}
-                </div>
-                <span className="text-muted-foreground">{item.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      <SetupChecklistStrip checklist={checklist} />
 
       <div className="flex-1 overflow-y-auto">
         <AnimatePresence mode="wait">
