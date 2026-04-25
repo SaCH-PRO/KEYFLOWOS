@@ -11,8 +11,15 @@ fi
 
 CURRENT_BRANCH="$(git branch --show-current)"
 
+# In CI (e.g. GitHub Actions), checkout can be detached HEAD.
+# Fall back to provided ref metadata in that case.
+if [[ -z "$CURRENT_BRANCH" ]]; then
+  CURRENT_BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}"
+fi
+
 if [[ -z "$CURRENT_BRANCH" ]]; then
   echo "Unable to determine current branch."
+  echo "Tried git branch, GITHUB_HEAD_REF, and GITHUB_REF_NAME."
   exit 1
 fi
 
