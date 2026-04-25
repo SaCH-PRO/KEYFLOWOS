@@ -279,41 +279,20 @@ function SetupChecklistStrip({
   return (
     <div className="px-4 sm:px-6 pt-2 pb-1">
       <div className="flex items-center justify-between gap-3">
-        <div
-          className="flex items-center overflow-x-auto"
-          aria-label="Setup progress checklist"
-        >
-          {checklist.map((item, index) => (
-            <div key={item.label} className="flex items-center">
-              {index > 0 && (
-                <div
-                  className="h-px w-2 sm:w-3"
-                  style={{
-                    background: item.done
-                      ? "hsl(var(--kf-info) / 0.55)"
-                      : "hsl(var(--kf-border) / 0.45)",
-                  }}
-                  aria-hidden="true"
-                />
-              )}
-              <div
-                className="h-3.5 w-3.5 rounded-[4px] border transition-all"
-                style={{
-                  background: item.done
-                    ? "hsl(var(--kf-info) / 0.22)"
-                    : "hsl(var(--kf-muted) / 0.24)",
-                  borderColor: item.done
-                    ? "hsl(var(--kf-info) / 0.75)"
-                    : "hsl(var(--kf-border) / 0.55)",
-                  boxShadow: item.done
-                    ? "0 0 0 1px hsl(var(--kf-info) / 0.12)"
-                    : "none",
-                }}
-                role="img"
-                aria-label={`${item.label}: ${item.done ? "complete" : "incomplete"}`}
-                title={`${item.label} — ${item.done ? "Complete" : "Incomplete"}`}
-              />
-            </div>
+        <div className="inline-flex items-center gap-1.5" aria-label="Setup progress checklist">
+          {checklist.map((item) => (
+            <div
+              key={item.label}
+              className="h-4 w-4 rounded-[2px] border transition-all"
+              style={{
+                background: item.done ? "#7dd3fc" : "hsl(var(--kf-foreground) / 0.18)",
+                borderColor: item.done ? "#38bdf8" : "hsl(var(--kf-foreground) / 0.26)",
+                boxShadow: item.done ? "0 0 0 1px rgb(56 189 248 / 0.25), 0 0 10px rgb(56 189 248 / 0.2)" : "none",
+              }}
+              role="img"
+              aria-label={`${item.label}: ${item.done ? "complete" : "incomplete"}`}
+              title={`${item.label} — ${item.done ? "Complete" : "Incomplete"}`}
+            />
           ))}
         </div>
         <p className="text-[11px] text-muted-foreground whitespace-nowrap">
