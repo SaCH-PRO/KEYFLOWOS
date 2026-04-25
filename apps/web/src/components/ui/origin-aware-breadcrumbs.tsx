@@ -87,25 +87,21 @@ export function OriginAwareBreadcrumbs() {
   const { getOriginContext } = useNavigationContext();
   const [isHydrated, setIsHydrated] = useState(false);
 
+  const segments = pathname.split("/").filter(Boolean);
+  const appIndex = segments.indexOf("app");
+  const crumbs = appIndex === -1 ? [] : segments.slice(appIndex + 1);
+  const hasRenderableCrumbs = segments.length > 1 && appIndex !== -1 && crumbs.length > 0;
+  const topModule = crumbs[0] ?? "";
+  const isConfigSurface = topModule !== "" && CONFIG_SURFACES.has(topModule);
+  const isDetailSurface = topModule !== "" && crumbs.length > 1 && DETAIL_SURFACES.has(topModule) && crumbs.some(isUuid);
+  const origin = isHydrated ? getOriginContext() : null;
+  const showOriginContext = hasRenderableCrumbs && (isConfigSurface || isDetailSurface) && origin && origin.route !== pathname;
+
   useEffect(() => {
     setIsHydrated(true);
   }, []);
 
-  const segments = pathname.split("/").filter(Boolean);
-  if (segments.length <= 1) return null;
-
-  const appIndex = segments.indexOf("app");
-  if (appIndex === -1) return null;
-
-  const crumbs = segments.slice(appIndex + 1);
-  if (crumbs.length === 0) return null;
-
-  const topModule = crumbs[0];
-  const isConfigSurface = CONFIG_SURFACES.has(topModule);
-  const isDetailSurface = crumbs.length > 1 && DETAIL_SURFACES.has(topModule) && crumbs.some(isUuid);
-
-  const origin = isHydrated ? getOriginContext() : null;
-  const showOriginContext = (isConfigSurface || isDetailSurface) && origin && origin.route !== pathname;
+  if (!hasRenderableCrumbs) return null;
 
   return (
     <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-xs text-muted-foreground px-1 py-1.5 flex-wrap">

@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
-import { OriginAwareBreadcrumbs } from "@/components/ui/origin-aware-breadcrumbs";
 import { NavigationContextProvider, useNavigationContext } from "@/lib/navigation-context";
 import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDisplayName, getUserInitials, refreshWorkspace, getCachedBusiness, isSuperAdmin } from "@/lib/workspace";
 import { apiGet, apiPatch } from "@/lib/api";
@@ -60,6 +60,11 @@ import { AiContextProvider } from "@/contexts/ai-context";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
+
+const OriginAwareBreadcrumbs = dynamic(
+  () => import("@/components/ui/origin-aware-breadcrumbs").then((mod) => mod.OriginAwareBreadcrumbs),
+  { ssr: false }
+);
 
 function relativeTime(dateStr: string): string {
   const now = Date.now();
