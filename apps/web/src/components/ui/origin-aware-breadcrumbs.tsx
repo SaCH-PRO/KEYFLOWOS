@@ -2,9 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
-import { ChevronRight, MapPin } from "lucide-react";
-import { useNavigationContext } from "@/lib/navigation-context";
+import { ChevronRight } from "lucide-react";
 
 const LABEL_MAP: Record<string, string> = {
   app: "Home",
@@ -61,68 +59,22 @@ const LABEL_MAP: Record<string, string> = {
   "output-templates": "AI Output",
 };
 
-const CONFIG_SURFACES = new Set([
-  "settings",
-  "studio",
-  "onboarding",
-  "profile",
-  "branding",
-]);
-
-const DETAIL_SURFACES = new Set([
-  "contacts",
-  "invoices",
-  "quotes",
-  "products",
-  "projects",
-  "bookings",
-]);
-
 function isUuid(s: string) {
   return /^[0-9a-f-]{20,}$/i.test(s);
 }
 
 export function OriginAwareBreadcrumbs() {
   const pathname = usePathname();
-  const { getOriginContext } = useNavigationContext();
-  const [isHydrated, setIsHydrated] = useState(false);
 
   const segments = pathname.split("/").filter(Boolean);
   const appIndex = segments.indexOf("app");
   const crumbs = appIndex === -1 ? [] : segments.slice(appIndex + 1);
   const hasRenderableCrumbs = segments.length > 1 && appIndex !== -1 && crumbs.length > 0;
-  const topModule = crumbs[0] ?? "";
-  const isConfigSurface = topModule !== "" && CONFIG_SURFACES.has(topModule);
-  const isDetailSurface = topModule !== "" && crumbs.length > 1 && DETAIL_SURFACES.has(topModule) && crumbs.some(isUuid);
-  const origin = isHydrated ? getOriginContext() : null;
-  const showOriginContext = hasRenderableCrumbs && (isConfigSurface || isDetailSurface) && origin && origin.route !== pathname;
-
-  useEffect(() => {
-    setIsHydrated(true);
-  }, []);
 
   if (!hasRenderableCrumbs) return null;
 
   return (
     <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-xs text-muted-foreground px-1 py-1.5 flex-wrap">
-      {showOriginContext && origin && (
-        <>
-          <Link
-            href={origin.route}
-            className="flex items-center gap-1 text-muted-foreground/70 hover:text-foreground transition-colors group"
-            title={`Return to ${origin.workspace ?? "previous page"}`}
-          >
-            <MapPin className="w-3 h-3 text-muted-foreground/50 group-hover:text-foreground/70 transition-colors" />
-            <span className="italic">
-              {origin.workspace ?? "Previous"}
-              {origin.tab ? ` › ${origin.tab.charAt(0).toUpperCase() + origin.tab.slice(1)}` : ""}
-              {origin.selectedEntityLabel ? ` › ${origin.selectedEntityLabel}` : ""}
-            </span>
-          </Link>
-          <ChevronRight className="w-3 h-3 text-muted-foreground/40" />
-        </>
-      )}
-
       <Link href="/app" className="hover:text-foreground transition-colors">
         Home
       </Link>
