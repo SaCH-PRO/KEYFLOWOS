@@ -285,9 +285,10 @@ function SetupChecklistStrip({
               key={item.label}
               className="h-4 w-4 rounded-[2px] border transition-all"
               style={{
-                background: item.done ? "#7dd3fc" : "hsl(var(--kf-foreground) / 0.18)",
-                borderColor: item.done ? "#38bdf8" : "hsl(var(--kf-foreground) / 0.26)",
-                boxShadow: item.done ? "0 0 0 1px rgb(56 189 248 / 0.25), 0 0 10px rgb(56 189 248 / 0.2)" : "none",
+                background: item.done ? "#0ea5e9" : "transparent",
+                borderColor: item.done ? "#38bdf8" : "hsl(var(--kf-foreground) / 0.42)",
+                borderWidth: item.done ? "2px" : "1.5px",
+                boxShadow: item.done ? "0 0 0 1px rgb(56 189 248 / 0.3), 0 0 14px rgb(56 189 248 / 0.35)" : "none",
               }}
               role="img"
               aria-label={`${item.label}: ${item.done ? "complete" : "incomplete"}`}
