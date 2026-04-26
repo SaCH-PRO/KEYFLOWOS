@@ -37,6 +37,7 @@ import type {
   DeliveryAddress,
   PaymentMethod,
   ShippingZone,
+  AllowedPaymentMethod,
 } from "./types";
 import {
   getAvailableSlots,
@@ -57,6 +58,7 @@ type Props = {
   cartTotal: number;
   cartCurrency: string;
   promoCode: PromoCode | null;
+  allowedPaymentMethods?: AllowedPaymentMethod[];
   shippingZones: ShippingZone[];
   taxRate?: number;
   onBack: () => void;
@@ -80,6 +82,13 @@ const paymentMethods: { id: PaymentMethod; name: string; description: string; ic
   { id: "cash", name: "Cash / Manual Payment", description: "Pay in person or arrange payment with the business", icon: CreditCard },
 ];
 
+const METHOD_BY_ALLOWED: Record<AllowedPaymentMethod, PaymentMethod> = {
+  wipay: "wipay",
+  paypal: "paypal",
+  cash: "cash",
+  manual: "cash",
+};
+
 export function CheckoutFlow({
   business,
   cart,
@@ -90,6 +99,7 @@ export function CheckoutFlow({
   cartTotal,
   cartCurrency,
   promoCode,
+  allowedPaymentMethods,
   shippingZones,
   taxRate,
   onBack,
@@ -122,6 +132,23 @@ export function CheckoutFlow({
   const [error, setError] = useState<string | null>(null);
   const [stepDirection, setStepDirection] = useState<"forward" | "back">("forward");
   const [fieldTouched, setFieldTouched] = useState<Record<string, boolean>>({});
+
+  const enabledPaymentMethods = (() => {
+    if (!allowedPaymentMethods || allowedPaymentMethods.length === 0) return paymentMethods;
+    const allowed = new Set<PaymentMethod>(
+      allowedPaymentMethods
+        .map((method) => METHOD_BY_ALLOWED[method])
+        .filter((method): method is PaymentMethod => Boolean(method)),
+    );
+    const filtered = paymentMethods.filter((method) => allowed.has(method.id));
+    return filtered.length > 0 ? filtered : paymentMethods;
+  })();
+
+  useEffect(() => {
+    if (!enabledPaymentMethods.some((method) => method.id === selectedPayment)) {
+      setSelectedPayment(enabledPaymentMethods[0]?.id ?? "cash");
+    }
+  }, [enabledPaymentMethods, selectedPayment]);
 
   const serviceItemsInCart = cart.filter((c) => c.requiresBooking);
   const hasPhysicalProducts = cart.some((c) => c.itemType === "product");
@@ -863,7 +890,7 @@ export function CheckoutFlow({
                   </div>
                 </div>
                 <div className="p-5 space-y-2">
-                  {paymentMethods.map((pm) => {
+                  {enabledPaymentMethods.map((pm) => {
                     const isSelected = selectedPayment === pm.id;
                     return (
                       <button

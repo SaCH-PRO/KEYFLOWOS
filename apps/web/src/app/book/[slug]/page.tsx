@@ -44,6 +44,7 @@ import { ShareStoreButton } from "./components/share-buttons";
 import { Heart } from "lucide-react";
 import { GuidedSelector } from "./components/guided-selector";
 import { AssetIntake } from "./components/asset-intake";
+import type { BlueprintGatewayKey } from "@/types/blueprint";
 
 const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
   "hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact", "policies",
@@ -106,6 +107,19 @@ export default function PublicBookingPage() {
   const [completedOrdersCount, setCompletedOrdersCount] = useState<number>(0);
   const [showGuidedSelector, setShowGuidedSelector] = useState(false);
   const [guidedIntake, setGuidedIntake] = useState<{ journeyId: string; productId: string; productName: string } | null>(null);
+  const [allowedPaymentMethods, setAllowedPaymentMethods] = useState<PaymentMethod[]>(["wipay", "paypal", "cash"]);
+  const resolveAllowedPaymentMethods = useCallback((gateways?: BlueprintGatewayKey[]): PaymentMethod[] => {
+    if (!gateways || gateways.length === 0) return ["wipay", "paypal", "cash"];
+    const allowed = new Set<PaymentMethod>();
+    if (gateways.includes("wipay")) allowed.add("wipay");
+    if (gateways.includes("paypal")) allowed.add("paypal");
+    if (gateways.includes("cash") || gateways.includes("manual") || gateways.includes("bank_transfer") || gateways.includes("invoice")) {
+      allowed.add("cash");
+    }
+    if (allowed.size === 0) allowed.add("cash");
+    return Array.from(allowed);
+  }, []);
+
 
   const wishlist = useWishlist(slug);
 
@@ -273,6 +287,9 @@ export default function PublicBookingPage() {
       else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
       if (sfRes.data?.shippingZones) setShippingZones(sfRes.data.shippingZones);
       if (typeof sfRes.data?.completedOrdersCount === 'number') setCompletedOrdersCount(sfRes.data.completedOrdersCount);
+      const blueprintGateways = sfRes.data?.blueprint?.paymentAndClosing?.enabledGateways as BlueprintGatewayKey[] | undefined;
+      const storefrontGateways = sfRes.data?.storefront?.storeSettings?.payment?.enabledMethods as BlueprintGatewayKey[] | undefined;
+      setAllowedPaymentMethods(resolveAllowedPaymentMethods(blueprintGateways ?? storefrontGateways));
 
       if (res.data?.id) trackStoreEvent(res.data.id, 'page_view');
 
@@ -971,6 +988,7 @@ export default function PublicBookingPage() {
           business={business!}
           cart={cart}
           staff={staff}
+          allowedPaymentMethods={allowedPaymentMethods}
           primaryColor={primaryColor}
           secondaryColor={secondaryColor}
           accentColor={accentColor}

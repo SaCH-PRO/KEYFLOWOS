@@ -366,14 +366,46 @@ export class SiteService {
 
     const { metaData: _meta, ...publicBusiness } = business;
 
+    const blueprint = meta.blueprint ?? null;
+
     return {
       business: publicBusiness,
       storefront,
+      blueprint,
       services,
       products,
       shippingZones,
       completedOrdersCount,
     };
+  }
+
+  getConfiguredCheckoutMethods(
+    source:
+      | Record<string, unknown>
+      | Partial<BusinessBlueprint>
+      | null
+      | undefined,
+  ): string[] {
+    const input = (source as Record<string, any> | null | undefined) ?? {};
+    const looksLikeBlueprint = !!input?.paymentAndClosing;
+    const blueprint = looksLikeBlueprint
+      ? (input as Partial<BusinessBlueprint>)
+      : (input.blueprint as Partial<BusinessBlueprint> | undefined);
+    const gateways = blueprint?.paymentAndClosing?.enabledGateways ?? [];
+    if (!Array.isArray(gateways) || gateways.length === 0) {
+      return ['WIPAY', 'PAYPAL', 'CASH'];
+    }
+
+    const mapped = new Set<string>();
+    for (const gateway of gateways) {
+      if (gateway === 'wipay') mapped.add('WIPAY');
+      if (gateway === 'paypal') mapped.add('PAYPAL');
+      if (gateway === 'cash' || gateway === 'manual' || gateway === 'bank_transfer' || gateway === 'invoice' || gateway === 'payment_link') {
+        mapped.add('CASH');
+      }
+    }
+    if (mapped.size === 0) mapped.add('CASH');
+    return Array.from(mapped);
   }
 
   private readonly ALLOWED_EVENT_TYPES = new Set([

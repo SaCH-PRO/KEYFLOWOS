@@ -1,6 +1,14 @@
 export type DayHours = { open: string; close: string; closed: boolean };
 export type BusinessHours = Record<string, DayHours>;
 
+export type BlueprintStoreSettings = {
+  payment?: {
+    enabledGateways?: Array<"wipay" | "paypal" | "cash" | "manual" | "bank_transfer" | "invoice" | "payment_link">;
+    preferredGateway?: "wipay" | "paypal" | "cash" | "manual" | "bank_transfer" | "invoice" | "payment_link";
+    closePathway?: "instant_checkout" | "deposit_checkout" | "request_quote" | "whatsapp_close" | "invoice_first" | "booking_first";
+  };
+};
+
 export type Business = {
   id: string;
   name: string;
@@ -23,6 +31,7 @@ export type Business = {
   twitter?: string | null;
   whatsapp?: string | null;
   refundPolicy?: string | null;
+  storefrontSettings?: BlueprintStoreSettings | null;
 };
 
 export type Service = {
@@ -92,6 +101,7 @@ export type DeliveryAddress = {
 };
 
 export type PaymentMethod = "wipay" | "paypal" | "cash";
+export type AllowedPaymentMethod = "wipay" | "paypal" | "cash" | "manual";
 
 export type CheckoutCustomerInfo = {
   firstName: string;

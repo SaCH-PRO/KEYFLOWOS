@@ -353,6 +353,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const notifRef = useRef<HTMLDivElement>(null);
   const [displayName, setDisplayName] = useState("");
   const [initials, setInitials] = useState("KF");
+  const [userEmail, setUserEmail] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [isAdminUser, setIsAdminUser] = useState(false);
@@ -398,6 +399,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       if (user) {
         setDisplayName(getUserDisplayName());
         setInitials(getUserInitials());
+        setUserEmail(user.email ?? "");
         if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
         setIsAdminUser(isSuperAdmin());
       }
@@ -844,7 +846,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                   >
                     <div className="px-3 py-2 border-b border-border">
                       <p className="text-xs font-medium text-foreground truncate">{displayName || "User"}</p>
-                      <p className="text-[10px] text-muted-foreground truncate mt-0.5">{getCachedUser()?.email}</p>
+                      <p className="text-[10px] text-muted-foreground truncate mt-0.5">{userEmail}</p>
                     </div>
                     <Link
                       href="/app/profile"

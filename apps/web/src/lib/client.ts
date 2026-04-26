@@ -1591,8 +1591,8 @@ export async function completeBusinessBlueprintStep(
 
 export async function publishBusinessStorefrontFromBlueprint(
   businessId: string,
-): Promise<ApiResult<{ storefrontPublished: boolean; storefrontUrl: string }>> {
-  return apiPostSimple<{ storefrontPublished: boolean; storefrontUrl: string }>(
+): Promise<ApiResult<{ storefrontUrl: string | null; blueprint: BusinessBlueprint }>> {
+  return apiPostSimple<{ storefrontUrl: string | null; blueprint: BusinessBlueprint }>(
     `/site/businesses/${encodeURIComponent(businessId)}/blueprint/publish-storefront`,
     {},
   );
@@ -1602,9 +1602,10 @@ export async function upsertBusinessBlueprint(
   businessId: string,
   input: { blueprint?: Partial<BusinessBlueprint>; patch?: Partial<BusinessBlueprint> },
 ): Promise<ApiResult<BusinessBlueprint>> {
+  const payload = (input.blueprint ?? input.patch ?? {}) as Partial<BusinessBlueprint>;
   return apiPatch<BusinessBlueprint>(
     `/site/businesses/${encodeURIComponent(businessId)}/blueprint`,
-    input,
+    payload,
   );
 }
 

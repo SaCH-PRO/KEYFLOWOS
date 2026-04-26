@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, UseGuards, BadRequestException } from '@nestjs/common';
 import { SiteService } from './site.service';
 import { StoreOrderService } from './store-order.service';
 import { PromoCodeService } from './promo-code.service';
@@ -50,9 +50,16 @@ export class SiteController {
   @Patch('businesses/:businessId/blueprint')
   updateBusinessBlueprint(
     @Param('businessId') businessId: string,
-    @Body() body: Partial<Record<keyof import('./blueprint.types').BusinessBlueprint, unknown>>,
+    @Body() body:
+      | Partial<Record<keyof import('./blueprint.types').BusinessBlueprint, unknown>>
+      | { blueprint?: Partial<import('./blueprint.types').BusinessBlueprint>; patch?: Partial<import('./blueprint.types').BusinessBlueprint> },
   ) {
-    return this.siteService.updateBusinessBlueprint(businessId, body as any);
+    const wrapped = body as { blueprint?: Partial<import('./blueprint.types').BusinessBlueprint>; patch?: Partial<import('./blueprint.types').BusinessBlueprint> };
+    const payload =
+      (wrapped.blueprint ?? wrapped.patch ?? body) as Partial<
+        import('./blueprint.types').BusinessBlueprint
+      >;
+    return this.siteService.updateBusinessBlueprint(businessId, payload as any);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -159,6 +166,13 @@ export class SiteController {
   ) {
     const storefront = await this.siteService.getPublicStorefront(slug);
     const businessId = storefront.business.id;
+    const configuredGateways = this.siteService.getConfiguredCheckoutMethods(
+      storefront?.blueprint as Partial<import('./blueprint.types').BusinessBlueprint> | null | undefined,
+    );
+    const requestedMethod = (body.paymentMethod ?? '').toUpperCase();
+    if (requestedMethod && !configuredGateways.includes(requestedMethod)) {
+      throw new BadRequestException(`Payment method ${requestedMethod} is not enabled for this storefront`);
+    }
 
     const cleanCustomer = {
       ...body.customer,
@@ -194,6 +208,17 @@ export class SiteController {
       order,
       payment,
     };
+  }
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(20, 60_000)
+  @Get('storefront/public/:slug/payment-methods')
+  async getPublicPaymentMethods(@Param('slug') slug: string) {
+    const storefront = await this.siteService.getPublicStorefront(slug);
+    const methods = this.siteService.getConfiguredCheckoutMethods(
+      storefront?.blueprint as Partial<import('./blueprint.types').BusinessBlueprint> | null | undefined,
+    );
+    return { methods };
   }
 
   @UseGuards(PublicRateLimitGuard)

@@ -43,6 +43,7 @@ import {
   fetchConciergeTemplatePreview,
   completeOnboardingStep,
   upsertBusinessBlueprint,
+  publishBusinessStorefrontFromBlueprint,
   updateBusiness,
   createProduct,
   IndustryTemplatePreview,
@@ -138,17 +139,36 @@ interface ChatMsg {
 }
 
 const STEPS = [
-  { label: "Business Type", number: 1 },
-  { label: "Your First Offering", number: 2 },
-  { label: "Go Live", number: 3 },
+  { label: "Business Snapshot", number: 1 },
+  { label: "First Offer", number: 2 },
+  { label: "Storefront", number: 3 },
+  { label: "Payment Path", number: 4 },
+  { label: "First Win", number: 5 },
 ];
 
 const STEP_KEY_MAP: Record<string, number> = {
   products: 1,
   hours: 1,
+  offer: 1,
   storefront: 2,
-  payments: 2,
+  payments: 3,
+  firstwin: 4,
 };
+
+const FIRST_WIN_TO_CLOSE_PATHWAY: Record<FirstWinId, "instant_checkout" | "deposit_checkout" | "request_quote" | "booking_first"> = {
+  invoice: "instant_checkout",
+  payments: "deposit_checkout",
+  followup: "request_quote",
+  booking: "booking_first",
+};
+
+const STEP_INDEX = {
+  snapshot: 0,
+  offer: 1,
+  storefront: 2,
+  payment: 3,
+  firstWin: 4,
+} as const;
 
 const PAIN_OPTIONS = [
   "Missed follow-ups",
@@ -587,7 +607,7 @@ export default function OnboardingPage() {
     () => [
       { label: "Business profile answers", done: profileComplete },
       { label: "Template selected", done: Boolean(selectedTemplate) },
-      { label: "First offering configured", done: step >= 2 && products.some((p) => p.included && p.name.trim()) },
+      { label: "First offering configured", done: step >= STEP_INDEX.storefront && products.some((p) => p.included && p.name.trim()) },
       { label: "Public page live", done: Boolean(publicUrl) },
       { label: "First win selected", done: Boolean(selectedFirstWin) },
     ],
@@ -657,12 +677,37 @@ export default function OnboardingPage() {
             }
             if (stateRes.data.setupStatus.products) {
               setPublicUrl(getPublicPageUrl(bid));
-              setStep(requestedStep !== null && requestedStep >= 0 && requestedStep <= 2 ? requestedStep : 2);
+              const explicitRequestedStep =
+                requestedStep !== null && requestedStep >= 0 && requestedStep <= 4
+                  ? requestedStep
+                  : null;
+              const onboardingMeta =
+                stateRes.data.metaData && typeof stateRes.data.metaData === "object"
+                  ? (stateRes.data.metaData.onboardingStep as number | undefined)
+                  : undefined;
+              const normalizedMetaStep =
+                typeof onboardingMeta === "number" && onboardingMeta >= 1 && onboardingMeta <= 5
+                  ? onboardingMeta - 1
+                  : null;
+              const inferredResumeStep = stateRes.data.onboardingComplete
+                ? 4
+                : stateRes.data.setupStatus.payments
+                  ? 4
+                  : stateRes.data.setupStatus.storefront
+                    ? 3
+                    : 2;
+              setStep(explicitRequestedStep ?? normalizedMetaStep ?? inferredResumeStep);
             } else {
-              setStep(requestedStep !== null && requestedStep >= 0 && requestedStep <= 1 ? requestedStep : 1);
+              setStep(
+                requestedStep !== null &&
+                  requestedStep >= STEP_INDEX.snapshot &&
+                  requestedStep <= STEP_INDEX.offer
+                  ? requestedStep
+                  : STEP_INDEX.offer,
+              );
             }
-          } else if (requestedStep === 0 || requestedStep === null) {
-            setStep(0);
+          } else if (requestedStep === STEP_INDEX.snapshot || requestedStep === null) {
+            setStep(STEP_INDEX.snapshot);
           }
         } else if (stateRes.error) {
           setConnectivityWarning(normalizeErrorMessage(stateRes.error, "Could not load onboarding state."));
@@ -726,7 +771,7 @@ export default function OnboardingPage() {
       console.error("Template select error:", err);
     }
 
-    setStep(1);
+    setStep(STEP_INDEX.offer);
   };
 
   const handleProductToggle = (index: number) => {
@@ -793,17 +838,91 @@ export default function OnboardingPage() {
         metaData: {
           conciergeTemplateId: selectedTemplate,
           onboardingStep: 2,
-          onboardingComplete: true,
+          onboardingComplete: false,
         },
       });
 
       setPublicUrl(getPublicPageUrl(businessId));
-      setStep(2);
+      setStep(STEP_INDEX.storefront);
     } catch (err) {
       console.error("Configure error:", err);
       setSetupError(normalizeErrorMessage(err, "We could not finish setup. Please try again."));
     }
     setConfiguring(false);
+  };
+
+  const handleSaveStorefrontStep = async () => {
+    if (!businessId || !publicUrl || configuring) return;
+    setConfiguring(true);
+    setSetupError(null);
+    try {
+      await completeOnboardingStep(businessId, {
+        stepKey: "storefrontPublished",
+        completed: true,
+      });
+      await updateBusiness({
+        businessId,
+        metaData: {
+          onboardingStep: 3,
+          activationProfile,
+        },
+      });
+      setStep(STEP_INDEX.payment);
+    } catch (err) {
+      setSetupError(normalizeErrorMessage(err, "Could not save storefront step. Please retry."));
+    } finally {
+      setConfiguring(false);
+    }
+  };
+
+  const handleSavePaymentPathStep = async () => {
+    if (!businessId || configuring) return;
+    setConfiguring(true);
+    setSetupError(null);
+    try {
+      const fallbackFirstWin: FirstWinId = selectedFirstWin ?? "invoice";
+      if (!selectedFirstWin) {
+        setSelectedFirstWin(fallbackFirstWin);
+      }
+      const closePathway = FIRST_WIN_TO_CLOSE_PATHWAY[fallbackFirstWin];
+      await upsertBusinessBlueprint(businessId, {
+        patch: {
+          paymentAndClosing: {
+            enabledGateways:
+              closePathway === "deposit_checkout"
+                ? ["payment_link", "bank_transfer", "manual"]
+                : closePathway === "request_quote"
+                  ? ["manual", "bank_transfer", "invoice", "cash"]
+                  : closePathway === "booking_first"
+                    ? ["manual", "bank_transfer", "cash"]
+                    : ["wipay", "paypal", "cash"],
+            acceptsManualPayment: true,
+            acceptsBankTransfer: true,
+            acceptsCash: true,
+            requiresDeposit: closePathway === "deposit_checkout",
+            depositPercent: closePathway === "deposit_checkout" ? 30 : undefined,
+            closePathway,
+          },
+        },
+      });
+      await completeOnboardingStep(businessId, {
+        stepKey: "paymentPathConfigured",
+        completed: true,
+      });
+      await updateBusiness({
+        businessId,
+        metaData: {
+          onboardingStep: 4,
+          firstWin: fallbackFirstWin,
+          activationProfile,
+        },
+      });
+      setStep(STEP_INDEX.firstWin);
+    } catch (err) {
+      setSetupError(normalizeErrorMessage(err, "Could not save payment pathway. Please retry."));
+    } finally {
+      setConfiguring(false);
+    }
   };
 
   const handleCopyLink = async () => {
@@ -834,7 +953,7 @@ export default function OnboardingPage() {
 
   const handleShareSocial = async () => {
     if (!publicUrl) return;
-    if (navigator.share) {
+    if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share({
           title: "My Business on KeyFlowOS",
@@ -918,7 +1037,7 @@ export default function OnboardingPage() {
         blueprint,
       });
       await completeOnboardingStep(businessId, {
-        stepKey: "publish",
+        stepKey: "onboardingCompleted",
         completed: true,
         progress,
       });
@@ -942,22 +1061,19 @@ export default function OnboardingPage() {
   };
 
   const handleSelectFirstWin = async (firstWin: FirstWinId) => {
-    if (!businessId || savingFirstWin) return;
-    setSavingFirstWin(true);
+    if (!businessId || configuring) return;
     setSelectedFirstWin(firstWin);
     try {
       await updateBusiness({
         businessId,
         metaData: {
-          onboardingStep: 3,
+          onboardingStep: 4,
           firstWin,
           activationProfile,
         },
       });
     } catch (err) {
       console.error("Failed to save first win:", err);
-    } finally {
-      setSavingFirstWin(false);
     }
   };
 
@@ -1278,7 +1394,7 @@ export default function OnboardingPage() {
             </motion.div>
           )}
 
-          {step === 1 && (
+          {step === STEP_INDEX.offer && (
             <motion.div
               key="step-1"
               initial={{ opacity: 0, x: 20 }}
@@ -1289,7 +1405,7 @@ export default function OnboardingPage() {
             >
               <div className="mb-6">
                 <button
-                  onClick={() => setStep(0)}
+                  onClick={() => setStep(STEP_INDEX.snapshot)}
                   className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-all mb-4"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
@@ -1435,7 +1551,7 @@ export default function OnboardingPage() {
 
               <div className="mt-8 flex items-center justify-between">
                 <button
-                  onClick={() => setStep(0)}
+                  onClick={() => setStep(STEP_INDEX.snapshot)}
                   className="flex items-center gap-1 px-4 py-2 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground transition-all"
                 >
                   <ChevronLeft className="w-4 h-4" />
@@ -1501,10 +1617,10 @@ export default function OnboardingPage() {
                     style={{ color: "hsl(var(--kf-success))" }}
                   />
                 </motion.div>
-                <h1 className="text-xl font-bold mb-2">You&apos;re live!</h1>
+                <h1 className="text-xl font-bold mb-2">Storefront published</h1>
                 <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-                  Your business is set up and ready for customers. Share your
-                  link to start receiving bookings and orders.
+                  Your public page is live. Share it now, then configure how you
+                  want to close transactions.
                 </p>
               </div>
 
@@ -1633,6 +1749,96 @@ export default function OnboardingPage() {
                 </div>
               )}
 
+              <button
+                onClick={handleSaveStorefrontStep}
+                disabled={configuring}
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all hover:scale-[1.01]"
+                style={{
+                  background:
+                    "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                  color: "hsl(var(--kf-foreground))",
+                }}
+              >
+                {configuring ? "Saving storefront step..." : "Continue to payment pathway"}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </motion.div>
+          )}
+
+          {step === 3 && (
+            <motion.div
+              key="step-3"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25 }}
+              className="max-w-lg mx-auto px-4 sm:px-6 py-8"
+            >
+              <div className="text-center mb-6">
+                <h2 className="text-xl font-bold mb-2">Choose your payment pathway</h2>
+                <p className="text-sm text-muted-foreground">
+                  Select how you want customers to complete transactions so we can
+                  configure your default close flow.
+                </p>
+              </div>
+
+              <div
+                className="rounded-xl p-4 mb-5"
+                style={{
+                  background: "hsl(var(--kf-muted) / 0.12)",
+                  border: "1px solid hsl(var(--kf-border) / 0.3)",
+                }}
+              >
+                <p className="text-xs text-muted-foreground mb-2">Suggested close flow by first win</p>
+                <div className="space-y-2">
+                  {FIRST_WIN_OPTIONS.map((option) => {
+                    const active = selectedFirstWin === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        onClick={() => handleSelectFirstWin(option.id)}
+                        className="w-full text-left rounded-lg px-3 py-2.5 transition-all"
+                        style={{
+                          background: active ? "hsl(var(--kf-accent2) / 0.16)" : "hsl(var(--kf-muted) / 0.2)",
+                          border: active
+                            ? "1px solid hsl(var(--kf-accent2) / 0.45)"
+                            : "1px solid hsl(var(--kf-border) / 0.25)",
+                        }}
+                      >
+                        <p className="text-sm font-medium">{option.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{option.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <button
+                onClick={handleSavePaymentPathStep}
+                disabled={!selectedFirstWin || configuring}
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all hover:scale-[1.01]"
+                style={{
+                  background:
+                    "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                  color: "hsl(var(--kf-foreground))",
+                  opacity: !selectedFirstWin ? 0.55 : 1,
+                }}
+              >
+                {configuring ? "Saving payment path..." : "Continue to first win"}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </motion.div>
+          )}
+
+          {step === 4 && (
+            <motion.div
+              key="step-4"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25 }}
+              className="max-w-lg mx-auto px-4 sm:px-6 py-8"
+            >
               <div
                 className="rounded-xl p-4 mb-6"
                 style={{
@@ -1670,41 +1876,6 @@ export default function OnboardingPage() {
                       <ChevronRight className="w-4 h-4 text-muted-foreground" />
                     </button>
                   ))}
-                </div>
-              </div>
-
-              <div
-                className="rounded-xl p-4 mb-6"
-                style={{
-                  background:
-                    "linear-gradient(135deg, hsl(var(--kf-accent2) / 0.08), hsl(var(--kf-accent1) / 0.04))",
-                  border: "1px solid hsl(var(--kf-accent2) / 0.2)",
-                }}
-              >
-                <p className="text-sm font-semibold mb-1">Pick your first concrete win</p>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Choose what you want to complete in this first session.
-                </p>
-                <div className="space-y-2">
-                  {FIRST_WIN_OPTIONS.map((option) => {
-                    const active = selectedFirstWin === option.id;
-                    return (
-                      <button
-                        key={option.id}
-                        onClick={() => handleSelectFirstWin(option.id)}
-                        className="w-full text-left rounded-lg px-3 py-2.5 transition-all"
-                        style={{
-                          background: active ? "hsl(var(--kf-accent2) / 0.16)" : "hsl(var(--kf-muted) / 0.2)",
-                          border: active
-                            ? "1px solid hsl(var(--kf-accent2) / 0.45)"
-                            : "1px solid hsl(var(--kf-border) / 0.25)",
-                        }}
-                      >
-                        <p className="text-sm font-medium">{option.title}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{option.description}</p>
-                      </button>
-                    );
-                  })}
                 </div>
               </div>
 
