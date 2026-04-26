@@ -1226,102 +1226,161 @@ export default function OnboardingPage() {
                 </div>
 
                 <div>
-                  <p className="text-xs mb-1 text-muted-foreground">What business type best matches you?</p>
-                  <div className="flex flex-wrap gap-2">
-                    {["Services", "Products", "Mixed"].map((option) => (
-                      <button
-                        key={option}
-                        onClick={() => setActivationProfile((prev) => ({ ...prev, businessType: option }))}
-                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                        style={{
-                          background:
-                            activationProfile.businessType === option
-                              ? "hsl(var(--kf-accent1) / 0.16)"
-                              : "hsl(var(--kf-muted) / 0.25)",
-                          color:
-                            activationProfile.businessType === option
-                              ? "hsl(var(--kf-accent1))"
-                              : "hsl(var(--kf-muted-foreground))",
-                        }}
-                      >
-                        {option}
-                      </button>
-                    ))}
+                  <p className="text-xs mb-2 text-muted-foreground">What business type best matches you?</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {["Services", "Products", "Mixed"].map((option) => {
+                      const selected = activationProfile.businessType === option;
+                      return (
+                        <button
+                          key={option}
+                          onClick={() => setActivationProfile((prev) => ({ ...prev, businessType: option }))}
+                          className="relative rounded-xl px-3 py-3 text-left transition-all hover:scale-[1.01]"
+                          style={{
+                            background: selected
+                              ? "hsl(var(--kf-accent1) / 0.12)"
+                              : "hsl(var(--kf-muted) / 0.18)",
+                            border: selected
+                              ? "1px solid hsl(var(--kf-accent1) / 0.45)"
+                              : "1px solid hsl(var(--kf-border) / 0.25)",
+                            boxShadow: selected
+                              ? "0 10px 22px hsl(var(--kf-accent1) / 0.16)"
+                              : "none",
+                          }}
+                        >
+                          <p
+                            className="text-xs font-semibold"
+                            style={{
+                              color: selected
+                                ? "hsl(var(--kf-accent1))"
+                                : "hsl(var(--kf-foreground))",
+                            }}
+                          >
+                            {option}
+                          </p>
+                          <p className="text-[10px] mt-1 text-muted-foreground">
+                            {option === "Services"
+                              ? "Appointments and client delivery"
+                              : option === "Products"
+                                ? "Catalog and direct checkout"
+                                : "Book and buy in one flow"}
+                          </p>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
                 <div>
-                  <p className="text-xs mb-1 text-muted-foreground">Biggest pain right now?</p>
-                  <div className="flex flex-wrap gap-2">
-                    {PAIN_OPTIONS.map((option) => (
-                      <button
-                        key={option}
-                        onClick={() => setActivationProfile((prev) => ({ ...prev, primaryPain: option }))}
-                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                        style={{
-                          background:
-                            activationProfile.primaryPain === option
-                              ? "hsl(var(--kf-accent1) / 0.16)"
-                              : "hsl(var(--kf-muted) / 0.25)",
-                          color:
-                            activationProfile.primaryPain === option
-                              ? "hsl(var(--kf-accent1))"
-                              : "hsl(var(--kf-muted-foreground))",
-                        }}
-                      >
-                        {option}
-                      </button>
-                    ))}
+                  <p className="text-xs mb-2 text-muted-foreground">Biggest pain right now?</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {PAIN_OPTIONS.map((option) => {
+                      const selected = activationProfile.primaryPain === option;
+                      return (
+                        <button
+                          key={option}
+                          onClick={() => setActivationProfile((prev) => ({ ...prev, primaryPain: option }))}
+                          className="relative rounded-xl px-3 py-3 text-left transition-all hover:scale-[1.01]"
+                          style={{
+                            background: selected
+                              ? "hsl(var(--kf-accent1) / 0.12)"
+                              : "hsl(var(--kf-muted) / 0.18)",
+                            border: selected
+                              ? "1px solid hsl(var(--kf-accent1) / 0.45)"
+                              : "1px solid hsl(var(--kf-border) / 0.25)",
+                            boxShadow: selected
+                              ? "0 10px 22px hsl(var(--kf-accent1) / 0.16)"
+                              : "none",
+                          }}
+                        >
+                          <p
+                            className="text-xs font-semibold"
+                            style={{
+                              color: selected
+                                ? "hsl(var(--kf-accent1))"
+                                : "hsl(var(--kf-foreground))",
+                            }}
+                          >
+                            {option}
+                          </p>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
                 <div>
-                  <p className="text-xs mb-1 text-muted-foreground">What should we automate first?</p>
-                  <div className="flex flex-wrap gap-2">
-                    {AUTOMATION_OPTIONS.map((option) => (
-                      <button
-                        key={option}
-                        onClick={() => setActivationProfile((prev) => ({ ...prev, firstAutomation: option }))}
-                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                        style={{
-                          background:
-                            activationProfile.firstAutomation === option
-                              ? "hsl(var(--kf-accent1) / 0.16)"
-                              : "hsl(var(--kf-muted) / 0.25)",
-                          color:
-                            activationProfile.firstAutomation === option
-                              ? "hsl(var(--kf-accent1))"
-                              : "hsl(var(--kf-muted-foreground))",
-                        }}
-                      >
-                        {option}
-                      </button>
-                    ))}
+                  <p className="text-xs mb-2 text-muted-foreground">What should we automate first?</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {AUTOMATION_OPTIONS.map((option) => {
+                      const selected = activationProfile.firstAutomation === option;
+                      return (
+                        <button
+                          key={option}
+                          onClick={() => setActivationProfile((prev) => ({ ...prev, firstAutomation: option }))}
+                          className="relative rounded-xl px-3 py-3 text-left transition-all hover:scale-[1.01]"
+                          style={{
+                            background: selected
+                              ? "hsl(var(--kf-accent1) / 0.12)"
+                              : "hsl(var(--kf-muted) / 0.18)",
+                            border: selected
+                              ? "1px solid hsl(var(--kf-accent1) / 0.45)"
+                              : "1px solid hsl(var(--kf-border) / 0.25)",
+                            boxShadow: selected
+                              ? "0 10px 22px hsl(var(--kf-accent1) / 0.16)"
+                              : "none",
+                          }}
+                        >
+                          <p
+                            className="text-xs font-semibold"
+                            style={{
+                              color: selected
+                                ? "hsl(var(--kf-accent1))"
+                                : "hsl(var(--kf-foreground))",
+                            }}
+                          >
+                            {option}
+                          </p>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
                 <div>
-                  <p className="text-xs mb-1 text-muted-foreground">What are you replacing?</p>
-                  <div className="flex flex-wrap gap-2">
-                    {REPLACING_OPTIONS.map((option) => (
-                      <button
-                        key={option}
-                        onClick={() => setActivationProfile((prev) => ({ ...prev, replacingSystem: option }))}
-                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                        style={{
-                          background:
-                            activationProfile.replacingSystem === option
-                              ? "hsl(var(--kf-accent1) / 0.16)"
-                              : "hsl(var(--kf-muted) / 0.25)",
-                          color:
-                            activationProfile.replacingSystem === option
-                              ? "hsl(var(--kf-accent1))"
-                              : "hsl(var(--kf-muted-foreground))",
-                        }}
-                      >
-                        {option}
-                      </button>
-                    ))}
+                  <p className="text-xs mb-2 text-muted-foreground">What are you replacing?</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {REPLACING_OPTIONS.map((option) => {
+                      const selected = activationProfile.replacingSystem === option;
+                      return (
+                        <button
+                          key={option}
+                          onClick={() => setActivationProfile((prev) => ({ ...prev, replacingSystem: option }))}
+                          className="relative rounded-xl px-3 py-3 text-left transition-all hover:scale-[1.01]"
+                          style={{
+                            background: selected
+                              ? "hsl(var(--kf-accent1) / 0.12)"
+                              : "hsl(var(--kf-muted) / 0.18)",
+                            border: selected
+                              ? "1px solid hsl(var(--kf-accent1) / 0.45)"
+                              : "1px solid hsl(var(--kf-border) / 0.25)",
+                            boxShadow: selected
+                              ? "0 10px 22px hsl(var(--kf-accent1) / 0.16)"
+                              : "none",
+                          }}
+                        >
+                          <p
+                            className="text-xs font-semibold"
+                            style={{
+                              color: selected
+                                ? "hsl(var(--kf-accent1))"
+                                : "hsl(var(--kf-foreground))",
+                            }}
+                          >
+                            {option}
+                          </p>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
