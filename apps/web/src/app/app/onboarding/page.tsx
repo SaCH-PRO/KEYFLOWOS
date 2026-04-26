@@ -190,6 +190,95 @@ const REPLACING_OPTIONS = [
   "First business system",
 ] as const;
 
+type ActivationProfile = {
+  businessType: string;
+  primaryPain: string;
+  firstAutomation: string;
+  replacingSystem: string;
+};
+
+type BusinessStageValue =
+  | "idea"
+  | "startup"
+  | "growth"
+  | "scaling"
+  | "established"
+  | "mature";
+
+const DEFAULT_ACTIVATION_PROFILE: ActivationProfile = {
+  businessType: "",
+  primaryPain: "",
+  firstAutomation: "",
+  replacingSystem: "",
+};
+
+const STAGE_BY_REPLACING_SYSTEM: Record<string, BusinessStageValue> = {
+  Spreadsheets: "growth",
+  "Multiple disconnected apps": "scaling",
+  "Mostly manual process": "startup",
+  "First business system": "idea",
+};
+
+const SKILLS_BY_BUSINESS_TYPE: Record<string, string[]> = {
+  Services: ["Client Delivery", "Scheduling", "Service Operations"],
+  Products: ["Product Merchandising", "Inventory Control", "Checkout Optimization"],
+  Mixed: ["Service Packaging", "Cross-Sell Design", "Operations Coordination"],
+};
+
+const PROJECT_TYPES_BY_BUSINESS_TYPE: Record<string, string[]> = {
+  Services: ["One-time services", "Retainer clients"],
+  Products: ["Catalog orders", "Bundles"],
+  Mixed: ["Packages", "Service + product bundles"],
+};
+
+const CAPACITY_BY_BUSINESS_STAGE: Record<BusinessStageValue, "OPEN" | "LIMITED" | "FULL"> = {
+  idea: "OPEN",
+  startup: "OPEN",
+  growth: "LIMITED",
+  scaling: "LIMITED",
+  established: "FULL",
+  mature: "FULL",
+};
+
+function normalizeActivationProfile(profile: ActivationProfile): ActivationProfile {
+  return {
+    businessType: profile.businessType || "Services",
+    primaryPain: profile.primaryPain || PAIN_OPTIONS[0],
+    firstAutomation: profile.firstAutomation || AUTOMATION_OPTIONS[0],
+    replacingSystem: profile.replacingSystem || REPLACING_OPTIONS[0],
+  };
+}
+
+function buildProfileSyncPatch(profile: ActivationProfile, templateLabel: string | undefined) {
+  const normalized = normalizeActivationProfile(profile);
+  const stage = STAGE_BY_REPLACING_SYSTEM[normalized.replacingSystem] ?? "startup";
+  const skills = SKILLS_BY_BUSINESS_TYPE[normalized.businessType] ?? SKILLS_BY_BUSINESS_TYPE.Services;
+  const preferredProjectTypes =
+    PROJECT_TYPES_BY_BUSINESS_TYPE[normalized.businessType] ?? PROJECT_TYPES_BY_BUSINESS_TYPE.Services;
+  const currentCapacity = CAPACITY_BY_BUSINESS_STAGE[stage];
+  const interests = Array.from(
+    new Set([normalized.primaryPain, normalized.firstAutomation, normalized.replacingSystem]),
+  );
+  const headline = `${normalized.businessType} business improving ${normalized.primaryPain.toLowerCase()}`;
+  const bio = `Focused on ${normalized.firstAutomation.toLowerCase()} while replacing ${normalized.replacingSystem.toLowerCase()}.`;
+  const positioningStatement = `We are a ${normalized.businessType.toLowerCase()} business helping customers solve ${normalized.primaryPain.toLowerCase()} through better systems and execution.`;
+  const industryLabel = templateLabel ?? "General";
+
+  return {
+    industry: industryLabel,
+    businessStage: stage,
+    headline,
+    bio,
+    tagline: normalized.firstAutomation,
+    description: positioningStatement,
+    positioningStatement,
+    currentCapacity,
+    preferredProjectTypes,
+    skills,
+    interests,
+  };
+}
+
 type FirstWinId = "invoice" | "followup" | "booking" | "payments";
 
 const FIRST_WIN_OPTIONS: Array<{
@@ -580,16 +669,22 @@ export default function OnboardingPage() {
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [activationProfile, setActivationProfile] = useState({
-    businessType: "",
-    primaryPain: "",
-    firstAutomation: "",
-    replacingSystem: "",
-  });
+  const [activationProfile, setActivationProfile] = useState<ActivationProfile>(
+    DEFAULT_ACTIVATION_PROFILE,
+  );
   const [selectedFirstWin, setSelectedFirstWin] = useState<FirstWinId | null>(null);
   const [savingFirstWin, setSavingFirstWin] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [connectivityWarning, setConnectivityWarning] = useState<string | null>(null);
+
+  const templateReady = useMemo(
+    () =>
+      Boolean(
+        activationProfile.businessType &&
+          activationProfile.primaryPain,
+      ),
+    [activationProfile],
+  );
 
   const profileComplete = useMemo(
     () =>
@@ -602,15 +697,26 @@ export default function OnboardingPage() {
     [activationProfile],
   );
 
+  const answeredPromptCount = useMemo(
+    () =>
+      [
+        activationProfile.businessType,
+        activationProfile.primaryPain,
+        activationProfile.firstAutomation,
+        activationProfile.replacingSystem,
+      ].filter(Boolean).length,
+    [activationProfile],
+  );
+
   const checklist = useMemo(
     () => [
-      { label: "Business profile answers", done: profileComplete },
+      { label: "Blueprint profile captured", done: templateReady },
       { label: "Template selected", done: Boolean(selectedTemplate) },
       { label: "First offering configured", done: step >= STEP_INDEX.storefront && products.some((p) => p.included && p.name.trim()) },
       { label: "Public page live", done: Boolean(publicUrl) },
       { label: "First win selected", done: Boolean(selectedFirstWin) },
     ],
-    [profileComplete, products, publicUrl, selectedFirstWin, selectedTemplate, step],
+    [templateReady, products, publicUrl, selectedFirstWin, selectedTemplate, step],
   );
 
   useEffect(() => {
@@ -737,25 +843,50 @@ export default function OnboardingPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  const handleActivationProfileSelect = async (
+    field: keyof ActivationProfile,
+    value: string,
+  ) => {
+    const nextProfile = { ...activationProfile, [field]: value };
+    setActivationProfile(nextProfile);
+    if (!businessId) return;
+    try {
+      await updateBusiness({
+        businessId,
+        ...buildProfileSyncPatch(nextProfile, TEMPLATES.find((t) => t.id === selectedTemplate)?.label),
+        metaData: {
+          activationProfile: nextProfile,
+          userBlueprint: nextProfile,
+        },
+      });
+    } catch (err) {
+      console.error("Failed to sync User Blueprint profile:", err);
+    }
+  };
+
   const handleSelectTemplate = async (templateId: string) => {
     if (!businessId) return;
-    if (!profileComplete) {
-      setSetupError("Answer all four User Blueprint questions first so we can tailor your setup.");
+    if (!templateReady) {
+      setSetupError("Select your business type and biggest pain first so we can tailor your User Blueprint.");
       return;
     }
     setSetupError(null);
     setSelectedTemplate(templateId);
     const template = TEMPLATES.find((t) => t.id === templateId);
+    const normalizedProfile = normalizeActivationProfile(activationProfile);
+    setActivationProfile(normalizedProfile);
+    const profilePatch = buildProfileSyncPatch(normalizedProfile, template?.label);
 
     try {
       await conciergeDetectType(businessId, template?.label || templateId);
       await updateBusiness({
         businessId,
         businessIntent: template?.label || templateId,
-        industry: template?.label || templateId,
+        ...profilePatch,
         metaData: {
           conciergeTemplateId: templateId,
-          activationProfile,
+          activationProfile: normalizedProfile,
+          userBlueprint: normalizedProfile,
           onboardingStep: 1,
         },
       });
@@ -970,7 +1101,7 @@ export default function OnboardingPage() {
   const handleFinish = async () => {
     if (businessId) {
       const progress = evaluateOnboardingProgress({
-        profileComplete,
+        profileComplete: templateReady,
         selectedTemplate,
         products,
         publicUrl,
@@ -1208,20 +1339,20 @@ export default function OnboardingPage() {
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div>
                     <p className="text-sm font-semibold">Quick profile capture</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Answer all 4 to unlock your tailored blueprint.</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Core required: business type + biggest pain. The other prompts enrich Profile and Settings.</p>
                   </div>
                   <span
                     className="px-2.5 py-1 rounded-full text-[11px] font-semibold"
                     style={{
-                      background: profileComplete
+                      background: templateReady
                         ? "hsl(var(--kf-success) / 0.14)"
                         : "hsl(var(--kf-warning) / 0.14)",
-                      color: profileComplete
+                      color: templateReady
                         ? "hsl(var(--kf-success))"
                         : "hsl(var(--kf-warning))",
                     }}
                   >
-                    {profileComplete ? "Ready" : "4 prompts"}
+                    {answeredPromptCount}/4 answered
                   </span>
                 </div>
 
@@ -1233,7 +1364,10 @@ export default function OnboardingPage() {
                       return (
                         <button
                           key={option}
-                          onClick={() => setActivationProfile((prev) => ({ ...prev, businessType: option }))}
+                          onClick={() => {
+                            void handleActivationProfileSelect("businessType", option);
+                            if (setupError) setSetupError(null);
+                          }}
                           className="relative rounded-xl px-3 py-3 text-left transition-all hover:scale-[1.01]"
                           style={{
                             background: selected
@@ -1278,7 +1412,10 @@ export default function OnboardingPage() {
                       return (
                         <button
                           key={option}
-                          onClick={() => setActivationProfile((prev) => ({ ...prev, primaryPain: option }))}
+                          onClick={() => {
+                            void handleActivationProfileSelect("primaryPain", option);
+                            if (setupError) setSetupError(null);
+                          }}
                           className="relative rounded-xl px-3 py-3 text-left transition-all hover:scale-[1.01]"
                           style={{
                             background: selected
@@ -1316,7 +1453,10 @@ export default function OnboardingPage() {
                       return (
                         <button
                           key={option}
-                          onClick={() => setActivationProfile((prev) => ({ ...prev, firstAutomation: option }))}
+                          onClick={() => {
+                            void handleActivationProfileSelect("firstAutomation", option);
+                            if (setupError) setSetupError(null);
+                          }}
                           className="relative rounded-xl px-3 py-3 text-left transition-all hover:scale-[1.01]"
                           style={{
                             background: selected
@@ -1354,7 +1494,10 @@ export default function OnboardingPage() {
                       return (
                         <button
                           key={option}
-                          onClick={() => setActivationProfile((prev) => ({ ...prev, replacingSystem: option }))}
+                          onClick={() => {
+                            void handleActivationProfileSelect("replacingSystem", option);
+                            if (setupError) setSetupError(null);
+                          }}
                           className="relative rounded-xl px-3 py-3 text-left transition-all hover:scale-[1.01]"
                           style={{
                             background: selected
@@ -1421,7 +1564,7 @@ export default function OnboardingPage() {
                     <button
                       key={t.id}
                       onClick={() => handleSelectTemplate(t.id)}
-                      disabled={!profileComplete}
+                      disabled={!templateReady}
                       className="relative rounded-xl p-4 text-left transition-all hover:scale-[1.02]"
                       style={{
                         background: isSelected
@@ -1430,7 +1573,7 @@ export default function OnboardingPage() {
                         border: isSelected
                           ? "2px solid hsl(var(--kf-accent1) / 0.5)"
                           : "1px solid hsl(var(--kf-border) / 0.3)",
-                        opacity: profileComplete ? 1 : 0.45,
+                        opacity: templateReady ? 1 : 0.45,
                         boxShadow: isSelected ? "0 14px 30px hsl(var(--kf-accent1) / 0.16)" : "none",
                       }}
                     >
@@ -1497,17 +1640,19 @@ export default function OnboardingPage() {
                 <p className="text-xs text-muted-foreground">
                   {profileComplete
                     ? "Profile complete. Choose a template to continue shaping your User Blueprint."
-                    : "Complete all four profile prompts to unlock template selection."}
+                    : templateReady
+                      ? "Template selection unlocked. Finish the remaining prompts to enrich Profile and Settings."
+                      : "Answer business type + biggest pain to unlock template selection."}
                 </p>
                 <span
                   className="text-[11px] font-semibold"
                   style={{
-                    color: profileComplete
+                    color: templateReady
                       ? "hsl(var(--kf-success))"
                       : "hsl(var(--kf-muted-foreground))",
                   }}
                 >
-                  {profileComplete ? "Ready to continue" : "Awaiting inputs"}
+                  {templateReady ? "Ready to continue" : "Awaiting core inputs"}
                 </span>
               </div>
             </motion.div>
