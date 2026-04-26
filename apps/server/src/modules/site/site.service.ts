@@ -1,6 +1,8 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import type { BusinessBlueprint } from './blueprint.types';
+import { buildDefaultBlueprint, mergeBlueprintPatch, normalizeBlueprintForStorage } from './blueprint.generator';
 
 interface StorefrontEvent {
   type: string;
@@ -63,6 +65,187 @@ export class SiteService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly ai: AiUsageService,
   ) {}
+
+  async getBusinessBlueprint(businessId: string): Promise<BusinessBlueprint> {
+    const business = await this.prisma.client.business.findFirst({
+      where: { id: businessId, deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        ownerId: true,
+        industry: true,
+        city: true,
+        country: true,
+        timezone: true,
+        currency: true,
+        primaryColor: true,
+        secondaryColor: true,
+        tagline: true,
+        description: true,
+        slug: true,
+        whatsapp: true,
+        onboardingComplete: true,
+        storeEnabled: true,
+        metaData: true,
+      },
+    });
+    if (!business) throw new NotFoundException('Business not found');
+
+    const meta = (business.metaData as Record<string, any>) ?? {};
+    const existing = meta.blueprint as Partial<BusinessBlueprint> | undefined;
+    const merged = mergeBlueprintPatch(buildDefaultBlueprint(business), existing ?? {});
+
+    return merged;
+  }
+
+  async getBlueprint(businessId: string): Promise<BusinessBlueprint> {
+    return this.getBusinessBlueprint(businessId);
+  }
+
+  async generateBusinessBlueprint(businessId: string): Promise<BusinessBlueprint> {
+    const blueprint = await this.getBusinessBlueprint(businessId);
+    await this.saveBusinessBlueprint(businessId, blueprint);
+    return blueprint;
+  }
+
+  async generateBlueprint(
+    businessId: string,
+    options?: { force?: boolean },
+  ): Promise<BusinessBlueprint> {
+    if (options?.force) {
+      const current = await this.getBusinessBlueprint(businessId);
+      const regenerated = mergeBlueprintPatch(
+        buildDefaultBlueprint({
+          name: current.businessIdentity.businessName,
+          industry: current.businessIdentity.industry,
+          currency: current.businessIdentity.currency,
+          timezone: current.businessIdentity.timezone ?? 'America/Port_of_Spain',
+          country: current.businessIdentity.country ?? null,
+        }),
+        current,
+      );
+      await this.saveBusinessBlueprint(businessId, regenerated);
+      return regenerated;
+    }
+    return this.generateBusinessBlueprint(businessId);
+  }
+
+  async updateBusinessBlueprint(
+    businessId: string,
+    patch: Partial<BusinessBlueprint>,
+  ): Promise<BusinessBlueprint> {
+    const current = await this.getBusinessBlueprint(businessId);
+    const next = mergeBlueprintPatch(current, patch);
+    await this.saveBusinessBlueprint(businessId, next);
+    return next;
+  }
+
+  async updateBlueprint(
+    businessId: string,
+    body: { blueprint?: Record<string, any>; patch?: Record<string, any> },
+  ): Promise<BusinessBlueprint> {
+    const payload = ((body?.blueprint ?? body?.patch ?? {}) as Partial<BusinessBlueprint>) ?? {};
+    return this.updateBusinessBlueprint(businessId, payload);
+  }
+
+  async completeBusinessBlueprintStep(
+    businessId: string,
+    stepKey: keyof BusinessBlueprint['activation'],
+    completed: boolean,
+  ): Promise<BusinessBlueprint> {
+    const current = await this.getBusinessBlueprint(businessId);
+    const next = mergeBlueprintPatch(current, {
+      activation: {
+        ...current.activation,
+        [stepKey]: completed,
+      },
+    });
+    await this.saveBusinessBlueprint(businessId, next);
+    return next;
+  }
+
+  async completeBlueprintStep(
+    businessId: string,
+    stepKey: string,
+  ): Promise<BusinessBlueprint> {
+    const key = stepKey as keyof BusinessBlueprint['activation'];
+    const allowed: Array<keyof BusinessBlueprint['activation']> = [
+      'onboardingCompleted',
+      'storefrontPublished',
+      'paymentPathConfigured',
+      'firstOfferCreated',
+      'firstShareCompleted',
+      'firstTransactionIntentCreated',
+    ];
+    if (!allowed.includes(key)) {
+      throw new BadRequestException(`Unsupported blueprint step: ${stepKey}`);
+    }
+    return this.completeBusinessBlueprintStep(businessId, key, true);
+  }
+
+  async publishStorefrontFromBlueprint(businessId: string): Promise<{
+    storefrontUrl: string | null;
+    blueprint: BusinessBlueprint;
+  }> {
+    const current = await this.getBusinessBlueprint(businessId);
+    const next = mergeBlueprintPatch(current, {
+      activation: {
+        ...current.activation,
+        storefrontPublished: true,
+      },
+    });
+
+    const business = await this.prisma.client.business.findFirst({
+      where: { id: businessId, deletedAt: null },
+      select: {
+        id: true,
+        slug: true,
+        metaData: true,
+      },
+    });
+    if (!business) throw new NotFoundException('Business not found');
+
+    const meta = (business.metaData as Record<string, any>) ?? {};
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: {
+        storeEnabled: true,
+        slug: business.slug ?? next.storefront.slug,
+        metaData: {
+          ...meta,
+          blueprint: normalizeBlueprintForStorage(next),
+        },
+      },
+    });
+
+    const storefrontUrl = (business.slug ?? next.storefront.slug)
+      ? `/book/${business.slug ?? next.storefront.slug}`
+      : null;
+
+    return { storefrontUrl, blueprint: next };
+  }
+
+  private async saveBusinessBlueprint(
+    businessId: string,
+    blueprint: BusinessBlueprint,
+  ): Promise<void> {
+    const business = await this.prisma.client.business.findFirst({
+      where: { id: businessId, deletedAt: null },
+      select: { metaData: true },
+    });
+    if (!business) throw new NotFoundException('Business not found');
+
+    const meta = (business.metaData as Record<string, any>) ?? {};
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: {
+        metaData: {
+          ...meta,
+          blueprint: normalizeBlueprintForStorage(blueprint),
+        },
+      },
+    });
+  }
 
   async getStorefrontConfig(businessId: string) {
     const business = await this.prisma.client.business.findFirst({

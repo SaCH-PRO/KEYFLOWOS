@@ -243,6 +243,7 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/control-tower", "tower"],
   ["/app/settings", "studio"],
   ["/app/profile", "studio"],
+  ["/app/launchpad", "store"],
   ["/app/store", "store"],
   ["/app/community", "public"],
   ["/app/learn", "public"],

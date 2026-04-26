@@ -41,6 +41,8 @@ import {
   conciergeDetectType,
   markConciergeComplete,
   fetchConciergeTemplatePreview,
+  completeOnboardingStep,
+  upsertBusinessBlueprint,
   updateBusiness,
   createProduct,
   IndustryTemplatePreview,
@@ -48,6 +50,8 @@ import {
 import { RedirectExplainerBanner } from "@/components/ui/redirect-explainer-banner";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
+import { buildBlueprintFromOnboardingSnapshot } from "@/app/onboarding/lib/blueprint-generator";
+import { evaluateOnboardingProgress } from "@/app/onboarding/lib/onboarding-progress";
 
 interface TemplateCard {
   id: string;
@@ -846,6 +850,87 @@ export default function OnboardingPage() {
   };
 
   const handleFinish = async () => {
+    if (businessId) {
+      const progress = evaluateOnboardingProgress({
+        profileComplete,
+        selectedTemplate,
+        products,
+        publicUrl,
+        selectedFirstWin,
+      });
+      const blueprint = buildBlueprintFromOnboardingSnapshot({
+        businessName: selectedTemplate
+          ? `${TEMPLATES.find((t) => t.id === selectedTemplate)?.label ?? "KeyFlow"} Launchpad`
+          : "KeyFlow Launchpad",
+        industry: TEMPLATES.find((t) => t.id === selectedTemplate)?.label ?? "General",
+        businessType:
+          activationProfile.businessType === "Products"
+            ? "product"
+            : activationProfile.businessType === "Mixed"
+              ? "hybrid"
+              : "service",
+        currency: "TTD",
+        profile: {
+          idealCustomer: activationProfile.primaryPain || undefined,
+          painPoints: activationProfile.primaryPain ? [activationProfile.primaryPain] : [],
+        },
+        offers: products
+          .filter((p) => p.included && p.name.trim())
+          .map((p) => ({
+            name: p.name,
+            description: p.description ?? undefined,
+            price: p.price,
+            currency: p.currency || "TTD",
+            category:
+              p.category === "PRODUCT"
+                ? "product"
+                : p.category === "PACKAGE"
+                  ? "package"
+                  : "service",
+            durationMins: p.duration ?? undefined,
+            requiresBooking: p.category !== "PRODUCT",
+            status: "active" as const,
+          })),
+        brand: {
+          tone: "professional",
+          stylePreset: "clean",
+          tagline: "Launch faster with KeyFlowOS",
+          shortDescription: "Conversion-first launchpad for your business.",
+        },
+        storefront: {
+          slug: businessId,
+          headline: "Book or buy in minutes",
+          subheadline: "A premium storefront built from your onboarding blueprint.",
+          defaultCta: selectedFirstWin === "booking" ? "book_now" : selectedFirstWin === "payments" ? "pay_deposit" : selectedFirstWin === "followup" ? "request_quote" : "buy_now",
+        },
+        paymentAndClosing: {
+          closePathway:
+            selectedFirstWin === "payments"
+              ? "deposit_checkout"
+              : selectedFirstWin === "followup"
+                ? "request_quote"
+                : selectedFirstWin === "booking"
+                  ? "booking_first"
+                  : "instant_checkout",
+        },
+      });
+      await upsertBusinessBlueprint(businessId, {
+        blueprint,
+      });
+      await completeOnboardingStep(businessId, {
+        stepKey: "publish",
+        completed: true,
+        progress,
+      });
+      await updateBusiness({
+        businessId,
+        metaData: {
+          onboardingStep: 5,
+          onboardingComplete: true,
+          onboardingFirstWin: selectedFirstWin,
+        },
+      });
+    }
     if (businessId) {
       await markConciergeComplete(businessId);
     }

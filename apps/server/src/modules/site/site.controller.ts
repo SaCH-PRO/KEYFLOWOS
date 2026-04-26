@@ -33,6 +33,51 @@ export class SiteController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/blueprint')
+  getBusinessBlueprint(@Param('businessId') businessId: string) {
+    return this.siteService.getBusinessBlueprint(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/blueprint/generate')
+  generateBusinessBlueprint(
+    @Param('businessId') businessId: string,
+  ) {
+    return this.siteService.generateBusinessBlueprint(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/blueprint')
+  updateBusinessBlueprint(
+    @Param('businessId') businessId: string,
+    @Body() body: Partial<Record<keyof import('./blueprint.types').BusinessBlueprint, unknown>>,
+  ) {
+    return this.siteService.updateBusinessBlueprint(businessId, body as any);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/blueprint/complete-step')
+  completeBusinessBlueprintStep(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      stepKey: keyof import('./blueprint.types').BusinessBlueprint['activation'];
+      completed?: boolean;
+    },
+  ) {
+    return this.siteService.completeBusinessBlueprintStep(
+      businessId,
+      body.stepKey,
+      body.completed ?? true,
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/blueprint/publish-storefront')
+  publishStorefrontFromBlueprint(@Param('businessId') businessId: string) {
+    return this.siteService.publishStorefrontFromBlueprint(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Put('businesses/:businessId/storefront')
   updateStorefrontConfig(
     @Param('businessId') businessId: string,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, type PlanLimitError } from "./api";
+import type { BusinessBlueprint } from "@/types/blueprint";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 const DEMO_MODE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE === "true";
@@ -1505,6 +1506,7 @@ export type Business = {
   description?: string | null;
   city?: string | null;
   country?: string | null;
+  metaData?: Record<string, unknown> | null;
 };
 
 export async function getBusinessById(businessId: string) {
@@ -1525,6 +1527,7 @@ export async function getBusinessById(businessId: string) {
     complianceData: z.record(z.boolean()).nullable().optional(),
     lastHealthCheck: z.string().nullable().optional(),
     businessHours: z.record(z.object({ open: z.string(), close: z.string(), closed: z.boolean().optional() })).nullable().optional(),
+    metaData: z.record(z.unknown()).nullable().optional(),
   });
   return apiGet(
     `/identity/businesses/${encodeURIComponent(businessId)}`,
@@ -1537,6 +1540,85 @@ export async function updateBusiness(input: { businessId: string; metaData?: Rec
   return apiPatch<{ id: string }>(
     `/identity/businesses/${encodeURIComponent(businessId)}`,
     data,
+  );
+}
+
+export interface BlueprintStepCompletionInput {
+  stepKey: string;
+  completed: boolean;
+}
+
+export async function fetchBusinessBlueprint(businessId: string): Promise<ApiResult<BusinessBlueprint | null>> {
+  return apiGetSimple<BusinessBlueprint | null>(
+    `/site/businesses/${encodeURIComponent(businessId)}/blueprint`,
+  );
+}
+
+export async function generateBusinessBlueprint(
+  businessId: string,
+  input: {
+    businessCategoryHint?: string;
+    stylePresetHint?: BusinessBlueprint["brand"]["stylePreset"];
+    toneHint?: BusinessBlueprint["brand"]["tone"];
+    preferredClosePathway?: BusinessBlueprint["paymentAndClosing"]["closePathway"];
+  } = {},
+): Promise<ApiResult<BusinessBlueprint>> {
+  return apiPostSimple<BusinessBlueprint>(
+    `/site/businesses/${encodeURIComponent(businessId)}/blueprint/generate`,
+    input,
+  );
+}
+
+export async function updateBusinessBlueprint(
+  businessId: string,
+  updates: Partial<BusinessBlueprint>,
+): Promise<ApiResult<BusinessBlueprint>> {
+  return apiPatch<BusinessBlueprint>(
+    `/site/businesses/${encodeURIComponent(businessId)}/blueprint`,
+    updates,
+  );
+}
+
+export async function completeBusinessBlueprintStep(
+  businessId: string,
+  input: BlueprintStepCompletionInput,
+): Promise<ApiResult<BusinessBlueprint>> {
+  return apiPostSimple<BusinessBlueprint>(
+    `/site/businesses/${encodeURIComponent(businessId)}/blueprint/complete-step`,
+    input,
+  );
+}
+
+export async function publishBusinessStorefrontFromBlueprint(
+  businessId: string,
+): Promise<ApiResult<{ storefrontPublished: boolean; storefrontUrl: string }>> {
+  return apiPostSimple<{ storefrontPublished: boolean; storefrontUrl: string }>(
+    `/site/businesses/${encodeURIComponent(businessId)}/blueprint/publish-storefront`,
+    {},
+  );
+}
+
+export async function upsertBusinessBlueprint(
+  businessId: string,
+  input: { blueprint?: Partial<BusinessBlueprint>; patch?: Partial<BusinessBlueprint> },
+): Promise<ApiResult<BusinessBlueprint>> {
+  return apiPatch<BusinessBlueprint>(
+    `/site/businesses/${encodeURIComponent(businessId)}/blueprint`,
+    input,
+  );
+}
+
+export async function completeOnboardingStep(
+  businessId: string,
+  input: {
+    stepKey: string;
+    completed?: boolean;
+    progress?: Record<string, unknown>;
+  },
+): Promise<ApiResult<BusinessBlueprint>> {
+  return apiPostSimple<BusinessBlueprint>(
+    `/site/businesses/${encodeURIComponent(businessId)}/blueprint/complete-step`,
+    input,
   );
 }
 

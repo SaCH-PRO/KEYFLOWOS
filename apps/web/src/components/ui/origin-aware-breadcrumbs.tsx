@@ -25,6 +25,7 @@ const LABEL_MAP: Record<string, string> = {
   automations: "Automations",
   reports: "Reports",
   store: "Presence",
+  launchpad: "Launchpad",
   settings: "Studio",
   business: "Business",
   profile: "Profile",
