@@ -48,7 +48,6 @@ import {
   createProduct,
   IndustryTemplatePreview,
 } from "@/lib/client";
-import { RedirectExplainerBanner } from "@/components/ui/redirect-explainer-banner";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { buildBlueprintFromOnboardingSnapshot } from "@/app/onboarding/lib/blueprint-generator";
@@ -1108,26 +1107,8 @@ export default function OnboardingPage() {
     );
   }
 
-  const origin = getOriginContext();
-  const wasRedirected = !!origin && origin.taskIntent !== "onboarding-setup";
-
   return (
     <div className="h-full flex flex-col bg-background">
-      {wasRedirected && origin && (
-        <div className="px-4 sm:px-6 pt-3">
-          <RedirectExplainerBanner
-            reason="Business setup is required before using the app"
-            missingRequirement="Complete your business profile and initial configuration"
-            postCompletionNote="After finishing setup you'll be taken to the dashboard"
-            primaryCta={{ label: "Complete Setup" }}
-            backCta={{
-              label: `Back to ${origin.workspace ?? "Previous"}${origin.tab ? ` › ${origin.tab.charAt(0).toUpperCase() + origin.tab.slice(1)}` : ""}`,
-              href: origin.route,
-            }}
-            variant="info"
-          />
-        </div>
-      )}
       <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b" style={{ borderColor: "hsl(var(--kf-border) / 0.4)" }}>
         <StepIndicator current={step} />
         <div className="flex items-center gap-2">
