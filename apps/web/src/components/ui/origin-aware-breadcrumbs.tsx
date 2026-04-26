@@ -41,7 +41,7 @@ const LABEL_MAP: Record<string, string> = {
   marketplace: "Marketplace",
   social: "Social",
   insights: "Insights",
-  onboarding: "Onboarding",
+  onboarding: "User Blueprint",
   branding: "Branding",
   integrations: "Integrations",
   security: "Security",

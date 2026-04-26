@@ -228,7 +228,7 @@ function normalizeErrorMessage(error: unknown, fallback: string): string {
   const raw = error instanceof Error ? error.message : "";
   if (!raw) return fallback;
   if (raw.includes("ECONNREFUSED") || raw.includes("Failed to fetch")) {
-    return "Cannot connect to backend (localhost:3001). Start the server to continue onboarding.";
+    return "Cannot connect to backend (localhost:3001). Start the server to continue your User Blueprint setup.";
   }
   return raw;
 }
@@ -709,11 +709,11 @@ export default function OnboardingPage() {
             setStep(STEP_INDEX.snapshot);
           }
         } else if (stateRes.error) {
-          setConnectivityWarning(normalizeErrorMessage(stateRes.error, "Could not load onboarding state."));
+          setConnectivityWarning(normalizeErrorMessage(stateRes.error, "Could not load User Blueprint state."));
         }
       } catch (err) {
         console.error("Failed to init onboarding:", err);
-        setConnectivityWarning(normalizeErrorMessage(err, "Could not initialize onboarding."));
+        setConnectivityWarning(normalizeErrorMessage(err, "Could not initialize User Blueprint setup."));
       }
       setLoading(false);
 
@@ -721,8 +721,8 @@ export default function OnboardingPage() {
       const taskId = registerInterruptedTask({
         id: `onboarding-${bid}`,
         module: "onboarding",
-        label: "Business Setup",
-        description: "Complete your business configuration to start using the app",
+        label: "User Blueprint",
+        description: "Complete your User Blueprint configuration to start using the app",
         route: "/app/onboarding",
         draftId: null,
         originRoute: origin?.route ?? null,
@@ -740,7 +740,7 @@ export default function OnboardingPage() {
   const handleSelectTemplate = async (templateId: string) => {
     if (!businessId) return;
     if (!profileComplete) {
-      setSetupError("Answer all four setup questions first so we can tailor your onboarding.");
+      setSetupError("Answer all four User Blueprint questions first so we can tailor your setup.");
       return;
     }
     setSetupError(null);
@@ -1018,7 +1018,7 @@ export default function OnboardingPage() {
         storefront: {
           slug: businessId,
           headline: "Book or buy in minutes",
-          subheadline: "A premium storefront built from your onboarding blueprint.",
+          subheadline: "A premium storefront built from your User Blueprint.",
           defaultCta: selectedFirstWin === "booking" ? "book_now" : selectedFirstWin === "payments" ? "pay_deposit" : selectedFirstWin === "followup" ? "request_quote" : "buy_now",
         },
         paymentAndClosing: {
@@ -1158,13 +1158,26 @@ export default function OnboardingPage() {
                     style={{ color: "hsl(var(--kf-accent1))" }}
                   />
                 </div>
-                <h1 className="text-xl font-bold mb-2">
-                  What type of business do you run?
-                </h1>
-                <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                  We&apos;ll set up your account with smart defaults — pricing in
-                  TTD, hours, and services tailored to your industry.
+                <p className="text-[11px] uppercase tracking-[0.18em] font-semibold mb-2" style={{ color: "hsl(var(--kf-accent1))" }}>
+                  User Blueprint
                 </p>
+                <h1 className="text-2xl sm:text-[28px] font-bold mb-2">
+                  Build your operating blueprint in 60 seconds
+                </h1>
+                <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+                  Tell us how you operate today and we&apos;ll generate your business model, offer stack, and automation priorities so you can launch faster.
+                </p>
+                <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
+                  <span className="px-2.5 py-1 rounded-full text-[11px] font-medium" style={{ background: "hsl(var(--kf-accent1) / 0.12)", color: "hsl(var(--kf-accent1))" }}>
+                    Personalized setup
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full text-[11px] font-medium" style={{ background: "hsl(var(--kf-accent2) / 0.12)", color: "hsl(var(--kf-accent2))" }}>
+                    Caribbean-ready defaults
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full text-[11px] font-medium" style={{ background: "hsl(var(--kf-warning) / 0.12)", color: "hsl(var(--kf-warning))" }}>
+                    Revenue-first flow
+                  </span>
+                </div>
               </div>
 
               {connectivityWarning && (
@@ -1186,13 +1199,31 @@ export default function OnboardingPage() {
               )}
 
               <div
-                className="rounded-xl p-4 mb-6 space-y-3"
+                className="rounded-2xl p-5 mb-6 space-y-3"
                 style={{
-                  background: "hsl(var(--kf-muted) / 0.12)",
+                  background: "linear-gradient(160deg, hsl(var(--kf-muted) / 0.2), hsl(var(--kf-muted) / 0.08))",
                   border: "1px solid hsl(var(--kf-border) / 0.35)",
                 }}
               >
-                <p className="text-sm font-semibold">Quick setup profile</p>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-sm font-semibold">Quick profile capture</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Answer all 4 to unlock your tailored blueprint.</p>
+                  </div>
+                  <span
+                    className="px-2.5 py-1 rounded-full text-[11px] font-semibold"
+                    style={{
+                      background: profileComplete
+                        ? "hsl(var(--kf-success) / 0.14)"
+                        : "hsl(var(--kf-warning) / 0.14)",
+                      color: profileComplete
+                        ? "hsl(var(--kf-success))"
+                        : "hsl(var(--kf-warning))",
+                    }}
+                  >
+                    {profileComplete ? "Ready" : "4 prompts"}
+                  </span>
+                </div>
 
                 <div>
                   <p className="text-xs mb-1 text-muted-foreground">What business type best matches you?</p>
@@ -1201,7 +1232,7 @@ export default function OnboardingPage() {
                       <button
                         key={option}
                         onClick={() => setActivationProfile((prev) => ({ ...prev, businessType: option }))}
-                        className="px-2.5 py-1.5 rounded-lg text-xs transition-all"
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
                         style={{
                           background:
                             activationProfile.businessType === option
@@ -1226,7 +1257,7 @@ export default function OnboardingPage() {
                       <button
                         key={option}
                         onClick={() => setActivationProfile((prev) => ({ ...prev, primaryPain: option }))}
-                        className="px-2.5 py-1.5 rounded-lg text-xs transition-all"
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
                         style={{
                           background:
                             activationProfile.primaryPain === option
@@ -1251,7 +1282,7 @@ export default function OnboardingPage() {
                       <button
                         key={option}
                         onClick={() => setActivationProfile((prev) => ({ ...prev, firstAutomation: option }))}
-                        className="px-2.5 py-1.5 rounded-lg text-xs transition-all"
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
                         style={{
                           background:
                             activationProfile.firstAutomation === option
@@ -1276,7 +1307,7 @@ export default function OnboardingPage() {
                       <button
                         key={option}
                         onClick={() => setActivationProfile((prev) => ({ ...prev, replacingSystem: option }))}
-                        className="px-2.5 py-1.5 rounded-lg text-xs transition-all"
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
                         style={{
                           background:
                             activationProfile.replacingSystem === option
@@ -1304,6 +1335,25 @@ export default function OnboardingPage() {
                 )}
               </div>
 
+              <div className="mb-3 flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Pick your industry template</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    This shapes your first offer list, storefront defaults, and payment pathway.
+                  </p>
+                </div>
+                <span
+                  className="text-[11px] font-medium px-2 py-1 rounded-full"
+                  style={{
+                    background: "hsl(var(--kf-muted) / 0.2)",
+                    color: "hsl(var(--kf-muted-foreground))",
+                    border: "1px solid hsl(var(--kf-border) / 0.25)",
+                  }}
+                >
+                  Step 1 of 5
+                </span>
+              </div>
+
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {TEMPLATES.map((t) => {
                   const Icon = t.icon;
@@ -1322,6 +1372,7 @@ export default function OnboardingPage() {
                           ? "2px solid hsl(var(--kf-accent1) / 0.5)"
                           : "1px solid hsl(var(--kf-border) / 0.3)",
                         opacity: profileComplete ? 1 : 0.45,
+                        boxShadow: isSelected ? "0 14px 30px hsl(var(--kf-accent1) / 0.16)" : "none",
                       }}
                     >
                       {isSelected && (
@@ -1371,6 +1422,34 @@ export default function OnboardingPage() {
                     </button>
                   );
                 })}
+              </div>
+
+              <div
+                className="mt-5 rounded-xl px-3 py-2.5 flex items-center justify-between gap-3"
+                style={{
+                  background: profileComplete
+                    ? "hsl(var(--kf-success) / 0.08)"
+                    : "hsl(var(--kf-muted) / 0.16)",
+                  border: profileComplete
+                    ? "1px solid hsl(var(--kf-success) / 0.3)"
+                    : "1px solid hsl(var(--kf-border) / 0.3)",
+                }}
+              >
+                <p className="text-xs text-muted-foreground">
+                  {profileComplete
+                    ? "Profile complete. Choose a template to continue shaping your User Blueprint."
+                    : "Complete all four profile prompts to unlock template selection."}
+                </p>
+                <span
+                  className="text-[11px] font-semibold"
+                  style={{
+                    color: profileComplete
+                      ? "hsl(var(--kf-success))"
+                      : "hsl(var(--kf-muted-foreground))",
+                  }}
+                >
+                  {profileComplete ? "Ready to continue" : "Awaiting inputs"}
+                </span>
               </div>
             </motion.div>
           )}

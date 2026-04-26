@@ -497,7 +497,7 @@ export default function ProfileSettingsPage() {
                 className="w-full text-left rounded-lg px-2.5 py-2 text-[11px] transition-all hover:bg-muted/20"
                 style={{ border: "1px solid hsl(var(--kf-border) / 0.25)" }}
               >
-                Continue onboarding
+                Continue User Blueprint
               </button>
               <button
                 onClick={() => handleTabChange("identity")}
