@@ -11,7 +11,10 @@ import { validateEmail, validatePhone } from "@/lib/validators";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { BusinessAddressAutocomplete } from "@/components/ui/business-address-autocomplete";
+import { getStoredBusinessId } from "@/lib/workspace";
 import { CONTACT_STATUSES } from "@/lib/crm-constants";
+import type { AddressPlaceDetails } from "@keyflow/ui";
 
 const STATUSES = CONTACT_STATUSES;
 const CHANNELS = ["WhatsApp", "Email", "SMS", "Call", "Instagram DM"] as const;
@@ -88,9 +91,29 @@ function FieldError({ error }: { error?: string }) {
   return <p className="text-xs text-destructive mt-0.5">{error}</p>;
 }
 
+function pickComponent(
+  components: Record<string, string> | undefined,
+  keys: string[],
+): string | undefined {
+  if (!components) return undefined;
+  for (const k of keys) {
+    if (components[k]) return components[k];
+  }
+  return undefined;
+}
+
+function buildStreetLine(components: Record<string, string> | undefined): string | undefined {
+  if (!components) return undefined;
+  const num = components.street_number;
+  const route = components.route;
+  if (num && route) return `${num} ${route}`;
+  return route || num || undefined;
+}
+
 export function ContactForm({ onSubmit, onCancel, loading, initialValues }: ContactFormProps) {
   const isEditing = !!initialValues;
   const isMobile = useIsMobile();
+  const businessId = useMemo(() => getStoredBusinessId(), []);
 
   const defaults: ContactFormData = {
     firstName: "",
@@ -236,6 +259,32 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
       validateField(key, form[key] as string);
     },
   });
+
+  const handleAddressSelect = useCallback((place: AddressPlaceDetails) => {
+    const components = place.components;
+    const street = buildStreetLine(components);
+    const city = pickComponent(components, [
+      "locality",
+      "postal_town",
+      "sublocality_level_1",
+      "sublocality",
+      "administrative_area_level_2",
+    ]);
+    const state = pickComponent(components, [
+      "administrative_area_level_1",
+      "administrative_area_level_2",
+    ]);
+    const country = pickComponent(components, ["country"]);
+    const postalCode = pickComponent(components, ["postal_code"]);
+    setForm((p) => ({
+      ...p,
+      addressLine1: street || place.formattedAddress || p.addressLine1,
+      city: city ?? p.city,
+      state: state ?? p.state,
+      country: country ?? p.country,
+      postalCode: postalCode ?? p.postalCode,
+    }));
+  }, []);
 
   return (
     <motion.div
@@ -487,7 +536,14 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
               <label className="text-xs text-muted-foreground flex items-center gap-1">
                 <MapPin className="w-3 h-3" /> Address Line 1
               </label>
-              <input type="text" placeholder="123 Main Street" {...field("addressLine1")} className="kf-input w-full" />
+              <BusinessAddressAutocomplete
+                businessId={businessId}
+                value={form.addressLine1}
+                onChange={(v) => setForm((p) => ({ ...p, addressLine1: v }))}
+                onSelect={handleAddressSelect}
+                placeholder="123 Main Street"
+                inputClassName="text-sm"
+              />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground flex items-center gap-1">
