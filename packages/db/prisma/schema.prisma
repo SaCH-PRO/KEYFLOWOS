@@ -2101,11 +2101,12 @@ model CommunityNotification {
   id             String   @id @default(cuid())
   businessId     String   @map("business_id")
   business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  type           String   // MESSAGE, COLLAB_REQUEST, COLLAB_RESPONSE, FOLLOW
+  type           String   // MESSAGE, COLLAB_REQUEST, COLLAB_RESPONSE, FOLLOW, community_post_match
   title          String
   body           String?
   referenceId    String?  @map("reference_id")
   referenceType  String?  @map("reference_type")
+  data           Json?
   isRead         Boolean  @default(false) @map("is_read")
 
   createdAt DateTime @default(now()) @map("created_at")

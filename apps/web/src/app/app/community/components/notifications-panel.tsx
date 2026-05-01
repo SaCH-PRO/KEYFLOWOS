@@ -10,6 +10,8 @@ import {
   CheckCheck,
   Circle,
   Loader2,
+  Sparkles,
+  ArrowRight,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -36,6 +38,7 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
   COLLAB_REQUEST: Handshake,
   COLLAB_RESPONSE: Handshake,
   FOLLOW: UserPlus,
+  community_post_match: Sparkles,
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -43,15 +46,17 @@ const TYPE_COLORS: Record<string, string> = {
   COLLAB_REQUEST: "text-purple-400 bg-purple-400/10",
   COLLAB_RESPONSE: "text-emerald-400 bg-emerald-400/10",
   FOLLOW: "text-amber-400 bg-amber-400/10",
+  community_post_match: "text-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10",
 };
 
 interface NotificationsPanelProps {
   businessId: string | null;
   onNavigateToInbox?: () => void;
   onNavigateToRequests?: () => void;
+  onViewPost?: (postId: string) => void;
 }
 
-export function NotificationsPanel({ businessId, onNavigateToInbox, onNavigateToRequests }: NotificationsPanelProps) {
+export function NotificationsPanel({ businessId, onNavigateToInbox, onNavigateToRequests, onViewPost }: NotificationsPanelProps) {
   const [notifications, setNotifications] = useState<CommunityNotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -98,7 +103,17 @@ export function NotificationsPanel({ businessId, onNavigateToInbox, onNavigateTo
     if (!notif.isRead) handleMarkRead(notif.id);
     if (notif.type === "MESSAGE" && onNavigateToInbox) onNavigateToInbox();
     if ((notif.type === "COLLAB_REQUEST" || notif.type === "COLLAB_RESPONSE") && onNavigateToRequests) onNavigateToRequests();
+    if (notif.type === "community_post_match" && onViewPost) {
+      const postId = (notif.data?.postId as string | undefined) || notif.referenceId || undefined;
+      if (postId) onViewPost(postId);
+    }
   };
+
+  const handleViewPost = useCallback((notif: CommunityNotificationItem) => {
+    if (!notif.isRead) handleMarkRead(notif.id);
+    const postId = (notif.data?.postId as string | undefined) || notif.referenceId || undefined;
+    if (postId && onViewPost) onViewPost(postId);
+  }, [handleMarkRead, onViewPost]);
 
   return (
     <div className="space-y-3">
@@ -143,15 +158,29 @@ export function NotificationsPanel({ businessId, onNavigateToInbox, onNavigateTo
           {notifications.map((notif, i) => {
             const Icon = TYPE_ICONS[notif.type] ?? Bell;
             const colorClass = TYPE_COLORS[notif.type] ?? "text-muted-foreground bg-muted/50";
+            const isMatch = notif.type === "community_post_match";
+            const explanation = isMatch ? (notif.data?.explanation as string | undefined) : undefined;
+            const postSnippet = isMatch ? (notif.data?.postSnippet as string | undefined) : undefined;
+            const fromBusinessName = isMatch ? (notif.data?.fromBusinessName as string | undefined) : undefined;
+            const matchScore = isMatch ? (notif.data?.matchScore as number | undefined) : undefined;
+            const postId = isMatch ? ((notif.data?.postId as string | undefined) || notif.referenceId || undefined) : undefined;
 
             return (
-              <motion.button
+              <motion.div
                 key={notif.id}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.02 }}
+                role="button"
+                tabIndex={0}
                 onClick={() => handleNotificationClick(notif)}
-                className={`w-full kf-card border rounded-xl p-3.5 text-left transition-all group ${
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleNotificationClick(notif);
+                  }
+                }}
+                className={`w-full kf-card border rounded-xl p-3.5 text-left transition-all group cursor-pointer ${
                   notif.isRead
                     ? "border-border opacity-70"
                     : "border-[hsl(var(--kf-accent1))]/20 bg-[hsl(var(--kf-accent1))]/[0.02]"
@@ -167,14 +196,72 @@ export function NotificationsPanel({ businessId, onNavigateToInbox, onNavigateTo
                         <Circle className="w-1.5 h-1.5 fill-[hsl(var(--kf-accent1))] text-[hsl(var(--kf-accent1))] flex-shrink-0" />
                       )}
                       <p className="text-xs font-medium truncate">{notif.title}</p>
+                      {isMatch && typeof matchScore === "number" && (
+                        <span className="ml-auto flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]">
+                          {matchScore}% match
+                        </span>
+                      )}
                     </div>
-                    {notif.body && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{notif.body}</p>
+
+                    {isMatch ? (
+                      <div className="mt-1.5 space-y-1.5">
+                        {explanation && (
+                          <div className="flex items-start gap-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/[0.06] border border-[hsl(var(--kf-accent1))]/15 px-2 py-1.5">
+                            <Sparkles className="w-3 h-3 mt-0.5 text-[hsl(var(--kf-accent1))] flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[10px] uppercase tracking-wide font-medium text-[hsl(var(--kf-accent1))]/90">
+                                You were matched because…
+                              </p>
+                              <p className="text-[11px] text-foreground/90 mt-0.5 line-clamp-3">{explanation}</p>
+                            </div>
+                          </div>
+                        )}
+                        {postSnippet && (
+                          <div className="rounded-lg bg-muted/40 border border-border/60 px-2 py-1.5">
+                            <p className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground">
+                              {fromBusinessName ? `${fromBusinessName} posted` : "Post"}
+                            </p>
+                            <p className="text-[11px] text-foreground/80 mt-0.5 line-clamp-3 italic">
+                              “{postSnippet}”
+                            </p>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between pt-0.5">
+                          <p className="text-[10px] text-muted-foreground">{timeAgo(notif.createdAt)}</p>
+                          {postId && (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewPost(notif);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleViewPost(notif);
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 text-[11px] font-medium text-[hsl(var(--kf-accent1))] hover:opacity-80 transition-opacity"
+                            >
+                              View post & reply
+                              <ArrowRight className="w-3 h-3" />
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {notif.body && (
+                          <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{notif.body}</p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground mt-1">{timeAgo(notif.createdAt)}</p>
+                      </>
                     )}
-                    <p className="text-[10px] text-muted-foreground mt-1">{timeAgo(notif.createdAt)}</p>
                   </div>
                 </div>
-              </motion.button>
+              </motion.div>
             );
           })}
         </AnimatePresence>
