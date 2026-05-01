@@ -371,4 +371,25 @@ export class CommunityController {
   getUnreadNotificationCount(@Param('businessId') businessId: string) {
     return this.community.getUnreadNotificationCount(businessId);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/match-feedback')
+  submitMatchFeedback(
+    @Param('businessId') businessId: string,
+    @Body() body: { targetBusinessId: string; feedback: 'HELPFUL' | 'DISMISSED'; matchScore?: number; matchType?: string },
+  ) {
+    return this.matching.submitFeedback(businessId, body.targetBusinessId, body.feedback, body.matchScore, body.matchType);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/match-feedback')
+  getMatchFeedback(@Param('businessId') businessId: string) {
+    return this.matching.getFeedback(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/match-analytics')
+  getMatchAnalytics(@Param('businessId') businessId: string) {
+    return this.matching.getMatchAnalytics(businessId);
+  }
 }

@@ -216,6 +216,10 @@ model Business {
   collabRequestsTo       CollaborationRequest[] @relation("CollabRequestTo")
   communityNotifications CommunityNotification[]
 
+  // Match Feedback (Community Phase 4)
+  matchFeedbackGiven    MatchFeedback[] @relation("MatchFeedbackFrom")
+  matchFeedbackReceived MatchFeedback[] @relation("MatchFeedbackTo")
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -2012,6 +2016,25 @@ model CommunityNotification {
   @@index([businessId, isRead])
   @@index([businessId, createdAt])
   @@map("community_notifications")
+}
+
+model MatchFeedback {
+  id               String   @id @default(cuid())
+  businessId       String   @map("business_id")
+  targetBusinessId String   @map("target_business_id")
+  feedback         String   // HELPFUL, DISMISSED
+  matchScore       Int?     @map("match_score")
+  matchType        String?  @map("match_type")
+  business         Business @relation("MatchFeedbackFrom", fields: [businessId], references: [id], onDelete: Cascade)
+  targetBusiness   Business @relation("MatchFeedbackTo", fields: [targetBusinessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, targetBusinessId])
+  @@index([businessId])
+  @@index([businessId, feedback])
+  @@map("match_feedback")
 }
 
 // ---
