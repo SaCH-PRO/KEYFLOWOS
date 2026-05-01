@@ -324,6 +324,10 @@ model Business {
   matchesAsSource  BusinessMatch[] @relation("BusinessMatchSource")
   matchesAsTarget  BusinessMatch[] @relation("BusinessMatchTarget")
 
+  // AI Suggestion Tracking (Phase 4 follow-up)
+  aiSuggestionEventsTriggered AiSuggestionEvent[] @relation("AiSuggestionEventFrom")
+  aiSuggestionEventsReceived  AiSuggestionEvent[] @relation("AiSuggestionEventTo")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -4396,3 +4400,31 @@ model ResourceDownload {
   @@index([downloaderBusinessId, createdAt])
   @@map("community_resource_downloads")
 }
+
+model AiSuggestionEvent {
+  id               String   @id @default(cuid())
+  businessId       String   @map("business_id")
+  business         Business @relation("AiSuggestionEventFrom", fields: [businessId], references: [id], onDelete: Cascade)
+  targetBusinessId String?  @map("target_business_id")
+  targetBusiness   Business? @relation("AiSuggestionEventTo", fields: [targetBusinessId], references: [id], onDelete: SetNull)
+
+  // Event type. One of:
+  // SUGGESTION_CLICKED, INTRO_DRAFT_GENERATED, INTRO_DRAFT_USED,
+  // MESSAGE_SENT, CONNECTION_MADE, QUOTE_REQUESTED, COLLAB_CREATED, DEAL_WON
+  eventType String  @map("event_type")
+  // Where the suggestion came from.
+  // recommendations | relationship_insights | need_match | quote_request_modal | message_modal | send_message_modal
+  source    String
+  score     Int?
+  matchType String? @map("match_type")
+  metadata  Json?   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, createdAt])
+  @@index([businessId, eventType])
+  @@index([businessId, source])
+  @@index([targetBusinessId])
+  @@map("ai_suggestion_events")
+}
+

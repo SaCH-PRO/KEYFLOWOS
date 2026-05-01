@@ -26,6 +26,7 @@ export function SendMessageModal({ isOpen, onClose, businessId, targetBusiness, 
   const [success, setSuccess] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [lastAiDraft, setLastAiDraft] = useState<string | null>(null);
 
   const handleAiDraft = useCallback(async () => {
     if (!businessId || !targetBusiness || drafting) return;
@@ -36,9 +37,11 @@ export function SendMessageModal({ isOpen, onClose, businessId, targetBusiness, 
       const res = await draftAiIntroMessage(businessId, targetBusiness.id, {
         goal,
         context: content.trim() || (mode === "collab" ? collabTitle.trim() : "") || undefined,
+        source: 'send_message_modal',
       });
       if (res.data?.draft) {
         setContent(res.data.draft);
+        setLastAiDraft(res.data.draft);
       } else {
         setDraftError("Couldn't generate a draft");
       }
@@ -55,7 +58,12 @@ export function SendMessageModal({ isOpen, onClose, businessId, targetBusiness, 
     try {
       if (mode === "message") {
         if (!content.trim()) { setSending(false); return; }
-        const res = await sendDirectMessage(businessId, targetBusiness.id, content.trim());
+        const trimmed = content.trim();
+        const aiDraftUsed = !!lastAiDraft && lastAiDraft.trim() === trimmed;
+        const res = await sendDirectMessage(businessId, targetBusiness.id, trimmed, {
+          aiDraftUsed,
+          aiSuggestionSource: lastAiDraft ? 'send_message_modal' : undefined,
+        });
         if (res.data && !('error' in res.data)) {
           setSuccess(true);
           setTimeout(() => { setSuccess(false); onClose(); setContent(""); onMessageSent?.(); }, 1200);
@@ -75,7 +83,7 @@ export function SendMessageModal({ isOpen, onClose, businessId, targetBusiness, 
       }
     } catch {}
     setSending(false);
-  }, [businessId, targetBusiness, mode, content, collabTitle, collabType, onClose, onMessageSent]);
+  }, [businessId, targetBusiness, mode, content, collabTitle, collabType, lastAiDraft, onClose, onMessageSent]);
 
   if (!isOpen || !targetBusiness) return null;
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, FileText, Send, DollarSign, Clock, Sparkles, Loader2, ArrowRight } from "lucide-react";
-import { fetchProvidersForNeed, type NeedMatchProvider } from "@/lib/client";
+import { fetchProvidersForNeed, logAiSuggestionEvent, type NeedMatchProvider } from "@/lib/client";
 
 interface QuoteRequestModalProps {
   isOpen: boolean;
@@ -215,7 +215,19 @@ export function QuoteRequestModal({
                         {suggestions.map((s) => (
                           <button
                             key={s.businessId}
-                            onClick={() => onViewProvider?.(s.businessId)}
+                            onClick={() => {
+                              if (myBusinessId) {
+                                void logAiSuggestionEvent(myBusinessId, {
+                                  eventType: 'SUGGESTION_CLICKED',
+                                  source: 'quote_request_modal',
+                                  targetBusinessId: s.businessId,
+                                  score: typeof s.score === 'number' ? s.score : undefined,
+                                  matchType: 'need_match',
+                                  metadata: { reason: s.relevanceReason },
+                                });
+                              }
+                              onViewProvider?.(s.businessId);
+                            }}
                             disabled={!onViewProvider}
                             className="w-full flex items-start gap-2 p-2 rounded-md bg-background/40 hover:bg-background/80 transition-colors text-left disabled:cursor-default"
                           >

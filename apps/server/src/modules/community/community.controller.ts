@@ -292,11 +292,12 @@ export class CommunityController {
   @Post('businesses/:businessId/community/intro-draft')
   draftIntroMessage(
     @Param('businessId') businessId: string,
-    @Body() body: { toBusinessId: string; context?: string; goal?: 'introduce' | 'collaborate' | 'quote' | 'referral' },
+    @Body() body: { toBusinessId: string; context?: string; goal?: 'introduce' | 'collaborate' | 'quote' | 'referral'; source?: string },
   ) {
     return this.matching.draftIntroMessage(businessId, body.toBusinessId, {
       context: body.context,
       goal: body.goal,
+      source: body.source,
     });
   }
 
@@ -360,6 +361,8 @@ export class CommunityController {
       currency?: string;
       timeline?: string;
       attachments?: string[];
+      aiSuggestionSource?: string;
+      aiSuggestionScore?: number;
     },
   ) {
     return this.community.createQuoteRequest(businessId, body);
@@ -470,7 +473,7 @@ export class CommunityController {
   @Post('businesses/:businessId/community/messages')
   sendMessage(
     @Param('businessId') businessId: string,
-    @Body() body: { toBusinessId: string; content: string },
+    @Body() body: { toBusinessId: string; content: string; aiDraftUsed?: boolean; aiSuggestionSource?: string },
   ) {
     return this.community.sendMessage(businessId, body);
   }
@@ -507,12 +510,13 @@ export class CommunityController {
   @Post('businesses/:businessId/community/collab-requests')
   createCollabRequest(
     @Param('businessId') businessId: string,
-    @Body() body: { toBusinessId: string; type?: string; title: string; message?: string },
+    @Body() body: { toBusinessId: string; type?: string; title: string; message?: string; aiSuggestionSource?: string },
   ) {
     return this.community.createCollabRequest(businessId, body.toBusinessId, {
       type: body.type,
       title: body.title,
       message: body.message,
+      aiSuggestionSource: body.aiSuggestionSource,
     });
   }
 
@@ -588,6 +592,39 @@ export class CommunityController {
   @Get('businesses/:businessId/community/match-feedback')
   getMatchFeedback(@Param('businessId') businessId: string) {
     return this.matching.getFeedback(businessId);
+  }
+
+  // ==========================================
+  // AI SUGGESTION TRACKING
+  // ==========================================
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/ai-suggestion-events')
+  recordAiSuggestionEvent(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      eventType: string;
+      source: string;
+      targetBusinessId?: string;
+      score?: number;
+      matchType?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ) {
+    return this.matching.recordSuggestionEvent(businessId, {
+      eventType: body.eventType,
+      source: body.source,
+      targetBusinessId: body.targetBusinessId,
+      score: body.score,
+      matchType: body.matchType,
+      metadata: body.metadata,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/ai-suggestion-funnel')
+  getAiSuggestionFunnel(@Param('businessId') businessId: string) {
+    return this.matching.getSuggestionFunnel(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

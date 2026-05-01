@@ -120,6 +120,266 @@ export class BusinessMatchingService {
     }));
   }
 
+  // ==========================================
+  // AI SUGGESTION EVENT TRACKING
+  // Captures the funnel: shown -> clicked -> message/quote -> connection.
+  // ==========================================
+
+  async recordSuggestionEvent(
+    businessId: string,
+    input: {
+      eventType: string;
+      source: string;
+      targetBusinessId?: string | null;
+      score?: number | null;
+      matchType?: string | null;
+      metadata?: Record<string, unknown> | null;
+    },
+  ): Promise<{ id: string } | null> {
+    try {
+      const allowedTypes = new Set([
+        'SUGGESTION_CLICKED',
+        'INTRO_DRAFT_GENERATED',
+        'INTRO_DRAFT_USED',
+        'MESSAGE_SENT',
+        'CONNECTION_MADE',
+        'QUOTE_REQUESTED',
+        'COLLAB_CREATED',
+        'DEAL_WON',
+      ]);
+      if (!allowedTypes.has(input.eventType)) {
+        return null;
+      }
+      if (input.targetBusinessId && input.targetBusinessId === businessId) {
+        return null;
+      }
+      const created = await this.prisma.client.aiSuggestionEvent.create({
+        data: {
+          businessId,
+          targetBusinessId: input.targetBusinessId ?? null,
+          eventType: input.eventType,
+          source: input.source.slice(0, 64),
+          score: input.score ?? null,
+          matchType: input.matchType?.slice(0, 64) ?? null,
+          metadata: (input.metadata ?? {}) as any,
+        },
+        select: { id: true },
+      });
+      return created;
+    } catch (err) {
+      this.logger.warn(`Failed to record AI suggestion event: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  async getSuggestionFunnel(businessId: string): Promise<{
+    totals: {
+      clicked: number;
+      introDraftsGenerated: number;
+      introDraftsUsed: number;
+      messagesSent: number;
+      connectionsMade: number;
+      quotesRequested: number;
+      collabsCreated: number;
+      dealsWon: number;
+    };
+    bySource: Record<string, { clicked: number; messagesSent: number; quotesRequested: number; connectionsMade: number; dealsWon: number }>;
+    conversionRates: {
+      clickToMessage: number;
+      clickToQuote: number;
+      clickToConnection: number;
+      clickToDeal: number;
+      draftUsageRate: number;
+    };
+    convertedSuggestions: Array<{
+      targetBusinessId: string;
+      targetBusinessName: string;
+      source: string;
+      score: number | null;
+      clickedAt: string;
+      outcomeType: string;
+      outcomeAt: string;
+    }>;
+    recent: Array<{
+      id: string;
+      eventType: string;
+      source: string;
+      score: number | null;
+      matchType: string | null;
+      targetBusinessId: string | null;
+      targetBusinessName: string | null;
+      createdAt: string;
+    }>;
+  }> {
+    const events = await this.prisma.client.aiSuggestionEvent.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+      include: {
+        targetBusiness: { select: { id: true, name: true } },
+      },
+    });
+
+    const rankOutcome = (t: string) => {
+      switch (t) {
+        case 'MESSAGE_SENT': return 1;
+        case 'CONNECTION_MADE': return 2;
+        case 'QUOTE_REQUESTED': return 3;
+        case 'COLLAB_CREATED': return 4;
+        case 'DEAL_WON': return 5;
+        default: return 0;
+      }
+    };
+
+    const totals = {
+      clicked: 0,
+      introDraftsGenerated: 0,
+      introDraftsUsed: 0,
+      messagesSent: 0,
+      connectionsMade: 0,
+      quotesRequested: 0,
+      collabsCreated: 0,
+      dealsWon: 0,
+    };
+    const bySource: Record<string, { clicked: number; messagesSent: number; quotesRequested: number; connectionsMade: number; dealsWon: number }> = {};
+    const ensureSource = (s: string) => {
+      if (!bySource[s]) bySource[s] = { clicked: 0, messagesSent: 0, quotesRequested: 0, connectionsMade: 0, dealsWon: 0 };
+      return bySource[s];
+    };
+
+    // Track first click per (target, source) so we can compute conversion per suggestion.
+    const firstClick = new Map<string, { source: string; score: number | null; createdAt: Date; targetName: string }>();
+    const targetOutcomes = new Map<string, { outcomeType: string; outcomeAt: Date }>();
+
+    for (const e of events) {
+      const src = e.source;
+      switch (e.eventType) {
+        case 'SUGGESTION_CLICKED':
+          totals.clicked++;
+          ensureSource(src).clicked++;
+          if (e.targetBusinessId) {
+            const key = `${e.targetBusinessId}::${src}`;
+            const existing = firstClick.get(key);
+            if (!existing || e.createdAt < existing.createdAt) {
+              firstClick.set(key, {
+                source: src,
+                score: e.score,
+                createdAt: e.createdAt,
+                targetName: e.targetBusiness?.name ?? 'Unknown',
+              });
+            }
+          }
+          break;
+        case 'INTRO_DRAFT_GENERATED':
+          totals.introDraftsGenerated++;
+          break;
+        case 'INTRO_DRAFT_USED':
+          totals.introDraftsUsed++;
+          break;
+        case 'MESSAGE_SENT':
+          totals.messagesSent++;
+          ensureSource(src).messagesSent++;
+          if (e.targetBusinessId) {
+            const existing = targetOutcomes.get(e.targetBusinessId);
+            if (!existing || rankOutcome('MESSAGE_SENT') > rankOutcome(existing.outcomeType)) {
+              targetOutcomes.set(e.targetBusinessId, { outcomeType: 'MESSAGE_SENT', outcomeAt: e.createdAt });
+            }
+          }
+          break;
+        case 'CONNECTION_MADE':
+          totals.connectionsMade++;
+          ensureSource(src).connectionsMade++;
+          if (e.targetBusinessId) {
+            const existing = targetOutcomes.get(e.targetBusinessId);
+            if (!existing || rankOutcome('CONNECTION_MADE') > rankOutcome(existing.outcomeType)) {
+              targetOutcomes.set(e.targetBusinessId, { outcomeType: 'CONNECTION_MADE', outcomeAt: e.createdAt });
+            }
+          }
+          break;
+        case 'QUOTE_REQUESTED':
+          totals.quotesRequested++;
+          ensureSource(src).quotesRequested++;
+          if (e.targetBusinessId) {
+            const existing = targetOutcomes.get(e.targetBusinessId);
+            if (!existing || rankOutcome('QUOTE_REQUESTED') > rankOutcome(existing.outcomeType)) {
+              targetOutcomes.set(e.targetBusinessId, { outcomeType: 'QUOTE_REQUESTED', outcomeAt: e.createdAt });
+            }
+          }
+          break;
+        case 'COLLAB_CREATED':
+          totals.collabsCreated++;
+          if (e.targetBusinessId) {
+            const existing = targetOutcomes.get(e.targetBusinessId);
+            if (!existing || rankOutcome('COLLAB_CREATED') > rankOutcome(existing.outcomeType)) {
+              targetOutcomes.set(e.targetBusinessId, { outcomeType: 'COLLAB_CREATED', outcomeAt: e.createdAt });
+            }
+          }
+          break;
+        case 'DEAL_WON':
+          totals.dealsWon++;
+          ensureSource(src).dealsWon++;
+          if (e.targetBusinessId) {
+            targetOutcomes.set(e.targetBusinessId, { outcomeType: 'DEAL_WON', outcomeAt: e.createdAt });
+          }
+          break;
+      }
+    }
+
+    const convertedSuggestions: Array<{
+      targetBusinessId: string;
+      targetBusinessName: string;
+      source: string;
+      score: number | null;
+      clickedAt: string;
+      outcomeType: string;
+      outcomeAt: string;
+    }> = [];
+    for (const [key, click] of firstClick.entries()) {
+      const [targetId] = key.split('::');
+      const outcome = targetOutcomes.get(targetId);
+      if (outcome && outcome.outcomeAt >= click.createdAt) {
+        convertedSuggestions.push({
+          targetBusinessId: targetId,
+          targetBusinessName: click.targetName,
+          source: click.source,
+          score: click.score,
+          clickedAt: click.createdAt.toISOString(),
+          outcomeType: outcome.outcomeType,
+          outcomeAt: outcome.outcomeAt.toISOString(),
+        });
+      }
+    }
+    convertedSuggestions.sort((a, b) => new Date(b.outcomeAt).getTime() - new Date(a.outcomeAt).getTime());
+
+    const safeRate = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
+    const conversionRates = {
+      clickToMessage: safeRate(totals.messagesSent, totals.clicked),
+      clickToQuote: safeRate(totals.quotesRequested, totals.clicked),
+      clickToConnection: safeRate(totals.connectionsMade, totals.clicked),
+      clickToDeal: safeRate(totals.dealsWon, totals.clicked),
+      draftUsageRate: safeRate(totals.introDraftsUsed, totals.introDraftsGenerated),
+    };
+
+    const recent = events.slice(0, 25).map((e) => ({
+      id: e.id,
+      eventType: e.eventType,
+      source: e.source,
+      score: e.score,
+      matchType: e.matchType,
+      targetBusinessId: e.targetBusinessId,
+      targetBusinessName: e.targetBusiness?.name ?? null,
+      createdAt: e.createdAt.toISOString(),
+    }));
+
+    return {
+      totals,
+      bySource,
+      conversionRates,
+      convertedSuggestions: convertedSuggestions.slice(0, 25),
+      recent,
+    };
+  }
+
   async submitFeedback(businessId: string, targetBusinessId: string, feedback: 'HELPFUL' | 'DISMISSED', matchScore?: number, matchType?: string) {
     const result = await this.prisma.client.matchFeedback.upsert({
       where: { businessId_targetBusinessId: { businessId, targetBusinessId } },
@@ -469,12 +729,20 @@ export class BusinessMatchingService {
   async draftIntroMessage(
     fromBusinessId: string,
     toBusinessId: string,
-    options?: { context?: string; goal?: 'introduce' | 'collaborate' | 'quote' | 'referral' },
+    options?: { context?: string; goal?: 'introduce' | 'collaborate' | 'quote' | 'referral'; source?: string },
   ): Promise<{ draft: string; tone: string; suggestedFollowUp?: string }> {
     if (fromBusinessId === toBusinessId) {
       return { draft: '', tone: 'neutral' };
     }
     const goal = options?.goal ?? 'introduce';
+    const source = options?.source ?? 'message_modal';
+
+    void this.recordSuggestionEvent(fromBusinessId, {
+      eventType: 'INTRO_DRAFT_GENERATED',
+      source,
+      targetBusinessId: toBusinessId,
+      metadata: { goal },
+    });
 
     const [from, to] = await Promise.all([
       this.prisma.client.business.findUnique({
