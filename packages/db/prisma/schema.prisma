@@ -195,6 +195,9 @@ model Business {
   receivedMessages        BusinessMessage[]       @relation("ReceivedMessages")
   savedByOthers           SavedBusiness[]         @relation("SavedByOthers")
   mySavedBusinesses       SavedBusiness[]         @relation("MySavedBusinesses")
+  reviewsGiven            CommunityReview[]       @relation("ReviewsGiven")
+  reviewsReceived         CommunityReview[]       @relation("ReviewsReceived")
+  reputation              BusinessReputation?     @relation("BusinessReputation")
 
   // Flow AI Bot Sessions
   flowSessions         FlowSession[]
@@ -4096,3 +4099,61 @@ model SavedBusiness {
   @@map("saved_businesses")
 }
 
+
+model CommunityReview {
+  id                  String   @id @default(cuid())
+  reviewerBusinessId  String   @map("reviewer_business_id")
+  reviewer            Business @relation("ReviewsGiven", fields: [reviewerBusinessId], references: [id], onDelete: Cascade)
+  revieweeBusinessId  String   @map("reviewee_business_id")
+  reviewee            Business @relation("ReviewsReceived", fields: [revieweeBusinessId], references: [id], onDelete: Cascade)
+
+  transactionType     String   @map("transaction_type") // QUOTE_REQUEST, COLLABORATION, REFERRAL
+  transactionId       String   @map("transaction_id")
+
+  rating              Int
+  title               String?
+  body                String?
+  qualityRating       Int?     @map("quality_rating")
+  communicationRating Int?     @map("communication_rating")
+  timelinessRating    Int?     @map("timeliness_rating")
+  isPublic            Boolean  @default(true) @map("is_public")
+
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt      @map("updated_at")
+
+  @@unique([reviewerBusinessId, transactionType, transactionId])
+  @@index([revieweeBusinessId, createdAt])
+  @@index([reviewerBusinessId, createdAt])
+  @@map("community_reviews")
+}
+
+model BusinessReputation {
+  id                    String   @id @default(cuid())
+  businessId            String   @unique @map("business_id")
+  business              Business @relation("BusinessReputation", fields: [businessId], references: [id], onDelete: Cascade)
+
+  averageRating         Float    @default(0) @map("average_rating")
+  totalReviews          Int      @default(0) @map("total_reviews")
+  totalCompleted        Int      @default(0) @map("total_completed")
+  completedQuotes       Int      @default(0) @map("completed_quotes")
+  completedCollabs      Int      @default(0) @map("completed_collabs")
+  completedReferrals    Int      @default(0) @map("completed_referrals")
+  onTimeRate            Float    @default(0) @map("on_time_rate")
+  responseTimeHours     Float?   @map("response_time_hours")
+  repeatClientRate      Float    @default(0) @map("repeat_client_rate")
+  referralsSent         Int      @default(0) @map("referrals_sent")
+  referralsConverted    Int      @default(0) @map("referrals_converted")
+  referralsReceived     Int      @default(0) @map("referrals_received")
+  referralsAccepted     Int      @default(0) @map("referrals_accepted")
+  reputationScore       Int      @default(0) @map("reputation_score")
+  isVerified            Boolean  @default(false) @map("is_verified")
+  verifiedAt            DateTime? @map("verified_at")
+  lastCalculatedAt      DateTime? @map("last_calculated_at")
+
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt      @map("updated_at")
+
+  @@index([reputationScore])
+  @@index([isVerified, reputationScore])
+  @@map("business_reputation")
+}

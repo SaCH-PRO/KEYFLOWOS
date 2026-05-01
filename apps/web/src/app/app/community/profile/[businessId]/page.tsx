@@ -50,11 +50,13 @@ import {
   saveBusinessToShortlist,
   unsaveBusinessFromShortlist,
   checkBusinessSaved,
+  fetchBusinessReviews,
   type CommunityProfile,
   type CommunityPost,
   type NetworkConnectionStatus,
   type TrustSignals,
   type EndorsementData,
+  type CommunityReview,
 } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -406,12 +408,41 @@ export default function PublicProfilePage() {
             <div className="min-w-0 pb-1 flex-1">
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-bold">{profile.name}</h1>
-                {trustSignals && trustSignals.badges.some(b => b.id === 'complete_profile') && (
+                {trustSignals?.isVerified ? (
+                  <span title="Verified Provider" className="flex-shrink-0">
+                    <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                  </span>
+                ) : trustSignals && trustSignals.badges.some(b => b.id === 'complete_profile') ? (
                   <ShieldCheck className="w-5 h-5 text-blue-400 flex-shrink-0" />
-                )}
+                ) : null}
               </div>
               {profile.headline && (
                 <p className="text-sm text-muted-foreground mt-0.5">{profile.headline}</p>
+              )}
+              {trustSignals && (trustSignals.totalReviews ?? 0) > 0 && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <div className="flex items-center gap-0.5">
+                    {[1, 2, 3, 4, 5].map((n) => {
+                      const filled = Math.round(trustSignals.averageRating ?? 0) >= n;
+                      return (
+                        <svg
+                          key={n}
+                          viewBox="0 0 20 20"
+                          fill={filled ? "rgb(251 191 36)" : "none"}
+                          stroke="rgb(251 191 36)"
+                          strokeWidth={1.5}
+                          className="w-3.5 h-3.5"
+                        >
+                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.539 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.783.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                        </svg>
+                      );
+                    })}
+                  </div>
+                  <span className="text-sm font-semibold">{(trustSignals.averageRating ?? 0).toFixed(1)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    ({trustSignals.totalReviews} review{trustSignals.totalReviews === 1 ? "" : "s"})
+                  </span>
+                </div>
               )}
             </div>
             {!isOwnProfile && myBusinessId && (
@@ -584,13 +615,46 @@ export default function PublicProfilePage() {
 
       {trustSignals && (
         <motion.div variants={fadeUp} className="kf-card rounded-xl p-5 border border-border/30 space-y-4">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Trust & Reputation
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+              Trust & Reputation
+            </h3>
+            {trustSignals.isVerified && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400">
+                <ShieldCheck className="w-3 h-3" /> Verified Provider
+              </span>
+            )}
+          </div>
           <ReputationMeter score={trustSignals.reputationScore} />
+          {((trustSignals.totalCompleted ?? 0) > 0 ||
+            (trustSignals.onTimeRate ?? 0) > 0 ||
+            (trustSignals.responseTimeHours ?? 0) > 0 ||
+            (trustSignals.referralsConverted ?? 0) > 0) && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-border/20">
+              <div className="text-center p-2 rounded-lg bg-white/5">
+                <div className="text-base font-bold">{trustSignals.totalCompleted ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground">Projects done</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-white/5">
+                <div className="text-base font-bold">{Math.round((trustSignals.onTimeRate ?? 0) * 100)}%</div>
+                <div className="text-[10px] text-muted-foreground">On-time</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-white/5">
+                <div className="text-base font-bold">{Math.round((trustSignals.repeatClientRate ?? 0) * 100)}%</div>
+                <div className="text-[10px] text-muted-foreground">Repeat clients</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-white/5">
+                <div className="text-base font-bold">{trustSignals.referralsConverted ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground">Referrals won</div>
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
+
+      <ProfileReviewsSection businessId={businessId} />
+
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <motion.div variants={fadeUp} className="kf-card rounded-xl p-4 text-center border border-border/30">
@@ -942,7 +1006,7 @@ export default function PublicProfilePage() {
       )}
 
       {!isOwnProfile && myBusinessId && (
-        <InteractionHistorySection businessId={myBusinessId} otherBusinessId={businessId} />
+        <InteractionHistorySection businessId={myBusinessId} otherBusinessId={businessId} otherBusinessName={profile.name} />
       )}
 
       {posts.length > 0 && (
@@ -1007,6 +1071,118 @@ export default function PublicProfilePage() {
           otherBusinessName={profile.name}
           otherBusinessLogo={profile.logoUrl}
         />
+      )}
+    </motion.div>
+  );
+}
+
+function ReviewStars({ value, size = 12 }: { value: number; size?: number }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <Star
+          key={n}
+          style={{ width: size, height: size }}
+          className={n <= Math.round(value) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ProfileReviewsSection({ businessId }: { businessId: string }) {
+  const [reviews, setReviews] = useState<CommunityReview[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchBusinessReviews(businessId, 50)
+      .then((res) => {
+        if (cancelled) return;
+        setReviews(res.data?.reviews ?? []);
+        setTotal(res.data?.total ?? 0);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
+  if (loading) {
+    return (
+      <motion.div variants={fadeUp} className="kf-card rounded-xl p-5 border border-border/30 animate-pulse space-y-3">
+        <div className="h-4 w-24 bg-muted/40 rounded" />
+        <div className="h-16 bg-muted/20 rounded" />
+      </motion.div>
+    );
+  }
+
+  if (reviews.length === 0) return null;
+
+  const visible = showAll ? reviews : reviews.slice(0, 3);
+
+  return (
+    <motion.div variants={fadeUp} className="kf-card rounded-xl p-5 border border-border/30 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+          Reviews
+          <span className="text-xs text-muted-foreground font-normal">({total})</span>
+        </h3>
+      </div>
+      <div className="space-y-3">
+        {visible.map((r) => {
+          const reviewerLogo = r.reviewerBusiness?.logoUrl
+            ? r.reviewerBusiness.logoUrl.startsWith("http")
+              ? r.reviewerBusiness.logoUrl
+              : `${API_BASE}${r.reviewerBusiness.logoUrl}`
+            : null;
+          const reviewerInitials = r.reviewerBusiness?.name?.[0]?.toUpperCase() ?? "?";
+          return (
+            <div key={r.id} className="flex gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-sm font-bold overflow-hidden flex-shrink-0">
+                {reviewerLogo ? (
+                  <img src={reviewerLogo} alt={r.reviewerBusiness?.name ?? "reviewer"} className="w-full h-full object-cover" />
+                ) : (
+                  reviewerInitials
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold truncate">{r.reviewerBusiness?.name ?? "A business"}</span>
+                    <ReviewStars value={r.rating} />
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">
+                    {new Date(r.createdAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                  </span>
+                </div>
+                {r.title && <p className="text-xs font-medium mt-1">{r.title}</p>}
+                {r.body && <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{r.body}</p>}
+                <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
+                  <span className="capitalize">{r.transactionType.replace("_", " ").toLowerCase()}</span>
+                  {r.qualityRating ? <span>· Quality {r.qualityRating}/5</span> : null}
+                  {r.communicationRating ? <span>· Comm {r.communicationRating}/5</span> : null}
+                  {r.timelinessRating ? <span>· On-time {r.timelinessRating}/5</span> : null}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {reviews.length > 3 && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className="text-xs text-[hsl(var(--kf-accent1))] hover:underline"
+        >
+          {showAll ? "Show fewer" : `Show all ${reviews.length} reviews`}
+        </button>
       )}
     </motion.div>
   );

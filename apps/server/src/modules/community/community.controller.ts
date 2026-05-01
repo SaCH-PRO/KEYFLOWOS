@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CommunityService } from './community.service';
+import { ReputationService } from './reputation.service';
 import { BusinessMatchingService } from '../ai/business-matching.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -8,6 +9,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 export class CommunityController {
   constructor(
     @Inject(CommunityService) private readonly community: CommunityService,
+    @Inject(ReputationService) private readonly reputation: ReputationService,
     @Inject(BusinessMatchingService) private readonly matching: BusinessMatchingService,
   ) {}
 
@@ -573,5 +575,81 @@ export class CommunityController {
     @Param('otherBusinessId') otherBusinessId: string,
   ) {
     return this.community.getInteractionHistory(businessId, otherBusinessId);
+  }
+
+  // ==========================================
+  // REVIEWS & REPUTATION
+  // ==========================================
+
+  @UseGuards(AuthGuard)
+  @Get('community/reputation/:businessId')
+  getReputation(@Param('businessId') businessId: string) {
+    return this.reputation.getOrCompute(businessId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('community/reviews/:businessId')
+  getReviewsForBusiness(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.reputation.listReviewsForBusiness(businessId, limit ? parseInt(limit, 10) : 20);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/reviews/given')
+  getReviewsByBusiness(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.reputation.listReviewsByBusiness(businessId, limit ? parseInt(limit, 10) : 20);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/reviewable/:otherBusinessId')
+  getReviewableTransactions(
+    @Param('businessId') businessId: string,
+    @Param('otherBusinessId') otherBusinessId: string,
+  ) {
+    return this.reputation.getReviewableTransactions(businessId, otherBusinessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/reviews')
+  createReview(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      revieweeBusinessId: string;
+      transactionType: 'QUOTE_REQUEST' | 'COLLABORATION' | 'REFERRAL';
+      transactionId: string;
+      rating: number;
+      title?: string;
+      body?: string;
+      qualityRating?: number;
+      communicationRating?: number;
+      timelinessRating?: number;
+      isPublic?: boolean;
+    },
+  ) {
+    return this.reputation.createReview(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/community/reviews/:reviewId')
+  deleteReview(
+    @Param('businessId') businessId: string,
+    @Param('reviewId') reviewId: string,
+  ) {
+    return this.reputation.deleteReview(businessId, reviewId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/referrals/:referralId/outcome')
+  markReferralOutcome(
+    @Param('businessId') businessId: string,
+    @Param('referralId') referralId: string,
+    @Body() body: { outcome: 'CONVERTED' | 'NOT_CONVERTED'; note?: string },
+  ) {
+    return this.reputation.markReferralOutcome(businessId, referralId, body.outcome, body.note);
   }
 }
