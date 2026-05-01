@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './core/filters/http-exception.filter';
+import { allowedCorsOrigins } from './core/config/runtime-urls';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -33,17 +34,12 @@ async function bootstrap() {
     }),
   );
 
-  const allowedOrigins: string[] = [];
-  const replitDevDomain = process.env.REPLIT_DEV_DOMAIN;
+  const allowedOrigins = allowedCorsOrigins();
   const replitSlug = process.env.REPL_SLUG;
   const replitOwner = process.env.REPL_OWNER;
-  if (replitDevDomain) {
-    allowedOrigins.push(`https://${replitDevDomain}`);
-  }
   if (replitSlug && replitOwner) {
     allowedOrigins.push(`https://${replitSlug}.${replitOwner}.repl.co`);
   }
-  allowedOrigins.push('http://localhost:5000', 'http://localhost:3000');
 
   const isProduction = process.env.NODE_ENV === 'production';
 

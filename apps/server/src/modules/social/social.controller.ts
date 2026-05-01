@@ -6,6 +6,7 @@ import { SocialService } from './social.service';
 import { SocialConnectionsService } from './social-connections.service';
 import { SocialAnalyticsService } from './social-analytics.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { oauthRedirect } from '../../core/config/runtime-urls';
 
 @Controller('social')
 export class SocialController {
@@ -97,8 +98,7 @@ export class SocialController {
       throw new BadRequestException(`No OAuth credentials configured for ${platform}. Add ${platform.toUpperCase()} app credentials in Settings or as environment variables.`);
     }
 
-    const domain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(',')[0] || '';
-    const redirectUri = `https://${domain}/app/social/oauth/${platform.toLowerCase()}/callback`;
+    const redirectUri = oauthRedirect(`/app/social/oauth/${platform.toLowerCase()}/callback`);
     const platformUpper = platform.toUpperCase();
     const stateToken = randomBytes(16).toString('hex');
     let authUrl: string;
@@ -163,8 +163,7 @@ export class SocialController {
       throw new BadRequestException(`No OAuth credentials configured for ${platform}`);
     }
 
-    const domain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(',')[0] || '';
-    const redirectUri = `https://${domain}/app/social/oauth/${platform.toLowerCase()}/callback`;
+    const redirectUri = oauthRedirect(`/app/social/oauth/${platform.toLowerCase()}/callback`);
 
     const platformUpper = platform.toUpperCase();
 

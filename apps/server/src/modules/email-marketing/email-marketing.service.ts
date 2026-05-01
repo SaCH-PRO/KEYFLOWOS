@@ -4,6 +4,7 @@ import { createHmac } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CampaignCreatedPayload, CampaignSentPayload } from '../../core/event-bus/events.types';
 import { GmailService } from '../commerce/gmail.service';
+import { apiLink } from '../../core/config/runtime-urls';
 
 @Injectable()
 export class EmailMarketingService {
@@ -135,10 +136,7 @@ export class EmailMarketingService {
 
   buildUnsubscribeFooter(contactId: string, businessId: string, campaignId: string): string {
     const token = this.buildUnsubscribeToken(contactId, businessId, campaignId);
-    const baseUrl = process.env.API_URL || process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : 'http://localhost:3001';
-    const url = `${baseUrl}/marketing/unsubscribe/${token}`;
+    const url = apiLink(`/marketing/unsubscribe/${token}`);
     return `\n\n---\nTo unsubscribe from future emails, click here: ${url}`;
   }
 

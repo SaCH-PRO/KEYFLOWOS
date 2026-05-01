@@ -4,6 +4,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { BusinessContextService } from '../identity/business-context.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { getDocumentBlueprint, getCategoryDirective, getSensitivityLayers } from './document-blueprints';
+import { appLink } from '../../core/config/runtime-urls';
 
 @Injectable()
 export class DocumentsService {
@@ -755,7 +756,7 @@ export class DocumentsService {
 
     if (!user?.email) return false;
 
-    const documentUrl = `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'https://keyflowos.com'}/app/documents/${instance.id}`;
+    const documentUrl = appLink(`/app/documents/${instance.id}`);
 
     await this.emailService.send({
       businessId,

@@ -4,6 +4,7 @@ import { createHmac, randomBytes } from 'crypto';
 import { ContactImportedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from './crm.service';
+import { oauthRedirect } from '../../core/config/runtime-urls';
 
 interface GoogleToken {
   access_token: string;
@@ -56,9 +57,7 @@ export class CrmGoogleService {
   private readonly clientId = process.env.GOOGLE_CLIENT_ID;
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   private readonly redirectUri = process.env.GOOGLE_REDIRECT_URI
-    || (process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}/api/crm/google/callback`
-      : undefined);
+    || oauthRedirect('/api/crm/google/callback');
   private get stateSecret(): string {
     const secret = process.env.GOOGLE_STATE_SECRET;
     if (!secret) throw new BadRequestException('GOOGLE_STATE_SECRET environment variable is required');

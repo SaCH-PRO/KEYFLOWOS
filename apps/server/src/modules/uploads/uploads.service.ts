@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ObjectStorageService } from '../../replit_integrations/object_storage';
+import { ObjectStorageService } from '../../core/object-storage';
 
 @Injectable()
 export class UploadsService {
