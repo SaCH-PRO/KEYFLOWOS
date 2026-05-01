@@ -558,17 +558,29 @@ export class ExpensesService {
 
     const serviceIds = [...new Set(expenses.filter(e => e.serviceId).map(e => e.serviceId!))];
     if (serviceIds.length > 0) {
-      const svcInvoiceItems = await this.prisma.client.invoiceItem.findMany({
-        where: {
-          invoice: { businessId, issueDate: { gte: startDate, lte: endDate }, status: { in: ['PAID', 'SENT', 'OVERDUE'] } },
-          product: { serviceId: { in: serviceIds } },
-        },
-        select: { total: true, product: { select: { serviceId: true } } },
+      // Service.sourceProductId is the inverse link to Product, so build a productId -> serviceId map
+      const linkedServices = await this.prisma.client.service.findMany({
+        where: { id: { in: serviceIds }, businessId, sourceProductId: { not: null } },
+        select: { id: true, sourceProductId: true },
       });
-      for (const item of svcInvoiceItems) {
-        const sid = item.product?.serviceId;
-        if (sid && byService[sid]) {
-          byService[sid].revenue += item.total;
+      const productIdToServiceId = new Map<string, string>();
+      for (const s of linkedServices) {
+        if (s.sourceProductId) productIdToServiceId.set(s.sourceProductId, s.id);
+      }
+      const productIds = Array.from(productIdToServiceId.keys());
+      if (productIds.length > 0) {
+        const svcInvoiceItems = await this.prisma.client.invoiceItem.findMany({
+          where: {
+            invoice: { businessId, issueDate: { gte: startDate, lte: endDate }, status: { in: ['PAID', 'SENT', 'OVERDUE'] } },
+            productId: { in: productIds },
+          },
+          select: { total: true, productId: true },
+        });
+        for (const item of svcInvoiceItems) {
+          const sid = item.productId ? productIdToServiceId.get(item.productId) : undefined;
+          if (sid && byService[sid]) {
+            byService[sid].revenue += item.total;
+          }
         }
       }
     }
