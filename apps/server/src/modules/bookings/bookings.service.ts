@@ -433,6 +433,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     startTime: Date;
     endTime: Date;
     notes?: string;
+    location?: string;
+    locationPlaceId?: string;
+    locationLatLng?: { lat: number; lng: number };
   }) {
     const createData: Prisma.BookingUncheckedCreateInput = {
       businessId: input.businessId,
@@ -443,6 +446,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     };
     if (input.staffId) createData.staffId = input.staffId;
     if (input.notes) createData.notes = input.notes;
+    if (input.location) createData.location = input.location;
+    if (input.locationPlaceId) createData.locationPlaceId = input.locationPlaceId;
+    if (input.locationLatLng) {
+      createData.locationLatLng = input.locationLatLng as unknown as Prisma.InputJsonValue;
+    }
 
     const booking = await this.prisma.client.booking.create({
       data: createData,

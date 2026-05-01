@@ -7,6 +7,7 @@ import {
   FileText,
   RotateCcw,
   StickyNote,
+  MapPin,
   ExternalLink,
 } from "lucide-react";
 import type { Booking } from "../components/bookings-types";
@@ -283,6 +284,9 @@ export default function WeekTimeline({
                           >
                             <div className="font-medium truncate flex items-center gap-0.5">
                               {formatTime(b.startTime)}
+                              {b.location && (
+                                <MapPin className="w-2 h-2 opacity-60 shrink-0" aria-label="Has location" />
+                              )}
                               {b.notes && (
                                 <StickyNote className="w-2 h-2 opacity-60 shrink-0" aria-label="Has notes" />
                               )}

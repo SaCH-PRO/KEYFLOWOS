@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   Users,
   StickyNote,
+  MapPin,
   Activity,
 } from "lucide-react";
 import type { Booking, BookingStats } from "./bookings-types";
@@ -190,6 +191,11 @@ export default function TodayStrip({
                     {b.service && (
                       <span className="text-[10px] text-muted-foreground truncate hidden sm:inline">
                         {b.service.name}
+                      </span>
+                    )}
+                    {b.location && (
+                      <span className="text-muted-foreground/60 hidden sm:flex shrink-0" title={b.location}>
+                        <MapPin className="w-2.5 h-2.5" />
                       </span>
                     )}
                     {b.notes && (

@@ -944,6 +944,9 @@ model Booking {
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
 
   notes           String?
+  location         String?
+  locationPlaceId  String? @map("location_place_id")
+  locationLatLng   Json?   @map("location_lat_lng")
   calendarEventId String? @map("calendar_event_id")
   reminderSentAt  DateTime? @map("reminder_sent_at")
 

@@ -23,6 +23,7 @@ import {
   MessageCircle,
   CreditCard,
   User,
+  MapPin,
 } from "lucide-react";
 import type { Booking } from "./bookings-types";
 import { STATUS_STYLE, formatTime, formatFullDate, contactName } from "./bookings-types";
@@ -360,6 +361,42 @@ export default function BookingDetailDrawer({
                 <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Staff</div>
                 <div className="text-sm font-medium">{selectedBooking.staff.name}</div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {selectedBooking.location && (
+          <div className="kf-card rounded-xl p-3 space-y-2">
+            <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
+              <MapPin className="w-3 h-3" />
+              Location
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm text-foreground/90 break-words flex-1">{selectedBooking.location}</p>
+              {(() => {
+                const ll = selectedBooking.locationLatLng;
+                const mapsHref =
+                  ll && typeof ll.lat === "number" && typeof ll.lng === "number"
+                    ? `https://www.google.com/maps/search/?api=1&query=${ll.lat},${ll.lng}${
+                        selectedBooking.locationPlaceId
+                          ? `&query_place_id=${encodeURIComponent(selectedBooking.locationPlaceId)}`
+                          : ""
+                      }`
+                    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                        selectedBooking.location,
+                      )}`;
+                return (
+                  <a
+                    href={mapsHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[10px] font-medium hover:underline shrink-0"
+                    style={{ color: "hsl(var(--kf-accent2))" }}
+                  >
+                    Open map <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
+                );
+              })()}
             </div>
           </div>
         )}

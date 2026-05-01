@@ -12,6 +12,7 @@ interface OAuthState {
 interface CalendarEvent {
   summary: string;
   description?: string;
+  location?: string;
   start: { dateTime: string; timeZone: string };
   end: { dateTime: string; timeZone: string };
   attendees?: Array<{ email: string; displayName?: string }>;
@@ -353,6 +354,7 @@ export class CalendarService {
     const event: CalendarEvent = {
       summary: `${serviceName} - ${contactName}`,
       description: `Booking for ${contactName}\nService: ${serviceName}\nStaff: ${booking.staff?.name ?? 'Unassigned'}\nStatus: ${booking.status}`,
+      location: booking.location ?? undefined,
       start: {
         dateTime: booking.startTime.toISOString(),
         timeZone: booking.business.timezone || 'America/Port_of_Spain',
