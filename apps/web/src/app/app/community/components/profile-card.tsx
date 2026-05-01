@@ -162,12 +162,25 @@ export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
                     <div className="min-w-0 pb-1">
                       <div className="flex items-center gap-1.5">
                         <h3 className="text-lg font-bold truncate">{profile.name}</h3>
-                        {trustSignals && trustSignals.badges.some(b => b.id === 'complete_profile') && (
+                        {trustSignals?.isVerified ? (
+                          <span title="Verified Provider" className="flex-shrink-0">
+                            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                          </span>
+                        ) : trustSignals && trustSignals.badges.some(b => b.id === 'complete_profile') ? (
                           <ShieldCheck className="w-4 h-4 text-blue-400 flex-shrink-0" />
-                        )}
+                        ) : null}
                       </div>
                       {profile.headline && (
                         <p className="text-sm text-muted-foreground truncate">{profile.headline}</p>
+                      )}
+                      {trustSignals && (trustSignals.totalReviews ?? 0) > 0 && (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                          <span className="text-xs font-semibold">{(trustSignals.averageRating ?? 0).toFixed(1)}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            ({trustSignals.totalReviews} review{trustSignals.totalReviews === 1 ? "" : "s"})
+                          </span>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -183,6 +196,23 @@ export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
                       </span>
                     )}
                   </div>
+
+                  {trustSignals && ((trustSignals.totalCompleted ?? 0) > 0 || (trustSignals.onTimeRate ?? 0) > 0) && (
+                    <div className="grid grid-cols-3 gap-2 p-2 rounded-lg bg-white/5">
+                      <div className="text-center">
+                        <div className="text-sm font-bold">{trustSignals.totalCompleted ?? 0}</div>
+                        <div className="text-[9px] text-muted-foreground">completed</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-sm font-bold">{Math.round((trustSignals.onTimeRate ?? 0) * 100)}%</div>
+                        <div className="text-[9px] text-muted-foreground">on time</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-sm font-bold">{Math.round((trustSignals.repeatClientRate ?? 0) * 100)}%</div>
+                        <div className="text-[9px] text-muted-foreground">repeat</div>
+                      </div>
+                    </div>
+                  )}
 
                   {trustSignals && trustSignals.badges.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">

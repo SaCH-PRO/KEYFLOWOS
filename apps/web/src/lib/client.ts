@@ -5322,6 +5322,21 @@ export interface TrustSignals {
   badges: { id: string; label: string; icon: string }[];
   endorsementCount: number;
   topEndorsedSkills: { skill: string; count: number }[];
+  isVerified?: boolean;
+  verifiedAt?: string;
+  averageRating?: number;
+  totalReviews?: number;
+  totalCompleted?: number;
+  completedQuotes?: number;
+  completedCollabs?: number;
+  completedReferrals?: number;
+  onTimeRate?: number;
+  responseTimeHours?: number;
+  repeatClientRate?: number;
+  referralsReceived?: number;
+  referralsAccepted?: number;
+  referralsConverted?: number;
+  referralConversionRate?: number;
 }
 export interface EndorsementData {
   id: string;
@@ -5381,6 +5396,12 @@ export interface DirectoryBusiness {
   _count?: { communityPosts: number; cohortMembers: number; networkConnectionsTo: number; endorsementsReceived?: number };
   reputationScore?: number;
   badges?: { id: string; label: string; icon: string }[];
+  averageRating?: number;
+  totalReviews?: number;
+  totalCompleted?: number;
+  isVerified?: boolean;
+  onTimeRate?: number;
+  createdAt?: string;
 }
 export interface NetworkConnectionStatus {
   following: boolean;
@@ -5667,19 +5688,56 @@ export interface InteractionHistory {
   collaborations: CommunityCollaboration[];
   recentMessages: BusinessMessageItem[];
 }
-export interface DirectoryBusiness {
+export interface CommunityReview {
   id: string;
-  name: string;
-  logoUrl?: string;
-  headline?: string;
-  bio?: string;
-  industry?: string;
-  city?: string;
-  country?: string;
-  skills: string[];
-  businessStage?: string;
-  profileCompleteness: number;
+  reviewerBusinessId: string;
+  revieweeBusinessId: string;
+  reviewerBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  revieweeBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  transactionType: 'QUOTE_REQUEST' | 'COLLABORATION' | 'REFERRAL';
+  transactionId: string;
+  rating: number;
+  qualityRating?: number;
+  communicationRating?: number;
+  timelinessRating?: number;
+  title?: string;
+  body?: string;
+  isPublic: boolean;
+  isHidden: boolean;
   createdAt: string;
+}
+export interface BusinessReputation {
+  businessId: string;
+  averageRating: number;
+  totalReviews: number;
+  averageQuality: number;
+  averageCommunication: number;
+  averageTimeliness: number;
+  totalQuotesReceived: number;
+  totalQuotesResponded: number;
+  totalQuotesAccepted: number;
+  totalCollaborations: number;
+  totalCollaborationsCompleted: number;
+  totalReferralsReceived: number;
+  totalReferralsAccepted: number;
+  totalReferralsConverted: number;
+  totalCompleted: number;
+  responseTimeHours: number;
+  onTimeRate: number;
+  repeatClientRate: number;
+  referralConversionRate: number;
+  reputationScore: number;
+  isVerified: boolean;
+  verifiedAt?: string;
+  lastCalculatedAt: string;
+}
+export interface ReviewableTransaction {
+  type: 'QUOTE_REQUEST' | 'COLLABORATION' | 'REFERRAL';
+  id: string;
+  title: string;
+  status: string;
+  createdAt: string;
+  alreadyReviewed?: boolean;
 }
 
 export async function createCommunityQuoteRequest(businessId: string, data: { toBusinessId: string; title: string; description: string; budgetMin?: number; budgetMax?: number; currency?: string; timeline?: string }): Promise<ApiResult<CommunityQuoteRequest>> {
@@ -5732,6 +5790,29 @@ export async function checkBusinessSaved(businessId: string, targetBusinessId: s
 }
 export async function fetchInteractionHistory(businessId: string, otherBusinessId: string): Promise<ApiResult<InteractionHistory>> {
   return apiGetSimple<InteractionHistory>(`/businesses/${encodeURIComponent(businessId)}/community/history/${encodeURIComponent(otherBusinessId)}`);
+}
+export async function fetchBusinessReputation(businessId: string): Promise<ApiResult<BusinessReputation>> {
+  return apiGetSimple<BusinessReputation>(`/community/reputation/${encodeURIComponent(businessId)}`);
+}
+export async function fetchBusinessReviews(businessId: string, limit?: number): Promise<ApiResult<{ reviews: CommunityReview[]; total: number }>> {
+  const q = limit ? `?limit=${limit}` : '';
+  return apiGetSimple<{ reviews: CommunityReview[]; total: number }>(`/community/reviews/${encodeURIComponent(businessId)}${q}`);
+}
+export async function fetchReviewsGivenByBusiness(businessId: string, limit?: number): Promise<ApiResult<{ reviews: CommunityReview[]; total: number }>> {
+  const q = limit ? `?limit=${limit}` : '';
+  return apiGetSimple<{ reviews: CommunityReview[]; total: number }>(`/businesses/${encodeURIComponent(businessId)}/community/reviews/given${q}`);
+}
+export async function fetchReviewableTransactions(businessId: string, otherBusinessId: string): Promise<ApiResult<ReviewableTransaction[]>> {
+  return apiGetSimple<ReviewableTransaction[]>(`/businesses/${encodeURIComponent(businessId)}/community/reviewable/${encodeURIComponent(otherBusinessId)}`);
+}
+export async function createCommunityReview(businessId: string, data: { revieweeBusinessId: string; transactionType: 'QUOTE_REQUEST' | 'COLLABORATION' | 'REFERRAL'; transactionId: string; rating: number; title?: string; body?: string; qualityRating?: number; communicationRating?: number; timelinessRating?: number; isPublic?: boolean }): Promise<ApiResult<CommunityReview>> {
+  return apiPost<CommunityReview>({ path: `/businesses/${encodeURIComponent(businessId)}/community/reviews`, body: data });
+}
+export async function deleteCommunityReview(businessId: string, reviewId: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/community/reviews/${encodeURIComponent(reviewId)}`);
+}
+export async function markReferralOutcome(businessId: string, referralId: string, outcome: 'CONVERTED' | 'NOT_CONVERTED', note?: string): Promise<ApiResult<CommunityReferral>> {
+  return apiPatch<CommunityReferral>(`/businesses/${encodeURIComponent(businessId)}/community/referrals/${encodeURIComponent(referralId)}/outcome`, { outcome, note });
 }
 export async function fetchCommunityDirectory(params?: { search?: string; industry?: string; stage?: string; skill?: string; page?: number; limit?: number }): Promise<ApiResult<{ data: DirectoryBusiness[]; total: number }>> {
   const sp = new URLSearchParams();

@@ -1,12 +1,28 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ReputationService } from './reputation.service';
 
 export interface TrustSignals {
   reputationScore: number;
   badges: { id: string; label: string; icon: string }[];
   endorsementCount: number;
   topEndorsedSkills: { skill: string; count: number }[];
+  isVerified: boolean;
+  verifiedAt: string | null;
+  averageRating: number;
+  totalReviews: number;
+  totalCompleted: number;
+  completedQuotes: number;
+  completedCollabs: number;
+  completedReferrals: number;
+  onTimeRate: number;
+  responseTimeHours: number | null;
+  repeatClientRate: number;
+  referralsSent: number;
+  referralsConverted: number;
+  referralsReceived: number;
+  referralsAccepted: number;
 }
 
 const BADGE_DEFINITIONS = [
@@ -61,6 +77,7 @@ export class CommunityService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
+    @Inject(ReputationService) private readonly reputation: ReputationService,
   ) {}
 
   async listPosts(filters?: { type?: string; tag?: string; page?: number; limit?: number }) {
@@ -351,6 +368,16 @@ export class CommunityService {
               endorsementsReceived: true,
             },
           },
+          reputation: {
+            select: {
+              averageRating: true,
+              totalReviews: true,
+              totalCompleted: true,
+              isVerified: true,
+              reputationScore: true,
+              onTimeRate: true,
+            },
+          },
           createdAt: true,
         },
         skip,
@@ -361,7 +388,7 @@ export class CommunityService {
     ]);
 
     const enriched = data.map((biz) => {
-      const { badges, reputationScore } = computeBadgesAndReputation({
+      const { badges, reputationScore: badgeRep } = computeBadgesAndReputation({
         profileCompleteness: biz.profileCompleteness,
         productCount: biz.products?.length ?? 0,
         serviceCount: biz.services?.length ?? 0,
@@ -370,7 +397,24 @@ export class CommunityService {
         endorsementCount: biz._count.endorsementsReceived ?? 0,
         cohortCount: biz._count.cohortMembers,
       });
-      return { ...biz, reputationScore, badges };
+      const rep = biz.reputation;
+      if (rep?.isVerified && !badges.some((b) => b.id === 'verified_provider')) {
+        badges.push({ id: 'verified_provider', label: 'Verified Provider', icon: 'shield-check' });
+      }
+      const reputationScore = rep && (rep.totalReviews > 0 || rep.totalCompleted > 0)
+        ? rep.reputationScore
+        : badgeRep;
+      const { reputation, ...rest } = biz as any;
+      return {
+        ...rest,
+        reputationScore,
+        badges,
+        averageRating: rep?.averageRating ?? 0,
+        totalReviews: rep?.totalReviews ?? 0,
+        totalCompleted: rep?.totalCompleted ?? 0,
+        isVerified: rep?.isVerified ?? false,
+        onTimeRate: rep?.onTimeRate ?? 0,
+      };
     });
 
     return { data: enriched, total, page, limit };
@@ -462,6 +506,8 @@ export class CommunityService {
       data: { quoteRequestId: request.id, toBusinessId: businessId },
     });
 
+    await this.reputation.recalculate(businessId).catch(() => {});
+
     return request;
   }
 
@@ -545,6 +591,11 @@ export class CommunityService {
       });
     }
 
+    await Promise.all([
+      this.reputation.recalculate(referral.fromBusinessId).catch(() => {}),
+      this.reputation.recalculate(referral.toBusinessId).catch(() => {}),
+    ]);
+
     return referral;
   }
 
@@ -627,6 +678,11 @@ export class CommunityService {
       body: `${collab.toBusiness.name} ${action} your collaboration proposal: "${collab.title}"`,
       data: { collaborationId: collab.id },
     });
+
+    await Promise.all([
+      this.reputation.recalculate(collab.fromBusinessId).catch(() => {}),
+      this.reputation.recalculate(collab.toBusinessId).catch(() => {}),
+    ]);
 
     return collab;
   }
@@ -889,6 +945,16 @@ export class CommunityService {
               endorsementsReceived: true,
             },
           },
+          reputation: {
+            select: {
+              averageRating: true,
+              totalReviews: true,
+              totalCompleted: true,
+              isVerified: true,
+              reputationScore: true,
+              onTimeRate: true,
+            },
+          },
           createdAt: true,
         },
         skip,
@@ -898,7 +964,20 @@ export class CommunityService {
       this.prisma.client.business.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    const enriched = data.map((biz: any) => {
+      const { reputation, ...rest } = biz;
+      return {
+        ...rest,
+        averageRating: reputation?.averageRating ?? 0,
+        totalReviews: reputation?.totalReviews ?? 0,
+        totalCompleted: reputation?.totalCompleted ?? 0,
+        isVerified: reputation?.isVerified ?? false,
+        reputationScore: reputation?.reputationScore ?? 0,
+        onTimeRate: reputation?.onTimeRate ?? 0,
+      };
+    });
+
+    return { data: enriched, total, page, limit };
   }
   async createConnection(fromBusinessId: string, toBusinessId: string, type: string = 'FOLLOW') {
     if (fromBusinessId === toBusinessId) return { error: 'Cannot connect to yourself' };
@@ -1077,11 +1156,20 @@ export class CommunityService {
       },
     });
 
-    if (!business) return { reputationScore: 0, badges: [], endorsementCount: 0, topEndorsedSkills: [] };
+    if (!business) return {
+      reputationScore: 0, badges: [], endorsementCount: 0, topEndorsedSkills: [],
+      isVerified: false, verifiedAt: null, averageRating: 0, totalReviews: 0,
+      totalCompleted: 0, completedQuotes: 0, completedCollabs: 0, completedReferrals: 0,
+      onTimeRate: 0, responseTimeHours: null, repeatClientRate: 0,
+      referralsSent: 0, referralsConverted: 0, referralsReceived: 0, referralsAccepted: 0,
+    };
 
-    const endorsementData = await this.getEndorsements(businessId);
+    const [endorsementData, repSnap] = await Promise.all([
+      this.getEndorsements(businessId),
+      this.reputation.getOrCompute(businessId),
+    ]);
 
-    const { badges, reputationScore } = computeBadgesAndReputation({
+    const { badges, reputationScore: badgeRep } = computeBadgesAndReputation({
       profileCompleteness: business.profileCompleteness,
       productCount: business._count.products,
       serviceCount: business._count.services,
@@ -1091,11 +1179,34 @@ export class CommunityService {
       cohortCount: business._count.cohortMembers,
     });
 
+    if (repSnap.isVerified && !badges.some((b) => b.id === 'verified_provider')) {
+      badges.push({ id: 'verified_provider', label: 'Verified Provider', icon: 'shield-check' });
+    }
+
+    const reputationScore = repSnap.totalReviews > 0 || repSnap.totalCompleted > 0
+      ? repSnap.reputationScore
+      : badgeRep;
+
     return {
       reputationScore,
       badges,
       endorsementCount: endorsementData.total,
       topEndorsedSkills: endorsementData.topSkills.slice(0, 5),
+      isVerified: repSnap.isVerified,
+      verifiedAt: repSnap.verifiedAt ? repSnap.verifiedAt.toISOString() : null,
+      averageRating: repSnap.averageRating,
+      totalReviews: repSnap.totalReviews,
+      totalCompleted: repSnap.totalCompleted,
+      completedQuotes: repSnap.completedQuotes,
+      completedCollabs: repSnap.completedCollabs,
+      completedReferrals: repSnap.completedReferrals,
+      onTimeRate: repSnap.onTimeRate,
+      responseTimeHours: repSnap.responseTimeHours,
+      repeatClientRate: repSnap.repeatClientRate,
+      referralsSent: repSnap.referralsSent,
+      referralsConverted: repSnap.referralsConverted,
+      referralsReceived: repSnap.referralsReceived,
+      referralsAccepted: repSnap.referralsAccepted,
     };
   }
 

@@ -272,8 +272,13 @@ function DirectoryCard({ biz, onViewProfile }: { biz: DirectoryBusiness; onViewP
     : null;
   const initials = biz.name?.[0]?.toUpperCase() || "?";
   const topOffering = biz.services?.[0] || biz.products?.[0];
-  const hasVerified = biz.badges?.some(b => b.id === 'complete_profile') ?? false;
-  const topBadges = (biz.badges || []).filter(b => b.id !== 'complete_profile').slice(0, 2);
+  const isVerifiedProvider = biz.isVerified || (biz.badges?.some(b => b.id === 'verified_provider') ?? false);
+  const hasCompleteProfile = biz.badges?.some(b => b.id === 'complete_profile') ?? false;
+  const topBadges = (biz.badges || [])
+    .filter(b => b.id !== 'complete_profile' && b.id !== 'verified_provider')
+    .slice(0, 2);
+  const reviewCount = biz.totalReviews ?? 0;
+  const avgRating = biz.averageRating ?? 0;
 
   return (
     <motion.div
@@ -293,14 +298,28 @@ function DirectoryCard({ biz, onViewProfile }: { biz: DirectoryBusiness; onViewP
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <h3 className="text-sm font-semibold truncate group-hover:text-[hsl(var(--kf-accent1))] transition-colors">{biz.name}</h3>
-            {hasVerified && (
+            {isVerifiedProvider ? (
+              <span title="Verified Provider" className="flex-shrink-0">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              </span>
+            ) : hasCompleteProfile ? (
               <ShieldCheck className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
-            )}
+            ) : null}
             {biz.reputationScore != null && biz.reputationScore > 0 && (
               <ReputationIndicator score={biz.reputationScore} />
             )}
           </div>
           {biz.headline && <p className="text-xs text-muted-foreground truncate">{biz.headline}</p>}
+          {reviewCount > 0 && (
+            <div className="flex items-center gap-1 mt-0.5">
+              <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+              <span className="text-[11px] font-semibold">{avgRating.toFixed(1)}</span>
+              <span className="text-[10px] text-muted-foreground">({reviewCount})</span>
+              {biz.totalCompleted ? (
+                <span className="text-[10px] text-muted-foreground ml-1">· {biz.totalCompleted} completed</span>
+              ) : null}
+            </div>
+          )}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <CapacityBadge capacity={biz.currentCapacity} accepting={biz.acceptingWork} />
             {biz.industry && (
