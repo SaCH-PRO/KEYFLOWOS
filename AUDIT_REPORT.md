@@ -100,10 +100,9 @@ $ rg "worf\.replit\.dev" --glob '!attached_assets/**'
 
 ### 2.3 Removed dependency
 
-`@replit/object-storage` is no longer imported anywhere. It can be removed
-from `apps/server/package.json` on the next dependency cleanup pass — it is
-left in place for now to keep the lockfile diff minimal. This is a no-op at
-runtime since the package is never required.
+`@replit/object-storage` has been removed from `apps/server/package.json`
+and the pnpm lockfile. It is no longer imported anywhere in the codebase
+(verified via `rg "@replit/object-storage"`).
 
 ---
 
