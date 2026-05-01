@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Param, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
+import { ConnectorHealthMonitorService } from './connector-health-monitor.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { BusinessGuard } from '../auth/business.guard';
 import type { ConnectorType } from './connector.interface';
@@ -11,6 +12,7 @@ export class ConnectorController {
   constructor(
     private readonly registry: ConnectorRegistryService,
     private readonly activity: ConnectorActivityService,
+    private readonly healthMonitor: ConnectorHealthMonitorService,
   ) {}
 
   @Get('businesses/:businessId/dashboard')
@@ -102,6 +104,16 @@ export class ConnectorController {
       const message = err instanceof Error ? err.message : 'Test failed';
       throw new BadRequestException(message);
     }
+  }
+
+  @Get('businesses/:businessId/needs-attention')
+  async needsAttention(@Param('businessId') businessId: string) {
+    return this.healthMonitor.needsAttention(businessId);
+  }
+
+  @Post('businesses/:businessId/health-check/run')
+  async runHealthCheck(@Param('businessId') businessId: string) {
+    return this.healthMonitor.tickBusiness(businessId);
   }
 
   @Get('businesses/:businessId/activity')

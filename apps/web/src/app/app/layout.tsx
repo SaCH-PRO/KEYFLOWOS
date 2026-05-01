@@ -87,6 +87,7 @@ function getNotificationIcon(n: any): typeof Bell {
   if (type.includes("expense") || title.includes("expense")) return Receipt;
   if (type.includes("automation") || title.includes("automation") || title.includes("playbook")) return Zap;
   if (type.includes("endorsement") || title.includes("endorsed")) return Award;
+  if (type.includes("connector") || title.includes("reconnect")) return Plug;
   return Bell;
 }
 
@@ -102,6 +103,7 @@ function getNotificationLink(n: any): string | null {
   if (type.includes("expense") || title.includes("expense")) return "/app/expenses";
   if (type.includes("automation") || title.includes("automation")) return "/app/automations";
   if (type.includes("endorsement") && n.data?.link) return n.data.link;
+  if (type.includes("connector") || title.includes("reconnect")) return "/app/connect";
   if (n.data?.link) return n.data.link;
   if (n.link || n.href) return n.link || n.href;
   return null;
@@ -333,6 +335,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [connectorAlertCount, setConnectorAlertCount] = useState(0);
   const notifRef = useRef<HTMLDivElement>(null);
   const [displayName, setDisplayName] = useState("");
   const [initials, setInitials] = useState("KF");
@@ -424,11 +427,24 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     if (countRes.data) setUnreadCount((countRes.data as any).count ?? 0);
   }, []);
 
+  const fetchConnectorAlerts = useCallback(async () => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+    const res = await apiGet(`/connectors/businesses/${businessId}/needs-attention`);
+    if (res.data) {
+      setConnectorAlertCount((res.data as { count?: number }).count ?? 0);
+    }
+  }, []);
+
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000);
+    fetchConnectorAlerts();
+    const interval = setInterval(() => {
+      fetchNotifications();
+      fetchConnectorAlerts();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [fetchNotifications]);
+  }, [fetchNotifications, fetchConnectorAlerts]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -621,6 +637,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                   {currentSecondary.map((item) => {
                     const Icon = item.icon;
                     const active = isSecondaryActive(item);
+                    const showConnectorBadge =
+                      item.href === "/app/connect" && connectorAlertCount > 0;
                     return (
                       <Link
                         key={item.href + item.label}
@@ -634,7 +652,17 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                       >
                         <Icon className="w-4 h-4 flex-shrink-0" />
                         <span>{item.label}</span>
-                        {active && (
+                        {showConnectorBadge && (
+                          <span
+                            className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
+                            style={{ background: "hsl(var(--kf-accent1))" }}
+                            title={`${connectorAlertCount} connector${connectorAlertCount === 1 ? "" : "s"} need${connectorAlertCount === 1 ? "s" : ""} attention`}
+                            aria-label={`${connectorAlertCount} connectors need attention`}
+                          >
+                            {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
+                          </span>
+                        )}
+                        {active && !showConnectorBadge && (
                           <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/50" />
                         )}
                       </Link>
@@ -964,6 +992,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                       {items.map((item) => {
                         const Icon = item.icon;
                         const active = isSecondaryActive(item);
+                        const showConnectorBadge =
+                          item.href === "/app/connect" && connectorAlertCount > 0;
                         return (
                           <Link
                             key={item.href + item.label}
@@ -976,6 +1006,15 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                           >
                             <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
                             <span>{item.label}</span>
+                            {showConnectorBadge && (
+                              <span
+                                className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
+                                style={{ background: "hsl(var(--kf-accent1))" }}
+                                aria-label={`${connectorAlertCount} connectors need attention`}
+                              >
+                                {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
+                              </span>
+                            )}
                           </Link>
                         );
                       })}

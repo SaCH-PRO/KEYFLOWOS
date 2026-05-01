@@ -1,11 +1,13 @@
 import { Global, Module } from '@nestjs/common';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
+import { ConnectorHealthMonitorService } from './connector-health-monitor.service';
 import { EntityResolutionService } from './entity-resolution.service';
 import { ConnectorController } from './connector.controller';
 import { ConnectorInitializerService } from './connector-initializer.service';
 import { GoogleSuiteService } from './google-suite.service';
 import { GoogleSuiteController } from './google-suite.controller';
+import { NotificationsModule } from '../../modules/notifications/notifications.module';
 import {
   GmailConnector,
   GoogleCalendarConnector,
@@ -23,10 +25,12 @@ import {
 
 @Global()
 @Module({
+  imports: [NotificationsModule],
   controllers: [ConnectorController, GoogleSuiteController],
   providers: [
     ConnectorRegistryService,
     ConnectorActivityService,
+    ConnectorHealthMonitorService,
     EntityResolutionService,
     ConnectorInitializerService,
     GoogleSuiteService,
@@ -46,6 +50,7 @@ import {
   exports: [
     ConnectorRegistryService,
     ConnectorActivityService,
+    ConnectorHealthMonitorService,
     EntityResolutionService,
     GoogleSuiteService,
   ],
