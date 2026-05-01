@@ -59,7 +59,7 @@ export class ReputationService {
     });
     if (!business) throw new Error('Business not found');
 
-    const [reviewAgg, quotes, collabs, referralsTo, referralsFrom] = await Promise.all([
+    const [reviewAgg, quotes, collabs, referralsTo, referralsFrom, activePartnerCount] = await Promise.all([
       this.prisma.client.communityReview.aggregate({
         where: { revieweeBusinessId: businessId },
         _avg: { rating: true },
@@ -98,6 +98,15 @@ export class ReputationService {
       this.prisma.client.communityReferral.findMany({
         where: { fromBusinessId: businessId },
         select: { id: true, status: true, createdAt: true },
+      }),
+      this.prisma.client.partnerProgram.count({
+        where: {
+          status: 'ACTIVE',
+          OR: [
+            { initiatorBusinessId: businessId },
+            { partnerBusinessId: businessId },
+          ],
+        },
       }),
     ]);
 
@@ -143,8 +152,9 @@ export class ReputationService {
     const onTimeScore = onTimeRate * 15;
     const repeatScore = repeatClientRate * 10;
     const referralScore = referralConvRate * 15;
+    const partnerScore = Math.min(activePartnerCount as number, 5) * 2;
     const reputationScore = Math.min(
-      Math.round(ratingScore + completedScore + onTimeScore + repeatScore + referralScore),
+      Math.round(ratingScore + completedScore + onTimeScore + repeatScore + referralScore + partnerScore),
       100,
     );
 

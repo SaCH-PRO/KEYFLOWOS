@@ -51,6 +51,7 @@ import {
   unsaveBusinessFromShortlist,
   checkBusinessSaved,
   fetchBusinessReviews,
+  recordProfileView,
   type CommunityProfile,
   type CommunityPost,
   type NetworkConnectionStatus,
@@ -179,6 +180,13 @@ export default function PublicProfilePage() {
     const bid = getStoredBusinessId();
     if (bid) setMyBusinessId(bid);
   }, []);
+
+  useEffect(() => {
+    if (!businessId) return;
+    const viewerBusinessId = getStoredBusinessId();
+    if (viewerBusinessId === businessId) return;
+    void recordProfileView(businessId, { viewerBusinessId, source: "profile_page" }).catch(() => {});
+  }, [businessId]);
 
   useEffect(() => {
     if (!businessId) return;

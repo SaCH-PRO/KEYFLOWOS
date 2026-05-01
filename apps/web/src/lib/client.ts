@@ -8135,3 +8135,290 @@ export async function transcribeKeyflowSpeech(
     return { data: null, error: (err as Error).message };
   }
 }
+
+// ============================================
+// COMMUNITY PHASE 5: NETWORK ACTIVITY & GROWTH
+// ============================================
+
+export type OpportunityType = 'JOB' | 'PROJECT' | 'COLLABORATION' | 'CONTRACT' | 'GIG';
+export type OpportunityStatus = 'OPEN' | 'CLOSED' | 'AWARDED' | 'ARCHIVED';
+
+export type Opportunity = {
+  id: string;
+  posterBusinessId: string;
+  type: OpportunityType;
+  title: string;
+  description: string;
+  category?: string | null;
+  budgetMin?: number | null;
+  budgetMax?: number | null;
+  currency: string;
+  timeline?: string | null;
+  location?: string | null;
+  remoteOk: boolean;
+  skillsRequired: string[];
+  attachments: string[];
+  status: OpportunityStatus;
+  awardedToBusinessId?: string | null;
+  closedAt?: string | null;
+  expiresAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  poster?: { id: string; name: string; logoUrl?: string | null; headline?: string | null; industry?: string | null; slug?: string | null };
+  _count?: { applications: number };
+};
+
+export type OpportunityApplicationStatus = 'SUBMITTED' | 'SHORTLISTED' | 'AWARDED' | 'DECLINED' | 'WITHDRAWN';
+
+export type OpportunityApplication = {
+  id: string;
+  opportunityId: string;
+  applicantBusinessId: string;
+  message: string;
+  proposedBudget?: number | null;
+  proposedTimeline?: string | null;
+  attachments: string[];
+  status: OpportunityApplicationStatus;
+  responseNote?: string | null;
+  respondedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  applicant?: { id: string; name: string; logoUrl?: string | null; headline?: string | null; industry?: string | null; slug?: string | null };
+  opportunity?: Opportunity;
+};
+
+export async function listOpportunities(params: { type?: string; status?: string; category?: string; search?: string; page?: number; limit?: number } = {}) {
+  const q = new URLSearchParams();
+  if (params.type) q.set('type', params.type);
+  if (params.status) q.set('status', params.status);
+  if (params.category) q.set('category', params.category);
+  if (params.search) q.set('search', params.search);
+  if (params.page) q.set('page', String(params.page));
+  if (params.limit) q.set('limit', String(params.limit));
+  const qs = q.toString();
+  return apiGetSimple<{ data: Opportunity[]; total: number; page: number; limit: number }>(`/community/opportunities${qs ? `?${qs}` : ''}`);
+}
+export async function getOpportunity(id: string) {
+  return apiGetSimple<Opportunity & { applications: OpportunityApplication[] }>(`/community/opportunities/${encodeURIComponent(id)}`);
+}
+export async function createOpportunity(businessId: string, body: Partial<Opportunity>) {
+  return apiPost<Opportunity>({ path: `/businesses/${encodeURIComponent(businessId)}/community/opportunities`, body });
+}
+export async function listMyOpportunities(businessId: string) {
+  return apiGetSimple<Opportunity[]>(`/businesses/${encodeURIComponent(businessId)}/community/opportunities/mine`);
+}
+export async function updateOpportunity(businessId: string, id: string, body: Partial<Opportunity>) {
+  return apiPatch<Opportunity>(`/businesses/${encodeURIComponent(businessId)}/community/opportunities/${encodeURIComponent(id)}`, body);
+}
+export async function closeOpportunity(businessId: string, id: string) {
+  return apiPost<Opportunity>({ path: `/businesses/${encodeURIComponent(businessId)}/community/opportunities/${encodeURIComponent(id)}/close`, body: {} });
+}
+export async function deleteOpportunity(businessId: string, id: string) {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/community/opportunities/${encodeURIComponent(id)}`);
+}
+export async function applyToOpportunity(
+  businessId: string,
+  id: string,
+  body: { message: string; proposedBudget?: number; proposedTimeline?: string; attachments?: string[] },
+) {
+  return apiPost<OpportunityApplication>({ path: `/businesses/${encodeURIComponent(businessId)}/community/opportunities/${encodeURIComponent(id)}/apply`, body });
+}
+export async function listMyOpportunityApplications(businessId: string) {
+  return apiGetSimple<OpportunityApplication[]>(`/businesses/${encodeURIComponent(businessId)}/community/opportunity-applications/mine`);
+}
+export async function respondToOpportunityApplication(
+  businessId: string,
+  applicationId: string,
+  body: { status: 'SHORTLISTED' | 'AWARDED' | 'DECLINED'; responseNote?: string },
+) {
+  return apiPatch<OpportunityApplication>(`/businesses/${encodeURIComponent(businessId)}/community/opportunity-applications/${encodeURIComponent(applicationId)}/respond`, body);
+}
+export async function withdrawOpportunityApplication(businessId: string, applicationId: string) {
+  return apiPost<OpportunityApplication>({ path: `/businesses/${encodeURIComponent(businessId)}/community/opportunity-applications/${encodeURIComponent(applicationId)}/withdraw`, body: {} });
+}
+
+// ----- Partner Programs -----
+export type PartnerProgramType = 'REFERRAL' | 'RESELLER' | 'AFFILIATE' | 'JOINT_VENTURE' | 'STRATEGIC' | 'INTEGRATION';
+export type PartnerProgramStatus = 'PROPOSED' | 'ACTIVE' | 'PAUSED' | 'ENDED' | 'DECLINED';
+export type PartnerProgramVisibility = 'PUBLIC' | 'PRIVATE';
+
+export type PartnerProgram = {
+  id: string;
+  initiatorBusinessId: string;
+  partnerBusinessId: string;
+  programType: PartnerProgramType;
+  name: string;
+  description: string;
+  commissionRate?: number | null;
+  terms?: any;
+  startDate?: string | null;
+  endDate?: string | null;
+  status: PartnerProgramStatus;
+  visibility: PartnerProgramVisibility;
+  responseNote?: string | null;
+  acceptedAt?: string | null;
+  endedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  initiator?: { id: string; name: string; logoUrl?: string | null; headline?: string | null; slug?: string | null };
+  partner?: { id: string; name: string; logoUrl?: string | null; headline?: string | null; slug?: string | null };
+};
+
+export async function proposePartnerProgram(businessId: string, body: Partial<PartnerProgram> & { partnerBusinessId: string }) {
+  return apiPost<PartnerProgram>({ path: `/businesses/${encodeURIComponent(businessId)}/community/partner-programs`, body });
+}
+export async function listPartnerPrograms(businessId: string, status?: string) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+  return apiGetSimple<PartnerProgram[]>(`/businesses/${encodeURIComponent(businessId)}/community/partner-programs${qs}`);
+}
+export async function listPublicPartnerProgramsForProfile(businessId: string) {
+  return apiGetSimple<PartnerProgram[]>(`/community/partner-programs/profile/${encodeURIComponent(businessId)}`);
+}
+export async function getPartnerProgram(id: string) {
+  return apiGetSimple<PartnerProgram>(`/community/partner-programs/${encodeURIComponent(id)}`);
+}
+export async function respondToPartnerProgram(
+  businessId: string,
+  id: string,
+  body: { status: 'ACTIVE' | 'DECLINED'; responseNote?: string },
+) {
+  return apiPatch<PartnerProgram>(`/businesses/${encodeURIComponent(businessId)}/community/partner-programs/${encodeURIComponent(id)}/respond`, body);
+}
+export async function terminatePartnerProgram(businessId: string, id: string, note?: string) {
+  return apiPost<PartnerProgram>({ path: `/businesses/${encodeURIComponent(businessId)}/community/partner-programs/${encodeURIComponent(id)}/terminate`, body: { note } });
+}
+
+// ----- Resource Marketplace -----
+export type ResourceType = 'TEMPLATE' | 'PROMPT_LIBRARY' | 'PROCESS_DOC' | 'EDU_CONTENT' | 'CANVA_KIT' | 'OTHER';
+
+export type ResourceListing = {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  price: number;
+  currency: string;
+  imageUrl?: string | null;
+  resourceType: ResourceType;
+  downloadUrl: string;
+  previewUrl?: string | null;
+  licenseTerms?: string | null;
+  isFree: boolean;
+  fileSize?: number | null;
+  isActive: boolean;
+  createdAt: string;
+  business?: { id: string; name: string; logoUrl?: string | null; headline?: string | null; slug?: string | null };
+  _count?: { resourceDownloads: number };
+};
+
+export async function listResources(params: { resourceType?: string; search?: string; isFree?: boolean; businessId?: string; page?: number; limit?: number } = {}) {
+  const q = new URLSearchParams();
+  if (params.resourceType) q.set('resourceType', params.resourceType);
+  if (params.search) q.set('search', params.search);
+  if (typeof params.isFree === 'boolean') q.set('isFree', String(params.isFree));
+  if (params.businessId) q.set('businessId', params.businessId);
+  if (params.page) q.set('page', String(params.page));
+  if (params.limit) q.set('limit', String(params.limit));
+  const qs = q.toString();
+  return apiGetSimple<{ data: ResourceListing[]; total: number; page: number; limit: number }>(`/community/resources${qs ? `?${qs}` : ''}`);
+}
+export async function getResource(id: string) {
+  return apiGetSimple<ResourceListing>(`/community/resources/${encodeURIComponent(id)}`);
+}
+export async function publishResource(businessId: string, body: Partial<ResourceListing> & { name: string; price: number; resourceType: ResourceType; downloadUrl: string }) {
+  return apiPost<ResourceListing>({ path: `/businesses/${encodeURIComponent(businessId)}/community/resources`, body });
+}
+export async function listMyResources(businessId: string) {
+  return apiGetSimple<ResourceListing[]>(`/businesses/${encodeURIComponent(businessId)}/community/resources/mine`);
+}
+export async function recordResourceDownload(businessId: string, id: string, source?: string) {
+  return apiPost<{ download: any; downloadUrl: string; licenseTerms?: string | null }>({
+    path: `/businesses/${encodeURIComponent(businessId)}/community/resources/${encodeURIComponent(id)}/download`,
+    body: { source },
+  });
+}
+export async function listMyResourceDownloads(businessId: string) {
+  return apiGetSimple<Array<{ id: string; productId: string; pricePaid: number; currency: string; createdAt: string; product: ResourceListing }>>(`/businesses/${encodeURIComponent(businessId)}/community/resource-downloads/mine`);
+}
+
+// ----- Network Activity Feed -----
+export type NetworkActivityType =
+  | 'OPPORTUNITY_POSTED' | 'OPPORTUNITY_AWARDED'
+  | 'PARTNERSHIP_FORMED' | 'PARTNERSHIP_TERMINATED'
+  | 'RESOURCE_PUBLISHED' | 'COHORT_JOINED' | 'REVIEW_RECEIVED'
+  | 'COLLAB_COMPLETED' | 'CERTIFICATION_EARNED' | 'MILESTONE_REACHED';
+
+export type NetworkActivityItem = {
+  id: string;
+  actorBusinessId: string;
+  type: NetworkActivityType;
+  refType?: string | null;
+  refId?: string | null;
+  title: string;
+  body?: string | null;
+  metadata?: Record<string, any> | null;
+  isPublic: boolean;
+  createdAt: string;
+  actor?: { id: string; name: string; logoUrl?: string | null; headline?: string | null; industry?: string | null; slug?: string | null };
+};
+
+export async function listNetworkActivity(params: { types?: string[]; actorBusinessId?: string; page?: number; limit?: number } = {}) {
+  const q = new URLSearchParams();
+  if (params.types?.length) q.set('types', params.types.join(','));
+  if (params.actorBusinessId) q.set('actorBusinessId', params.actorBusinessId);
+  if (params.page) q.set('page', String(params.page));
+  if (params.limit) q.set('limit', String(params.limit));
+  const qs = q.toString();
+  return apiGetSimple<{ data: NetworkActivityItem[]; total: number; page: number; limit: number }>(`/community/activity${qs ? `?${qs}` : ''}`);
+}
+export async function listFollowingActivity(businessId: string, params: { page?: number; limit?: number } = {}) {
+  const q = new URLSearchParams();
+  if (params.page) q.set('page', String(params.page));
+  if (params.limit) q.set('limit', String(params.limit));
+  const qs = q.toString();
+  return apiGetSimple<{ data: NetworkActivityItem[]; total: number; page: number; limit: number }>(`/businesses/${encodeURIComponent(businessId)}/community/activity/following${qs ? `?${qs}` : ''}`);
+}
+export async function listActivityForBusiness(businessId: string) {
+  return apiGetSimple<NetworkActivityItem[]>(`/community/activity/business/${encodeURIComponent(businessId)}`);
+}
+
+// ----- Network Analytics -----
+export type AnalyticsDashboard = {
+  windowDays: number;
+  profileViews: {
+    total: number;
+    window: number;
+    previous: number;
+    deltaPct: number;
+    uniqueViewers: number;
+    trend: { date: string; views: number }[];
+    topViewers: { business: { id: string; name: string; logoUrl?: string | null; headline?: string | null; slug?: string | null } | null; viewCount: number }[];
+  };
+  quoteRequests: { sent: number; received: number };
+  referrals: { sent: number; received: number };
+  partnerships: { active: number };
+  network: { followers: number; following: number };
+  opportunities: { posted: number; applicationsSent: number };
+  resources: { downloadsReceived: number; downloadsMade: number };
+  reviews: { receivedInWindow: number };
+  activity: { eventsInWindow: number };
+  reputation: {
+    score: number;
+    averageRating: number;
+    totalReviews: number;
+    totalCompleted: number;
+    rank: number | null;
+    totalRanked: number | null;
+    percentile: number | null;
+  } | null;
+};
+
+export async function recordProfileView(viewedBusinessId: string, body: { viewerBusinessId?: string | null; source?: string } = {}) {
+  return apiPost<{ id: string } | null>({ path: `/community/profile-views/${encodeURIComponent(viewedBusinessId)}`, body });
+}
+export async function getNetworkAnalyticsDashboard(businessId: string, days = 30) {
+  return apiGetSimple<AnalyticsDashboard>(`/businesses/${encodeURIComponent(businessId)}/community/analytics/dashboard?days=${days}`);
+}
+export async function listRecentProfileViewers(businessId: string, limit = 20) {
+  return apiGetSimple<Array<{ id: string; createdAt: string; source?: string | null; viewer: { id: string; name: string; logoUrl?: string | null; headline?: string | null; slug?: string | null } }>>(`/businesses/${encodeURIComponent(businessId)}/community/analytics/recent-viewers?limit=${limit}`);
+}

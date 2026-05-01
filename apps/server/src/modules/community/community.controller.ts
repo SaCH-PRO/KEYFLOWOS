@@ -1,9 +1,16 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { CommunityService } from './community.service';
 import { ReputationService } from './reputation.service';
+import { OpportunityService } from './opportunity.service';
+import { PartnerProgramService } from './partner-program.service';
+import { ResourceMarketplaceService } from './resource-marketplace.service';
+import { NetworkActivityService } from './network-activity.service';
+import { NetworkAnalyticsService } from './network-analytics.service';
 import { BusinessMatchingService } from '../ai/business-matching.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller()
 export class CommunityController {
@@ -11,7 +18,23 @@ export class CommunityController {
     @Inject(CommunityService) private readonly community: CommunityService,
     @Inject(ReputationService) private readonly reputation: ReputationService,
     @Inject(BusinessMatchingService) private readonly matching: BusinessMatchingService,
+    @Inject(OpportunityService) private readonly opportunities: OpportunityService,
+    @Inject(PartnerProgramService) private readonly partners: PartnerProgramService,
+    @Inject(ResourceMarketplaceService) private readonly resources: ResourceMarketplaceService,
+    @Inject(NetworkActivityService) private readonly activity: NetworkActivityService,
+    @Inject(NetworkAnalyticsService) private readonly analytics: NetworkAnalyticsService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
+
+  private async getRequesterBusinessIds(req: any): Promise<string[]> {
+    const userId = req?.user?.id;
+    if (!userId) return [];
+    const businesses = await this.prisma.client.business.findMany({
+      where: { OR: [{ ownerId: userId }, { members: { some: { userId } } }] },
+      select: { id: true },
+    });
+    return businesses.map((b) => b.id);
+  }
 
   @UseGuards(AuthGuard)
   @Get('community/posts')
@@ -706,5 +729,309 @@ export class CommunityController {
     @Body() body: { outcome: 'CONVERTED' | 'NOT_CONVERTED'; note?: string },
   ) {
     return this.reputation.markReferralOutcome(businessId, referralId, body.outcome, body.note);
+  }
+
+  // ==========================================
+  // OPPORTUNITY BOARD (Phase 5)
+  // ==========================================
+
+  @UseGuards(AuthGuard)
+  @Get('community/opportunities')
+  listOpportunities(
+    @Query('type') type?: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.opportunities.list({
+      type, status, category, search,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('community/opportunities/:id')
+  async getOpportunity(@Param('id') id: string, @Req() req: any) {
+    const requesterBusinessIds = await this.getRequesterBusinessIds(req);
+    return this.opportunities.getById(id, requesterBusinessIds);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/opportunities')
+  createOpportunity(
+    @Param('businessId') businessId: string,
+    @Body() body: any,
+  ) {
+    return this.opportunities.create(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/opportunities/mine')
+  listMyOpportunities(@Param('businessId') businessId: string) {
+    return this.opportunities.listMine(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/opportunities/:id')
+  updateOpportunity(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
+    return this.opportunities.update(businessId, id, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/opportunities/:id/close')
+  closeOpportunity(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.opportunities.close(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/community/opportunities/:id')
+  deleteOpportunity(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.opportunities.delete(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/opportunities/:id/apply')
+  applyToOpportunity(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { message: string; proposedBudget?: number; proposedTimeline?: string; attachments?: string[] },
+  ) {
+    return this.opportunities.apply(businessId, id, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/opportunity-applications/mine')
+  listMyApplications(@Param('businessId') businessId: string) {
+    return this.opportunities.listMyApplications(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/opportunity-applications/:id/respond')
+  respondToOpportunityApplication(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { status: 'SHORTLISTED' | 'AWARDED' | 'DECLINED'; responseNote?: string },
+  ) {
+    return this.opportunities.respondToApplication(businessId, id, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/opportunity-applications/:id/withdraw')
+  withdrawApplication(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.opportunities.withdrawApplication(businessId, id);
+  }
+
+  // ==========================================
+  // PARTNER PROGRAMS (Phase 5)
+  // ==========================================
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/partner-programs')
+  proposePartnerProgram(
+    @Param('businessId') businessId: string,
+    @Body() body: any,
+  ) {
+    return this.partners.propose(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/partner-programs')
+  listPartnerPrograms(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+  ) {
+    return this.partners.listForBusiness(businessId, { status });
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('community/partner-programs/profile/:businessId')
+  listPublicPartnerProgramsForProfile(@Param('businessId') businessId: string) {
+    return this.partners.listPublicForProfile(businessId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('community/partner-programs/:id')
+  getPartnerProgram(@Param('id') id: string) {
+    return this.partners.getById(id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/partner-programs/:id/respond')
+  respondToPartnerProgram(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { status: 'ACTIVE' | 'DECLINED'; responseNote?: string },
+  ) {
+    return this.partners.respond(businessId, id, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/partner-programs/:id/terminate')
+  terminatePartnerProgram(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { note?: string },
+  ) {
+    return this.partners.terminate(businessId, id, body?.note);
+  }
+
+  // ==========================================
+  // RESOURCE MARKETPLACE (Phase 5)
+  // ==========================================
+
+  @UseGuards(AuthGuard)
+  @Get('community/resources')
+  listResources(
+    @Query('resourceType') resourceType?: string,
+    @Query('search') search?: string,
+    @Query('isFree') isFree?: string,
+    @Query('businessId') businessId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.resources.list({
+      resourceType,
+      search,
+      isFree: isFree === 'true' ? true : isFree === 'false' ? false : undefined,
+      businessId,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('community/resources/:id')
+  getResource(@Param('id') id: string) {
+    return this.resources.getById(id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/resources')
+  publishResource(
+    @Param('businessId') businessId: string,
+    @Body() body: any,
+  ) {
+    return this.resources.publish(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/resources/mine')
+  listMyResources(@Param('businessId') businessId: string) {
+    return this.resources.listForBusiness(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/resources/:id/download')
+  recordResourceDownload(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { source?: string },
+  ) {
+    return this.resources.recordDownload(businessId, id, body?.source);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/resource-downloads/mine')
+  listMyResourceDownloads(@Param('businessId') businessId: string) {
+    return this.resources.listMyDownloads(businessId);
+  }
+
+  // ==========================================
+  // NETWORK ACTIVITY FEED (Phase 5)
+  // ==========================================
+
+  @UseGuards(AuthGuard)
+  @Get('community/activity')
+  listActivityFeed(
+    @Query('types') types?: string,
+    @Query('actorBusinessId') actorBusinessId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.activity.listFeed({
+      types: types ? types.split(',').filter(Boolean) : undefined,
+      actorBusinessId,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/activity/following')
+  listFollowingActivity(
+    @Param('businessId') businessId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.activity.listFeed({
+      followingOf: businessId,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('community/activity/business/:businessId')
+  listActivityForBusiness(@Param('businessId') businessId: string) {
+    return this.activity.listForActor(businessId);
+  }
+
+  // ==========================================
+  // NETWORK ANALYTICS (Phase 5)
+  // ==========================================
+
+  @UseGuards(OptionalAuthGuard)
+  @Post('community/profile-views/:viewedBusinessId')
+  async recordProfileView(
+    @Param('viewedBusinessId') viewedBusinessId: string,
+    @Body() body: { viewerBusinessId?: string; source?: string },
+    @Req() req: any,
+  ) {
+    // Derive viewer business from authenticated session, never trust body alone.
+    // If a viewerBusinessId is supplied, it must belong to the authenticated user.
+    let viewerBusinessId: string | null = null;
+    const requesterBusinessIds = await this.getRequesterBusinessIds(req);
+    if (requesterBusinessIds.length > 0) {
+      if (body?.viewerBusinessId && requesterBusinessIds.includes(body.viewerBusinessId)) {
+        viewerBusinessId = body.viewerBusinessId;
+      } else {
+        viewerBusinessId = requesterBusinessIds[0];
+      }
+    }
+    return this.analytics.recordProfileView(viewedBusinessId, viewerBusinessId, body?.source);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/analytics/dashboard')
+  getAnalyticsDashboard(
+    @Param('businessId') businessId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.analytics.getDashboard(businessId, days ? parseInt(days, 10) : 30);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/analytics/recent-viewers')
+  getRecentViewers(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.analytics.listRecentViewers(businessId, limit ? parseInt(limit, 10) : 20);
   }
 }
