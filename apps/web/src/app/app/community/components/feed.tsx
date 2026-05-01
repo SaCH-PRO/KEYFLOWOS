@@ -17,6 +17,9 @@ import { API_BASE } from "@/lib/api";
 import { PostCard, POST_TYPE_CONFIG, timeAgo } from "./post-card";
 import { CreatePost } from "./create-post";
 import { FeedSkeleton } from "./community-skeleton";
+import { MatchedProvidersPanel } from "./matched-providers-panel";
+
+const MATCH_NOTIFIED_TYPES = new Set(["QUESTION", "OPPORTUNITY", "HELP", "NEED"]);
 
 const POST_TYPES = ["ALL", "DISCUSSION", "QUESTION", "WIN", "RESOURCE"];
 
@@ -33,6 +36,7 @@ interface FeedProps {
   onAddComment: (text: string) => Promise<void>;
   submittingComment: boolean;
   onAuthorClick?: (businessId: string) => void;
+  currentBusinessId?: string | null;
 }
 
 export function Feed({
@@ -48,6 +52,7 @@ export function Feed({
   onAddComment,
   submittingComment,
   onAuthorClick,
+  currentBusinessId,
 }: FeedProps) {
   const [showNewPost, setShowNewPost] = useState(false);
   const [newPostTitle, setNewPostTitle] = useState("");
@@ -154,6 +159,14 @@ export function Feed({
               {expandedPost.comments?.length || 0} comments
             </span>
           </div>
+
+          {currentBusinessId &&
+            expandedPost.businessId === currentBusinessId &&
+            MATCH_NOTIFIED_TYPES.has(expandedPost.type?.toUpperCase()) &&
+            expandedPost.matchedProviders &&
+            expandedPost.matchedProviders.providers?.length > 0 && (
+              <MatchedProvidersPanel matchedProviders={expandedPost.matchedProviders} />
+            )}
         </div>
 
         <div className="space-y-3">
@@ -308,6 +321,7 @@ export function Feed({
               onExpand={onExpandPost}
               onLike={onLike}
               onAuthorClick={onAuthorClick}
+              currentBusinessId={currentBusinessId}
             />
           ))}
         </div>

@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import type { CommunityPost } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
+import { MatchedProvidersPanel } from "./matched-providers-panel";
+
+const MATCH_NOTIFIED_TYPES = new Set(["QUESTION", "OPPORTUNITY", "HELP", "NEED"]);
 
 const POST_TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof MessageSquare }> = {
   DISCUSSION: { label: "Discussion", color: "text-blue-400", bg: "bg-blue-500/20", icon: MessageCircle },
@@ -40,11 +43,19 @@ interface PostCardProps {
   onExpand: (postId: string) => void;
   onLike: (postId: string) => void;
   onAuthorClick?: (businessId: string) => void;
+  currentBusinessId?: string | null;
 }
 
-export function PostCard({ post, index, onExpand, onLike, onAuthorClick }: PostCardProps) {
+export function PostCard({ post, index, onExpand, onLike, onAuthorClick, currentBusinessId }: PostCardProps) {
   const typeConfig = POST_TYPE_CONFIG[post.type] || POST_TYPE_CONFIG.DISCUSSION;
   const TypeIcon = typeConfig.icon;
+  const isOwnPost = currentBusinessId && post.businessId === currentBusinessId;
+  const showMatches =
+    isOwnPost &&
+    MATCH_NOTIFIED_TYPES.has(post.type?.toUpperCase()) &&
+    post.matchedProviders &&
+    Array.isArray(post.matchedProviders.providers) &&
+    post.matchedProviders.providers.length > 0;
 
   const logoUrl = post.business?.logoUrl
     ? post.business.logoUrl.startsWith("http") ? post.business.logoUrl : `${API_BASE}${post.business.logoUrl}`
@@ -127,6 +138,10 @@ export function PostCard({ post, index, onExpand, onLike, onAuthorClick }: PostC
           {post._count?.comments || 0}
         </span>
       </div>
+
+      {showMatches && post.matchedProviders && (
+        <MatchedProvidersPanel matchedProviders={post.matchedProviders} />
+      )}
     </motion.div>
   );
 }

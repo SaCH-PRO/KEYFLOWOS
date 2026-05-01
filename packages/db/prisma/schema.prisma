@@ -1969,10 +1969,14 @@ model CommunityPost {
   id         String   @id @default(cuid())
   title      String?
   content    String
-  type       String   @default("DISCUSSION") // DISCUSSION, QUESTION, WIN, RESOURCE
+  type       String   @default("DISCUSSION") // DISCUSSION, QUESTION, WIN, RESOURCE, OPPORTUNITY, HELP, NEED
   tags       String[] @default([])
   likes      Int      @default(0)
   isPinned   Boolean  @default(false) @map("is_pinned")
+
+  // Snapshot of providers notified by AI matching when this post was created.
+  // Shape: { computedAt: ISO string, providers: [{ businessId, name, logoUrl?, headline?, score, explanation }] }
+  matchedProviders Json? @map("matched_providers")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
