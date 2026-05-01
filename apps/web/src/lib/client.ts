@@ -575,8 +575,8 @@ export async function createContact(input: {
   const body = {
     firstName: input.firstName ?? "Guest",
     lastName: input.lastName ?? "User",
-    email: input.email ?? "",
-    phone: input.phone ?? "",
+    email: input.email?.trim() || undefined,
+    phone: input.phone?.trim() || undefined,
     status: input.status ?? "LEAD",
     source: input.source ?? "",
     tags: input.tags ?? [],
@@ -1034,9 +1034,16 @@ export async function updateContact(input: {
   doNotContact?: boolean;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const { businessId: _businessId, contactId: _contactId, ...body } = input;
+  if (body.email !== undefined) {
+    body.email = body.email.trim() || undefined;
+  }
+  if (body.phone !== undefined) {
+    body.phone = body.phone.trim() || undefined;
+  }
   return apiPatch<Contact>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}`,
-    input,
+    body,
   );
 }
 

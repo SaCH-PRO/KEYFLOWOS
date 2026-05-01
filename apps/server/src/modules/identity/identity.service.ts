@@ -149,6 +149,7 @@ export class IdentityService {
     city?: string;
     country?: string;
     industry?: string;
+    businessIntent?: string;
     metaData?: Record<string, any>;
     headline?: string;
     bio?: string;
@@ -185,7 +186,7 @@ export class IdentityService {
       'email', 'website', 'facebook', 'instagram', 'twitter', 'linkedin',
       'tiktok', 'youtube', 'whatsapp', 'primaryColor', 'secondaryColor',
       'complianceStatus', 'tagline', 'description', 'city', 'country',
-      'industry', 'headline', 'bio', 'businessStage', 'teamSize',
+      'industry', 'businessIntent', 'headline', 'bio', 'businessStage', 'teamSize',
     ];
 
     const data: Record<string, unknown> = {};

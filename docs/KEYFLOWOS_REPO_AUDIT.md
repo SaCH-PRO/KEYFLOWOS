@@ -172,6 +172,68 @@ Findings:
 - The highest remaining risk is environment/database readiness: auth bootstrap requires a valid session token and a working Prisma/Postgres connection.
 - The second highest remaining risk is product behavior rather than compilation: multi-business selection is not yet a first-class UX in the current workspace cache flow.
 
+## 12B. Onboarding Completion Flow Stabilization Pass
+
+Reviewed onboarding files:
+
+- `apps/web/src/app/app/onboarding/page.tsx`: onboarding wizard, template selection, product setup, auto-configuration, first-win selection, and finish/skip actions.
+- `apps/web/src/app/app/layout.tsx`: redirects incomplete businesses to `/app/onboarding` when `business.onboardingComplete === false`.
+- `apps/web/src/lib/client.ts`: `updateBusiness`, concierge state, auto-configure, template preview, and completion helpers.
+- `apps/server/src/modules/onboarding-concierge/onboarding-concierge.controller.ts`: guarded onboarding concierge endpoints.
+- `apps/server/src/modules/onboarding-concierge/onboarding-concierge.service.ts`: setup status, nudges, auto-configure, and completion persistence.
+- `apps/server/src/modules/identity/dto/update-business.dto.ts`: validated business update fields.
+- `apps/server/src/modules/identity/identity.service.ts`: business update persistence.
+
+Findings and fix:
+
+- The onboarding page sent `businessIntent` during template selection.
+- `Business.businessIntent` exists in Prisma, but `UpdateBusinessDto` and `IdentityService.updateBusiness` did not accept/persist the field.
+- Because the Nest validation pipe uses `whitelist: true`, `businessIntent` was stripped before reaching the service.
+- Fixed by adding `businessIntent` to `UpdateBusinessDto` and the existing `IdentityService.updateBusiness` string-field persistence path.
+- `pnpm --filter server build` and `pnpm --filter web build` both pass after the fix.
+
+## 12C. CRM Contacts Pipeline Stabilization Pass
+
+Reviewed CRM files:
+
+- `apps/web/src/app/app/crm/pipeline/page.tsx`: CRM pipeline entry surface and contacts tab wiring.
+- `apps/web/src/app/app/crm/pipeline/hooks/use-contacts-data.ts`: contact list loading, filters, pagination, favorites, and workspace resolution.
+- `apps/web/src/components/contacts/contact-picker-drawer.tsx`: contact picker/broadcast contact loading.
+- `apps/web/src/lib/client.ts`: contact list/detail/create/update/delete API helpers.
+- `apps/server/src/modules/crm/crm.controller.ts`: guarded CRM contact endpoints.
+- `apps/server/src/modules/crm/crm.service.ts`: contact list/create/update/delete service logic.
+- `apps/server/src/modules/crm/dto/create-contact.dto.ts`: create contact validation.
+- `apps/server/src/modules/crm/dto/update-contact.dto.ts`: update contact validation.
+- `packages/db/prisma/schema.prisma`: `Contact` model, soft-delete column, normalized email/phone fields, and unique constraints.
+
+Findings and fix:
+
+- The frontend `createContact` helper defaulted missing `email` and `phone` to empty strings.
+- The backend DTO marks `email` optional, but if an empty string is present, `@IsEmail()` rejects it.
+- The `Contact` model also has unique constraints on normalized email and phone, so blank values are risky even when they pass lower-level normalization.
+- Fixed by omitting blank `email` and `phone` values from create/update contact requests before they reach backend validation.
+- `pnpm --filter server build` and `pnpm --filter web build` both pass after the fix.
+
+## 12D. Public Booking Flow Stabilization Pass
+
+Reviewed public booking files:
+
+- `apps/web/src/app/book/[slug]/page.tsx`: public storefront/booking page, business lookup, service/staff/product loading, checkout, and public booking submission.
+- `apps/web/src/app/public/book/page.tsx`: simple public booking test page.
+- `apps/server/src/modules/bookings/bookings.controller.ts`: public service/staff lookup and unauthenticated public booking creation endpoints.
+- `apps/server/src/modules/bookings/bookings.service.ts`: public booking creation, service lookup, business hours checks, staff availability checks, contact creation, invoice creation, and booking persistence.
+- `apps/server/src/modules/bookings/dto/public-create-booking.dto.ts`: public booking request validation.
+- `apps/server/src/modules/identity/identity.controller.ts`: public business slug/ID lookup endpoints.
+- `apps/server/src/modules/identity/identity.service.ts`: public-safe business field selection.
+- `packages/db/prisma/schema.prisma`: `Service`, `StaffMember`, `Availability`, and `Booking` models.
+
+Findings and fix:
+
+- The public booking controller already converts `body.startTime` to `Date` before calling the service.
+- `PublicCreateBookingDto.startTime` should therefore remain the incoming ISO string for validation.
+- Fixed the DTO to keep `startTime` typed as `string` and validated with `@IsISO8601()`, avoiding pre-validation date coercion risk under the global transform pipe.
+- `pnpm --filter server build` and `pnpm --filter web build` both pass after the fix.
+
 1. Stabilize authentication + workspace/business context end-to-end.
 2. Stabilize onboarding completion flow and ensure business context is created/cached consistently.
 3. Stabilize CRM contacts pipeline as the first core operational workspace.

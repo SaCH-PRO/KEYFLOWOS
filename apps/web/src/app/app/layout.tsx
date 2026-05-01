@@ -8,7 +8,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
 import { OriginAwareBreadcrumbs } from "@/components/ui/origin-aware-breadcrumbs";
 import { NavigationContextProvider, useNavigationContext } from "@/lib/navigation-context";
-import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDisplayName, getUserInitials, refreshWorkspace, getCachedBusiness, isSuperAdmin } from "@/lib/workspace";
+import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDisplayName, getUserInitials, refreshWorkspace, isSuperAdmin } from "@/lib/workspace";
 import { apiGet, apiPatch } from "@/lib/api";
 import { useThemeColors } from "@/lib/theme-context";
 import {
@@ -384,42 +384,50 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   useEffect(() => {
+    let canceled = false;
     const init = async () => {
-      await refreshWorkspace();
-      const user = getCachedUser();
-      const business = getCachedBusiness();
-      
-      if (user) {
-        setDisplayName(getUserDisplayName());
-        setInitials(getUserInitials());
-        if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
-        setIsAdminUser(isSuperAdmin());
-      }
+      try {
+        await refreshWorkspace();
+        if (canceled) return;
+        const user = getCachedUser();
+        
+        if (user) {
+          setDisplayName(getUserDisplayName());
+          setInitials(getUserInitials());
+          if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
+          setIsAdminUser(isSuperAdmin());
+        }
 
-      const businessId = getStoredBusinessId();
-      if (businessId) {
-        const res = await apiGet(`/identity/businesses/${businessId}`);
-        if (res.data) {
-          const data = res.data as { primaryColor?: string; secondaryColor?: string; onboardingComplete?: boolean };
-          if (data.primaryColor) setAccent1(data.primaryColor);
-          if (data.secondaryColor) setAccent2(data.secondaryColor);
-          
-          if (data.onboardingComplete === false && !pathname.startsWith("/app/onboarding")) {
-            if (current) {
-              setTaskOrigin(current);
+        const businessId = getStoredBusinessId();
+        if (businessId) {
+          const res = await apiGet(`/identity/businesses/${businessId}`);
+          if (canceled) return;
+          if (res.data) {
+            const data = res.data as { primaryColor?: string; secondaryColor?: string; onboardingComplete?: boolean };
+            if (data.primaryColor) setAccent1(data.primaryColor);
+            if (data.secondaryColor) setAccent2(data.secondaryColor);
+            
+            if (data.onboardingComplete === false && !pathname.startsWith("/app/onboarding")) {
+              if (current) {
+                setTaskOrigin(current);
+              }
+              pushContext({
+                taskIntent: "onboarding-setup",
+                draftId: null,
+              });
+              router.push("/app/onboarding");
+              return;
             }
-            pushContext({
-              taskIntent: "onboarding-setup",
-              draftId: null,
-            });
-            router.push("/app/onboarding");
-            return;
           }
         }
+      } finally {
+        if (!canceled) setOnboardingChecked(true);
       }
-      setOnboardingChecked(true);
     };
     init();
+    return () => {
+      canceled = true;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, router]);
 

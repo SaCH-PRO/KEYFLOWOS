@@ -1,4 +1,4 @@
-import { Type, Transform } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import { IsISO8601, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 const stripHtml = ({ value }: { value: any }) =>
@@ -14,8 +14,7 @@ export class PublicCreateBookingDto {
   staffId?: string | null;
 
   @IsISO8601()
-  @Type(() => Date)
-  startTime!: Date;
+  startTime!: string;
 
   @IsString()
   @IsOptional()

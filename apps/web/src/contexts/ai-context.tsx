@@ -34,7 +34,10 @@ export function AiContextProvider({ children }: { children: ReactNode }) {
   });
 
   const stateRef = useRef(state);
-  stateRef.current = state;
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const registerModuleContext = useCallback((entry: ModuleContextEntry) => {
     setState((prev) => ({
