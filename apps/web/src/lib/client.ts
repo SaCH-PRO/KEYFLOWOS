@@ -1197,6 +1197,26 @@ export async function updateBookingNotes(bookingId: string, notes: string, busin
   });
 }
 
+export async function updateBookingLocation(
+  bookingId: string,
+  input: {
+    location?: string | null;
+    locationPlaceId?: string | null;
+    locationLatLng?: { lat: number; lng: number } | null;
+  },
+  businessId?: string,
+) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPatch<Booking>(
+    `/bookings/businesses/${encodeURIComponent(bId)}/bookings/${encodeURIComponent(bookingId)}`,
+    {
+      location: input.location ?? null,
+      locationPlaceId: input.locationPlaceId ?? null,
+      locationLatLng: input.locationLatLng ?? null,
+    },
+  );
+}
+
 export async function fetchReminderSettings(businessId?: string) {
   const bId = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet<{ bookingReminderMins: number }>(

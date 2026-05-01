@@ -30,6 +30,8 @@ import { STATUS_STYLE, formatTime, formatFullDate, contactName } from "./booking
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 import Link from "next/link";
 import { googleDeepLinks } from "@/lib/google-deep-links";
+import { BusinessAddressAutocomplete } from "@/components/ui/business-address-autocomplete";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 interface BookingDetailDrawerProps {
   selectedBooking: Booking;
@@ -38,6 +40,14 @@ interface BookingDetailDrawerProps {
   onSyncCalendar: (bookingId: string) => void;
   onReschedule?: (bookingId: string, newStartTime: string) => void;
   onUpdateNotes?: (bookingId: string, notes: string) => void;
+  onUpdateLocation?: (
+    bookingId: string,
+    input: {
+      location: string | null;
+      locationPlaceId: string | null;
+      locationLatLng: { lat: number; lng: number } | null;
+    },
+  ) => void;
   onCreateInvoice?: (booking: Booking) => void;
   calendarConnected: boolean;
 }
@@ -174,12 +184,22 @@ export default function BookingDetailDrawer({
   onSyncCalendar,
   onReschedule,
   onUpdateNotes,
+  onUpdateLocation,
   onCreateInvoice,
   calendarConnected,
 }: BookingDetailDrawerProps) {
   const [showReschedule, setShowReschedule] = useState(false);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState(selectedBooking.notes ?? "");
+  const [editingLocation, setEditingLocation] = useState(false);
+  const [locationText, setLocationText] = useState(selectedBooking.location ?? "");
+  const [locationPlaceId, setLocationPlaceId] = useState<string | null>(
+    selectedBooking.locationPlaceId ?? null,
+  );
+  const [locationLatLng, setLocationLatLng] = useState<{ lat: number; lng: number } | null>(
+    selectedBooking.locationLatLng ?? null,
+  );
+  const businessId = getStoredBusinessId();
 
   const canReschedule = selectedBooking.status === "PENDING" || selectedBooking.status === "CONFIRMED";
   const canInvoice = selectedBooking.status === "COMPLETED" || selectedBooking.status === "CONFIRMED";
@@ -365,39 +385,124 @@ export default function BookingDetailDrawer({
           </div>
         )}
 
-        {selectedBooking.location && (
+        {(selectedBooking.location || onUpdateLocation) && (
           <div className="kf-card rounded-xl p-3 space-y-2">
-            <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
-              <MapPin className="w-3 h-3" />
-              Location
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
+                <MapPin className="w-3 h-3" />
+                Location
+              </div>
+              {!editingLocation && onUpdateLocation && (
+                <button
+                  onClick={() => {
+                    setLocationText(selectedBooking.location ?? "");
+                    setLocationPlaceId(selectedBooking.locationPlaceId ?? null);
+                    setLocationLatLng(selectedBooking.locationLatLng ?? null);
+                    setEditingLocation(true);
+                  }}
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors min-h-[36px]"
+                >
+                  <Pencil className="w-2.5 h-2.5" />
+                  {selectedBooking.location ? "Edit" : "Add"}
+                </button>
+              )}
             </div>
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-sm text-foreground/90 break-words flex-1">{selectedBooking.location}</p>
-              {(() => {
-                const ll = selectedBooking.locationLatLng;
-                const mapsHref =
-                  ll && typeof ll.lat === "number" && typeof ll.lng === "number"
-                    ? `https://www.google.com/maps/search/?api=1&query=${ll.lat},${ll.lng}${
-                        selectedBooking.locationPlaceId
-                          ? `&query_place_id=${encodeURIComponent(selectedBooking.locationPlaceId)}`
-                          : ""
-                      }`
-                    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                        selectedBooking.location,
-                      )}`;
-                return (
-                  <a
-                    href={mapsHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[10px] font-medium hover:underline shrink-0"
-                    style={{ color: "hsl(var(--kf-accent2))" }}
+            {editingLocation && onUpdateLocation ? (
+              <div className="space-y-2">
+                <BusinessAddressAutocomplete
+                  businessId={businessId}
+                  value={locationText}
+                  onChange={(v) => {
+                    setLocationText(v);
+                    setLocationPlaceId(null);
+                    setLocationLatLng(null);
+                  }}
+                  onSelect={(p) => {
+                    setLocationText(p.formattedAddress);
+                    setLocationPlaceId(p.placeId);
+                    if (typeof p.lat === "number" && typeof p.lng === "number") {
+                      setLocationLatLng({ lat: p.lat, lng: p.lng });
+                    } else {
+                      setLocationLatLng(null);
+                    }
+                  }}
+                  placeholder="Where will this booking happen?"
+                  inputClassName="text-xs"
+                />
+                <div className="flex gap-1.5 justify-end">
+                  <button
+                    onClick={() => setEditingLocation(false)}
+                    className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[36px]"
                   >
-                    Open map <ExternalLink className="w-2.5 h-2.5" />
-                  </a>
-                );
-              })()}
-            </div>
+                    Cancel
+                  </button>
+                  {selectedBooking.location && (
+                    <button
+                      onClick={() => {
+                        onUpdateLocation(selectedBooking.id, {
+                          location: null,
+                          locationPlaceId: null,
+                          locationLatLng: null,
+                        });
+                        setEditingLocation(false);
+                      }}
+                      className="px-2 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors min-h-[36px]"
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      const trimmed = locationText.trim();
+                      onUpdateLocation(selectedBooking.id, {
+                        location: trimmed ? trimmed : null,
+                        locationPlaceId: trimmed ? locationPlaceId : null,
+                        locationLatLng: trimmed ? locationLatLng : null,
+                      });
+                      setEditingLocation(false);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[36px]"
+                    style={{
+                      background: "hsl(var(--kf-accent1) / 0.1)",
+                      color: "hsl(var(--kf-accent1))",
+                    }}
+                  >
+                    <Save className="w-2.5 h-2.5" />
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : selectedBooking.location ? (
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm text-foreground/90 break-words flex-1">{selectedBooking.location}</p>
+                {(() => {
+                  const ll = selectedBooking.locationLatLng;
+                  const mapsHref =
+                    ll && typeof ll.lat === "number" && typeof ll.lng === "number"
+                      ? `https://www.google.com/maps/search/?api=1&query=${ll.lat},${ll.lng}${
+                          selectedBooking.locationPlaceId
+                            ? `&query_place_id=${encodeURIComponent(selectedBooking.locationPlaceId)}`
+                            : ""
+                        }`
+                      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                          selectedBooking.location,
+                        )}`;
+                  return (
+                    <a
+                      href={mapsHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[10px] font-medium hover:underline shrink-0"
+                      style={{ color: "hsl(var(--kf-accent2))" }}
+                    >
+                      Open map <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  );
+                })()}
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground/50 italic">No location set</p>
+            )}
           </div>
         )}
 
