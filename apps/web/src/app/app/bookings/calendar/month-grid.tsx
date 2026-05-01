@@ -170,6 +170,9 @@ export default function MonthGrid({
                             <span className="text-[9px] truncate text-muted-foreground">
                               {b.service?.name ?? contactName(b)}
                             </span>
+                            {b.location && (
+                              <span className="text-[8px] text-muted-foreground/50 flex-shrink-0" title={b.location}>📍</span>
+                            )}
                             {b.notes && (
                               <span className="text-[8px] text-muted-foreground/50 flex-shrink-0" title={b.notes}>📝</span>
                             )}

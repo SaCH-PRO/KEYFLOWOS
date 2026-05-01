@@ -253,6 +253,9 @@ export default function DayTimeline({
                               >
                                 {b.status}
                               </span>
+                              {b.location && (
+                                <MapPin className="w-3 h-3 text-muted-foreground opacity-60" aria-label="Has location" />
+                              )}
                               {b.notes && (
                                 <StickyNote className="w-3 h-3 text-muted-foreground opacity-60" aria-label="Has notes" />
                               )}
@@ -276,6 +279,12 @@ export default function DayTimeline({
                                 <span className="flex items-center gap-1">
                                   <User className="w-3 h-3" />
                                   {b.staff.name}
+                                </span>
+                              )}
+                              {b.location && (
+                                <span className="flex items-center gap-1 truncate max-w-[200px]">
+                                  <MapPin className="w-3 h-3 shrink-0" />
+                                  <span className="truncate">{b.location}</span>
                                 </span>
                               )}
                             </div>

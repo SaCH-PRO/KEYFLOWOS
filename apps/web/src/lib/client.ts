@@ -117,6 +117,9 @@ const bookingSchema = z.object({
   serviceId: z.string().nullable().optional(),
   staffId: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
+  location: z.string().nullable().optional(),
+  locationPlaceId: z.string().nullable().optional(),
+  locationLatLng: z.object({ lat: z.number(), lng: z.number() }).nullable().optional(),
   calendarEventId: z.string().nullable().optional(),
   contact: z.object({
     id: z.string(),
@@ -1147,6 +1150,9 @@ export async function createBooking(input: {
   startTime: string;
   endTime: string;
   notes?: string;
+  location?: string;
+  locationPlaceId?: string;
+  locationLatLng?: { lat: number; lng: number };
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const res = await apiPost<Booking>({
@@ -1158,6 +1164,9 @@ export async function createBooking(input: {
       startTime: input.startTime,
       endTime: input.endTime,
       notes: input.notes ?? undefined,
+      location: input.location ?? undefined,
+      locationPlaceId: input.locationPlaceId ?? undefined,
+      locationLatLng: input.locationLatLng ?? undefined,
     },
   });
 

@@ -30,6 +30,9 @@ interface BookingFormProps {
     staffId: string;
     contactId: string;
     notes?: string;
+    location?: string;
+    locationPlaceId?: string;
+    locationLatLng?: { lat: number; lng: number };
   }) => void;
   onCancel: () => void;
   formError: string | null;
@@ -93,6 +96,8 @@ export default function BookingForm({
   const [bookingStaffId, setBookingStaffId] = useState("");
   const [bookingContactId, setBookingContactId] = useState(defaultContactId ?? "");
   const [bookingLocation, setBookingLocation] = useState("");
+  const [bookingLocationPlaceId, setBookingLocationPlaceId] = useState<string | undefined>(undefined);
+  const [bookingLocationLatLng, setBookingLocationLatLng] = useState<{ lat: number; lng: number } | undefined>(undefined);
   const [bookingNotes, setBookingNotes] = useState("");
   const businessId = getStoredBusinessId();
   const [weekBase, setWeekBase] = useState(() => {
@@ -166,18 +171,16 @@ export default function BookingForm({
   function handleSubmit() {
     const trimmedLoc = bookingLocation.trim();
     const trimmedNotes = bookingNotes.trim();
-    const combinedNotes = trimmedLoc
-      ? trimmedNotes
-        ? `Location: ${trimmedLoc}\n\n${trimmedNotes}`
-        : `Location: ${trimmedLoc}`
-      : trimmedNotes;
     onSubmit({
       date: bookingDate,
       time: bookingTime,
       serviceId: bookingServiceId,
       staffId: bookingStaffId,
       contactId: bookingContactId,
-      notes: combinedNotes || undefined,
+      notes: trimmedNotes || undefined,
+      location: trimmedLoc || undefined,
+      locationPlaceId: trimmedLoc ? bookingLocationPlaceId : undefined,
+      locationLatLng: trimmedLoc ? bookingLocationLatLng : undefined,
     });
   }
 
@@ -422,8 +425,20 @@ export default function BookingForm({
             <BusinessAddressAutocomplete
               businessId={businessId}
               value={bookingLocation}
-              onChange={setBookingLocation}
-              onSelect={(p) => setBookingLocation(p.formattedAddress)}
+              onChange={(v) => {
+                setBookingLocation(v);
+                setBookingLocationPlaceId(undefined);
+                setBookingLocationLatLng(undefined);
+              }}
+              onSelect={(p) => {
+                setBookingLocation(p.formattedAddress);
+                setBookingLocationPlaceId(p.placeId);
+                if (typeof p.lat === "number" && typeof p.lng === "number") {
+                  setBookingLocationLatLng({ lat: p.lat, lng: p.lng });
+                } else {
+                  setBookingLocationLatLng(undefined);
+                }
+              }}
               placeholder="Where will this booking happen?"
               inputClassName="text-xs"
             />

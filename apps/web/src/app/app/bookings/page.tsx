@@ -312,7 +312,17 @@ export default function BookingsPage() {
     setCalendarLoading(false);
   }
 
-  async function handleCreateBooking(data: { date: string; time: string; serviceId: string; staffId: string; contactId: string; notes?: string }) {
+  async function handleCreateBooking(data: {
+    date: string;
+    time: string;
+    serviceId: string;
+    staffId: string;
+    contactId: string;
+    notes?: string;
+    location?: string;
+    locationPlaceId?: string;
+    locationLatLng?: { lat: number; lng: number };
+  }) {
     if (!businessId) return;
     setFormError(null);
     if (!data.date || !data.time) { setFormError("Please pick a date and time"); return; }
@@ -333,6 +343,9 @@ export default function BookingsPage() {
         startTime,
         endTime,
         notes: data.notes || undefined,
+        location: data.location || undefined,
+        locationPlaceId: data.locationPlaceId || undefined,
+        locationLatLng: data.locationLatLng || undefined,
       });
       if (error) { setFormError(error); return; }
       if (result) {

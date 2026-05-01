@@ -83,6 +83,9 @@ export class BookingsController {
       startTime: new Date(body.startTime),
       endTime: new Date(body.endTime),
       notes: body.notes,
+      location: body.location,
+      locationPlaceId: body.locationPlaceId,
+      locationLatLng: body.locationLatLng,
     });
   }
 
