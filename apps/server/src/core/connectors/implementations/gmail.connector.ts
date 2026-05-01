@@ -11,12 +11,20 @@ export class GmailConnector implements IConnector {
   readonly meta: ConnectorMeta = {
     type: 'gmail',
     name: 'Gmail',
-    description: 'Send quotes, invoices, and campaigns from your business email',
+    description: 'Read & send email, manage threads, labels, archives, and trash',
     category: 'communication',
+    group: 'google',
     icon: 'mail',
-    supportsSync: false,
+    supportsSync: true,
     supportsWebhook: false,
     authType: 'oauth2',
+    scopes: [
+      'https://www.googleapis.com/auth/gmail.modify',
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile',
+    ],
+    externalUrl: 'https://mail.google.com',
   };
 
   constructor(
@@ -89,6 +97,28 @@ export class GmailConnector implements IConnector {
     });
 
     return { success: true, itemsSynced: 0, errors: [], duration: Date.now() - start };
+  }
+
+  async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { gmailAccessToken: true, gmailEmail: true },
+    });
+    if (!business?.gmailAccessToken) {
+      return { success: false, error: 'Gmail is not connected' };
+    }
+    try {
+      const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+        headers: { Authorization: `Bearer ${business.gmailAccessToken}` },
+      });
+      if (!res.ok) {
+        return { success: false, error: `Gmail API returned ${res.status}` };
+      }
+      const data = await res.json();
+      return { success: true, account: data.emailAddress ?? business.gmailEmail ?? undefined };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async disconnect(businessId: string): Promise<void> {

@@ -506,6 +506,89 @@ export class CommerceController {
     return this.gmail.disconnectGmail(businessId);
   }
 
+  // ----- Gmail full inbox -----
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/gmail/threads')
+  listGmailThreads(
+    @Param('businessId') businessId: string,
+    @Query('q') q?: string,
+    @Query('label') label?: string,
+    @Query('maxResults') maxResults?: string,
+    @Query('pageToken') pageToken?: string,
+  ) {
+    return this.gmail.listThreads(businessId, {
+      q,
+      labelIds: label ? [label] : undefined,
+      maxResults: maxResults ? Number.parseInt(maxResults, 10) : undefined,
+      pageToken,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/gmail/threads/:threadId')
+  getGmailThread(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+  ) {
+    return this.gmail.getThread(businessId, threadId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/gmail/labels')
+  listGmailLabels(@Param('businessId') businessId: string) {
+    return this.gmail.listLabels(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/gmail/messages/:messageId/:action')
+  modifyGmailMessage(
+    @Param('businessId') businessId: string,
+    @Param('messageId') messageId: string,
+    @Param('action') action: string,
+  ) {
+    switch (action) {
+      case 'read':
+        return this.gmail.markRead(businessId, messageId);
+      case 'unread':
+        return this.gmail.markUnread(businessId, messageId);
+      case 'star':
+        return this.gmail.star(businessId, messageId);
+      case 'unstar':
+        return this.gmail.unstar(businessId, messageId);
+      case 'archive':
+        return this.gmail.archive(businessId, messageId);
+      case 'trash':
+        return this.gmail.trash(businessId, messageId);
+      case 'untrash':
+        return this.gmail.untrash(businessId, messageId);
+      default:
+        throw new Error(`Unknown gmail message action: ${action}`);
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/gmail/threads/:threadId/reply')
+  replyGmailThread(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+    @Body() body: { inReplyTo: string; to: string; subject: string; htmlBody: string },
+  ) {
+    return this.gmail.sendReply({
+      businessId,
+      threadId,
+      inReplyTo: body.inReplyTo,
+      to: body.to,
+      subject: body.subject,
+      htmlBody: body.htmlBody,
+    });
+  }
+
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/quotes/:quoteId/send-email')

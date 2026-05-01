@@ -13,6 +13,7 @@ export class StripeConnector implements IConnector {
     name: 'Stripe',
     description: 'Accept global card payments and manage subscriptions via Stripe',
     category: 'payment',
+    group: 'payments',
     icon: 'credit-card',
     supportsSync: false,
     supportsWebhook: true,

@@ -13,6 +13,7 @@ export class WiPayConnector implements IConnector {
     name: 'WiPay',
     description: 'Accept Caribbean payments via WiPay payment gateway',
     category: 'payment',
+    group: 'payments',
     icon: 'wallet',
     supportsSync: false,
     supportsWebhook: true,

@@ -90,6 +90,88 @@ export class GoogleDriveController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/files/:fileId/rename')
+  rename(
+    @Param('businessId') businessId: string,
+    @Param('fileId') fileId: string,
+    @Body() body: { name: string },
+  ) {
+    return this.driveService.renameFile(businessId, fileId, body.name);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/files/:fileId/move')
+  move(
+    @Param('businessId') businessId: string,
+    @Param('fileId') fileId: string,
+    @Body() body: { addParents?: string[]; removeParents?: string[] },
+  ) {
+    return this.driveService.moveFile(businessId, fileId, body.addParents, body.removeParents);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/files/:fileId/trash')
+  trash(@Param('businessId') businessId: string, @Param('fileId') fileId: string) {
+    return this.driveService.trashFile(businessId, fileId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/files/:fileId/untrash')
+  untrash(@Param('businessId') businessId: string, @Param('fileId') fileId: string) {
+    return this.driveService.untrashFile(businessId, fileId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/files/:fileId')
+  deleteFile(@Param('businessId') businessId: string, @Param('fileId') fileId: string) {
+    return this.driveService.deleteFile(businessId, fileId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/files/:fileId/share')
+  share(
+    @Param('businessId') businessId: string,
+    @Param('fileId') fileId: string,
+    @Body()
+    body: {
+      type: 'user' | 'group' | 'domain' | 'anyone';
+      role: 'reader' | 'commenter' | 'writer' | 'owner';
+      emailAddress?: string;
+      domain?: string;
+      sendNotification?: boolean;
+    },
+  ) {
+    return this.driveService.shareFile(businessId, fileId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/docs')
+  createDoc(
+    @Param('businessId') businessId: string,
+    @Body() body: { title: string; parentId?: string },
+  ) {
+    return this.driveService.createDoc(businessId, body.title, body.parentId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sheets')
+  createSheet(
+    @Param('businessId') businessId: string,
+    @Body() body: { title: string; parentId?: string },
+  ) {
+    return this.driveService.createSheet(businessId, body.title, body.parentId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/folders')
+  createFolder(
+    @Param('businessId') businessId: string,
+    @Body() body: { name: string; parentId?: string },
+  ) {
+    return this.driveService.createFolder(businessId, body.name, body.parentId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/files/:fileId/embed-url')
   getEmbedUrl(
     @Param('businessId') businessId: string,

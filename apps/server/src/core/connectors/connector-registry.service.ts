@@ -138,6 +138,37 @@ export class ConnectorRegistryService {
     return result;
   }
 
+  async testConnector(
+    type: ConnectorType,
+    businessId: string,
+  ): Promise<{ success: boolean; error?: string; account?: string }> {
+    const connector = this.connectors.get(type);
+    if (!connector) throw new Error(`Connector ${type} not found`);
+
+    const startedAt = Date.now();
+    let result: { success: boolean; error?: string; account?: string };
+    try {
+      if (typeof connector.testConnection === 'function') {
+        result = await connector.testConnection(businessId);
+      } else {
+        const isConn = await connector.isConnected(businessId);
+        result = isConn ? { success: true } : { success: false, error: 'Not connected' };
+      }
+    } catch (err) {
+      result = { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    this.events.emit('connector.tested', {
+      connectorType: type,
+      businessId,
+      timestamp: new Date(),
+      success: result.success,
+      error: result.error,
+      duration: Date.now() - startedAt,
+    });
+    return result;
+  }
+
   async reconnectConnector(type: ConnectorType, businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
     const connector = this.connectors.get(type);
     if (!connector) throw new Error(`Connector ${type} not found`);

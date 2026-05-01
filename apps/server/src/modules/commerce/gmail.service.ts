@@ -353,4 +353,159 @@ export class GmailService {
 
     return { messageId: result.id };
   }
+
+  // ----- Full inbox CRUD -----
+
+  async listThreads(
+    businessId: string,
+    opts: { q?: string; labelIds?: string[]; maxResults?: number; pageToken?: string } = {},
+  ) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const params = new URLSearchParams();
+    if (opts.q) params.set('q', opts.q);
+    if (opts.labelIds) for (const l of opts.labelIds) params.append('labelIds', l);
+    params.set('maxResults', String(opts.maxResults ?? 25));
+    if (opts.pageToken) params.set('pageToken', opts.pageToken);
+
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/threads?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    return res.json();
+  }
+
+  async getThread(businessId: string, threadId: string) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    return res.json();
+  }
+
+  async modifyMessageLabels(
+    businessId: string,
+    messageId: string,
+    add: string[] = [],
+    remove: string[] = [],
+  ) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/modify`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addLabelIds: add, removeLabelIds: remove }),
+      },
+    );
+    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    return res.json();
+  }
+
+  markRead(businessId: string, messageId: string) {
+    return this.modifyMessageLabels(businessId, messageId, [], ['UNREAD']);
+  }
+
+  markUnread(businessId: string, messageId: string) {
+    return this.modifyMessageLabels(businessId, messageId, ['UNREAD'], []);
+  }
+
+  star(businessId: string, messageId: string) {
+    return this.modifyMessageLabels(businessId, messageId, ['STARRED'], []);
+  }
+
+  unstar(businessId: string, messageId: string) {
+    return this.modifyMessageLabels(businessId, messageId, [], ['STARRED']);
+  }
+
+  archive(businessId: string, messageId: string) {
+    return this.modifyMessageLabels(businessId, messageId, [], ['INBOX']);
+  }
+
+  async trash(businessId: string, messageId: string) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/trash`,
+      { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    return res.json();
+  }
+
+  async untrash(businessId: string, messageId: string) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/untrash`,
+      { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    return res.json();
+  }
+
+  async sendReply(params: {
+    businessId: string;
+    threadId: string;
+    inReplyTo: string;
+    to: string;
+    subject: string;
+    htmlBody: string;
+  }): Promise<{ messageId: string; threadId: string }> {
+    const accessToken = await this.getValidAccessToken(params.businessId);
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: params.businessId },
+      select: { gmailEmail: true, name: true },
+    });
+    if (!business?.gmailEmail) throw new BadRequestException('Gmail not connected');
+
+    const from = business.name ? `${business.name} <${business.gmailEmail}>` : business.gmailEmail;
+    const boundary = 'boundary_' + Date.now();
+    const headers = [
+      `From: ${from}`,
+      `To: ${params.to}`,
+      `Subject: ${params.subject.startsWith('Re:') ? params.subject : 'Re: ' + params.subject}`,
+      `In-Reply-To: ${params.inReplyTo}`,
+      `References: ${params.inReplyTo}`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    ];
+    const body = [
+      '',
+      `--${boundary}`,
+      'Content-Type: text/html; charset=UTF-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      Buffer.from(params.htmlBody).toString('base64'),
+      '',
+      `--${boundary}--`,
+    ];
+    const raw = Buffer.from([...headers, ...body].join('\r\n'))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw, threadId: params.threadId }),
+    });
+    if (!res.ok) {
+      const error = await res.text();
+      this.logger.error(`Reply failed: ${error}`);
+      throw new BadRequestException('Failed to send reply');
+    }
+    const result = (await res.json()) as { id: string; threadId: string };
+    return { messageId: result.id, threadId: result.threadId };
+  }
+
+  async listLabels(businessId: string) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    return res.json();
+  }
 }
