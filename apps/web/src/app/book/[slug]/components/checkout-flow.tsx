@@ -726,6 +726,37 @@ export function CheckoutFlow({
                               No time slots available for this date.
                             </div>
                           )}
+
+                          <div className="space-y-2.5">
+                            <label className="text-[10px] uppercase tracking-widest text-gray-400 flex items-center gap-1.5 font-medium">
+                              <MapPin className="w-3 h-3" /> Service Location
+                              <span className="text-gray-300 normal-case tracking-normal">(optional)</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={bd.location ?? ""}
+                              onChange={(e) =>
+                                updateBd({
+                                  location: e.target.value,
+                                  locationPlaceId: null,
+                                  locationLatLng: null,
+                                })
+                              }
+                              maxLength={500}
+                              placeholder={
+                                business.address
+                                  ? `Defaults to ${business.address}`
+                                  : "e.g. 123 Main Street, or a Google Maps link"
+                              }
+                              className="w-full rounded-xl border border-gray-200 bg-white/[0.02] px-4 py-3 text-sm text-gray-900 focus:outline-none transition-all duration-200 min-h-[44px]"
+                              style={{
+                                borderColor: bd.location ? `${primaryColor}30` : undefined,
+                              }}
+                            />
+                            <p className="text-[11px] text-gray-400">
+                              Add an address if this is a mobile or on-site service. Leave blank to meet at the business location.
+                            </p>
+                          </div>
                         </div>
                       </div>
                     );

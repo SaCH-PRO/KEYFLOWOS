@@ -354,6 +354,9 @@ export class FlowListener implements OnModuleInit {
       endTime: booking.endTime,
       staffName: staff?.name,
       bookingId: booking.id,
+      location: (booking as any).location ?? null,
+      locationPlaceId: (booking as any).locationPlaceId ?? null,
+      locationLatLng: (booking as any).locationLatLng ?? null,
     });
   }
 
@@ -380,6 +383,9 @@ export class FlowListener implements OnModuleInit {
       newEndTime: booking.endTime,
       previousStartTime: payload.previousStartTime,
       staffName: staff?.name,
+      location: (booking as any).location ?? null,
+      locationPlaceId: (booking as any).locationPlaceId ?? null,
+      locationLatLng: (booking as any).locationLatLng ?? null,
     });
   }
 
@@ -443,6 +449,9 @@ export class FlowListener implements OnModuleInit {
           endTime: booking.endTime,
           staffName: booking.staff?.name,
           bookingId: booking.id,
+          location: (booking as any).location ?? null,
+          locationPlaceId: (booking as any).locationPlaceId ?? null,
+          locationLatLng: (booking as any).locationLatLng ?? null,
         }, dedupeKey);
       }
 
