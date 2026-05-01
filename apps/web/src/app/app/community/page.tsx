@@ -460,6 +460,10 @@ export default function CommunityPage() {
           businessId={businessId}
           onNavigateToInbox={() => handleTabChange("inbox")}
           onNavigateToRequests={() => handleTabChange("requests")}
+          onViewPost={(postId) => {
+            handleTabChange("feed");
+            void handleExpandPost(postId);
+          }}
         />
       )}
 

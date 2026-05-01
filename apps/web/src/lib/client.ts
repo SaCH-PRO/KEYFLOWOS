@@ -5646,6 +5646,7 @@ export interface CommunityNotificationItem {
   body?: string | null;
   referenceId?: string | null;
   referenceType?: string | null;
+  data?: Record<string, any> | null;
   isRead: boolean;
   createdAt: string;
 }

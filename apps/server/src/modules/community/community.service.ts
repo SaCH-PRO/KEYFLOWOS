@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReputationService } from './reputation.service';
@@ -254,15 +255,44 @@ export class CommunityService {
     if (matches.length === 0) return;
 
     const subject = args.title?.slice(0, 80) || args.content.slice(0, 80);
-    await Promise.all(matches.map((m) =>
-      this.notifications.create({
-        businessId: m.businessId,
-        type: 'community_post_match',
-        title: 'New community post matches your skills',
-        body: `${fromBusinessName} posted: "${subject}" — ${m.explanation || 'Could be a fit for you'}`,
-        data: { postId, fromBusinessId, matchScore: m.score },
-      }).catch(() => {})
-    ));
+    const postSnippet = (args.title?.trim() || args.content || '').slice(0, 240);
+
+    await Promise.all(matches.flatMap((m) => {
+      const explanation = m.explanation || 'Could be a fit for you';
+      const payload: Prisma.InputJsonObject = {
+        postId,
+        fromBusinessId,
+        fromBusinessName,
+        matchScore: m.score,
+        explanation,
+        postSnippet,
+        ...(args.type ? { postType: args.type } : {}),
+      };
+      return [
+        // Legacy notification feed (navbar bell). Includes the explanation so
+        // top-level notification consumers can surface the AI reasoning too.
+        this.notifications.create({
+          businessId: m.businessId,
+          type: 'community_post_match',
+          title: 'New community post matches your skills',
+          body: `${fromBusinessName} posted: "${subject}" — ${explanation}`,
+          data: payload,
+        }).catch(() => {}),
+        // Community Notifications panel. Carries the full payload so the panel
+        // can render the AI explanation, post snippet, and "View post" CTA.
+        this.prisma.client.communityNotification.create({
+          data: {
+            businessId: m.businessId,
+            type: 'community_post_match',
+            title: `${fromBusinessName} posted something that matches your skills`,
+            body: postSnippet,
+            referenceId: postId,
+            referenceType: 'POST',
+            data: payload,
+          },
+        }).catch(() => {}),
+      ];
+    }));
   }
 
   async updatePost(businessId: string, postId: string, input: { title?: string; content?: string; type?: string; tags?: string[] }) {
