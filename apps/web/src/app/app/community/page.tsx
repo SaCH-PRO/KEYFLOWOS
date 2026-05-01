@@ -171,32 +171,45 @@ export default function CommunityPage() {
         const created = res.data;
         setPosts((prev) => [created, ...prev]);
 
-        // Provider matching runs async on the server; re-fetch this post after
-        // a short delay so the "We notified N providers" indicator appears
-        // without the author needing to manually refresh.
+        // Provider matching runs async on the server. The post we just got back
+        // already carries a `{ status: "pending" }` snapshot for need-style posts
+        // (which surfaces the "Looking for providers…" indicator). We then poll
+        // on a fixed ~2s cadence up to ~12s total until the snapshot flips to
+        // `status: "complete"` so the pending state transitions into either the
+        // "We notified N providers" panel or the "No matches found yet" empty
+        // state.
         const NEED_TYPES = new Set(["QUESTION", "OPPORTUNITY", "HELP", "NEED"]);
         if (NEED_TYPES.has(created.type?.toUpperCase())) {
-          const tryFetch = async (delayMs: number) => {
-            await new Promise((r) => setTimeout(r, delayMs));
-            try {
-              const refreshed = await fetchCommunityPost(created.id);
-              if (refreshed.data?.matchedProviders) {
-                setPosts((prev) =>
-                  prev.map((p) =>
-                    p.id === created.id
-                      ? { ...p, matchedProviders: refreshed.data!.matchedProviders }
-                      : p,
-                  ),
-                );
-                return true;
-              }
-            } catch {}
-            return false;
-          };
-          // Two attempts: 3s and 8s after creation.
+          const POLL_INTERVAL_MS = 2000;
+          const POLL_TIMEOUT_MS = 12000;
           (async () => {
-            const ok = await tryFetch(3000);
-            if (!ok) await tryFetch(5000);
+            const start = Date.now();
+            while (Date.now() - start < POLL_TIMEOUT_MS) {
+              await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+              try {
+                const refreshed = await fetchCommunityPost(created.id);
+                const snapshot = refreshed.data?.matchedProviders;
+                if (snapshot) {
+                  setPosts((prev) =>
+                    prev.map((p) =>
+                      p.id === created.id
+                        ? { ...p, matchedProviders: snapshot }
+                        : p,
+                    ),
+                  );
+                  // Keep the expanded post view in sync if the author is viewing
+                  // their just-created post.
+                  setExpandedPost((prev) =>
+                    prev?.id === created.id
+                      ? { ...prev, matchedProviders: snapshot }
+                      : prev,
+                  );
+                  if (snapshot.status === "complete" || snapshot.status === undefined) {
+                    return;
+                  }
+                }
+              } catch {}
+            }
           })();
         }
       }

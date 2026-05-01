@@ -50,12 +50,13 @@ export function PostCard({ post, index, onExpand, onLike, onAuthorClick, current
   const typeConfig = POST_TYPE_CONFIG[post.type] || POST_TYPE_CONFIG.DISCUSSION;
   const TypeIcon = typeConfig.icon;
   const isOwnPost = currentBusinessId && post.businessId === currentBusinessId;
+  // Show the matched-providers panel for the post author on need-style posts as
+  // long as we have *any* matching snapshot (pending, empty, or with results).
+  // The panel itself decides which state to render.
   const showMatches =
     isOwnPost &&
     MATCH_NOTIFIED_TYPES.has(post.type?.toUpperCase()) &&
-    post.matchedProviders &&
-    Array.isArray(post.matchedProviders.providers) &&
-    post.matchedProviders.providers.length > 0;
+    !!post.matchedProviders;
 
   const logoUrl = post.business?.logoUrl
     ? post.business.logoUrl.startsWith("http") ? post.business.logoUrl : `${API_BASE}${post.business.logoUrl}`
