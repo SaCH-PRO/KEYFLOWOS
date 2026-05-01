@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { InfoBadge } from "@/components/ui/info-badge";
+import { BusinessAddressAutocomplete } from "@/components/ui/business-address-autocomplete";
+import { getStoredBusinessId } from "@/lib/workspace";
 import { FormState, ValidationErrors } from "./use-business-settings";
 
 const TIMEZONES = [
@@ -178,18 +180,22 @@ export function BasicInfoTab({ form, setField, logoUrl, validationErrors = {} }:
         </label>
       </div>
 
-      <label className="block text-xs text-muted-foreground">
+      <div className="block text-xs text-muted-foreground">
         <div className="flex items-center gap-1 mb-1">
           <MapPin className="h-3 w-3" />
           Business Address
         </div>
-        <textarea
-          className="w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm min-h-[80px] resize-none"
+        <BusinessAddressAutocomplete
+          businessId={getStoredBusinessId()}
           value={form.address}
-          onChange={(e) => setField("address", e.target.value)}
+          onChange={(v) => setField("address", v)}
+          onSelect={(place) => setField("address", place.formattedAddress)}
           placeholder="123 Main Street, Port of Spain, Trinidad"
+          multiline
+          rows={3}
+          hint="Powered by Google Places when a Maps API key is configured."
         />
-      </label>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <label className="block text-xs text-muted-foreground">

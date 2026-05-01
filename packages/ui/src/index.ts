@@ -12,4 +12,5 @@ export * from "./components/dialog";
 export * from "./components/drawer";
 export * from "./components/toast";
 export * from "./components/layout";
+export * from "./components/address-autocomplete";
 export * from "./lib/utils";

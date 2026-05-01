@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -650,6 +651,62 @@ export default function KeyFlowConnectPage() {
             {googleConnectedCount > 0 ? "Re-authorize Google" : "Connect Google account"}
           </Button>
         </div>
+      </motion.div>
+
+      {/* Quick links to first-class screens */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="grid grid-cols-2 md:grid-cols-4 gap-3"
+      >
+        {[
+          {
+            href: "/app/connect/forms",
+            icon: FileText,
+            title: "Forms",
+            desc: "Browse responses",
+            tone: "from-purple-500/15 to-blue-500/15 text-purple-200",
+          },
+          {
+            href: "/app/connect/contacts",
+            icon: Users,
+            title: "Contacts sync",
+            desc: "Pull Google People",
+            tone: "from-emerald-500/15 to-teal-500/15 text-emerald-200",
+          },
+          {
+            href: "/app/connect/business-profile",
+            icon: Building2,
+            title: "Business Profile",
+            desc: "Reviews & posts",
+            tone: "from-amber-500/15 to-orange-500/15 text-amber-200",
+          },
+          {
+            href: "/app/connect/maps",
+            icon: MapIcon,
+            title: "Maps",
+            desc: "API key & test",
+            tone: "from-cyan-500/15 to-blue-500/15 text-cyan-200",
+          },
+        ].map((tile) => {
+          const Icon = tile.icon;
+          return (
+            <Link
+              key={tile.href}
+              href={tile.href}
+              className={`rounded-2xl border border-border/40 p-3 bg-gradient-to-br ${tile.tone} hover:border-border/70 transition-all flex items-center gap-3 group`}
+            >
+              <div className="h-9 w-9 rounded-xl bg-background/40 border border-border/30 flex items-center justify-center shrink-0">
+                <Icon className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold truncate">{tile.title}</div>
+                <div className="text-[11px] text-muted-foreground truncate">{tile.desc}</div>
+              </div>
+              <ChevronRight className="h-3.5 w-3.5 opacity-50 group-hover:opacity-100 transition-opacity" />
+            </Link>
+          );
+        })}
       </motion.div>
 
       {GROUP_ORDER.map((group) => {
