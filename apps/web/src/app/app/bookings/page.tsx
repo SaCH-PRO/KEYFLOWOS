@@ -22,6 +22,7 @@ import {
   createBooking,
   rescheduleBooking,
   updateBookingNotes,
+  updateBookingLocation,
   fetchBookings,
   fetchServices,
   fetchStaff,
@@ -423,6 +424,25 @@ export default function BookingsPage() {
     }
   }
 
+  async function handleUpdateLocation(
+    bookingId: string,
+    input: {
+      location: string | null;
+      locationPlaceId: string | null;
+      locationLatLng: { lat: number; lng: number } | null;
+    },
+  ) {
+    if (!businessId) return;
+    const res = await updateBookingLocation(bookingId, input, businessId);
+    if (res.data) {
+      await loadData();
+      setSelectedBooking(res.data);
+      setBanner({ text: "Booking location updated.", type: "success" });
+    } else {
+      setBanner({ text: res.error ?? "Failed to update location.", type: "error" });
+    }
+  }
+
   const handleCalendarCreate = useCallback((prefill: { date: string; time?: string }) => {
     setPrefillDate(prefill.date);
     setPrefillTime(prefill.time);
@@ -741,6 +761,7 @@ export default function BookingsPage() {
             onSyncCalendar={handleSyncBooking}
             onReschedule={handleReschedule}
             onUpdateNotes={handleUpdateNotes}
+            onUpdateLocation={handleUpdateLocation}
             onCreateInvoice={handleCreateInvoice}
             calendarConnected={calendarConnected}
           />

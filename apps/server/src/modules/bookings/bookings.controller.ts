@@ -6,6 +6,7 @@ import { BookingOptimizerService } from './booking-optimizer.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { UpdateBookingDto } from './dto/update-booking.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicCreateBookingDto } from './dto/public-create-booking.dto';
 import { appUrl } from '../../core/config/runtime-urls';
@@ -63,6 +64,28 @@ export class BookingsController {
     @Body('notes') notes: string,
   ) {
     return this.bookings.updateBookingNotes(businessId, bookingId, notes);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/bookings/:bookingId')
+  async updateBooking(
+    @Param('businessId') businessId: string,
+    @Param('bookingId') bookingId: string,
+    @Body() body: UpdateBookingDto,
+  ) {
+    const updated = await this.bookings.updateBookingLocation(businessId, bookingId, {
+      location: body.location,
+      locationPlaceId: body.locationPlaceId,
+      locationLatLng: body.locationLatLng ?? null,
+    });
+
+    if (updated.calendarEventId) {
+      this.calendar
+        .syncBookingToCalendar(bookingId, businessId)
+        .catch(() => undefined);
+    }
+
+    return updated;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)

@@ -245,6 +245,52 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async updateBookingLocation(
+    businessId: string,
+    bookingId: string,
+    input: {
+      location?: string | null;
+      locationPlaceId?: string | null;
+      locationLatLng?: { lat: number; lng: number } | null;
+    },
+  ) {
+    const booking = await this.prisma.client.booking.findFirst({
+      where: { id: bookingId, businessId, deletedAt: null },
+    });
+    if (!booking) {
+      throw new BadRequestException('Booking not found');
+    }
+
+    const data: Prisma.BookingUncheckedUpdateInput = {};
+    if (input.location !== undefined) {
+      const trimmed = typeof input.location === 'string' ? input.location.trim() : '';
+      data.location = trimmed ? trimmed : null;
+      if (!trimmed) {
+        data.locationPlaceId = null;
+        data.locationLatLng = Prisma.JsonNull;
+      }
+    }
+    if (input.locationPlaceId !== undefined && data.locationPlaceId === undefined) {
+      data.locationPlaceId = input.locationPlaceId || null;
+    }
+    if (input.locationLatLng !== undefined && data.locationLatLng === undefined) {
+      data.locationLatLng = input.locationLatLng
+        ? (input.locationLatLng as unknown as Prisma.InputJsonValue)
+        : Prisma.JsonNull;
+    }
+
+    return this.prisma.client.booking.update({
+      where: { id: bookingId },
+      data,
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        service: { select: { id: true, name: true, duration: true, price: true, bufferMins: true, leadTimeMins: true } },
+        staff: { select: { id: true, name: true } },
+        invoice: { select: { id: true, invoiceNumber: true, status: true, total: true } },
+      },
+    });
+  }
+
   async rescheduleBooking(businessId: string, bookingId: string, newStartTime: Date) {
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
