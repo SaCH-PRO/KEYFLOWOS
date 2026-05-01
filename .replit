@@ -9,13 +9,7 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-NEXT_PUBLIC_API_BASE_URL = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev:3001"
 PORT = "3001"
-GMAIL_REDIRECT_URI = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev/api/commerce/gmail/callback"
-NEXT_PUBLIC_SITE_URL = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev"
-CALENDAR_REDIRECT_URI = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev:3001/bookings/calendar/callback"
-GOOGLE_REDIRECT_URI = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev/api/crm/google/callback"
-DRIVE_REDIRECT_URI = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev/api/drive/callback"
 
 [workflows]
 runButton = "Project"
