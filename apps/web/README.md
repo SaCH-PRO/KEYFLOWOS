@@ -20,6 +20,23 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Troubleshooting
+
+### Turbopack HMR error: `react/jsx-dev-runtime` "module factory is not available"
+
+If the dev console shows an error like:
+
+> Module `react/jsx-dev-runtime` was instantiated because it was required from module `theme-provider.tsx`, but the module factory is not available. It might have been deleted in an HMR update.
+
+Try the following, in order:
+
+1. Stop the dev server, remove the Turbopack cache, and restart:
+   ```bash
+   rm -rf apps/web/.next apps/web/node_modules/.cache
+   pnpm --filter web dev
+   ```
+2. If the error returns, confirm `next-themes` (and any provider library used in the root layout) is on a version whose `peerDependencies` include the React major you're running. With React 19 + Next 16 (Turbopack), `next-themes` must be `^0.4.x` or newer — older 0.3.x releases declare React 16-18 only and trigger this HMR failure.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
