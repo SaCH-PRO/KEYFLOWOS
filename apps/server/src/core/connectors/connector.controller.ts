@@ -109,10 +109,17 @@ export class ConnectorController {
     @Param('businessId') businessId: string,
     @Query('type') type?: string,
     @Query('limit') limit?: string,
+    @Query('since') since?: string,
   ) {
+    let sinceDate: Date | undefined;
+    if (since) {
+      const parsed = new Date(since);
+      if (!Number.isNaN(parsed.getTime())) sinceDate = parsed;
+    }
     return this.activity.list(businessId, {
       connectorType: type ? (type as ConnectorType) : undefined,
       limit: limit ? Number.parseInt(limit, 10) : undefined,
+      since: sinceDate,
     });
   }
 }

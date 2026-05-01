@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -292,6 +292,14 @@ export default function KeyFlowConnectPage() {
   const [activityOpen, setActivityOpen] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
+  const [activityLive, setActivityLive] = useState(false);
+  const [activityDegraded, setActivityDegraded] = useState(false);
+  const activityPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activityAbortRef = useRef<AbortController | null>(null);
+  const activityNewIdsRef = useRef<Set<string>>(new Set());
+  const activityLatestAtRef = useRef<string | null>(null);
+  const activityHighlightTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const [activityHighlightIds, setActivityHighlightIds] = useState<Set<string>>(new Set());
   const [confirm, setConfirm] = useState<{ open: boolean; message: string; action: () => void }>({
     open: false,
     message: "",
@@ -421,16 +429,146 @@ export default function KeyFlowConnectPage() {
     });
   };
 
-  const handleActivity = async (type: string) => {
+  const clearHighlightTimers = useCallback(() => {
+    for (const t of activityHighlightTimersRef.current) clearTimeout(t);
+    activityHighlightTimersRef.current.clear();
+  }, []);
+
+  const stopActivityPolling = useCallback(() => {
+    if (activityPollRef.current) {
+      clearInterval(activityPollRef.current);
+      activityPollRef.current = null;
+    }
+    if (activityAbortRef.current) {
+      activityAbortRef.current.abort();
+      activityAbortRef.current = null;
+    }
+    clearHighlightTimers();
+    setActivityLive(false);
+    setActivityDegraded(false);
+  }, [clearHighlightTimers]);
+
+  const closeActivity = useCallback(() => {
+    stopActivityPolling();
+    setActivityOpen(null);
+    setActivityLog([]);
+    setActivityHighlightIds(new Set());
+    activityNewIdsRef.current = new Set();
+    activityLatestAtRef.current = null;
+  }, [stopActivityPolling]);
+
+  const handleActivity = (type: string) => {
     if (!businessId) return;
+    stopActivityPolling();
     setActivityOpen(type);
+    setActivityLog([]);
+    setActivityHighlightIds(new Set());
+    activityNewIdsRef.current = new Set();
+    activityLatestAtRef.current = null;
     setActivityLoading(true);
-    const res = await apiGet<ActivityEntry[]>(
-      `/connectors/businesses/${businessId}/activity?type=${type}&limit=25`,
-    );
-    if (res.data) setActivityLog(res.data);
-    setActivityLoading(false);
+    setActivityDegraded(false);
   };
+
+  // Polling effect: while activity modal is open, fetch the latest entries
+  // every ~3s and merge in any new ones (deduped by id) without disturbing
+  // scroll position. Cleans up on close, type change, and unmount.
+  useEffect(() => {
+    if (!activityOpen || !businessId) return;
+    const type = activityOpen;
+    let cancelled = false;
+
+    let inFlight = false;
+    let consecutiveFailures = 0;
+
+    const fetchOnce = async (initial: boolean) => {
+      if (cancelled) return;
+      // Skip overlapping ticks rather than canceling the in-flight request —
+      // on slow networks aborting every prior poll can starve the UI of
+      // updates. Initial open always runs.
+      if (!initial && inFlight) return;
+      inFlight = true;
+      const controller = new AbortController();
+      activityAbortRef.current = controller;
+      // For incremental polls, only ask for entries at-or-after the latest
+      // createdAt we've already shown (server uses `gte`, we de-dupe by id).
+      // The initial request fetches the last 25.
+      const sinceParam =
+        !initial && activityLatestAtRef.current
+          ? `&since=${encodeURIComponent(activityLatestAtRef.current)}`
+          : "";
+      const res = await apiGet<ActivityEntry[]>(
+        `/connectors/businesses/${businessId}/activity?type=${type}&limit=25${sinceParam}`,
+        { signal: controller.signal },
+      ).finally(() => {
+        inFlight = false;
+      });
+      if (cancelled) return;
+      if (res.error) {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 2) setActivityDegraded(true);
+        if (initial) setActivityLoading(false);
+        return;
+      }
+      consecutiveFailures = 0;
+      setActivityDegraded(false);
+      if (res.data) {
+        const incoming = res.data;
+        if (initial) {
+          setActivityLog(incoming);
+          if (incoming.length > 0) {
+            activityLatestAtRef.current = incoming[0].createdAt;
+          }
+        } else if (incoming.length > 0) {
+          setActivityLog((prev) => {
+            const seen = new Set(prev.map((r) => r.id));
+            const fresh = incoming.filter((r) => !seen.has(r.id));
+            if (fresh.length === 0) return prev;
+            const newIds = fresh.map((r) => r.id);
+            activityNewIdsRef.current = new Set([
+              ...activityNewIdsRef.current,
+              ...newIds,
+            ]);
+            setActivityHighlightIds(new Set(activityNewIdsRef.current));
+            // Clear highlight after a short window — track the timer so we
+            // can cancel it if the modal closes / unmounts in the meantime.
+            const timer = setTimeout(() => {
+              activityHighlightTimersRef.current.delete(timer);
+              for (const id of newIds) activityNewIdsRef.current.delete(id);
+              setActivityHighlightIds(new Set(activityNewIdsRef.current));
+            }, 3000);
+            activityHighlightTimersRef.current.add(timer);
+            // Merge & re-sort by createdAt desc, cap at 25
+            const merged = [...fresh, ...prev]
+              .sort(
+                (a, b) =>
+                  new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+              )
+              .slice(0, 25);
+            activityLatestAtRef.current = merged[0]?.createdAt ?? activityLatestAtRef.current;
+            return merged;
+          });
+        }
+      }
+      if (initial) setActivityLoading(false);
+    };
+
+    setActivityLive(true);
+    void fetchOnce(true);
+    activityPollRef.current = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void fetchOnce(false);
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      stopActivityPolling();
+    };
+  }, [activityOpen, businessId, stopActivityPolling]);
+
+  // Belt-and-suspenders: stop polling if the component unmounts.
+  useEffect(() => {
+    return () => stopActivityPolling();
+  }, [stopActivityPolling]);
 
   const grouped = entries.reduce<Record<ConnectorGroup, DashboardEntry[]>>(
     (acc, e) => {
@@ -559,7 +697,7 @@ export default function KeyFlowConnectPage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center p-4"
-            onClick={() => setActivityOpen(null)}
+            onClick={closeActivity}
           >
             <motion.div
               initial={{ y: 20, opacity: 0 }}
@@ -572,9 +710,34 @@ export default function KeyFlowConnectPage() {
                 <div className="flex items-center gap-2">
                   <Activity className="h-4 w-4" />
                   <h3 className="text-sm font-semibold">Activity log — {activityOpen}</h3>
+                  {activityLive && !activityLoading && (
+                    activityDegraded ? (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30"
+                        title="Live refresh failed — retrying"
+                      >
+                        <span className="relative inline-flex h-1.5 w-1.5">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75 animate-ping" />
+                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-400" />
+                        </span>
+                        Reconnecting
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                        title="Refreshing every few seconds"
+                      >
+                        <span className="relative inline-flex h-1.5 w-1.5">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                        </span>
+                        Live
+                      </span>
+                    )
+                  )}
                 </div>
                 <button
-                  onClick={() => setActivityOpen(null)}
+                  onClick={closeActivity}
                   className="text-muted-foreground hover:text-foreground text-sm"
                 >
                   Close
@@ -593,9 +756,19 @@ export default function KeyFlowConnectPage() {
                   </div>
                 ) : (
                   activityLog.map((row) => (
-                    <div
+                    <motion.div
                       key={row.id}
-                      className="text-xs p-3 rounded-lg border border-border/30 bg-muted/10"
+                      initial={
+                        activityHighlightIds.has(row.id)
+                          ? { opacity: 0, y: -6 }
+                          : false
+                      }
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`text-xs p-3 rounded-lg border transition-colors ${
+                        activityHighlightIds.has(row.id)
+                          ? "border-emerald-500/40 bg-emerald-500/10"
+                          : "border-border/30 bg-muted/10"
+                      }`}
                     >
                       <div className="flex items-center justify-between mb-1">
                         <span
@@ -621,7 +794,7 @@ export default function KeyFlowConnectPage() {
                           {row.durationMs !== null && <span>{row.durationMs}ms</span>}
                         </div>
                       )}
-                    </div>
+                    </motion.div>
                   ))
                 )}
               </div>

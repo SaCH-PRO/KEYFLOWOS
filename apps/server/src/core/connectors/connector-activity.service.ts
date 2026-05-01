@@ -54,15 +54,22 @@ export class ConnectorActivityService {
 
   async list(
     businessId: string,
-    opts: { connectorType?: ConnectorType; limit?: number } = {},
+    opts: { connectorType?: ConnectorType; limit?: number; since?: Date } = {},
   ) {
     const limit = Math.min(opts.limit ?? 50, 200);
     return this.prisma.client.connectorActivityLog.findMany({
       where: {
         businessId,
         ...(opts.connectorType ? { connectorType: opts.connectorType } : {}),
+        // `>=` so entries that share the cursor's exact timestamp are still
+        // returned; the client de-dupes by id. Avoids missing same-timestamp
+        // events on a polling boundary.
+        ...(opts.since ? { createdAt: { gte: opts.since } } : {}),
       },
-      orderBy: { createdAt: 'desc' },
+      // Stable tie-breaker on id so high-volume bursts that share a
+      // millisecond-precision createdAt still order deterministically and
+      // can't be reordered between polls.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
     });
   }
