@@ -205,6 +205,9 @@ model Business {
   aiMemories           AiMemory[]
   aiPlans              AiPlan[]
 
+  // Keyflow Command notes (polymorphic notes attached to any module item)
+  keyflowNotes         KeyflowNote[]
+
   // Unified Communications Engine
   channelConnections   ChannelConnection[]
   outboundContent      OutboundContent[]
@@ -3851,6 +3854,33 @@ model AiApprovalItem {
   @@index([businessId, createdAt])
   @@index([planId])
   @@map("ai_approval_items")
+}
+
+model KeyflowNote {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Polymorphic target — any module item.
+  // Examples: "booking", "contact", "invoice", "project", "project_task",
+  // "contact_task", "autopilot_task", "campaign", "social_post", "expense",
+  // "document", "marketplace_listing", "community_post", "page" (free-form)
+  targetType String  @map("target_type")
+  targetId   String  @map("target_id")
+  targetLabel String? @map("target_label")
+
+  body       String  @default("")
+  aiBrief    String? @map("ai_brief")
+  authorId   String? @map("author_id")
+
+  pinned     Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, targetType, targetId])
+  @@index([businessId, updatedAt])
+  @@map("keyflow_notes")
 }
 
 model AiMemory {

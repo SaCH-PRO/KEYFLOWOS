@@ -74,6 +74,56 @@ export interface FlowStreamChunk {
   error?: string;
 }
 
+/**
+ * Optional context the caller can attach to a chat turn so the AI brain
+ * knows where the user is in the app and what they are looking at.
+ * The Keyflow Command surface attaches the current page route, the focused
+ * item (e.g. a contact, invoice, booking) and recent activity hints.
+ */
+export interface FlowPageContext {
+  surface?: string;
+  route?: string;
+  focusedItem?: {
+    type?: string;
+    id?: string;
+    label?: string;
+    summary?: string;
+  };
+  recent?: Array<{ label: string; href?: string; at?: string }>;
+  notes?: Array<{ title?: string; body: string }>;
+  hints?: string[];
+}
+
+function formatPageContextSection(ctx?: FlowPageContext): string {
+  if (!ctx) return '';
+  const lines: string[] = ['', '## Where the operator is right now'];
+  if (ctx.surface) lines.push(`Active surface: ${ctx.surface}`);
+  if (ctx.route) lines.push(`Route: ${ctx.route}`);
+  if (ctx.focusedItem) {
+    const fi = ctx.focusedItem;
+    lines.push(`Focused item: ${fi.type ?? 'item'}${fi.id ? ` #${fi.id}` : ''}${fi.label ? ` — ${fi.label}` : ''}`);
+    if (fi.summary) lines.push(`Focused summary: ${fi.summary}`);
+  }
+  if (ctx.recent?.length) {
+    lines.push('Recent items:');
+    for (const r of ctx.recent.slice(0, 8)) {
+      lines.push(`- ${r.label}${r.href ? ` (${r.href})` : ''}`);
+    }
+  }
+  if (ctx.notes?.length) {
+    lines.push('Open Keyflow notes:');
+    for (const n of ctx.notes.slice(0, 5)) {
+      const head = n.title ? `${n.title}: ` : '';
+      lines.push(`- ${head}${n.body.slice(0, 200)}`);
+    }
+  }
+  if (ctx.hints?.length) {
+    lines.push('Operator hints:');
+    for (const h of ctx.hints.slice(0, 6)) lines.push(`- ${h}`);
+  }
+  return '\n' + lines.join('\n');
+}
+
 const FLOW_SYSTEM_PROMPT = `You are Flow, an AI assistant built into KeyFlowOS — a business operating system for Caribbean entrepreneurs. You have full access to the user's business data and can take real actions on their behalf.
 
 You have 4 tool families at your disposal:
@@ -142,6 +192,7 @@ export class FlowOrchestratorService {
     message: string,
     conversationHistory: FlowMessage[] = [],
     pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, any> },
+    pageContext?: FlowPageContext,
   ): Promise<FlowResponse> {
     this.aiUsage.checkRateLimit(businessId);
 
@@ -158,10 +209,11 @@ export class FlowOrchestratorService {
 
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
+    const pageContextSection = formatPageContextSection(pageContext);
 
     const systemPrompt = FLOW_SYSTEM_PROMPT
       .replace('{{CURRENT_DATE}}', new Date().toISOString())
-      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection);
+      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + pageContextSection);
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -410,6 +462,7 @@ export class FlowOrchestratorService {
     businessId: string,
     message: string,
     conversationHistory: FlowMessage[] = [],
+    pageContext?: FlowPageContext,
   ): AsyncGenerator<FlowStreamChunk> {
     try {
       this.aiUsage.checkRateLimit(businessId);
@@ -431,10 +484,11 @@ export class FlowOrchestratorService {
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
+    const pageContextSection = formatPageContextSection(pageContext);
 
     const systemPrompt = FLOW_SYSTEM_PROMPT
       .replace('{{CURRENT_DATE}}', new Date().toISOString())
-      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection);
+      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + pageContextSection);
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -1866,6 +1920,220 @@ export class FlowOrchestratorService {
         }
 
         throw new Error(`Unsupported entity type: ${entityType}`);
+      }
+
+      // ----------------------------------------------------------------
+      //  PROJECTS
+      // ----------------------------------------------------------------
+      case 'projects_list': {
+        const limit = args.limit ?? 25;
+        const where: any = { businessId, deletedAt: null };
+        if (args.status) where.status = args.status;
+        const projects = await this.prisma.client.project.findMany({
+          where,
+          include: { _count: { select: { tasks: { where: { deletedAt: null } } } } },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+        });
+        return {
+          projects: projects.map((p) => ({
+            id: p.id,
+            name: p.name,
+            status: p.status,
+            priority: (p as any).priority ?? null,
+            dueDate: p.dueDate?.toISOString() ?? null,
+            taskCount: (p as any)._count?.tasks ?? 0,
+          })),
+        };
+      }
+
+      case 'projects_list_tasks': {
+        const where: any = { businessId, deletedAt: null };
+        if (args.projectId) where.projectId = args.projectId;
+        if (args.onlyOpen) where.isCompleted = false;
+        const tasks = await this.prisma.client.projectTask.findMany({
+          where,
+          include: { project: { select: { id: true, name: true } } },
+          orderBy: [{ isCompleted: 'asc' }, { dueDate: 'asc' }],
+          take: 100,
+        });
+        return { tasks };
+      }
+
+      case 'projects_create_task': {
+        const project = await this.prisma.client.project.findFirst({
+          where: { id: args.projectId, businessId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!project) throw new Error('Project not found');
+        const task = await this.prisma.client.projectTask.create({
+          data: {
+            businessId,
+            projectId: args.projectId,
+            title: args.title,
+            dueDate: args.dueDate ? new Date(args.dueDate) : null,
+            priority: args.priority ?? 'NORMAL',
+          },
+        });
+        return { task };
+      }
+
+      case 'projects_complete_task': {
+        const existing = await this.prisma.client.projectTask.findFirst({
+          where: { id: args.taskId, businessId, deletedAt: null },
+        });
+        if (!existing) throw new Error('Task not found');
+        const task = await this.prisma.client.projectTask.update({
+          where: { id: args.taskId },
+          data: { isCompleted: true },
+        });
+        return { task };
+      }
+
+      // ----------------------------------------------------------------
+      //  EXPENSES
+      // ----------------------------------------------------------------
+      case 'expenses_list': {
+        const sinceDays = args.sinceDays ?? 30;
+        const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
+        const expenses = await this.prisma.client.expense.findMany({
+          where: { businessId, deletedAt: null, date: { gte: since } },
+          orderBy: { date: 'desc' },
+          take: args.limit ?? 25,
+        });
+        return { expenses };
+      }
+
+      case 'expenses_create': {
+        const expense = await this.prisma.client.expense.create({
+          data: {
+            businessId,
+            amount: args.amount,
+            description: args.description,
+            date: args.date ? new Date(args.date) : new Date(),
+            vendor: args.vendor ?? null,
+          } as any,
+        });
+        return { expense };
+      }
+
+      // ----------------------------------------------------------------
+      //  DOCUMENTS
+      // ----------------------------------------------------------------
+      case 'documents_list': {
+        const where: any = { businessId };
+        if (args.status) where.status = args.status;
+        const documents = await this.prisma.client.documentInstance.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          take: args.limit ?? 25,
+          select: { id: true, title: true, status: true, createdAt: true, updatedAt: true },
+        });
+        return { documents };
+      }
+
+      case 'documents_search': {
+        const query = String(args.query ?? '').trim();
+        if (!query) return { documents: [] };
+        const documents = await this.prisma.client.documentInstance.findMany({
+          where: { businessId, title: { contains: query, mode: 'insensitive' } },
+          orderBy: { updatedAt: 'desc' },
+          take: 20,
+          select: { id: true, title: true, status: true, updatedAt: true },
+        });
+        return { documents };
+      }
+
+      // ----------------------------------------------------------------
+      //  COMMUNITY
+      // ----------------------------------------------------------------
+      case 'community_list_posts': {
+        const posts = await this.prisma.client.communityPost.findMany({
+          where: { deletedAt: null } as any,
+          orderBy: { createdAt: 'desc' },
+          take: args.limit ?? 20,
+          select: {
+            id: true,
+            title: true,
+            content: true,
+            type: true,
+            tags: true,
+            likes: true,
+            createdAt: true,
+            businessId: true,
+          } as any,
+        });
+        return { posts };
+      }
+
+      // ----------------------------------------------------------------
+      //  MARKETPLACE
+      // ----------------------------------------------------------------
+      case 'marketplace_list_listings': {
+        const where: any = { businessId };
+        if (args.status) where.status = args.status;
+        const listings = await this.prisma.client.marketplaceListing.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          take: args.limit ?? 25,
+        });
+        return { listings };
+      }
+
+      case 'marketplace_list_orders': {
+        const orders = await this.prisma.client.marketplaceOrder.findMany({
+          where: { businessId } as any,
+          orderBy: { createdAt: 'desc' },
+          take: args.limit ?? 25,
+        });
+        return { orders };
+      }
+
+      // ----------------------------------------------------------------
+      //  STORE
+      // ----------------------------------------------------------------
+      case 'store_list_products': {
+        const products = await this.prisma.client.product.findMany({
+          where: { businessId, deletedAt: null } as any,
+          orderBy: { createdAt: 'desc' },
+          take: args.limit ?? 25,
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            currency: true,
+            category: true,
+            isActive: true,
+          } as any,
+        });
+        return { products };
+      }
+
+      case 'store_list_recent_orders': {
+        const orders = await this.prisma.client.invoice.findMany({
+          where: { businessId, deletedAt: null, status: 'PAID' },
+          orderBy: { paidAt: 'desc' },
+          take: args.limit ?? 25,
+          include: { contact: { select: { id: true, firstName: true, lastName: true } } },
+        });
+        return { orders };
+      }
+
+      // ----------------------------------------------------------------
+      //  KEYFLOW NOTES — universal note tool
+      // ----------------------------------------------------------------
+      case 'keyflow_create_note': {
+        const note = await this.prisma.client.keyflowNote.create({
+          data: {
+            businessId,
+            targetType: args.targetType,
+            targetId: args.targetId,
+            targetLabel: args.targetLabel ?? null,
+            body: args.body ?? '',
+            pinned: args.pinned ?? false,
+          },
+        });
+        return { note };
       }
 
       default:

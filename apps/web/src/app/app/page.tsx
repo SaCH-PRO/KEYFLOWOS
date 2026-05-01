@@ -8,7 +8,7 @@ export default function CommandPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/app/control-tower");
+    router.replace("/app/keyflow-command");
   }, [router]);
 
   return <ListPageSkeleton />;

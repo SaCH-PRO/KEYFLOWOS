@@ -3916,10 +3916,11 @@ export async function sendFlowChat(
     toolName?: string;
     toolArgs?: Record<string, any>;
   },
+  pageContext?: Record<string, any>,
 ): Promise<ApiResult<FlowChatResponse>> {
   return apiPost<FlowChatResponse>({
     path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/chat`,
-    body: { message, history, pendingConfirmation },
+    body: { message, history, pendingConfirmation, pageContext },
   });
 }
 
@@ -7808,3 +7809,170 @@ export async function quoteFromConversation(businessId: string, conversationText
 }
 
 export { DEFAULT_BUSINESS_ID };
+
+// ================================================================
+// KEYFLOW COMMAND
+// ================================================================
+
+export type KeyflowEventKind =
+  | 'booking'
+  | 'contact_task'
+  | 'project_task'
+  | 'autopilot_task'
+  | 'project_deadline'
+  | 'google_event';
+
+export interface KeyflowEvent {
+  id: string;
+  kind: KeyflowEventKind;
+  title: string;
+  description?: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  status?: string;
+  priority?: string;
+  href?: string;
+  refType?: string;
+  refId?: string;
+  meta?: Record<string, any>;
+  color?: string;
+  source?: string;
+}
+
+export interface KeyflowNote {
+  id: string;
+  businessId: string;
+  targetType: string;
+  targetId: string;
+  targetLabel?: string | null;
+  body: string;
+  aiBrief?: string | null;
+  authorId?: string | null;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchKeyflowEvents(
+  businessId: string,
+  opts?: { timeMin?: string; timeMax?: string; signal?: AbortSignal },
+): Promise<ApiResult<{ events: KeyflowEvent[]; range: { timeMin: string; timeMax: string } }>> {
+  const params = new URLSearchParams();
+  if (opts?.timeMin) params.set('timeMin', opts.timeMin);
+  if (opts?.timeMax) params.set('timeMax', opts.timeMax);
+  const qs = params.toString();
+  const path = `/keyflow/businesses/${encodeURIComponent(businessId)}/events${qs ? `?${qs}` : ''}`;
+  const url = `${API_BASE}${path}`;
+  try {
+    const res = await fetch(url, { headers: getAuthHeaders(), cache: 'no-store', signal: opts?.signal });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { data: null, error: data?.message || 'Failed to load events' };
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: (err as Error).message };
+  }
+}
+
+export async function fetchKeyflowNotes(
+  businessId: string,
+  targetType?: string,
+  targetId?: string,
+): Promise<ApiResult<{ items: KeyflowNote[] }>> {
+  const params = new URLSearchParams();
+  if (targetType) params.set('targetType', targetType);
+  if (targetId) params.set('targetId', targetId);
+  const qs = params.toString();
+  return apiGetSimple<{ items: KeyflowNote[] }>(
+    `/keyflow/businesses/${encodeURIComponent(businessId)}/notes${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function createKeyflowNote(
+  businessId: string,
+  payload: { targetType: string; targetId: string; targetLabel?: string | null; body?: string; pinned?: boolean },
+): Promise<ApiResult<KeyflowNote>> {
+  return apiPost<KeyflowNote>({
+    path: `/keyflow/businesses/${encodeURIComponent(businessId)}/notes`,
+    body: payload,
+  });
+}
+
+export async function updateKeyflowNote(
+  businessId: string,
+  noteId: string,
+  patch: { body?: string; pinned?: boolean; targetLabel?: string | null },
+): Promise<ApiResult<KeyflowNote>> {
+  return apiPut<KeyflowNote>({
+    path: `/keyflow/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`,
+    body: patch,
+  });
+}
+
+export async function deleteKeyflowNote(
+  businessId: string,
+  noteId: string,
+): Promise<ApiResult<{ success: boolean }>> {
+  return apiDelete<{ success: boolean }>(
+    `/keyflow/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`,
+  );
+}
+
+export async function generateKeyflowNoteBrief(
+  businessId: string,
+  noteId: string,
+): Promise<ApiResult<KeyflowNote>> {
+  return apiPostSimple<KeyflowNote>(
+    `/keyflow/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}/brief`,
+    {},
+  );
+}
+
+export async function synthesizeKeyflowSpeech(
+  businessId: string,
+  text: string,
+  voice: string = 'alloy',
+): Promise<{ blob: Blob | null; error: string | null }> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/keyflow/businesses/${encodeURIComponent(businessId)}/voice/tts`,
+      {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice, format: 'mp3' }),
+      },
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      return { blob: null, error: err?.message || 'TTS failed' };
+    }
+    const blob = await res.blob();
+    return { blob, error: null };
+  } catch (err) {
+    return { blob: null, error: (err as Error).message };
+  }
+}
+
+export async function transcribeKeyflowSpeech(
+  businessId: string,
+  audio: Blob,
+  filename: string = 'utterance.webm',
+): Promise<ApiResult<{ text: string }>> {
+  try {
+    const fd = new FormData();
+    fd.append('audio', audio, filename);
+    const res = await fetch(
+      `${API_BASE}/keyflow/businesses/${encodeURIComponent(businessId)}/voice/transcribe`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: fd,
+      },
+    );
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { data: null, error: data?.message || 'STT failed' };
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: (err as Error).message };
+  }
+}
