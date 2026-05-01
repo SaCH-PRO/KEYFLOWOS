@@ -265,6 +265,43 @@ export class CommunityController {
     return this.matching.getMatchAnalytics(businessId);
   }
 
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/intro-draft')
+  draftIntroMessage(
+    @Param('businessId') businessId: string,
+    @Body() body: { toBusinessId: string; context?: string; goal?: 'introduce' | 'collaborate' | 'quote' | 'referral' },
+  ) {
+    return this.matching.draftIntroMessage(businessId, body.toBusinessId, {
+      context: body.context,
+      goal: body.goal,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/need-matches')
+  matchProvidersForNeed(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      title?: string;
+      description: string;
+      budgetMin?: number;
+      budgetMax?: number;
+      timeline?: string;
+      projectType?: string;
+      categoryHint?: string;
+      limit?: number;
+    },
+  ) {
+    const { limit, ...need } = body;
+    return this.matching.matchProvidersForNeed(businessId, need, limit ?? 5);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/relationship-insights')
+  getRelationshipInsights(@Param('businessId') businessId: string) {
+    return this.matching.getRelationshipInsights(businessId);
+  }
+
   // ==========================================
   // QUOTE REQUESTS
   // ==========================================

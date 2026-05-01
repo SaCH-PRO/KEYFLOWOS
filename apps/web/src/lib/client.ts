@@ -5469,6 +5469,53 @@ export async function fetchBusinessRecommendations(businessId: string, refresh =
   const q = refresh ? '?refresh=true' : '';
   return apiGetSimple<BusinessRecommendation[]>(`/businesses/${encodeURIComponent(businessId)}/community/recommendations${q}`);
 }
+
+export interface AiIntroDraft {
+  draft: string;
+  tone: string;
+  suggestedFollowUp?: string;
+}
+export async function draftAiIntroMessage(
+  businessId: string,
+  toBusinessId: string,
+  options?: { context?: string; goal?: 'introduce' | 'collaborate' | 'quote' | 'referral' },
+): Promise<ApiResult<AiIntroDraft>> {
+  return apiPost<AiIntroDraft>({
+    path: `/businesses/${encodeURIComponent(businessId)}/community/intro-draft`,
+    body: { toBusinessId, ...(options || {}) },
+  });
+}
+
+export interface NeedMatchProvider extends BusinessRecommendation {
+  relevanceReason: string;
+}
+export async function fetchProvidersForNeed(
+  businessId: string,
+  need: { title?: string; description: string; budgetMin?: number; budgetMax?: number; timeline?: string; projectType?: string; categoryHint?: string; limit?: number },
+): Promise<ApiResult<NeedMatchProvider[]>> {
+  return apiPost<NeedMatchProvider[]>({
+    path: `/businesses/${encodeURIComponent(businessId)}/community/need-matches`,
+    body: need,
+  });
+}
+
+export interface RelationshipInsightItem {
+  businessId: string;
+  name: string;
+  logoUrl?: string | null;
+  headline?: string | null;
+  industry?: string | null;
+  lastInteractionAt?: string | null;
+  reason: string;
+  suggestedAction: 'reconnect' | 'collaborate' | 'review' | 'follow_up';
+}
+export interface RelationshipInsights {
+  underutilized: RelationshipInsightItem[];
+  suggestions: string[];
+}
+export async function fetchRelationshipInsights(businessId: string): Promise<ApiResult<RelationshipInsights>> {
+  return apiGetSimple<RelationshipInsights>(`/businesses/${encodeURIComponent(businessId)}/community/relationship-insights`);
+}
 export async function fetchTrustSignals(businessId: string): Promise<ApiResult<TrustSignals>> {
   return apiGetSimple<TrustSignals>(`/community/trust-signals/${encodeURIComponent(businessId)}`);
 }

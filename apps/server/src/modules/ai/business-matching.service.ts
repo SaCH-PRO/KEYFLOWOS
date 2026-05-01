@@ -461,4 +461,446 @@ export class BusinessMatchingService {
 
     return matches.map((m) => m.reasons.join('. '));
   }
+
+  // ==========================================
+  // SMART INTRO MESSAGE DRAFTING
+  // ==========================================
+
+  async draftIntroMessage(
+    fromBusinessId: string,
+    toBusinessId: string,
+    options?: { context?: string; goal?: 'introduce' | 'collaborate' | 'quote' | 'referral' },
+  ): Promise<{ draft: string; tone: string; suggestedFollowUp?: string }> {
+    if (fromBusinessId === toBusinessId) {
+      return { draft: '', tone: 'neutral' };
+    }
+    const goal = options?.goal ?? 'introduce';
+
+    const [from, to] = await Promise.all([
+      this.prisma.client.business.findUnique({
+        where: { id: fromBusinessId },
+        select: {
+          id: true, name: true, industry: true, skills: true, headline: true,
+          tagline: true, businessStage: true, city: true, country: true,
+          preferredProjectTypes: true, positioningStatement: true,
+        },
+      }),
+      this.prisma.client.business.findUnique({
+        where: { id: toBusinessId },
+        select: {
+          id: true, name: true, industry: true, skills: true, headline: true,
+          tagline: true, businessStage: true, city: true, country: true,
+          preferredProjectTypes: true, positioningStatement: true,
+          acceptingWork: true, currentCapacity: true,
+        },
+      }),
+    ]);
+
+    if (!from || !to) {
+      throw new Error('Business not found');
+    }
+
+    let priorInteractions = 0;
+    try {
+      priorInteractions = await this.prisma.client.businessMessage.count({
+        where: {
+          OR: [
+            { fromBusinessId, toBusinessId },
+            { fromBusinessId: toBusinessId, toBusinessId: fromBusinessId },
+          ],
+        },
+      });
+    } catch {}
+
+    const sourceSkills = new Set(from.skills.map((s) => s.toLowerCase()));
+    const sharedSkills = to.skills.filter((s) => sourceSkills.has(s.toLowerCase())).slice(0, 3);
+    const complementarySkills = to.skills.filter((s) => !sourceSkills.has(s.toLowerCase())).slice(0, 3);
+    const sameIndustry = from.industry && to.industry && from.industry.toLowerCase() === to.industry.toLowerCase();
+    const sameCity = from.city && to.city && from.city.toLowerCase() === to.city.toLowerCase();
+
+    const goalInstructions: Record<string, string> = {
+      introduce: 'a warm first-touch introduction to start a connection',
+      collaborate: 'a proposal to explore a collaboration or joint project',
+      quote: 'a request for pricing or a quote on services',
+      referral: 'a referral hand-off introducing a potential client',
+    };
+
+    const result = await this.aiUsage.callAi({
+      businessId: fromBusinessId,
+      feature: 'intro_draft',
+      model: 'gpt-4o-mini',
+      maxTokens: 500,
+      temperature: 0.7,
+      responseMode: 'structured_json',
+      messages: [
+        {
+          role: 'system',
+          content: `You draft short, authentic outreach messages for Caribbean entrepreneurs on a business networking platform. The tone is warm, professional, peer-to-peer (NEVER salesy or formal). Keep messages 2-4 sentences, personalised to the recipient, and end with a clear, low-pressure question or next step. Do NOT use placeholders like [Your Name] or generic openers. Return ONLY a JSON object: {"draft": string, "tone": "warm"|"professional"|"casual", "suggestedFollowUp"?: string}. No markdown.`,
+        },
+        {
+          role: 'user',
+          content:
+            `Sender: "${from.name}" — ${from.headline || from.tagline || 'No headline'} — Industry: ${from.industry || 'N/A'} — Skills: ${from.skills.slice(0, 5).join(', ') || 'N/A'}\n` +
+            `Recipient: "${to.name}" — ${to.headline || to.tagline || 'No headline'} — Industry: ${to.industry || 'N/A'} — Skills: ${to.skills.slice(0, 5).join(', ') || 'N/A'}\n` +
+            `Context: Goal is ${goalInstructions[goal]}.` +
+            (sharedSkills.length ? ` They share skills: ${sharedSkills.join(', ')}.` : '') +
+            (complementarySkills.length ? ` Recipient brings complementary skills: ${complementarySkills.join(', ')}.` : '') +
+            (sameIndustry ? ` Same industry.` : '') +
+            (sameCity ? ` Both based in ${from.city}.` : '') +
+            (priorInteractions > 0 ? ` They have ${priorInteractions} prior message(s) — reference reconnecting.` : ' This is a first-time introduction.') +
+            (options?.context ? `\nExtra context from sender: "${options.context.slice(0, 400)}"` : ''),
+        },
+      ],
+    });
+
+    try {
+      const cleaned = result.content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (typeof parsed?.draft === 'string' && parsed.draft.trim()) {
+        return {
+          draft: parsed.draft,
+          tone: typeof parsed.tone === 'string' ? parsed.tone : 'warm',
+          suggestedFollowUp: typeof parsed.suggestedFollowUp === 'string' ? parsed.suggestedFollowUp : undefined,
+        };
+      }
+    } catch {
+      this.logger.warn('Failed to parse intro draft response');
+    }
+
+    const fallback = `Hi ${to.name}, I'm ${from.name}${from.industry ? ` working in ${from.industry}` : ''}.` +
+      (sharedSkills.length ? ` Saw we share work in ${sharedSkills.join(', ')}.` : complementarySkills.length ? ` Your work in ${complementarySkills.join(', ')} caught my eye.` : '') +
+      ` Open to a quick chat?`;
+    return { draft: fallback, tone: 'warm' };
+  }
+
+  // ==========================================
+  // NEED -> PROVIDER MATCHING
+  // ==========================================
+
+  async matchProvidersForNeed(
+    businessId: string,
+    need: { title?: string; description: string; budgetMin?: number; budgetMax?: number; timeline?: string; projectType?: string; categoryHint?: string },
+    limit = 5,
+  ): Promise<Array<MatchResult & { business: BusinessProfile; relevanceReason: string }>> {
+    const text = `${need.title || ''} ${need.description || ''} ${need.projectType || ''} ${need.categoryHint || ''}`.toLowerCase();
+    if (!text.trim()) return [];
+
+    const tokens = Array.from(new Set(text
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((t) => t.length > 3)));
+
+    const orFilters: any[] = [];
+    for (const tok of tokens.slice(0, 12)) {
+      orFilters.push({ skills: { has: tok } });
+      orFilters.push({ industry: { contains: tok, mode: 'insensitive' } });
+      orFilters.push({ headline: { contains: tok, mode: 'insensitive' } });
+      orFilters.push({ bio: { contains: tok, mode: 'insensitive' } });
+      orFilters.push({ preferredProjectTypes: { has: tok } });
+    }
+
+    const candidates = await this.prisma.client.business.findMany({
+      where: {
+        id: { not: businessId },
+        deletedAt: null,
+        acceptingWork: true,
+        profileCompleteness: { gte: 20 },
+        ...(orFilters.length > 0 ? { OR: orFilters } : {}),
+      },
+      select: {
+        id: true, name: true, slug: true, logoUrl: true,
+        headline: true, bio: true, industry: true, skills: true,
+        businessStage: true, city: true, country: true, tagline: true,
+        acceptingWork: true, currentCapacity: true, leadTime: true,
+        preferredProjectTypes: true, budgetFit: true,
+        positioningStatement: true, profileCompleteness: true,
+        products: { where: { isActive: true }, select: { id: true, name: true, price: true, currency: true, category: true }, take: 3, orderBy: { createdAt: 'desc' } },
+        services: { select: { id: true, name: true, price: true }, take: 3, orderBy: { createdAt: 'desc' } },
+        _count: { select: { communityPosts: true, cohortMembers: true, networkConnectionsTo: true } },
+      },
+      take: 50,
+      orderBy: { profileCompleteness: 'desc' },
+    });
+
+    const scored = candidates.map((c) => {
+      let score = 0;
+      const reasons: string[] = [];
+      const skillsLower = c.skills.map((s) => s.toLowerCase());
+      const matchedSkills = tokens.filter((t) => skillsLower.includes(t));
+      if (matchedSkills.length > 0) {
+        score += matchedSkills.length * 12;
+        reasons.push(`Skills match: ${matchedSkills.slice(0, 3).join(', ')}`);
+      }
+      const projTypesLower = c.preferredProjectTypes.map((p) => p.toLowerCase());
+      const matchedProjects = tokens.filter((t) => projTypesLower.includes(t));
+      if (matchedProjects.length > 0) {
+        score += matchedProjects.length * 8;
+        reasons.push(`Works on: ${matchedProjects.slice(0, 2).join(', ')}`);
+      }
+      const haystack = `${c.headline || ''} ${c.bio || ''} ${c.industry || ''}`.toLowerCase();
+      const textHits = tokens.filter((t) => haystack.includes(t));
+      if (textHits.length > 0) {
+        score += Math.min(textHits.length * 3, 12);
+      }
+      if (c.acceptingWork) {
+        score += 5;
+        if (c.currentCapacity === 'OPEN') score += 4;
+      }
+      if (need.budgetMin || need.budgetMax) {
+        if (c.budgetFit) {
+          score += 4;
+          reasons.push(`Budget fit: ${c.budgetFit}`);
+        }
+      }
+      score += Math.min(Math.floor(c.profileCompleteness / 10), 5);
+      return { candidate: c, score, reasons };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    const top = scored.filter((s) => s.score > 0).slice(0, limit);
+
+    if (top.length === 0) return [];
+
+    let aiReasons: string[] = [];
+    try {
+      const summary = top.map((m, i) =>
+        `${i + 1}. "${m.candidate.name}" — Skills: ${m.candidate.skills.slice(0, 5).join(', ') || 'N/A'} — Industry: ${m.candidate.industry || 'N/A'}`
+      ).join('\n');
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'need_match',
+        model: 'gpt-4o-mini',
+        maxTokens: 500,
+        temperature: 0.5,
+        responseMode: 'structured_json',
+        messages: [
+          {
+            role: 'system',
+            content: `You write short relevance explanations for service-provider matches based on a stated need. Return ONLY a JSON array of strings (one per provider, in order). Each string is ONE sentence (≤22 words) explaining why the provider fits this specific need. No markdown.`,
+          },
+          {
+            role: 'user',
+            content: `Need: "${need.title || ''} — ${need.description.slice(0, 300)}"${need.budgetMin || need.budgetMax ? `\nBudget: ${need.budgetMin || '?'} – ${need.budgetMax || '?'}` : ''}${need.timeline ? `\nTimeline: ${need.timeline}` : ''}\n\nProviders:\n${summary}`,
+          },
+        ],
+      });
+      const cleaned = result.content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) aiReasons = parsed.map(String);
+    } catch (err) {
+      this.logger.warn(`AI relevance reason failed: ${(err as Error).message}`);
+    }
+
+    return top.map((m, i) => ({
+      businessId: m.candidate.id,
+      score: Math.round(m.score),
+      reasons: m.reasons,
+      explanation: aiReasons[i] || m.reasons.join('. '),
+      relevanceReason: aiReasons[i] || m.reasons.join('. '),
+      matchType: 'collaboration' as MatchResult['matchType'],
+      business: m.candidate as BusinessProfile,
+    }));
+  }
+
+  /**
+   * Triggered when a community post (QUESTION/OPPORTUNITY) is created.
+   * Notifies top-matched providers about a relevant post.
+   * Returns the matched provider IDs (used by caller for notifications).
+   */
+  async matchProvidersForPost(args: {
+    fromBusinessId: string;
+    postId: string;
+    title?: string;
+    content: string;
+    type?: string;
+    tags?: string[];
+  }, limit = 3): Promise<Array<{ businessId: string; score: number; explanation: string }>> {
+    const text = `${args.title || ''} ${args.content || ''} ${(args.tags || []).join(' ')}`.trim();
+    if (text.length < 10) return [];
+
+    const matches = await this.matchProvidersForNeed(args.fromBusinessId, {
+      title: args.title,
+      description: args.content,
+      categoryHint: (args.tags || []).join(' '),
+    }, limit);
+
+    return matches.map((m) => ({
+      businessId: m.businessId,
+      score: m.score,
+      explanation: m.explanation,
+    }));
+  }
+
+  // ==========================================
+  // RELATIONSHIP INSIGHTS
+  // ==========================================
+
+  async getRelationshipInsights(businessId: string): Promise<{
+    underutilized: Array<{
+      businessId: string;
+      name: string;
+      logoUrl?: string | null;
+      headline?: string | null;
+      industry?: string | null;
+      lastInteractionAt?: string | null;
+      reason: string;
+      suggestedAction: 'reconnect' | 'collaborate' | 'review' | 'follow_up';
+    }>;
+    suggestions: string[];
+  }> {
+    const cutoffMs = 60 * 24 * 60 * 60 * 1000; // 60 days
+    const cutoff = new Date(Date.now() - cutoffMs);
+
+    const [followingOut, followingIn, recentMessages] = await Promise.all([
+      this.prisma.client.networkConnection.findMany({
+        where: { fromBusinessId: businessId, type: 'FOLLOW' },
+        select: {
+          toBusinessId: true,
+          createdAt: true,
+          toBusiness: {
+            select: { id: true, name: true, logoUrl: true, headline: true, industry: true, acceptingWork: true, currentCapacity: true },
+          },
+        },
+        take: 100,
+      }),
+      this.prisma.client.networkConnection.findMany({
+        where: { toBusinessId: businessId, type: 'FOLLOW' },
+        select: {
+          fromBusinessId: true,
+          createdAt: true,
+          fromBusiness: {
+            select: { id: true, name: true, logoUrl: true, headline: true, industry: true, acceptingWork: true, currentCapacity: true },
+          },
+        },
+        take: 100,
+      }),
+      this.prisma.client.businessMessage.findMany({
+        where: {
+          OR: [
+            { fromBusinessId: businessId },
+            { toBusinessId: businessId },
+          ],
+        },
+        select: { fromBusinessId: true, toBusinessId: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      }),
+    ]);
+
+    const lastInteraction = new Map<string, Date>();
+    for (const m of recentMessages) {
+      const other = m.fromBusinessId === businessId ? m.toBusinessId : m.fromBusinessId;
+      const existing = lastInteraction.get(other);
+      if (!existing || m.createdAt > existing) lastInteraction.set(other, m.createdAt);
+    }
+
+    const candidates = new Map<string, {
+      businessId: string;
+      name: string;
+      logoUrl?: string | null;
+      headline?: string | null;
+      industry?: string | null;
+      acceptingWork?: boolean;
+      currentCapacity?: string | null;
+      connectedAt: Date;
+      lastInteractionAt: Date | null;
+      mutual: boolean;
+    }>();
+
+    const inFollowSet = new Set(followingIn.map((c) => c.fromBusinessId));
+
+    for (const c of followingOut) {
+      if (!c.toBusiness) continue;
+      candidates.set(c.toBusinessId, {
+        businessId: c.toBusinessId,
+        name: c.toBusiness.name,
+        logoUrl: c.toBusiness.logoUrl,
+        headline: c.toBusiness.headline,
+        industry: c.toBusiness.industry,
+        acceptingWork: c.toBusiness.acceptingWork,
+        currentCapacity: c.toBusiness.currentCapacity,
+        connectedAt: c.createdAt,
+        lastInteractionAt: lastInteraction.get(c.toBusinessId) || null,
+        mutual: inFollowSet.has(c.toBusinessId),
+      });
+    }
+    for (const c of followingIn) {
+      if (!c.fromBusiness) continue;
+      if (candidates.has(c.fromBusinessId)) continue;
+      candidates.set(c.fromBusinessId, {
+        businessId: c.fromBusinessId,
+        name: c.fromBusiness.name,
+        logoUrl: c.fromBusiness.logoUrl,
+        headline: c.fromBusiness.headline,
+        industry: c.fromBusiness.industry,
+        acceptingWork: c.fromBusiness.acceptingWork,
+        currentCapacity: c.fromBusiness.currentCapacity,
+        connectedAt: c.createdAt,
+        lastInteractionAt: lastInteraction.get(c.fromBusinessId) || null,
+        mutual: false,
+      });
+    }
+
+    const underutilized: Array<{
+      businessId: string;
+      name: string;
+      logoUrl?: string | null;
+      headline?: string | null;
+      industry?: string | null;
+      lastInteractionAt?: string | null;
+      reason: string;
+      suggestedAction: 'reconnect' | 'collaborate' | 'review' | 'follow_up';
+      _priority: number;
+    }> = [];
+
+    for (const c of candidates.values()) {
+      const hasInteraction = !!c.lastInteractionAt;
+      const isStale = !c.lastInteractionAt || c.lastInteractionAt < cutoff;
+      const isOldConnection = c.connectedAt < cutoff;
+
+      if (!hasInteraction && isOldConnection) {
+        underutilized.push({
+          businessId: c.businessId,
+          name: c.name,
+          logoUrl: c.logoUrl,
+          headline: c.headline,
+          industry: c.industry,
+          lastInteractionAt: null,
+          reason: c.mutual ? 'You both follow each other but have never connected directly' : 'Connected but never engaged',
+          suggestedAction: 'reconnect',
+          _priority: c.mutual ? 90 : 60,
+        });
+      } else if (hasInteraction && isStale) {
+        const days = Math.floor((Date.now() - c.lastInteractionAt!.getTime()) / 86400000);
+        underutilized.push({
+          businessId: c.businessId,
+          name: c.name,
+          logoUrl: c.logoUrl,
+          headline: c.headline,
+          industry: c.industry,
+          lastInteractionAt: c.lastInteractionAt!.toISOString(),
+          reason: `Last spoke ${days} days ago — worth a check-in`,
+          suggestedAction: 'follow_up',
+          _priority: 70 + (c.acceptingWork ? 10 : 0),
+        });
+      }
+    }
+
+    underutilized.sort((a, b) => b._priority - a._priority);
+    const top = underutilized.slice(0, 6).map(({ _priority, ...rest }) => rest);
+
+    const suggestions: string[] = [];
+    if (top.length === 0 && candidates.size === 0) {
+      suggestions.push('Start building your network — explore the directory and connect with peers.');
+    } else if (top.length === 0) {
+      suggestions.push('Your network is well-tended — keep the momentum going.');
+    } else {
+      const reconnectCount = top.filter((t) => t.suggestedAction === 'reconnect').length;
+      const followUpCount = top.filter((t) => t.suggestedAction === 'follow_up').length;
+      if (reconnectCount > 0) suggestions.push(`${reconnectCount} connection${reconnectCount > 1 ? 's' : ''} you've never engaged — try a quick intro.`);
+      if (followUpCount > 0) suggestions.push(`${followUpCount} relationship${followUpCount > 1 ? 's have' : ' has'} gone quiet — a check-in could re-open the door.`);
+    }
+
+    return { underutilized: top, suggestions };
+  }
 }

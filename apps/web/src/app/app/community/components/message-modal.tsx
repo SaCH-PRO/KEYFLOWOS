@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, MessageSquare, Send } from "lucide-react";
-import { fetchMessageThread, sendBusinessMessage, type BusinessMessageItem } from "@/lib/client";
+import { X, MessageSquare, Send, Sparkles, Loader2 } from "lucide-react";
+import { fetchMessageThread, sendBusinessMessage, draftAiIntroMessage, type BusinessMessageItem } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
 
 interface MessageModalProps {
@@ -31,7 +31,29 @@ export function MessageModal({ isOpen, onClose, businessId, otherBusinessId, oth
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+
+  const handleAiDraft = async () => {
+    if (drafting) return;
+    setDrafting(true);
+    setDraftError(null);
+    try {
+      const res = await draftAiIntroMessage(businessId, otherBusinessId, {
+        goal: messages.length === 0 ? 'introduce' : 'collaborate',
+        context: newMessage.trim() || undefined,
+      });
+      if (res.data?.draft) {
+        setNewMessage(res.data.draft);
+      } else {
+        setDraftError("Couldn't generate a draft right now");
+      }
+    } catch {
+      setDraftError("Couldn't generate a draft right now");
+    }
+    setDrafting(false);
+  };
 
   useEffect(() => {
     if (!isOpen || !businessId || !otherBusinessId) return;
@@ -142,7 +164,20 @@ export function MessageModal({ isOpen, onClose, businessId, otherBusinessId, oth
                 <div ref={endRef} />
               </div>
 
-              <div className="p-3 border-t border-border/30">
+              <div className="p-3 border-t border-border/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={handleAiDraft}
+                    disabled={drafting}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors disabled:opacity-50"
+                    title="Generate a personalised opener with AI"
+                  >
+                    {drafting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    {drafting ? "Drafting…" : (newMessage.trim() ? "Refine with AI" : "Draft with AI")}
+                  </button>
+                  {draftError && <span className="text-[10px] text-destructive">{draftError}</span>}
+                </div>
                 <div className="flex gap-2">
                   <input
                     value={newMessage}

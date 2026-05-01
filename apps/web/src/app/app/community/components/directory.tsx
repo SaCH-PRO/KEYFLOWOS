@@ -28,6 +28,8 @@ import {
   Award,
   ThumbsUp,
   XCircle,
+  Heart,
+  HeartHandshake,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -35,8 +37,10 @@ import {
   searchDirectory,
   fetchBusinessRecommendations,
   submitMatchFeedback,
+  fetchRelationshipInsights,
   type DirectoryBusiness,
   type BusinessRecommendation,
+  type RelationshipInsightItem,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { API_BASE } from "@/lib/api";
@@ -446,11 +450,24 @@ export function Directory({ onViewProfile }: DirectoryProps) {
   const [recsError, setRecsError] = useState(false);
   const [showRecs, setShowRecs] = useState(true);
   const [businessId, setBusinessId] = useState<string | null>(null);
+  const [insights, setInsights] = useState<{ underutilized: RelationshipInsightItem[]; suggestions: string[] } | null>(null);
+  const [showInsights, setShowInsights] = useState(true);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
   }, []);
+
+  useEffect(() => {
+    if (!businessId) return;
+    let active = true;
+    fetchRelationshipInsights(businessId)
+      .then((res) => {
+        if (active && res.data) setInsights(res.data);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [businessId]);
 
   const loadRecommendations = useCallback(async (refresh = false) => {
     if (!businessId) return;
@@ -609,6 +626,88 @@ export function Directory({ onViewProfile }: DirectoryProps) {
         >
           <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
           Show AI Recommendations ({recommendations.length})
+        </button>
+      )}
+
+      <AnimatePresence>
+        {showInsights && !hasActiveSearch && insights && insights.underutilized.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="kf-card rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-transparent to-[hsl(var(--kf-accent2))]/5 p-4 space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-emerald-500/15">
+                  <HeartHandshake className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold">Relationship Insights</h3>
+                  <p className="text-[10px] text-muted-foreground">Connections worth nurturing — based on your network activity</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowInsights(false)}
+                className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                title="Hide insights"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {insights.suggestions.length > 0 && (
+              <div className="text-[11px] text-muted-foreground italic border-l-2 border-emerald-400/40 pl-2">
+                {insights.suggestions[0]}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+              {insights.underutilized.slice(0, 6).map((item) => (
+                <button
+                  key={item.businessId}
+                  onClick={() => onViewProfile(item.businessId)}
+                  className="flex items-start gap-2 p-2.5 rounded-lg bg-background/40 hover:bg-background/80 border border-border/30 transition-colors text-left"
+                >
+                  <div className="w-8 h-8 shrink-0 rounded-lg bg-gradient-to-br from-emerald-400 to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden">
+                    {item.logoUrl ? (
+                      <img
+                        src={item.logoUrl.startsWith("http") ? item.logoUrl : `${API_BASE}${item.logoUrl}`}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      item.name.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-medium truncate">{item.name}</p>
+                      <span className={`text-[9px] px-1 py-px rounded font-medium ${
+                        item.suggestedAction === 'reconnect' ? 'bg-purple-500/15 text-purple-300' :
+                        item.suggestedAction === 'follow_up' ? 'bg-emerald-500/15 text-emerald-300' :
+                        'bg-amber-500/15 text-amber-300'
+                      }`}>
+                        {item.suggestedAction === 'reconnect' ? 'Reconnect' : item.suggestedAction === 'follow_up' ? 'Follow up' : 'Engage'}
+                      </span>
+                    </div>
+                    {item.headline && <p className="text-[10px] text-muted-foreground truncate">{item.headline}</p>}
+                    <p className="text-[10px] text-muted-foreground/80 mt-0.5 line-clamp-2">{item.reason}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {!showInsights && insights && insights.underutilized.length > 0 && !hasActiveSearch && (
+        <button
+          onClick={() => setShowInsights(true)}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+        >
+          <Heart className="w-3.5 h-3.5 text-emerald-400" />
+          Show Relationship Insights ({insights.underutilized.length})
         </button>
       )}
 

@@ -1049,6 +1049,12 @@ export default function PublicProfilePage() {
         onClose={() => setShowQuoteModal(false)}
         toBusinessName={profile.name}
         onSubmit={handleQuoteSubmit}
+        myBusinessId={myBusinessId ?? undefined}
+        toBusinessId={businessId}
+        onViewProvider={(providerId) => {
+          setShowQuoteModal(false);
+          router.push(`/app/community/profile/${providerId}`);
+        }}
       />
       <ReferralModal
         isOpen={showReferralModal}

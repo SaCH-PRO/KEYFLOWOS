@@ -94,6 +94,9 @@ const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
   draft_payment_reminder: 'content-generation',
   draft_storefront_copy: 'content-generation',
   draft_project_update: 'content-generation',
+  intro_draft: 'content-generation',
+  need_match: 'reasoning',
+  relationship_insights: 'reasoning',
 };
 
 @Injectable()

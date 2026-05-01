@@ -2,10 +2,11 @@
 
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Send, Loader2, MessageSquare, Handshake } from "lucide-react";
+import { X, Send, Loader2, MessageSquare, Handshake, Sparkles } from "lucide-react";
 import {
   sendDirectMessage,
   createCollabRequest,
+  draftAiIntroMessage,
 } from "@/lib/client";
 
 interface SendMessageModalProps {
@@ -23,6 +24,29 @@ export function SendMessageModal({ isOpen, onClose, businessId, targetBusiness, 
   const [collabType, setCollabType] = useState("COLLABORATION");
   const [sending, setSending] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  const handleAiDraft = useCallback(async () => {
+    if (!businessId || !targetBusiness || drafting) return;
+    setDrafting(true);
+    setDraftError(null);
+    try {
+      const goal: 'introduce' | 'collaborate' = mode === "collab" ? "collaborate" : "introduce";
+      const res = await draftAiIntroMessage(businessId, targetBusiness.id, {
+        goal,
+        context: content.trim() || (mode === "collab" ? collabTitle.trim() : "") || undefined,
+      });
+      if (res.data?.draft) {
+        setContent(res.data.draft);
+      } else {
+        setDraftError("Couldn't generate a draft");
+      }
+    } catch {
+      setDraftError("Couldn't generate a draft");
+    }
+    setDrafting(false);
+  }, [businessId, targetBusiness, mode, content, collabTitle, drafting]);
 
   const handleSend = useCallback(async () => {
     if (!businessId || !targetBusiness) return;
@@ -155,9 +179,21 @@ export function SendMessageModal({ isOpen, onClose, businessId, targetBusiness, 
                 </>
               )}
               <div>
-                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                  {mode === "message" ? "Message" : "Details (optional)"}
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-medium text-muted-foreground">
+                    {mode === "message" ? "Message" : "Details (optional)"}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleAiDraft}
+                    disabled={drafting}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors disabled:opacity-50"
+                    title="Generate a personalised opener with AI"
+                  >
+                    {drafting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    {drafting ? "Drafting…" : (content.trim() ? "Refine with AI" : "Draft with AI")}
+                  </button>
+                </div>
                 <textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
@@ -165,6 +201,7 @@ export function SendMessageModal({ isOpen, onClose, businessId, targetBusiness, 
                   className="w-full resize-none rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))] min-h-[100px]"
                   rows={4}
                 />
+                {draftError && <p className="mt-1 text-[10px] text-destructive">{draftError}</p>}
               </div>
               <button
                 onClick={handleSend}
