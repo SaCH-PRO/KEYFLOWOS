@@ -238,6 +238,10 @@ model Business {
   matchFeedbackGiven    MatchFeedback[] @relation("MatchFeedbackFrom")
   matchFeedbackReceived MatchFeedback[] @relation("MatchFeedbackTo")
 
+  // Relationship Insight Dismissals
+  relationshipInsightDismissals          RelationshipInsightDismissal[] @relation("RelationshipInsightDismissalFrom")
+  relationshipInsightDismissalsAsTarget  RelationshipInsightDismissal[] @relation("RelationshipInsightDismissalTo")
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -2098,6 +2102,25 @@ model MatchFeedback {
   @@index([businessId])
   @@index([businessId, feedback])
   @@map("match_feedback")
+}
+
+model RelationshipInsightDismissal {
+  id               String    @id @default(cuid())
+  businessId       String    @map("business_id")
+  targetBusinessId String    @map("target_business_id")
+  dismissedAt      DateTime  @default(now()) @map("dismissed_at")
+  snoozedUntil     DateTime? @map("snoozed_until")
+
+  business       Business @relation("RelationshipInsightDismissalFrom", fields: [businessId], references: [id], onDelete: Cascade)
+  targetBusiness Business @relation("RelationshipInsightDismissalTo", fields: [targetBusinessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, targetBusinessId])
+  @@index([businessId])
+  @@index([businessId, snoozedUntil])
+  @@map("relationship_insight_dismissals")
 }
 
 // ---

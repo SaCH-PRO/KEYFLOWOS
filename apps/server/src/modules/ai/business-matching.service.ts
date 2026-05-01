@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from './ai-usage.service';
 
@@ -751,6 +751,21 @@ export class BusinessMatchingService {
     const cutoffMs = 60 * 24 * 60 * 60 * 1000; // 60 days
     const cutoff = new Date(Date.now() - cutoffMs);
 
+    // Pull dismissals so we can filter their targets out of the suggestions.
+    // A dismissal is "active" when snoozedUntil is null (permanent) or still in the future.
+    const now = new Date();
+    const activeDismissals = await this.prisma.client.relationshipInsightDismissal.findMany({
+      where: {
+        businessId,
+        OR: [
+          { snoozedUntil: null },
+          { snoozedUntil: { gt: now } },
+        ],
+      },
+      select: { targetBusinessId: true },
+    });
+    const dismissedIds = new Set(activeDismissals.map((d) => d.targetBusinessId));
+
     const [followingOut, followingIn, recentMessages] = await Promise.all([
       this.prisma.client.networkConnection.findMany({
         where: { fromBusinessId: businessId, type: 'FOLLOW' },
@@ -811,6 +826,7 @@ export class BusinessMatchingService {
 
     for (const c of followingOut) {
       if (!c.toBusiness) continue;
+      if (dismissedIds.has(c.toBusinessId)) continue;
       candidates.set(c.toBusinessId, {
         businessId: c.toBusinessId,
         name: c.toBusiness.name,
@@ -827,6 +843,7 @@ export class BusinessMatchingService {
     for (const c of followingIn) {
       if (!c.fromBusiness) continue;
       if (candidates.has(c.fromBusinessId)) continue;
+      if (dismissedIds.has(c.fromBusinessId)) continue;
       candidates.set(c.fromBusinessId, {
         businessId: c.fromBusinessId,
         name: c.fromBusiness.name,
@@ -902,5 +919,51 @@ export class BusinessMatchingService {
     }
 
     return { underutilized: top, suggestions };
+  }
+
+  /**
+   * Dismiss or snooze a relationship insight suggestion.
+   * - snoozeDays > 0  -> hide for that many days, then resurface
+   * - snoozeDays = 0 / undefined -> permanent dismissal (snoozedUntil = null)
+   */
+  async dismissRelationshipInsight(
+    businessId: string,
+    targetBusinessId: string,
+    snoozeDays?: number,
+  ): Promise<{ businessId: string; targetBusinessId: string; snoozedUntil: string | null; dismissedAt: string }> {
+    if (!targetBusinessId) {
+      throw new BadRequestException('targetBusinessId is required');
+    }
+    if (businessId === targetBusinessId) {
+      throw new BadRequestException('Cannot dismiss your own business');
+    }
+
+    const snoozedUntil = snoozeDays && snoozeDays > 0
+      ? new Date(Date.now() + snoozeDays * 24 * 60 * 60 * 1000)
+      : null;
+    const dismissedAt = new Date();
+
+    const row = await this.prisma.client.relationshipInsightDismissal.upsert({
+      where: { businessId_targetBusinessId: { businessId, targetBusinessId } },
+      create: { businessId, targetBusinessId, dismissedAt, snoozedUntil },
+      update: { dismissedAt, snoozedUntil },
+    });
+
+    return {
+      businessId: row.businessId,
+      targetBusinessId: row.targetBusinessId,
+      dismissedAt: row.dismissedAt.toISOString(),
+      snoozedUntil: row.snoozedUntil ? row.snoozedUntil.toISOString() : null,
+    };
+  }
+
+  /**
+   * Restore (un-dismiss) a previously dismissed/snoozed relationship insight.
+   */
+  async restoreRelationshipInsight(businessId: string, targetBusinessId: string): Promise<{ removed: boolean }> {
+    const result = await this.prisma.client.relationshipInsightDismissal.deleteMany({
+      where: { businessId, targetBusinessId },
+    });
+    return { removed: result.count > 0 };
   }
 }

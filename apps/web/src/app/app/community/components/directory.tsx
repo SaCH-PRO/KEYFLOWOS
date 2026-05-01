@@ -30,6 +30,9 @@ import {
   XCircle,
   Heart,
   HeartHandshake,
+  MoreHorizontal,
+  BellOff,
+  EyeOff,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -38,6 +41,7 @@ import {
   fetchBusinessRecommendations,
   submitMatchFeedback,
   fetchRelationshipInsights,
+  dismissRelationshipInsight,
   type DirectoryBusiness,
   type BusinessRecommendation,
   type RelationshipInsightItem,
@@ -266,6 +270,104 @@ function RecommendationCard({
         </button>
       </div>
     </motion.div>
+  );
+}
+
+function RelationshipInsightTile({
+  item,
+  onViewProfile,
+  onDismiss,
+}: {
+  item: RelationshipInsightItem;
+  onViewProfile: (id: string) => void;
+  onDismiss: (targetBusinessId: string, snoozeDays?: number) => void | Promise<void>;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close the snooze menu when clicking outside.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = () => setMenuOpen(false);
+    // Defer attachment so the click that opened the menu doesn't immediately close it.
+    const t = setTimeout(() => document.addEventListener("click", handler), 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("click", handler);
+    };
+  }, [menuOpen]);
+
+  return (
+    <div className="relative group flex items-start gap-2 p-2.5 rounded-lg bg-background/40 hover:bg-background/80 border border-border/30 transition-colors">
+      <button
+        type="button"
+        onClick={() => onViewProfile(item.businessId)}
+        className="flex items-start gap-2 flex-1 min-w-0 text-left"
+      >
+        <div className="w-8 h-8 shrink-0 rounded-lg bg-gradient-to-br from-emerald-400 to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden">
+          {item.logoUrl ? (
+            <img
+              src={item.logoUrl.startsWith("http") ? item.logoUrl : `${API_BASE}${item.logoUrl}`}
+              alt=""
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            item.name.charAt(0).toUpperCase()
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 pr-6">
+            <p className="text-xs font-medium truncate">{item.name}</p>
+            <span className={`text-[9px] px-1 py-px rounded font-medium ${
+              item.suggestedAction === 'reconnect' ? 'bg-purple-500/15 text-purple-300' :
+              item.suggestedAction === 'follow_up' ? 'bg-emerald-500/15 text-emerald-300' :
+              'bg-amber-500/15 text-amber-300'
+            }`}>
+              {item.suggestedAction === 'reconnect' ? 'Reconnect' : item.suggestedAction === 'follow_up' ? 'Follow up' : 'Engage'}
+            </span>
+          </div>
+          {item.headline && <p className="text-[10px] text-muted-foreground truncate">{item.headline}</p>}
+          <p className="text-[10px] text-muted-foreground/80 mt-0.5 line-clamp-2">{item.reason}</p>
+        </div>
+      </button>
+
+      <div className="absolute top-1.5 right-1.5">
+        <button
+          type="button"
+          aria-label="Dismiss or snooze suggestion"
+          title="Dismiss or snooze"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          className="p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-white/10 transition-colors opacity-60 group-hover:opacity-100 focus:opacity-100"
+        >
+          <MoreHorizontal className="w-3.5 h-3.5" />
+        </button>
+        {menuOpen && (
+          <div
+            className="absolute right-0 top-full mt-1 z-20 min-w-[170px] rounded-lg border border-white/10 bg-[hsl(var(--kf-surface,222_18%_10%))] shadow-lg overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => { setMenuOpen(false); void onDismiss(item.businessId, 30); }}
+              className="flex items-center gap-2 w-full px-3 py-2 text-[11px] text-left text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+            >
+              <BellOff className="w-3 h-3 text-amber-400" />
+              Snooze for 30 days
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMenuOpen(false); void onDismiss(item.businessId); }}
+              className="flex items-center gap-2 w-full px-3 py-2 text-[11px] text-left text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors border-t border-white/5"
+            >
+              <EyeOff className="w-3 h-3 text-red-400" />
+              Don't show again
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -505,6 +607,23 @@ export function Directory({ onViewProfile }: DirectoryProps) {
     }
   }, [businessId]);
 
+  const handleDismissInsight = useCallback(async (targetBusinessId: string, snoozeDays?: number) => {
+    if (!businessId) return;
+    // Optimistically remove from local state.
+    setInsights((prev) => prev ? {
+      ...prev,
+      underutilized: prev.underutilized.filter((i) => i.businessId !== targetBusinessId),
+    } : prev);
+    try {
+      await dismissRelationshipInsight(businessId, targetBusinessId, snoozeDays);
+    } catch {
+      // On failure, refetch to restore state.
+      fetchRelationshipInsights(businessId).then((res) => {
+        if (res.data) setInsights(res.data);
+      }).catch(() => {});
+    }
+  }, [businessId]);
+
   const loadDirectory = useCallback(async () => {
     setLoading(true);
     const params: Record<string, string> = {};
@@ -664,37 +783,12 @@ export function Directory({ onViewProfile }: DirectoryProps) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
               {insights.underutilized.slice(0, 6).map((item) => (
-                <button
+                <RelationshipInsightTile
                   key={item.businessId}
-                  onClick={() => onViewProfile(item.businessId)}
-                  className="flex items-start gap-2 p-2.5 rounded-lg bg-background/40 hover:bg-background/80 border border-border/30 transition-colors text-left"
-                >
-                  <div className="w-8 h-8 shrink-0 rounded-lg bg-gradient-to-br from-emerald-400 to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden">
-                    {item.logoUrl ? (
-                      <img
-                        src={item.logoUrl.startsWith("http") ? item.logoUrl : `${API_BASE}${item.logoUrl}`}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      item.name.charAt(0).toUpperCase()
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-xs font-medium truncate">{item.name}</p>
-                      <span className={`text-[9px] px-1 py-px rounded font-medium ${
-                        item.suggestedAction === 'reconnect' ? 'bg-purple-500/15 text-purple-300' :
-                        item.suggestedAction === 'follow_up' ? 'bg-emerald-500/15 text-emerald-300' :
-                        'bg-amber-500/15 text-amber-300'
-                      }`}>
-                        {item.suggestedAction === 'reconnect' ? 'Reconnect' : item.suggestedAction === 'follow_up' ? 'Follow up' : 'Engage'}
-                      </span>
-                    </div>
-                    {item.headline && <p className="text-[10px] text-muted-foreground truncate">{item.headline}</p>}
-                    <p className="text-[10px] text-muted-foreground/80 mt-0.5 line-clamp-2">{item.reason}</p>
-                  </div>
-                </button>
+                  item={item}
+                  onViewProfile={onViewProfile}
+                  onDismiss={handleDismissInsight}
+                />
               ))}
             </div>
           </motion.div>
