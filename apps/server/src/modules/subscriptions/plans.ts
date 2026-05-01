@@ -58,6 +58,9 @@ export const AI_CREDIT_COSTS: Record<string, number> = {
   onboarding_concierge: 1,
   flow_chat: 2,
   business_matching: 1,
+  intro_draft: 1,
+  need_match: 1,
+  relationship_insights: 1,
 };
 
 export const AI_OVERAGE_RATE_TTD = 2.50;

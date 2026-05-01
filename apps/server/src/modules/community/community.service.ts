@@ -1,7 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReputationService } from './reputation.service';
+import { BusinessMatchingService } from '../ai/business-matching.service';
 
 export interface TrustSignals {
   reputationScore: number;
@@ -74,10 +75,13 @@ function computeBadgesAndReputation(input: BadgeComputeInput): { badges: Badge[]
 
 @Injectable()
 export class CommunityService {
+  private readonly logger = new Logger(CommunityService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
     @Inject(ReputationService) private readonly reputation: ReputationService,
+    @Inject(BusinessMatchingService) private readonly matching: BusinessMatchingService,
   ) {}
 
   async listPosts(filters?: { type?: string; tag?: string; page?: number; limit?: number }) {
@@ -127,12 +131,13 @@ export class CommunityService {
   }
 
   async createPost(businessId: string, input: { title?: string; content: string; type?: string; tags?: string[] }) {
-    return this.prisma.client.communityPost.create({
+    const type = input.type ?? 'DISCUSSION';
+    const post = await this.prisma.client.communityPost.create({
       data: {
         businessId,
         title: input.title ?? null,
         content: input.content,
-        type: input.type ?? 'DISCUSSION',
+        type,
         tags: input.tags ?? [],
       },
       include: {
@@ -140,6 +145,49 @@ export class CommunityService {
         _count: { select: { comments: true } },
       },
     });
+
+    // AI-powered match: notify relevant providers when a need-style post is created
+    if (['QUESTION', 'OPPORTUNITY', 'HELP', 'NEED'].includes(type.toUpperCase())) {
+      this.notifyMatchedProvidersForPost(businessId, post.id, post.business.name, {
+        title: input.title,
+        content: input.content,
+        type,
+        tags: input.tags,
+      }).catch((err) => {
+        this.logger.warn(`Failed to notify matched providers for post ${post.id}: ${err?.message ?? err}`);
+      });
+    }
+
+    return post;
+  }
+
+  private async notifyMatchedProvidersForPost(
+    fromBusinessId: string,
+    postId: string,
+    fromBusinessName: string,
+    args: { title?: string; content: string; type?: string; tags?: string[] },
+  ): Promise<void> {
+    const matches = await this.matching.matchProvidersForPost({
+      fromBusinessId,
+      postId,
+      title: args.title,
+      content: args.content,
+      type: args.type,
+      tags: args.tags,
+    }, 3);
+
+    if (matches.length === 0) return;
+
+    const subject = args.title?.slice(0, 80) || args.content.slice(0, 80);
+    await Promise.all(matches.map((m) =>
+      this.notifications.create({
+        businessId: m.businessId,
+        type: 'community_post_match',
+        title: 'New community post matches your skills',
+        body: `${fromBusinessName} posted: "${subject}" — ${m.explanation || 'Could be a fit for you'}`,
+        data: { postId, fromBusinessId, matchScore: m.score },
+      }).catch(() => {})
+    ));
   }
 
   async updatePost(businessId: string, postId: string, input: { title?: string; content?: string; type?: string; tags?: string[] }) {
