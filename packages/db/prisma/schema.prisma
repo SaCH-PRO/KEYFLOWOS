@@ -242,6 +242,16 @@ model Business {
   relationshipInsightDismissals          RelationshipInsightDismissal[] @relation("RelationshipInsightDismissalFrom")
   relationshipInsightDismissalsAsTarget  RelationshipInsightDismissal[] @relation("RelationshipInsightDismissalTo")
 
+  // Network Activity & Growth (Community Phase 5)
+  opportunitiesPosted        Opportunity[]            @relation("OpportunityPoster")
+  opportunityApplications    OpportunityApplication[] @relation("OpportunityApplicant")
+  partnerProgramsInitiated   PartnerProgram[]         @relation("PartnerProgramInitiator")
+  partnerProgramsReceived    PartnerProgram[]         @relation("PartnerProgramPartner")
+  profileViewsGiven          ProfileView[]            @relation("ProfileViewer")
+  profileViewsReceived       ProfileView[]            @relation("ProfileViewed")
+  networkActivities          NetworkActivity[]        @relation("NetworkActivityActor")
+  resourceDownloadsGiven     ResourceDownload[]       @relation("ResourceDownloader")
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -694,6 +704,14 @@ model Product {
   inventoryMode     String?  @map("inventory_mode")      // tracked, untracked, virtual
   compareAtPrice    Float?   @map("compare_at_price")
 
+  // Resource Marketplace (Community Phase 5)
+  resourceType      String?  @map("resource_type")       // TEMPLATE, PROMPT_LIBRARY, PROCESS_DOC, EDU_CONTENT, CANVA_KIT, OTHER
+  downloadUrl       String?  @map("download_url")
+  previewUrl        String?  @map("preview_url")
+  licenseTerms      String?  @map("license_terms")
+  isFree            Boolean  @default(false) @map("is_free")
+  fileSize          Int?     @map("file_size")           // bytes
+
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -709,6 +727,7 @@ model Product {
   sourceLinks     ProductSourceLink[]
   costProfile     ProductCostProfile?
   marginSnapshots MarginSnapshot[]
+  resourceDownloads ResourceDownload[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -4227,4 +4246,149 @@ model BusinessReputation {
   @@index([reputationScore])
   @@index([isVerified, reputationScore])
   @@map("business_reputation")
+}
+
+// ============================================================================
+// COMMUNITY PHASE 5: NETWORK ACTIVITY & GROWTH LAYER (Task #132)
+// ============================================================================
+
+model Opportunity {
+  id              String   @id @default(cuid())
+  posterBusinessId String  @map("poster_business_id")
+  poster          Business @relation("OpportunityPoster", fields: [posterBusinessId], references: [id], onDelete: Cascade)
+
+  type            String   @default("PROJECT")          // PROJECT, NEED, COLLABORATION, RFP, JOB, RESOURCE_REQUEST
+  title           String
+  description     String
+  category        String?                                // industry / domain
+  skillsRequired  String[] @default([]) @map("skills_required")
+  budgetMin       Float?   @map("budget_min")
+  budgetMax       Float?   @map("budget_max")
+  currency        String   @default("TTD")
+  timeline        String?                                // free-text (e.g., "2 weeks", "Q3 2026")
+  location        String?                                // optional location preference
+  remoteOk        Boolean  @default(true) @map("remote_ok")
+  attachments     String[] @default([])
+  status          String   @default("OPEN")              // OPEN, IN_REVIEW, AWARDED, CLOSED, EXPIRED
+  awardedToBusinessId String? @map("awarded_to_business_id")
+  expiresAt       DateTime? @map("expires_at")
+
+  applications    OpportunityApplication[]
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@index([posterBusinessId, createdAt])
+  @@index([status, createdAt])
+  @@index([type, status])
+  @@map("community_opportunities")
+}
+
+model OpportunityApplication {
+  id                String   @id @default(cuid())
+  opportunityId     String   @map("opportunity_id")
+  opportunity       Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  applicantBusinessId String  @map("applicant_business_id")
+  applicant         Business @relation("OpportunityApplicant", fields: [applicantBusinessId], references: [id], onDelete: Cascade)
+
+  message           String
+  proposedBudget    Float?   @map("proposed_budget")
+  proposedTimeline  String?  @map("proposed_timeline")
+  attachments       String[] @default([])
+  status            String   @default("SUBMITTED")        // SUBMITTED, SHORTLISTED, AWARDED, DECLINED, WITHDRAWN
+  responseNote      String?  @map("response_note")
+  respondedAt       DateTime? @map("responded_at")
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt      @map("updated_at")
+
+  @@unique([opportunityId, applicantBusinessId])
+  @@index([applicantBusinessId, createdAt])
+  @@index([opportunityId, status])
+  @@map("community_opportunity_applications")
+}
+
+model PartnerProgram {
+  id                  String   @id @default(cuid())
+  initiatorBusinessId String   @map("initiator_business_id")
+  initiator           Business @relation("PartnerProgramInitiator", fields: [initiatorBusinessId], references: [id], onDelete: Cascade)
+  partnerBusinessId   String   @map("partner_business_id")
+  partner             Business @relation("PartnerProgramPartner", fields: [partnerBusinessId], references: [id], onDelete: Cascade)
+
+  programType         String   @default("REFERRAL")       // REFERRAL, RESELLER, AFFILIATE, JOINT_VENTURE, STRATEGIC, INTEGRATION
+  name                String
+  description         String
+  terms               Json?                                // structured agreement: { commission, exclusivity, scope, deliverables, ... }
+  commissionRate      Float?   @map("commission_rate")    // percentage 0-100 for referral/affiliate
+  startDate           DateTime? @map("start_date")
+  endDate             DateTime? @map("end_date")
+  status              String   @default("PROPOSED")        // PROPOSED, ACTIVE, PAUSED, ENDED, DECLINED
+  visibility          String   @default("PUBLIC")          // PUBLIC, PRIVATE
+  responseNote        String?  @map("response_note")
+  acceptedAt          DateTime? @map("accepted_at")
+  endedAt             DateTime? @map("ended_at")
+
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt      @map("updated_at")
+
+  @@index([initiatorBusinessId, status])
+  @@index([partnerBusinessId, status])
+  @@index([status, createdAt])
+  @@map("community_partner_programs")
+}
+
+model ProfileView {
+  id                  String   @id @default(cuid())
+  viewerBusinessId    String?  @map("viewer_business_id")  // null = anonymous
+  viewer              Business? @relation("ProfileViewer", fields: [viewerBusinessId], references: [id], onDelete: SetNull)
+  viewedBusinessId    String   @map("viewed_business_id")
+  viewed              Business @relation("ProfileViewed", fields: [viewedBusinessId], references: [id], onDelete: Cascade)
+  source              String?                                // directory, feed, search, opportunity, profile_link, recommendation
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@index([viewedBusinessId, createdAt])
+  @@index([viewerBusinessId, createdAt])
+  @@map("community_profile_views")
+}
+
+model NetworkActivity {
+  id              String   @id @default(cuid())
+  actorBusinessId String   @map("actor_business_id")
+  actor           Business @relation("NetworkActivityActor", fields: [actorBusinessId], references: [id], onDelete: Cascade)
+
+  type            String                                   // OPPORTUNITY_POSTED, OPPORTUNITY_AWARDED, PARTNERSHIP_FORMED,
+                                                           // RESOURCE_PUBLISHED, REVIEW_RECEIVED, MILESTONE_REACHED, COHORT_JOINED,
+                                                           // BUSINESS_VERIFIED, ENDORSEMENT_RECEIVED
+  refType         String?  @map("ref_type")                // opportunity, partner_program, product, review, ...
+  refId           String?  @map("ref_id")
+  title           String
+  body            String?
+  metadata        Json?
+  visibility      String   @default("PUBLIC")              // PUBLIC, FOLLOWERS, PRIVATE
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([actorBusinessId, createdAt])
+  @@index([type, createdAt])
+  @@index([createdAt])
+  @@map("community_network_activities")
+}
+
+model ResourceDownload {
+  id                  String   @id @default(cuid())
+  productId           String   @map("product_id")
+  product             Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  downloaderBusinessId String  @map("downloader_business_id")
+  downloader          Business @relation("ResourceDownloader", fields: [downloaderBusinessId], references: [id], onDelete: Cascade)
+
+  pricePaid           Float    @default(0) @map("price_paid")
+  currency            String   @default("TTD")
+  source              String?                                  // marketplace, profile, opportunity
+
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@index([productId, createdAt])
+  @@index([downloaderBusinessId, createdAt])
+  @@map("community_resource_downloads")
 }

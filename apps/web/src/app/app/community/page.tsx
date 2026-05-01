@@ -14,6 +14,11 @@ import {
   Globe,
   Bookmark,
   Inbox,
+  Briefcase,
+  Package,
+  Activity,
+  BarChart3,
+  Link2,
 } from "lucide-react";
 import {
   fetchCommunityPosts,
@@ -345,6 +350,11 @@ export default function CommunityPage() {
           { label: "Directory", icon: Globe, href: "/app/community/directory" },
           { label: "Messages", icon: Inbox, href: "/app/community/messages" },
           { label: "Saved", icon: Bookmark, href: "/app/community/saved" },
+          { label: "Opportunities", icon: Briefcase, href: "/app/community/opportunities" },
+          { label: "Resources", icon: Package, href: "/app/community/resources" },
+          { label: "Activity", icon: Activity, href: "/app/community/activity" },
+          { label: "Analytics", icon: BarChart3, href: "/app/community/analytics" },
+          { label: "Partners", icon: Link2, href: "/app/community/partners" },
         ].map((item) => (
           <button
             key={item.label}
