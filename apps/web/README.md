@@ -36,6 +36,7 @@ Try the following, in order:
    pnpm --filter web dev
    ```
 2. If the error returns, confirm `next-themes` (and any provider library used in the root layout) is on a version whose `peerDependencies` include the React major you're running. With React 19 + Next 16 (Turbopack), `next-themes` must be `^0.4.x` or newer — older 0.3.x releases declare React 16-18 only and trigger this HMR failure.
+3. Make sure every client provider used at the root layout boundary lives inside the single `Providers` wrapper at `apps/web/src/components/providers.tsx` — do not render `ThemeProvider`, `ThemeColorsProvider`, `RegisterSW`, `PWAInstallPrompt`, `Toaster`, or any other `"use client"` module as a direct child of the server-rendered `app/layout.tsx`. Mounting multiple sibling client modules at the root is a recurring trigger for the "module factory is not available" HMR error on Next 16 + Turbopack + React 19; collapsing them into one client boundary prevents Turbopack from dropping individual factories during HMR.
 
 ## Learn More
 

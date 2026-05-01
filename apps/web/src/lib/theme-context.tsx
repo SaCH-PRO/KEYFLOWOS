@@ -126,3 +126,4 @@ export function useThemeColors() {
 }
 
 export { DEFAULT_COLORS };
+
