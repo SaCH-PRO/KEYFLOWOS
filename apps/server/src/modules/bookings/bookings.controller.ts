@@ -8,6 +8,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicCreateBookingDto } from './dto/public-create-booking.dto';
+import { appUrl } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
@@ -323,9 +324,7 @@ export class BookingsController {
     @Query('state') state: string,
     @Res() res: Response,
   ) {
-    const frontendUrl = process.env.REPLIT_DEV_DOMAIN 
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
-      : 'http://localhost:5000';
+    const frontendUrl = appUrl();
 
     const parsedState = this.calendar.verifyState(state);
     if (!parsedState) {

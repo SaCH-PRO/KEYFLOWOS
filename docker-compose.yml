@@ -1,0 +1,84 @@
+###############################################################################
+# Local development stack for KeyflowOS.
+#
+# Usage:
+#   cp .env.example .env       # then edit values you care about
+#   docker compose up --build
+#
+# Brings up:
+#   db  — PostgreSQL 16 with a named volume
+#   api — NestJS backend on :3001
+#   web — Next.js frontend on :5000
+#
+# Production-grade deploys should swap `db` for managed Postgres (Supabase,
+# RDS, Neon, etc.) and use the `web` / `api` images directly. See MIGRATION.md.
+###############################################################################
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: keyflow
+      POSTGRES_PASSWORD: keyflow
+      POSTGRES_DB: keyflowos
+    ports:
+      - "5432:5432"
+    volumes:
+      - keyflow_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keyflow -d keyflowos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      target: server
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      # Inside the compose network the DB host is `db`.
+      DATABASE_URL: "postgresql://keyflow:keyflow@db:5432/keyflowos?schema=public"
+      DIRECT_URL: "postgresql://keyflow:keyflow@db:5432/keyflowos?schema=public"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      # The browser hits the API via the published localhost port.
+      NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}"
+      NEXT_PUBLIC_SITE_URL: "${NEXT_PUBLIC_SITE_URL:-http://localhost:5000}"
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  keyflow_db:

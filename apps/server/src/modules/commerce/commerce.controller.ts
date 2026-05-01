@@ -8,6 +8,7 @@ import { StoreReadinessService } from './store-readiness.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { appUrl } from '../../core/config/runtime-urls';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { CreateProductDto } from './dto/create-product.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
@@ -476,9 +477,7 @@ export class CommerceController {
     @Query('state') state: string,
     @Res() res: Response,
   ) {
-    const frontendUrl = process.env.REPLIT_DEV_DOMAIN 
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
-      : 'http://localhost:5000';
+    const frontendUrl = appUrl();
     
     const parsedState = this.gmail.verifyState(state);
     if (!parsedState) {

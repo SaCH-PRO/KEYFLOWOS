@@ -42,11 +42,19 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Security:** Implements Error Boundaries for core modules and rate limiting for unauthenticated endpoints.
 
 ## External Dependencies
-- **Database:** PostgreSQL
+- **Database:** PostgreSQL (any provider — Supabase, RDS, Neon, local Docker)
 - **Authentication:** Supabase Auth
 - **AI:** OpenAI, Anthropic, xAI
 - **Google Services:** Google Calendar, Google Sign-In, Gmail, Google Contacts, Google Drive
-- **Payment Gateways:** WiPay, PayPal, Google Pay
+- **Payment Gateways:** Stripe, WiPay, PayPal, Google Pay
+- **Object Storage:** Any S3-compatible service (AWS S3, Cloudflare R2, MinIO, Supabase Storage, Wasabi)
 - **Rich Text:** TipTap (React)
 - **Charts:** Recharts
 - **Package Manager:** pnpm
+
+## Portability
+The codebase is host-agnostic and runs unchanged on Replit, Docker, plain Node, or any PaaS:
+- Public URLs are resolved via env precedence (`APP_URL` / `API_URL` / `OAUTH_REDIRECT_BASE` / `PUBLIC_BASE_URL` → `REPLIT_DEV_DOMAIN` → safe localhost defaults). See `apps/server/src/core/config/runtime-urls.ts`.
+- Object storage is an S3 adapter (`apps/server/src/core/object-storage/`) reading `S3_*` env vars. No Replit sidecar dependency.
+- A multi-stage `Dockerfile` and `docker-compose.yml` are provided for one-command local stacks.
+- See `MIGRATION.md` for a step-by-step off-Replit deployment guide and `AUDIT_REPORT.md` for the full reality audit.
