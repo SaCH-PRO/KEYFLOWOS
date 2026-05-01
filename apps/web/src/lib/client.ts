@@ -5516,6 +5516,28 @@ export interface RelationshipInsights {
 export async function fetchRelationshipInsights(businessId: string): Promise<ApiResult<RelationshipInsights>> {
   return apiGetSimple<RelationshipInsights>(`/businesses/${encodeURIComponent(businessId)}/community/relationship-insights`);
 }
+export interface RelationshipInsightDismissalResult {
+  businessId: string;
+  targetBusinessId: string;
+  dismissedAt: string;
+  snoozedUntil: string | null;
+}
+export async function dismissRelationshipInsight(
+  businessId: string,
+  targetBusinessId: string,
+  snoozeDays?: number,
+): Promise<ApiResult<RelationshipInsightDismissalResult>> {
+  return apiPost<RelationshipInsightDismissalResult>({
+    path: `/businesses/${encodeURIComponent(businessId)}/community/relationship-insights/dismiss`,
+    body: { targetBusinessId, snoozeDays },
+  });
+}
+export async function restoreRelationshipInsight(
+  businessId: string,
+  targetBusinessId: string,
+): Promise<ApiResult<{ removed: boolean }>> {
+  return apiDelete<{ removed: boolean }>(`/businesses/${encodeURIComponent(businessId)}/community/relationship-insights/dismiss/${encodeURIComponent(targetBusinessId)}`);
+}
 export async function fetchTrustSignals(businessId: string): Promise<ApiResult<TrustSignals>> {
   return apiGetSimple<TrustSignals>(`/community/trust-signals/${encodeURIComponent(businessId)}`);
 }

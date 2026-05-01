@@ -302,6 +302,24 @@ export class CommunityController {
     return this.matching.getRelationshipInsights(businessId);
   }
 
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/relationship-insights/dismiss')
+  dismissRelationshipInsight(
+    @Param('businessId') businessId: string,
+    @Body() body: { targetBusinessId: string; snoozeDays?: number },
+  ) {
+    return this.matching.dismissRelationshipInsight(businessId, body.targetBusinessId, body.snoozeDays);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/community/relationship-insights/dismiss/:targetBusinessId')
+  restoreRelationshipInsight(
+    @Param('businessId') businessId: string,
+    @Param('targetBusinessId') targetBusinessId: string,
+  ) {
+    return this.matching.restoreRelationshipInsight(businessId, targetBusinessId);
+  }
+
   // ==========================================
   // QUOTE REQUESTS
   // ==========================================
