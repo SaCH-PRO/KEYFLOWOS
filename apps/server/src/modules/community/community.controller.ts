@@ -262,4 +262,113 @@ export class CommunityController {
   ) {
     return this.matching.getMatchHistory(businessId, limit ? parseInt(limit, 10) : 50);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/messages')
+  sendMessage(
+    @Param('businessId') businessId: string,
+    @Body() body: { toBusinessId: string; content: string },
+  ) {
+    return this.community.sendMessage(businessId, body.toBusinessId, body.content);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/conversations')
+  getConversations(@Param('businessId') businessId: string) {
+    return this.community.getConversations(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/conversations/:conversationId')
+  getConversationMessages(
+    @Param('businessId') businessId: string,
+    @Param('conversationId') conversationId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.community.getConversationMessages(
+      businessId,
+      conversationId,
+      page ? parseInt(page, 10) : undefined,
+      limit ? parseInt(limit, 10) : undefined,
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/messages/unread-count')
+  getUnreadMessageCount(@Param('businessId') businessId: string) {
+    return this.community.getUnreadMessageCount(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/collab-requests')
+  createCollabRequest(
+    @Param('businessId') businessId: string,
+    @Body() body: { toBusinessId: string; type?: string; title: string; message?: string },
+  ) {
+    return this.community.createCollabRequest(businessId, body.toBusinessId, {
+      type: body.type,
+      title: body.title,
+      message: body.message,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/collab-requests/:requestId')
+  respondToCollabRequest(
+    @Param('businessId') businessId: string,
+    @Param('requestId') requestId: string,
+    @Body() body: { status: 'ACCEPTED' | 'DECLINED' },
+  ) {
+    return this.community.respondToCollabRequest(businessId, requestId, body.status);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/collab-requests')
+  getCollabRequests(
+    @Param('businessId') businessId: string,
+    @Query('direction') direction?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.community.getCollabRequests(
+      businessId,
+      (direction === 'outgoing' ? 'outgoing' : 'incoming') as 'incoming' | 'outgoing',
+      status,
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/notifications')
+  getNotifications(
+    @Param('businessId') businessId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.community.getNotifications(
+      businessId,
+      page ? parseInt(page, 10) : undefined,
+      limit ? parseInt(limit, 10) : undefined,
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/notifications/:notificationId/read')
+  markNotificationRead(
+    @Param('businessId') businessId: string,
+    @Param('notificationId') notificationId: string,
+  ) {
+    return this.community.markNotificationRead(businessId, notificationId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/notifications/read-all')
+  markAllNotificationsRead(@Param('businessId') businessId: string) {
+    return this.community.markAllNotificationsRead(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/notifications/unread-count')
+  getUnreadNotificationCount(@Param('businessId') businessId: string) {
+    return this.community.getUnreadNotificationCount(businessId);
+  }
 }

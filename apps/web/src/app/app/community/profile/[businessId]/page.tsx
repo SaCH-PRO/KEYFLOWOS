@@ -503,6 +503,13 @@ export default function PublicProfilePage() {
                 <MessageSquare className="w-4 h-4" />
                 Send Message
               </button>
+              <button
+                onClick={() => router.push(`/app/community?collab=${profile.id}`)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-sm font-medium transition-colors border border-purple-500/20"
+              >
+                <Sparkles className="w-4 h-4" />
+                Collaborate
+              </button>
             </div>
           )}
         </div>

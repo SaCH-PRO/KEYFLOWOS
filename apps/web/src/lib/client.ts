@@ -5465,6 +5465,93 @@ export async function updateEndorsement(businessId: string, toBusinessId: string
 export async function removeEndorsement(businessId: string, toBusinessId: string, skill: string): Promise<ApiResult<void>> {
   return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/community/endorsements`, { toBusinessId, skill });
 }
+
+export interface ConversationSummary {
+  id: string;
+  otherBusiness: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  lastMessage: { id: string; content: string; senderName: string; isMine: boolean; createdAt: string; readAt?: string | null } | null;
+  lastMessageAt: string | null;
+  createdAt: string;
+}
+export interface DirectMessageItem {
+  id: string;
+  conversationId: string;
+  senderBusinessId: string;
+  senderBusiness: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  content: string;
+  readAt?: string | null;
+  createdAt: string;
+}
+export interface ConversationDetail {
+  messages: DirectMessageItem[];
+  total: number;
+  page: number;
+  limit: number;
+  otherBusiness: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  conversationId: string;
+}
+export interface CollabRequest {
+  id: string;
+  fromBusinessId: string;
+  toBusinessId: string;
+  fromBusiness: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  toBusiness: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  type: string;
+  title: string;
+  message?: string | null;
+  status: string;
+  respondedAt?: string | null;
+  createdAt: string;
+}
+export interface CommunityNotificationItem {
+  id: string;
+  businessId: string;
+  type: string;
+  title: string;
+  body?: string | null;
+  referenceId?: string | null;
+  referenceType?: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export async function sendDirectMessage(businessId: string, toBusinessId: string, content: string): Promise<ApiResult<DirectMessageItem>> {
+  return apiPost<DirectMessageItem>({ path: `/businesses/${encodeURIComponent(businessId)}/community/messages`, body: { toBusinessId, content } });
+}
+export async function fetchConversations(businessId: string): Promise<ApiResult<ConversationSummary[]>> {
+  return apiGetSimple<ConversationSummary[]>(`/businesses/${encodeURIComponent(businessId)}/community/conversations`);
+}
+export async function fetchConversationMessages(businessId: string, conversationId: string, page?: number): Promise<ApiResult<ConversationDetail>> {
+  const q = page ? `?page=${page}` : '';
+  return apiGetSimple<ConversationDetail>(`/businesses/${encodeURIComponent(businessId)}/community/conversations/${encodeURIComponent(conversationId)}${q}`);
+}
+export async function fetchUnreadMessageCount(businessId: string): Promise<ApiResult<{ count: number }>> {
+  return apiGetSimple<{ count: number }>(`/businesses/${encodeURIComponent(businessId)}/community/messages/unread-count`);
+}
+export async function createCollabRequest(businessId: string, data: { toBusinessId: string; type?: string; title: string; message?: string }): Promise<ApiResult<CollabRequest>> {
+  return apiPost<CollabRequest>({ path: `/businesses/${encodeURIComponent(businessId)}/community/collab-requests`, body: data });
+}
+export async function respondToCollabRequest(businessId: string, requestId: string, status: 'ACCEPTED' | 'DECLINED'): Promise<ApiResult<CollabRequest>> {
+  return apiPatch<CollabRequest>(`/businesses/${encodeURIComponent(businessId)}/community/collab-requests/${encodeURIComponent(requestId)}`, { status });
+}
+export async function fetchCollabRequests(businessId: string, direction: 'incoming' | 'outgoing' = 'incoming', status?: string): Promise<ApiResult<CollabRequest[]>> {
+  const params = new URLSearchParams({ direction });
+  if (status) params.set('status', status);
+  return apiGetSimple<CollabRequest[]>(`/businesses/${encodeURIComponent(businessId)}/community/collab-requests?${params.toString()}`);
+}
+export async function fetchCommunityNotifications(businessId: string, page?: number): Promise<ApiResult<{ data: CommunityNotificationItem[]; total: number; unreadCount: number }>> {
+  const q = page ? `?page=${page}` : '';
+  return apiGetSimple<{ data: CommunityNotificationItem[]; total: number; unreadCount: number }>(`/businesses/${encodeURIComponent(businessId)}/community/notifications${q}`);
+}
+export async function markNotificationRead(businessId: string, notificationId: string): Promise<ApiResult<CommunityNotificationItem>> {
+  return apiPatch<CommunityNotificationItem>(`/businesses/${encodeURIComponent(businessId)}/community/notifications/${encodeURIComponent(notificationId)}/read`, {});
+}
+export async function markAllNotificationsRead(businessId: string): Promise<ApiResult<void>> {
+  return apiPost<void>({ path: `/businesses/${encodeURIComponent(businessId)}/community/notifications/read-all`, body: {} });
+}
+export async function fetchUnreadNotificationCount(businessId: string): Promise<ApiResult<{ count: number }>> {
+  return apiGetSimple<{ count: number }>(`/businesses/${encodeURIComponent(businessId)}/community/notifications/unread-count`);
+}
 export async function generateAiProfile(businessId: string, data: { name?: string; industry?: string; skills?: string[]; businessStage?: string; description?: string }): Promise<ApiResult<{ headline: string; bio: string }>> {
   return apiPost<{ headline: string; bio: string }>({ path: `/identity/businesses/${encodeURIComponent(businessId)}/generate-profile`, body: data });
 }

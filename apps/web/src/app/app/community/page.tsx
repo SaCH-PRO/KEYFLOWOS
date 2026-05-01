@@ -8,6 +8,9 @@ import {
   Lightbulb,
   X,
   Search,
+  Mail,
+  Handshake,
+  Bell,
 } from "lucide-react";
 import {
   fetchCommunityPosts,
@@ -19,6 +22,9 @@ import {
   joinCohort,
   leaveCohort,
   fetchMyCohorts,
+  fetchUnreadNotificationCount,
+  fetchUnreadMessageCount,
+  fetchCommunityProfile,
   CommunityPost,
   CommunityComment,
   Cohort,
@@ -30,12 +36,19 @@ import { Feed } from "./components/feed";
 import { CohortList } from "./components/cohort-list";
 import { ProfileCard } from "./components/profile-card";
 import { Directory } from "./components/directory";
-import { useRouter } from "next/navigation";
+import { Inbox } from "./components/inbox";
+import { CollabRequests } from "./components/collab-requests";
+import { NotificationsPanel } from "./components/notifications-panel";
+import { SendMessageModal } from "./components/send-message-modal";
+import { useRouter, useSearchParams } from "next/navigation";
 
 const COMMUNITY_TABS = [
   { key: "feed", label: "Feed", icon: MessageSquare, tooltip: "Community posts, discussions, and updates from other business owners." },
   { key: "directory", label: "Directory", icon: Search, tooltip: "Search and discover businesses in the network by industry, skills, and availability." },
+  { key: "inbox", label: "Inbox", icon: Mail, tooltip: "Direct messages with other businesses." },
+  { key: "requests", label: "Requests", icon: Handshake, tooltip: "Collaboration, referral, and partnership requests." },
   { key: "cohorts", label: "Cohorts", icon: Users, tooltip: "Join or browse peer groups organized by industry or business stage." },
+  { key: "notifications", label: "Notifications", icon: Bell, tooltip: "Notifications for messages, requests, and follows." },
 ];
 const TAB_KEYS = COMMUNITY_TABS.map((t) => t.key);
 
@@ -52,12 +65,52 @@ export default function CommunityPage() {
   const [joiningCohort, setJoiningCohort] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [profileCardBusinessId, setProfileCardBusinessId] = useState<string | null>(null);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [openConversationWith, setOpenConversationWith] = useState<string | null>(null);
+  const [messageModalTarget, setMessageModalTarget] = useState<{ id: string; name: string; logoUrl?: string; headline?: string } | null>(null);
+  const [collabModalTarget, setCollabModalTarget] = useState<{ id: string; name: string; logoUrl?: string; headline?: string } | null>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
   }, []);
+
+  useEffect(() => {
+    if (!businessId) return;
+    const messageTarget = searchParams.get("message");
+    const collabTarget = searchParams.get("collab");
+
+    if (messageTarget) {
+      fetchCommunityProfile(messageTarget).then((res) => {
+        if (res.data) {
+          setMessageModalTarget({ id: res.data.id, name: res.data.name, logoUrl: res.data.logoUrl, headline: res.data.headline });
+        }
+      });
+      router.replace("/app/community");
+    }
+
+    if (collabTarget) {
+      fetchCommunityProfile(collabTarget).then((res) => {
+        if (res.data) {
+          setCollabModalTarget({ id: res.data.id, name: res.data.name, logoUrl: res.data.logoUrl, headline: res.data.headline });
+        }
+      });
+      router.replace("/app/community");
+    }
+  }, [businessId, searchParams, router]);
+
+  useEffect(() => {
+    if (!businessId) return;
+    fetchUnreadNotificationCount(businessId).then((res) => {
+      if (res.data) setUnreadNotifs(res.data.count);
+    });
+    fetchUnreadMessageCount(businessId).then((res) => {
+      if (res.data) setUnreadMessages(res.data.count);
+    });
+  }, [businessId, tab]);
 
   const loadFeed = useCallback(async () => {
     setLoading(true);
@@ -181,13 +234,24 @@ export default function CommunityPage() {
     router.push(`/app/community/profile/${bizId}`);
   }, [router]);
 
+  const tabsWithBadges = useMemo(() => {
+    return COMMUNITY_TABS.map((t) => {
+      if (t.key === "inbox" && unreadMessages > 0) return { ...t, label: `Inbox (${unreadMessages})` };
+      if (t.key === "notifications" && unreadNotifs > 0) return { ...t, label: `Notifications (${unreadNotifs})` };
+      return t;
+    });
+  }, [unreadMessages, unreadNotifs]);
+
   const communityShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
       groupName: "Community Navigation",
       shortcuts: [
         { key: "1", description: "Feed tab", action: () => handleTabChange("feed") },
         { key: "2", description: "Directory tab", action: () => handleTabChange("directory") },
-        { key: "3", description: "Cohorts tab", action: () => handleTabChange("cohorts") },
+        { key: "3", description: "Inbox tab", action: () => handleTabChange("inbox") },
+        { key: "4", description: "Requests tab", action: () => handleTabChange("requests") },
+        { key: "5", description: "Cohorts tab", action: () => handleTabChange("cohorts") },
+        { key: "6", description: "Notifications tab", action: () => handleTabChange("notifications") },
         { key: "n", description: "New post", action: () => { handleTabChange("feed"); } },
         { key: "r", description: "Refresh", action: () => { if (tab === "feed") void loadFeed(); else if (tab === "cohorts") void loadCohorts(); } },
         { key: "g", description: "Toggle guide", action: () => setShowGuide((p) => !p) },
@@ -203,7 +267,7 @@ export default function CommunityPage() {
       icon={Users}
       title="Community"
       subtitle="Connect with fellow entrepreneurs"
-      tabs={COMMUNITY_TABS}
+      tabs={tabsWithBadges}
       activeTab={tab}
       onTabChange={handleTabChange}
       tabLayoutId="community-tab"
@@ -251,8 +315,10 @@ export default function CommunityPage() {
                 {[
                   { step: "1", title: "Browse the Feed", desc: "Read posts from other business owners covering discussions, questions, wins, and resources." },
                   { step: "2", title: "Discover Businesses", desc: "Use the Directory to find businesses by industry, skills, availability, and location." },
-                  { step: "3", title: "Engage", desc: "Like and comment on posts, follow businesses, and save them to your shortlist." },
-                  { step: "4", title: "Complete Your Store Profile", desc: "Set your availability status, positioning statement, and preferred project types to attract opportunities." },
+                  { step: "3", title: "Send Messages", desc: "Open a direct conversation with any business from their profile or the directory." },
+                  { step: "4", title: "Collaborate", desc: "Send collaboration, referral, or partnership requests and manage them in the Requests tab." },
+                  { step: "5", title: "Engage", desc: "Like and comment on posts, follow businesses, and save them to your shortlist." },
+                  { step: "6", title: "Complete Your Store Profile", desc: "Set your availability status, positioning statement, and preferred project types to attract opportunities." },
                 ].map((item) => (
                   <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
                     <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
@@ -291,6 +357,18 @@ export default function CommunityPage() {
         <Directory onViewProfile={handleViewProfile} />
       )}
 
+      {tab === "inbox" && (
+        <Inbox
+          businessId={businessId}
+          openConversationWith={openConversationWith}
+          onClearOpenWith={() => setOpenConversationWith(null)}
+        />
+      )}
+
+      {tab === "requests" && (
+        <CollabRequests businessId={businessId} />
+      )}
+
       {tab === "cohorts" && (
         <CohortList
           cohorts={cohorts}
@@ -302,11 +380,37 @@ export default function CommunityPage() {
         />
       )}
 
+      {tab === "notifications" && (
+        <NotificationsPanel
+          businessId={businessId}
+          onNavigateToInbox={() => handleTabChange("inbox")}
+          onNavigateToRequests={() => handleTabChange("requests")}
+        />
+      )}
+
       <ProfileCard
         businessId={profileCardBusinessId || ""}
         isOpen={!!profileCardBusinessId}
         onClose={() => setProfileCardBusinessId(null)}
       />
+
+      <SendMessageModal
+        isOpen={!!messageModalTarget}
+        onClose={() => setMessageModalTarget(null)}
+        businessId={businessId}
+        targetBusiness={messageModalTarget}
+        onMessageSent={() => { setTab("inbox"); }}
+      />
+
+      {collabModalTarget && (
+        <SendMessageModal
+          isOpen={true}
+          onClose={() => setCollabModalTarget(null)}
+          businessId={businessId}
+          targetBusiness={collabModalTarget}
+          onMessageSent={() => { setTab("requests"); }}
+        />
+      )}
     </WorkspaceShell>
   );
 }

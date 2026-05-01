@@ -573,4 +573,323 @@ export class CommunityService {
       topEndorsedSkills: endorsementData.topSkills.slice(0, 5),
     };
   }
+
+  private readonly businessSelect = {
+    id: true, name: true, logoUrl: true, headline: true, industry: true,
+  } as const;
+
+  async getOrCreateConversation(businessIdA: string, businessIdB: string) {
+    if (businessIdA === businessIdB) return { error: 'Cannot message yourself' };
+
+    const [participantAId, participantBId] = [businessIdA, businessIdB].sort();
+
+    const existing = await this.prisma.client.conversation.findUnique({
+      where: { participantAId_participantBId: { participantAId, participantBId } },
+      include: {
+        participantA: { select: this.businessSelect },
+        participantB: { select: this.businessSelect },
+      },
+    });
+    if (existing) return existing;
+
+    return this.prisma.client.conversation.create({
+      data: { participantAId, participantBId },
+      include: {
+        participantA: { select: this.businessSelect },
+        participantB: { select: this.businessSelect },
+      },
+    });
+  }
+
+  async sendMessage(senderBusinessId: string, toBusinessId: string, content: string) {
+    if (senderBusinessId === toBusinessId) return { error: 'Cannot message yourself' };
+    if (!content.trim()) return { error: 'Message cannot be empty' };
+
+    const [participantAId, participantBId] = [senderBusinessId, toBusinessId].sort();
+
+    let conversation = await this.prisma.client.conversation.findUnique({
+      where: { participantAId_participantBId: { participantAId, participantBId } },
+    });
+
+    if (!conversation) {
+      conversation = await this.prisma.client.conversation.create({
+        data: { participantAId, participantBId, lastMessageAt: new Date() },
+      });
+    } else {
+      await this.prisma.client.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: new Date() },
+      });
+    }
+
+    const message = await this.prisma.client.directMessage.create({
+      data: {
+        conversationId: conversation.id,
+        senderBusinessId,
+        content: content.trim(),
+      },
+      include: {
+        senderBusiness: { select: this.businessSelect },
+      },
+    });
+
+    const sender = await this.prisma.client.business.findUnique({
+      where: { id: senderBusinessId },
+      select: { name: true },
+    });
+
+    await this.prisma.client.communityNotification.create({
+      data: {
+        businessId: toBusinessId,
+        type: 'MESSAGE',
+        title: `New message from ${sender?.name ?? 'a business'}`,
+        body: content.trim().substring(0, 100),
+        referenceId: conversation.id,
+        referenceType: 'CONVERSATION',
+      },
+    });
+
+    return message;
+  }
+
+  async getConversations(businessId: string) {
+    const conversations = await this.prisma.client.conversation.findMany({
+      where: {
+        OR: [
+          { participantAId: businessId },
+          { participantBId: businessId },
+        ],
+      },
+      include: {
+        participantA: { select: this.businessSelect },
+        participantB: { select: this.businessSelect },
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: {
+            senderBusiness: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: { lastMessageAt: 'desc' },
+    });
+
+    return conversations.map((c) => {
+      const otherBusiness = c.participantAId === businessId ? c.participantB : c.participantA;
+      const lastMessage = c.messages[0] ?? null;
+      return {
+        id: c.id,
+        otherBusiness,
+        lastMessage: lastMessage ? {
+          id: lastMessage.id,
+          content: lastMessage.content,
+          senderName: lastMessage.senderBusiness.name,
+          isMine: lastMessage.senderBusinessId === businessId,
+          createdAt: lastMessage.createdAt,
+          readAt: lastMessage.readAt,
+        } : null,
+        lastMessageAt: c.lastMessageAt,
+        createdAt: c.createdAt,
+      };
+    });
+  }
+
+  async getConversationMessages(businessId: string, conversationId: string, page = 1, limit = 50) {
+    const conversation = await this.prisma.client.conversation.findFirst({
+      where: {
+        id: conversationId,
+        OR: [
+          { participantAId: businessId },
+          { participantBId: businessId },
+        ],
+      },
+      include: {
+        participantA: { select: this.businessSelect },
+        participantB: { select: this.businessSelect },
+      },
+    });
+
+    if (!conversation) return { error: 'Conversation not found' };
+
+    const skip = (page - 1) * limit;
+    const [messages, total] = await Promise.all([
+      this.prisma.client.directMessage.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          senderBusiness: { select: this.businessSelect },
+        },
+        skip,
+        take: limit,
+      }),
+      this.prisma.client.directMessage.count({ where: { conversationId } }),
+    ]);
+
+    await this.prisma.client.directMessage.updateMany({
+      where: {
+        conversationId,
+        senderBusinessId: { not: businessId },
+        readAt: null,
+      },
+      data: { readAt: new Date() },
+    });
+
+    const otherBusiness = conversation.participantAId === businessId
+      ? conversation.participantB : conversation.participantA;
+
+    return { messages, total, page, limit, otherBusiness, conversationId };
+  }
+
+  async getUnreadMessageCount(businessId: string) {
+    const conversations = await this.prisma.client.conversation.findMany({
+      where: {
+        OR: [
+          { participantAId: businessId },
+          { participantBId: businessId },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (conversations.length === 0) return { count: 0 };
+
+    const count = await this.prisma.client.directMessage.count({
+      where: {
+        conversationId: { in: conversations.map((c) => c.id) },
+        senderBusinessId: { not: businessId },
+        readAt: null,
+      },
+    });
+
+    return { count };
+  }
+
+  async createCollabRequest(
+    fromBusinessId: string,
+    toBusinessId: string,
+    input: { type?: string; title: string; message?: string },
+  ) {
+    if (fromBusinessId === toBusinessId) return { error: 'Cannot send a request to yourself' };
+
+    const existing = await this.prisma.client.collaborationRequest.findFirst({
+      where: {
+        fromBusinessId,
+        toBusinessId,
+        status: 'PENDING',
+      },
+    });
+    if (existing) return { error: 'You already have a pending request with this business' };
+
+    const request = await this.prisma.client.collaborationRequest.create({
+      data: {
+        fromBusinessId,
+        toBusinessId,
+        type: input.type ?? 'COLLABORATION',
+        title: input.title,
+        message: input.message ?? null,
+      },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    await this.prisma.client.communityNotification.create({
+      data: {
+        businessId: toBusinessId,
+        type: 'COLLAB_REQUEST',
+        title: `${request.fromBusiness.name} sent you a ${request.type.toLowerCase()} request`,
+        body: request.title,
+        referenceId: request.id,
+        referenceType: 'COLLAB_REQUEST',
+      },
+    });
+
+    return request;
+  }
+
+  async respondToCollabRequest(businessId: string, requestId: string, status: 'ACCEPTED' | 'DECLINED') {
+    const request = await this.prisma.client.collaborationRequest.findFirst({
+      where: { id: requestId, toBusinessId: businessId, status: 'PENDING' },
+      include: {
+        toBusiness: { select: { name: true } },
+      },
+    });
+    if (!request) return { error: 'Request not found or already responded' };
+
+    const updated = await this.prisma.client.collaborationRequest.update({
+      where: { id: requestId },
+      data: { status, respondedAt: new Date() },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    await this.prisma.client.communityNotification.create({
+      data: {
+        businessId: request.fromBusinessId,
+        type: 'COLLAB_RESPONSE',
+        title: `${request.toBusiness.name} ${status.toLowerCase()} your ${request.type.toLowerCase()} request`,
+        body: request.title,
+        referenceId: request.id,
+        referenceType: 'COLLAB_REQUEST',
+      },
+    });
+
+    return updated;
+  }
+
+  async getCollabRequests(businessId: string, direction: 'incoming' | 'outgoing' = 'incoming', status?: string) {
+    const where: any = direction === 'incoming'
+      ? { toBusinessId: businessId }
+      : { fromBusinessId: businessId };
+    if (status) where.status = status;
+
+    return this.prisma.client.collaborationRequest.findMany({
+      where,
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getNotifications(businessId: string, page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [data, total, unreadCount] = await Promise.all([
+      this.prisma.client.communityNotification.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.client.communityNotification.count({ where: { businessId } }),
+      this.prisma.client.communityNotification.count({ where: { businessId, isRead: false } }),
+    ]);
+
+    return { data, total, unreadCount, page, limit };
+  }
+
+  async markNotificationRead(businessId: string, notificationId: string) {
+    return this.prisma.client.communityNotification.update({
+      where: { id: notificationId, businessId },
+      data: { isRead: true },
+    });
+  }
+
+  async markAllNotificationsRead(businessId: string) {
+    return this.prisma.client.communityNotification.updateMany({
+      where: { businessId, isRead: false },
+      data: { isRead: true },
+    });
+  }
+
+  async getUnreadNotificationCount(businessId: string) {
+    const count = await this.prisma.client.communityNotification.count({
+      where: { businessId, isRead: false },
+    });
+    return { count };
+  }
 }
