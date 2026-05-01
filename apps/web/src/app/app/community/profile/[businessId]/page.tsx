@@ -152,6 +152,7 @@ export default function PublicProfilePage() {
   const [editingEndorsement, setEditingEndorsement] = useState<{ skill: string; toBusinessId: string } | null>(null);
   const [editMessage, setEditMessage] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [endorsementsVisible, setEndorsementsVisible] = useState(6);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -670,7 +671,7 @@ export default function PublicProfilePage() {
             Recent Endorsements
           </h3>
           <div className="space-y-3">
-            {endorsements.slice(0, 6).map((endorsement) => {
+            {endorsements.slice(0, endorsementsVisible).map((endorsement) => {
               const eLogo = endorsement.fromBusiness.logoUrl
                 ? endorsement.fromBusiness.logoUrl.startsWith("http")
                   ? endorsement.fromBusiness.logoUrl
@@ -718,6 +719,25 @@ export default function PublicProfilePage() {
               );
             })}
           </div>
+          {endorsements.length > 6 && (
+            <div className="flex items-center justify-center pt-1">
+              {endorsementsVisible < endorsements.length ? (
+                <button
+                  onClick={() => setEndorsementsVisible((v) => Math.min(v + 6, endorsements.length))}
+                  className="text-xs font-medium text-[hsl(var(--kf-accent1))] hover:underline transition-colors"
+                >
+                  Show more ({endorsements.length - endorsementsVisible} remaining)
+                </button>
+              ) : (
+                <button
+                  onClick={() => setEndorsementsVisible(6)}
+                  className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline transition-colors"
+                >
+                  Show less
+                </button>
+              )}
+            </div>
+          )}
         </motion.div>
       )}
 
