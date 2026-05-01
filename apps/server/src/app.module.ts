@@ -45,6 +45,7 @@ import { GoogleDriveModule } from './modules/google-drive/google-drive.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { CommunicationsModule } from './modules/communications/communications.module';
 import { ConnectorModule } from './core/connectors/connector.module';
+import { KeyflowCommandModule } from './modules/keyflow-command/keyflow-command.module';
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { ConnectorModule } from './core/connectors/connector.module';
     GoogleDriveModule,
     DiagnosticsModule,
     CommunicationsModule,
+    KeyflowCommandModule,
   ],
   controllers: [AppController],
   providers: [

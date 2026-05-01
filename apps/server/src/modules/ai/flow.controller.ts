@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Param, Post, Res, UseGuards } fr
 import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { FlowOrchestratorService } from './flow-orchestrator.service';
+import { FlowOrchestratorService, FlowPageContext } from './flow-orchestrator.service';
 
 @Controller('ai')
 export class FlowController {
@@ -18,6 +18,7 @@ export class FlowController {
       message: string;
       history?: any[];
       sessionId?: string;
+      pageContext?: FlowPageContext;
       pendingConfirmation?: {
         toolCallId: string;
         confirmed: boolean;
@@ -32,6 +33,7 @@ export class FlowController {
       body.message,
       history,
       body.pendingConfirmation,
+      body.pageContext,
     );
     return result;
   }
@@ -43,6 +45,7 @@ export class FlowController {
     @Body() body: {
       message: string;
       history?: any[];
+      pageContext?: FlowPageContext;
     },
     @Res() res: Response,
   ) {
@@ -55,7 +58,7 @@ export class FlowController {
     const history = body.history || [];
 
     try {
-      const stream = this.flow.streamChat(businessId, body.message, history);
+      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext);
 
       for await (const chunk of stream) {
         if (res.destroyed) break;

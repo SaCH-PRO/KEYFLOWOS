@@ -1199,6 +1199,263 @@ export const FLOW_TOOLS: FlowTool[] = [
     },
     outputSchema: { type: 'object', description: 'Hygiene run result', fields: { itemsMatched: { type: 'number', description: 'Issues found' }, actionsCreated: { type: 'number', description: 'Cleanup tasks created' } } },
   },
+
+  // ================================================================
+  //  PROJECTS — read & manipulate projects + tasks
+  // ================================================================
+  {
+    name: 'projects_list',
+    description: 'List active projects with health, progress, and overdue counts.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Optional status filter (e.g. "active")' },
+        limit: { type: 'number', description: 'Max projects to return (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'List of projects', fields: { projects: { type: 'array', description: 'Project summaries' } } },
+  },
+  {
+    name: 'projects_list_tasks',
+    description: 'List tasks for a project (or across projects) with due dates and completion state.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'Optional project id to scope the list' },
+        onlyOpen: { type: 'boolean', description: 'If true, only return tasks that are not completed' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'List of project tasks', fields: { tasks: { type: 'array', description: 'Task list' } } },
+  },
+  {
+    name: 'projects_create_task',
+    description: 'Create a new task on a project.',
+    family: 'crud',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    changedEntities: ['projectTask'],
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'Project id' },
+        title: { type: 'string', description: 'Task title' },
+        dueDate: { type: 'string', description: 'Optional ISO date for the deadline' },
+        priority: { type: 'string', description: 'LOW | NORMAL | HIGH | URGENT', enum: ['LOW', 'NORMAL', 'HIGH', 'URGENT'] },
+      },
+      required: ['projectId', 'title'],
+    },
+    outputSchema: { type: 'object', description: 'Created task', fields: { task: { type: 'object', description: 'The created task' } } },
+  },
+  {
+    name: 'projects_complete_task',
+    description: 'Mark a project task as completed.',
+    family: 'crud',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    changedEntities: ['projectTask'],
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Project task id' },
+      },
+      required: ['taskId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated task', fields: { task: { type: 'object', description: 'The updated task' } } },
+  },
+
+  // ================================================================
+  //  EXPENSES — extra read tools
+  // ================================================================
+  {
+    name: 'expenses_list',
+    description: 'List recent expenses with vendor, amount, and category.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        sinceDays: { type: 'number', description: 'Look back this many days (default 30)' },
+        limit: { type: 'number', description: 'Max rows to return (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'List of expenses', fields: { expenses: { type: 'array', description: 'Expense rows' } } },
+  },
+  {
+    name: 'expenses_create',
+    description: 'Record a new business expense.',
+    family: 'crud',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    changedEntities: ['expense'],
+    parameters: {
+      type: 'object',
+      properties: {
+        amount: { type: 'number', description: 'Amount in TTD' },
+        description: { type: 'string', description: 'What the expense is for' },
+        date: { type: 'string', description: 'ISO date (defaults to today)' },
+        vendor: { type: 'string', description: 'Vendor name (optional)' },
+      },
+      required: ['amount', 'description'],
+    },
+    outputSchema: { type: 'object', description: 'Created expense', fields: { expense: { type: 'object', description: 'The created expense' } } },
+  },
+
+  // ================================================================
+  //  DOCUMENTS — read tools
+  // ================================================================
+  {
+    name: 'documents_list',
+    description: 'List recent documents (contracts, proposals, etc.) with status.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Optional document status filter' },
+        limit: { type: 'number', description: 'Max rows (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'List of documents', fields: { documents: { type: 'array', description: 'Document rows' } } },
+  },
+  {
+    name: 'documents_search',
+    description: 'Search documents by title.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Free-form text search' },
+      },
+      required: ['query'],
+    },
+    outputSchema: { type: 'object', description: 'Matched documents', fields: { documents: { type: 'array', description: 'Document rows' } } },
+  },
+
+  // ================================================================
+  //  COMMUNITY — read tools
+  // ================================================================
+  {
+    name: 'community_list_posts',
+    description: 'List recent community posts visible to this business.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max posts (default 20)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Community posts', fields: { posts: { type: 'array', description: 'Post rows' } } },
+  },
+
+  // ================================================================
+  //  MARKETPLACE — read tools
+  // ================================================================
+  {
+    name: 'marketplace_list_listings',
+    description: 'List this business’s marketplace listings with status, pricing, and stock.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Optional status filter (e.g. "active")' },
+        limit: { type: 'number', description: 'Max rows (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Listings', fields: { listings: { type: 'array', description: 'Listing rows' } } },
+  },
+  {
+    name: 'marketplace_list_orders',
+    description: 'List this business’s recent marketplace orders with totals and fulfilment state.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max rows (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Orders', fields: { orders: { type: 'array', description: 'Order rows' } } },
+  },
+
+  // ================================================================
+  //  STORE — read tools
+  // ================================================================
+  {
+    name: 'store_list_products',
+    description: 'List products in the storefront/store with pricing and stock.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max products (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Products', fields: { products: { type: 'array', description: 'Product rows' } } },
+  },
+  {
+    name: 'store_list_recent_orders',
+    description: 'List recent storefront/commerce orders (paid invoices act as orders) with totals.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max rows (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Recent orders', fields: { orders: { type: 'array', description: 'Order/invoice rows' } } },
+  },
+
+  // ================================================================
+  //  KEYFLOW NOTES — universal note tool
+  // ================================================================
+  {
+    name: 'keyflow_create_note',
+    description: 'Attach a note to any module item (booking, contact, invoice, project, etc.) using its type and id. Useful when the operator says "add a note to X".',
+    family: 'crud',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    changedEntities: ['keyflowNote'],
+    parameters: {
+      type: 'object',
+      properties: {
+        targetType: { type: 'string', description: 'Type of item: booking, contact, invoice, project, project_task, contact_task, autopilot_task, expense, document, marketplace_listing, community_post, page' },
+        targetId: { type: 'string', description: 'ID of the target item (use "page" for free-form notes)' },
+        targetLabel: { type: 'string', description: 'Optional human-readable label for the item' },
+        body: { type: 'string', description: 'The note body' },
+        pinned: { type: 'boolean', description: 'Pin this note for quick access (default false)' },
+      },
+      required: ['targetType', 'targetId', 'body'],
+    },
+    outputSchema: { type: 'object', description: 'Created note', fields: { note: { type: 'object', description: 'The persisted note' } } },
+  },
 ];
 
 export function getOpenAiToolDefinitions() {
