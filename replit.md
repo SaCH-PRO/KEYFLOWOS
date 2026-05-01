@@ -53,3 +53,4 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Rich Text:** TipTap (React)
 - **Charts:** Recharts
 - **Package Manager:** pnpm
+- **Web e2e Tests:** Playwright (`apps/web/e2e/*.spec.ts`, run via `pnpm --filter web test:e2e`). Tests mock all `/connect/*`, `/connectors/*`, and `/identity/*` API responses via `page.route()` so they don't need a real backend or seeded Google connection. Requires Playwright browsers (`pnpm --filter web exec playwright install chromium`).
