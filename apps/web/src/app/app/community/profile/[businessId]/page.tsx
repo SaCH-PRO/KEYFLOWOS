@@ -334,7 +334,11 @@ export default function PublicProfilePage() {
 
   const handleQuoteSubmit = useCallback(async (data: any) => {
     if (!myBusinessId) return;
-    await createCommunityQuoteRequest(myBusinessId, { toBusinessId: businessId, ...data });
+    await createCommunityQuoteRequest(myBusinessId, {
+      toBusinessId: businessId,
+      ...data,
+      aiSuggestionSource: 'quote_request_modal',
+    });
   }, [myBusinessId, businessId]);
 
   const handleReferralSubmit = useCallback(async (data: any) => {

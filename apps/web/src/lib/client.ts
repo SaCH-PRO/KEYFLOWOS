@@ -5500,7 +5500,7 @@ export interface AiIntroDraft {
 export async function draftAiIntroMessage(
   businessId: string,
   toBusinessId: string,
-  options?: { context?: string; goal?: 'introduce' | 'collaborate' | 'quote' | 'referral' },
+  options?: { context?: string; goal?: 'introduce' | 'collaborate' | 'quote' | 'referral'; source?: string },
 ): Promise<ApiResult<AiIntroDraft>> {
   return apiPost<AiIntroDraft>({
     path: `/businesses/${encodeURIComponent(businessId)}/community/intro-draft`,
@@ -5628,8 +5628,16 @@ export interface CommunityNotificationItem {
   createdAt: string;
 }
 
-export async function sendDirectMessage(businessId: string, toBusinessId: string, content: string): Promise<ApiResult<DirectMessageItem>> {
-  return apiPost<DirectMessageItem>({ path: `/businesses/${encodeURIComponent(businessId)}/community/messages`, body: { toBusinessId, content } });
+export async function sendDirectMessage(
+  businessId: string,
+  toBusinessId: string,
+  content: string,
+  options?: { aiDraftUsed?: boolean; aiSuggestionSource?: string },
+): Promise<ApiResult<DirectMessageItem>> {
+  return apiPost<DirectMessageItem>({
+    path: `/businesses/${encodeURIComponent(businessId)}/community/messages`,
+    body: { toBusinessId, content, ...(options || {}) },
+  });
 }
 export async function fetchConversations(businessId: string): Promise<ApiResult<ConversationSummary[]>> {
   return apiGetSimple<ConversationSummary[]>(`/businesses/${encodeURIComponent(businessId)}/community/conversations`);
@@ -5686,6 +5694,90 @@ export interface MatchAnalytics {
 }
 export async function fetchMatchAnalytics(businessId: string): Promise<ApiResult<MatchAnalytics>> {
   return apiGetSimple<MatchAnalytics>(`/businesses/${encodeURIComponent(businessId)}/community/match-analytics`);
+}
+
+export type AiSuggestionEventType =
+  | 'SUGGESTION_CLICKED'
+  | 'INTRO_DRAFT_GENERATED'
+  | 'INTRO_DRAFT_USED'
+  | 'MESSAGE_SENT'
+  | 'CONNECTION_MADE'
+  | 'QUOTE_REQUESTED'
+  | 'COLLAB_CREATED'
+  | 'DEAL_WON';
+
+export type AiSuggestionSource =
+  | 'recommendations'
+  | 'relationship_insights'
+  | 'need_match'
+  | 'quote_request_modal'
+  | 'message_modal'
+  | 'send_message_modal'
+  | string;
+
+export interface AiSuggestionEventInput {
+  eventType: AiSuggestionEventType;
+  source: AiSuggestionSource;
+  targetBusinessId?: string;
+  score?: number;
+  matchType?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export async function logAiSuggestionEvent(
+  businessId: string,
+  input: AiSuggestionEventInput,
+): Promise<ApiResult<{ id: string } | null>> {
+  return apiPost<{ id: string } | null>({
+    path: `/businesses/${encodeURIComponent(businessId)}/community/ai-suggestion-events`,
+    body: input,
+  });
+}
+
+export interface AiSuggestionFunnel {
+  totals: {
+    clicked: number;
+    introDraftsGenerated: number;
+    introDraftsUsed: number;
+    messagesSent: number;
+    connectionsMade: number;
+    quotesRequested: number;
+    collabsCreated: number;
+    dealsWon: number;
+  };
+  bySource: Record<string, { clicked: number; messagesSent: number; quotesRequested: number; connectionsMade: number; dealsWon: number }>;
+  conversionRates: {
+    clickToMessage: number;
+    clickToQuote: number;
+    clickToConnection: number;
+    clickToDeal: number;
+    draftUsageRate: number;
+  };
+  convertedSuggestions: Array<{
+    targetBusinessId: string;
+    targetBusinessName: string;
+    source: string;
+    score: number | null;
+    clickedAt: string;
+    outcomeType: string;
+    outcomeAt: string;
+  }>;
+  recent: Array<{
+    id: string;
+    eventType: string;
+    source: string;
+    score: number | null;
+    matchType: string | null;
+    targetBusinessId: string | null;
+    targetBusinessName: string | null;
+    createdAt: string;
+  }>;
+}
+
+export async function fetchAiSuggestionFunnel(businessId: string): Promise<ApiResult<AiSuggestionFunnel>> {
+  return apiGetSimple<AiSuggestionFunnel>(
+    `/businesses/${encodeURIComponent(businessId)}/community/ai-suggestion-funnel`,
+  );
 }
 export async function generateAiProfile(businessId: string, data: { name?: string; industry?: string; skills?: string[]; businessStage?: string; description?: string }): Promise<ApiResult<{ headline: string; bio: string }>> {
   return apiPost<{ headline: string; bio: string }>({ path: `/identity/businesses/${encodeURIComponent(businessId)}/generate-profile`, body: data });
@@ -5831,7 +5923,20 @@ export interface ReviewableTransaction {
   alreadyReviewed?: boolean;
 }
 
-export async function createCommunityQuoteRequest(businessId: string, data: { toBusinessId: string; title: string; description: string; budgetMin?: number; budgetMax?: number; currency?: string; timeline?: string }): Promise<ApiResult<CommunityQuoteRequest>> {
+export async function createCommunityQuoteRequest(
+  businessId: string,
+  data: {
+    toBusinessId: string;
+    title: string;
+    description: string;
+    budgetMin?: number;
+    budgetMax?: number;
+    currency?: string;
+    timeline?: string;
+    aiSuggestionSource?: string;
+    aiSuggestionScore?: number;
+  },
+): Promise<ApiResult<CommunityQuoteRequest>> {
   return apiPost<CommunityQuoteRequest>({ path: `/businesses/${encodeURIComponent(businessId)}/community/quote-requests`, body: data });
 }
 export async function fetchCommunityQuoteRequests(businessId: string, direction: 'sent' | 'received' = 'received'): Promise<ApiResult<CommunityQuoteRequest[]>> {
@@ -5858,7 +5963,10 @@ export async function fetchCommunityCollaborations(businessId: string, direction
 export async function respondToCommunityCollaboration(businessId: string, collabId: string, data: { status: string; responseNote?: string }): Promise<ApiResult<CommunityCollaboration>> {
   return apiPatch<CommunityCollaboration>(`/businesses/${encodeURIComponent(businessId)}/community/collaborations/${collabId}/respond`, data);
 }
-export async function sendBusinessMessage(businessId: string, data: { toBusinessId: string; content: string }): Promise<ApiResult<BusinessMessageItem>> {
+export async function sendBusinessMessage(
+  businessId: string,
+  data: { toBusinessId: string; content: string; aiDraftUsed?: boolean; aiSuggestionSource?: string },
+): Promise<ApiResult<BusinessMessageItem>> {
   return apiPost<BusinessMessageItem>({ path: `/businesses/${encodeURIComponent(businessId)}/community/messages`, body: data });
 }
 export async function fetchMessageThreads(businessId: string): Promise<ApiResult<MessageThread[]>> {

@@ -33,6 +33,7 @@ export function MessageModal({ isOpen, onClose, businessId, otherBusinessId, oth
   const [loading, setLoading] = useState(true);
   const [drafting, setDrafting] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [lastAiDraft, setLastAiDraft] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   const handleAiDraft = async () => {
@@ -43,9 +44,11 @@ export function MessageModal({ isOpen, onClose, businessId, otherBusinessId, oth
       const res = await draftAiIntroMessage(businessId, otherBusinessId, {
         goal: messages.length === 0 ? 'introduce' : 'collaborate',
         context: newMessage.trim() || undefined,
+        source: 'message_modal',
       });
       if (res.data?.draft) {
         setNewMessage(res.data.draft);
+        setLastAiDraft(res.data.draft);
       } else {
         setDraftError("Couldn't generate a draft right now");
       }
@@ -73,14 +76,19 @@ export function MessageModal({ isOpen, onClose, businessId, otherBusinessId, oth
   const handleSend = async () => {
     if (!newMessage.trim() || sending) return;
     setSending(true);
+    const trimmed = newMessage.trim();
+    const aiDraftUsed = !!lastAiDraft && lastAiDraft.trim() === trimmed;
     try {
       const res = await sendBusinessMessage(businessId, {
         toBusinessId: otherBusinessId,
-        content: newMessage.trim(),
+        content: trimmed,
+        aiDraftUsed,
+        aiSuggestionSource: lastAiDraft ? 'message_modal' : undefined,
       });
       if (res.data) {
         setMessages((prev) => [...prev, res.data!]);
         setNewMessage("");
+        setLastAiDraft(null);
       }
     } catch {}
     setSending(false);

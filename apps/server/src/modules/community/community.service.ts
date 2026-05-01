@@ -522,6 +522,8 @@ export class CommunityService {
     currency?: string;
     timeline?: string;
     attachments?: string[];
+    aiSuggestionSource?: string;
+    aiSuggestionScore?: number;
   }) {
     const request = await this.prisma.client.communityQuoteRequest.create({
       data: {
@@ -548,6 +550,16 @@ export class CommunityService {
       body: `${request.fromBusiness.name} sent you a quote request: "${input.title}"`,
       data: { quoteRequestId: request.id, fromBusinessId },
     });
+
+    if (input.aiSuggestionSource) {
+      void this.matching.recordSuggestionEvent(fromBusinessId, {
+        eventType: 'QUOTE_REQUESTED',
+        source: input.aiSuggestionSource,
+        targetBusinessId: input.toBusinessId,
+        score: input.aiSuggestionScore,
+        metadata: { quoteRequestId: request.id, title: input.title },
+      });
+    }
 
     return request;
   }
@@ -592,6 +604,15 @@ export class CommunityService {
       body: `${request.toBusiness.name} ${action} your quote request: "${request.title}"`,
       data: { quoteRequestId: request.id, toBusinessId: businessId },
     });
+
+    if (input.status === 'RESPONDED') {
+      void this.matching.recordSuggestionEvent(request.fromBusinessId, {
+        eventType: 'CONNECTION_MADE',
+        source: 'quote_request',
+        targetBusinessId: businessId,
+        metadata: { quoteRequestId: request.id, title: request.title },
+      });
+    }
 
     await this.reputation.recalculate(businessId).catch(() => {});
 
@@ -786,6 +807,8 @@ export class CommunityService {
   async sendMessage(fromBusinessId: string, input: {
     toBusinessId: string;
     content: string;
+    aiDraftUsed?: boolean;
+    aiSuggestionSource?: string;
   }) {
     const threadId = this.generateThreadId(fromBusinessId, input.toBusinessId);
 
@@ -809,6 +832,24 @@ export class CommunityService {
       body: `${message.fromBusiness.name} sent you a message`,
       data: { messageId: message.id, threadId, fromBusinessId },
     });
+
+    if (input.aiDraftUsed || input.aiSuggestionSource) {
+      const source = input.aiSuggestionSource || 'message_modal';
+      if (input.aiDraftUsed) {
+        void this.matching.recordSuggestionEvent(fromBusinessId, {
+          eventType: 'INTRO_DRAFT_USED',
+          source,
+          targetBusinessId: input.toBusinessId,
+          metadata: { messageId: message.id },
+        });
+      }
+      void this.matching.recordSuggestionEvent(fromBusinessId, {
+        eventType: 'MESSAGE_SENT',
+        source,
+        targetBusinessId: input.toBusinessId,
+        metadata: { messageId: message.id, aiDraftUsed: !!input.aiDraftUsed },
+      });
+    }
 
     return message;
   }
@@ -1435,7 +1476,7 @@ export class CommunityService {
   async createCollabRequest(
     fromBusinessId: string,
     toBusinessId: string,
-    input: { type?: string; title: string; message?: string },
+    input: { type?: string; title: string; message?: string; aiSuggestionSource?: string },
   ) {
     if (fromBusinessId === toBusinessId) return { error: 'Cannot send a request to yourself' };
 
@@ -1473,6 +1514,15 @@ export class CommunityService {
       },
     });
 
+    if (input.aiSuggestionSource) {
+      void this.matching.recordSuggestionEvent(fromBusinessId, {
+        eventType: 'COLLAB_CREATED',
+        source: input.aiSuggestionSource,
+        targetBusinessId: toBusinessId,
+        metadata: { collabRequestId: request.id, type: request.type, title: request.title },
+      });
+    }
+
     return request;
   }
 
@@ -1493,6 +1543,15 @@ export class CommunityService {
         toBusiness: { select: this.businessSelect },
       },
     });
+
+    if (status === 'ACCEPTED') {
+      void this.matching.recordSuggestionEvent(request.fromBusinessId, {
+        eventType: 'CONNECTION_MADE',
+        source: 'collab_request',
+        targetBusinessId: request.toBusinessId,
+        metadata: { collabRequestId: request.id, type: request.type },
+      });
+    }
 
     await this.prisma.client.communityNotification.create({
       data: {

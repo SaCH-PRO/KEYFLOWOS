@@ -33,6 +33,8 @@ import {
   MoreHorizontal,
   BellOff,
   EyeOff,
+  TrendingUp,
+  MousePointerClick,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -42,9 +44,12 @@ import {
   submitMatchFeedback,
   fetchRelationshipInsights,
   dismissRelationshipInsight,
+  fetchAiSuggestionFunnel,
+  logAiSuggestionEvent,
   type DirectoryBusiness,
   type BusinessRecommendation,
   type RelationshipInsightItem,
+  type AiSuggestionFunnel,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { API_BASE } from "@/lib/api";
@@ -129,6 +134,35 @@ function DirectoryBadgeIcon({ icon }: { icon: string }) {
     "graduation-cap": <Sparkles className="w-2.5 h-2.5" />,
   };
   return <>{iconMap[icon] || <CheckCircle className="w-2.5 h-2.5" />}</>;
+}
+
+function FunnelStep({
+  icon,
+  label,
+  value,
+  hint,
+  tone,
+  ring,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  hint?: string;
+  tone: string;
+  ring: string;
+}) {
+  return (
+    <div className={`rounded-lg border ${ring} bg-background/40 p-2.5`}>
+      <div className={`flex items-center gap-1.5 text-[10px] font-medium ${tone}`}>
+        {icon}
+        <span className="uppercase tracking-wide">{label}</span>
+      </div>
+      <div className="mt-1 flex items-baseline gap-1.5">
+        <span className="text-xl font-bold">{value}</span>
+        {hint && <span className="text-[9px] text-muted-foreground">{hint}</span>}
+      </div>
+    </div>
+  );
 }
 
 function MatchScoreBadge({ score }: { score: number }) {
@@ -554,6 +588,8 @@ export function Directory({ onViewProfile }: DirectoryProps) {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [insights, setInsights] = useState<{ underutilized: RelationshipInsightItem[]; suggestions: string[] } | null>(null);
   const [showInsights, setShowInsights] = useState(true);
+  const [funnel, setFunnel] = useState<AiSuggestionFunnel | null>(null);
+  const [showFunnel, setShowFunnel] = useState(true);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -570,6 +606,20 @@ export function Directory({ onViewProfile }: DirectoryProps) {
       .catch(() => {});
     return () => { active = false; };
   }, [businessId]);
+
+  const loadFunnel = useCallback(async () => {
+    if (!businessId) return;
+    try {
+      const res = await fetchAiSuggestionFunnel(businessId);
+      if (res.data) setFunnel(res.data);
+    } catch {}
+  }, [businessId]);
+
+  useEffect(() => {
+    if (businessId) {
+      void loadFunnel();
+    }
+  }, [businessId, loadFunnel]);
 
   const loadRecommendations = useCallback(async (refresh = false) => {
     if (!businessId) return;
@@ -657,8 +707,117 @@ export function Directory({ onViewProfile }: DirectoryProps) {
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const hasActiveSearch = search || activeFilterCount > 0;
 
+  const showFunnelTile =
+    showFunnel &&
+    !hasActiveSearch &&
+    funnel &&
+    (funnel.totals.clicked > 0 ||
+      funnel.totals.messagesSent > 0 ||
+      funnel.totals.quotesRequested > 0 ||
+      funnel.totals.connectionsMade > 0);
+
   return (
     <div className="space-y-4">
+      {showFunnelTile && funnel && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="kf-card rounded-xl border border-[hsl(var(--kf-accent1))]/20 bg-gradient-to-br from-[hsl(var(--kf-accent1))]/5 via-transparent to-[hsl(var(--kf-accent2))]/5 p-3 sm:p-4"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10">
+                <TrendingUp className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold">AI Match Performance</h3>
+                <p className="text-[10px] text-muted-foreground">
+                  How AI partner suggestions are turning into deals
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowFunnel(false)}
+              className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+              title="Hide AI performance"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <FunnelStep
+              icon={<MousePointerClick className="w-3.5 h-3.5" />}
+              label="Clicked"
+              value={funnel.totals.clicked}
+              tone="text-[hsl(var(--kf-accent1))]"
+              ring="border-[hsl(var(--kf-accent1))]/30"
+            />
+            <FunnelStep
+              icon={<MessageSquare className="w-3.5 h-3.5" />}
+              label="Messaged"
+              value={funnel.totals.messagesSent}
+              hint={`${funnel.conversionRates.clickToMessage}% of clicks`}
+              tone="text-blue-300"
+              ring="border-blue-400/30"
+            />
+            <FunnelStep
+              icon={<Send className="w-3.5 h-3.5" />}
+              label="Quotes"
+              value={funnel.totals.quotesRequested}
+              hint={`${funnel.conversionRates.clickToQuote}% of clicks`}
+              tone="text-amber-300"
+              ring="border-amber-400/30"
+            />
+            <FunnelStep
+              icon={<Handshake className="w-3.5 h-3.5" />}
+              label="Connected"
+              value={funnel.totals.connectionsMade + funnel.totals.dealsWon}
+              hint={
+                funnel.totals.dealsWon > 0
+                  ? `${funnel.totals.dealsWon} deal${funnel.totals.dealsWon === 1 ? '' : 's'} won`
+                  : `${funnel.conversionRates.clickToConnection}% of clicks`
+              }
+              tone="text-emerald-300"
+              ring="border-emerald-400/30"
+            />
+          </div>
+
+          {funnel.totals.introDraftsGenerated > 0 && (
+            <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground border-t border-border/20 pt-2">
+              <span className="flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-[hsl(var(--kf-accent1))]" />
+                AI intro drafts: {funnel.totals.introDraftsUsed}/{funnel.totals.introDraftsGenerated} used
+              </span>
+              <span className="font-semibold text-foreground">
+                {funnel.conversionRates.draftUsageRate}% draft usage
+              </span>
+            </div>
+          )}
+
+          {funnel.convertedSuggestions.length > 0 && (
+            <div className="mt-2 text-[10px] text-muted-foreground">
+              <span className="font-medium text-emerald-300">
+                {funnel.convertedSuggestions.length} suggestion{funnel.convertedSuggestions.length === 1 ? '' : 's'} converted to outreach
+              </span>
+              {funnel.convertedSuggestions[0] && (
+                <> · most recent: <span className="text-foreground">{funnel.convertedSuggestions[0].targetBusinessName}</span></>
+              )}
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      {!showFunnel && funnel && funnel.totals.clicked > 0 && !hasActiveSearch && (
+        <button
+          onClick={() => setShowFunnel(true)}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+        >
+          <TrendingUp className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+          Show AI Match Performance
+        </button>
+      )}
+
       <AnimatePresence>
         {showRecs && !hasActiveSearch && recommendations.length > 0 && (
           <motion.div
@@ -699,7 +858,24 @@ export function Directory({ onViewProfile }: DirectoryProps) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {recommendations.map((rec) => (
-                <RecommendationCard key={rec.businessId} rec={rec} onViewProfile={onViewProfile} onFeedback={handleMatchFeedback} />
+                <RecommendationCard
+                  key={rec.businessId}
+                  rec={rec}
+                  onViewProfile={(id) => {
+                    if (businessId) {
+                      void logAiSuggestionEvent(businessId, {
+                        eventType: 'SUGGESTION_CLICKED',
+                        source: 'recommendations',
+                        targetBusinessId: id,
+                        score: rec.score,
+                        matchType: rec.matchType,
+                      });
+                      void loadFunnel();
+                    }
+                    onViewProfile(id);
+                  }}
+                  onFeedback={handleMatchFeedback}
+                />
               ))}
             </div>
 
@@ -786,7 +962,19 @@ export function Directory({ onViewProfile }: DirectoryProps) {
                 <RelationshipInsightTile
                   key={item.businessId}
                   item={item}
-                  onViewProfile={onViewProfile}
+                  onViewProfile={(targetId) => {
+                    if (businessId) {
+                      void logAiSuggestionEvent(businessId, {
+                        eventType: 'SUGGESTION_CLICKED',
+                        source: 'relationship_insights',
+                        targetBusinessId: item.businessId,
+                        matchType: item.suggestedAction,
+                        metadata: { reason: item.reason },
+                      });
+                      void loadFunnel();
+                    }
+                    onViewProfile(targetId);
+                  }}
                   onDismiss={handleDismissInsight}
                 />
               ))}
