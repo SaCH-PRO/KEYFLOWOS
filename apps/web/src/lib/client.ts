@@ -5552,6 +5552,28 @@ export async function markAllNotificationsRead(businessId: string): Promise<ApiR
 export async function fetchUnreadNotificationCount(businessId: string): Promise<ApiResult<{ count: number }>> {
   return apiGetSimple<{ count: number }>(`/businesses/${encodeURIComponent(businessId)}/community/notifications/unread-count`);
 }
+
+export interface MatchFeedbackPayload {
+  targetBusinessId: string;
+  feedback: 'HELPFUL' | 'DISMISSED';
+  matchScore?: number;
+  matchType?: string;
+}
+export async function submitMatchFeedback(businessId: string, payload: MatchFeedbackPayload): Promise<ApiResult<{ id: string }>> {
+  return apiPost<{ id: string }>({ path: `/businesses/${encodeURIComponent(businessId)}/community/match-feedback`, body: payload });
+}
+export interface MatchAnalytics {
+  total: number;
+  helpful: number;
+  dismissed: number;
+  helpfulRate: number;
+  avgScoreHelpful: number | null;
+  avgScoreDismissed: number | null;
+  byType: Record<string, { helpful: number; dismissed: number; total: number }>;
+}
+export async function fetchMatchAnalytics(businessId: string): Promise<ApiResult<MatchAnalytics>> {
+  return apiGetSimple<MatchAnalytics>(`/businesses/${encodeURIComponent(businessId)}/community/match-analytics`);
+}
 export async function generateAiProfile(businessId: string, data: { name?: string; industry?: string; skills?: string[]; businessStage?: string; description?: string }): Promise<ApiResult<{ headline: string; bio: string }>> {
   return apiPost<{ headline: string; bio: string }>({ path: `/identity/businesses/${encodeURIComponent(businessId)}/generate-profile`, body: data });
 }

@@ -26,12 +26,15 @@ import {
   Star,
   ShieldCheck,
   Award,
+  ThumbsUp,
+  XCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   searchDirectory,
   fetchBusinessRecommendations,
+  submitMatchFeedback,
   type DirectoryBusiness,
   type BusinessRecommendation,
 } from "@/lib/client";
@@ -133,8 +136,17 @@ function MatchScoreBadge({ score }: { score: number }) {
   );
 }
 
-function RecommendationCard({ rec, onViewProfile }: { rec: BusinessRecommendation; onViewProfile: (id: string) => void }) {
+function RecommendationCard({
+  rec,
+  onViewProfile,
+  onFeedback,
+}: {
+  rec: BusinessRecommendation;
+  onViewProfile: (id: string) => void;
+  onFeedback: (targetBusinessId: string, feedback: 'HELPFUL' | 'DISMISSED', score: number, matchType: string) => void;
+}) {
   const router = useRouter();
+  const [feedbackGiven, setFeedbackGiven] = useState<'HELPFUL' | 'DISMISSED' | null>(null);
   const biz = rec.business;
   const logo = biz.logoUrl
     ? biz.logoUrl.startsWith("http") ? biz.logoUrl : `${API_BASE}${biz.logoUrl}`
@@ -142,6 +154,25 @@ function RecommendationCard({ rec, onViewProfile }: { rec: BusinessRecommendatio
   const initials = biz.name?.[0]?.toUpperCase() || "?";
   const matchConfig = MATCH_TYPE_CONFIG[rec.matchType] || MATCH_TYPE_CONFIG.general;
   const MatchIcon = matchConfig.icon;
+
+  const handleFeedback = (e: React.MouseEvent, type: 'HELPFUL' | 'DISMISSED') => {
+    e.stopPropagation();
+    setFeedbackGiven(type);
+    onFeedback(biz.id, type, rec.score, rec.matchType);
+  };
+
+  if (feedbackGiven === 'DISMISSED') {
+    return (
+      <motion.div
+        initial={{ opacity: 1, scale: 1 }}
+        animate={{ opacity: 0, scale: 0.95, height: 0, marginBottom: 0, padding: 0 }}
+        transition={{ duration: 0.3, delay: 0.2 }}
+        className="kf-card border border-border/20 rounded-xl p-4 overflow-hidden"
+      >
+        <p className="text-xs text-muted-foreground text-center">Dismissed</p>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -205,6 +236,30 @@ function RecommendationCard({ rec, onViewProfile }: { rec: BusinessRecommendatio
             <Briefcase className="w-3 h-3" /> {biz.industry}
           </span>
         )}
+      </div>
+
+      <div className="flex items-center gap-1.5 pt-2 border-t border-border/20">
+        <button
+          onClick={(e) => handleFeedback(e, 'HELPFUL')}
+          disabled={feedbackGiven === 'HELPFUL'}
+          className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
+            feedbackGiven === 'HELPFUL'
+              ? "bg-emerald-500/20 text-emerald-400"
+              : "bg-white/5 hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-400"
+          }`}
+          title="Helpful match"
+        >
+          <ThumbsUp className="w-3 h-3" />
+          {feedbackGiven === 'HELPFUL' ? "Marked Helpful" : "Helpful"}
+        </button>
+        <button
+          onClick={(e) => handleFeedback(e, 'DISMISSED')}
+          className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-medium bg-white/5 hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors ml-auto"
+          title="Not relevant"
+        >
+          <XCircle className="w-3 h-3" />
+          Not Relevant
+        </button>
       </div>
     </motion.div>
   );
@@ -401,6 +456,19 @@ export function Directory({ onViewProfile }: DirectoryProps) {
     }
   }, [businessId, loadRecommendations]);
 
+  const handleMatchFeedback = useCallback(async (targetBusinessId: string, feedback: 'HELPFUL' | 'DISMISSED', matchScore: number, matchType: string) => {
+    if (!businessId) return;
+    try {
+      await submitMatchFeedback(businessId, { targetBusinessId, feedback, matchScore, matchType });
+      if (feedback === 'DISMISSED') {
+        setTimeout(() => {
+          setRecommendations((prev) => prev.filter((r) => r.businessId !== targetBusinessId));
+        }, 600);
+      }
+    } catch {
+    }
+  }, [businessId]);
+
   const loadDirectory = useCallback(async () => {
     setLoading(true);
     const params: Record<string, string> = {};
@@ -476,7 +544,7 @@ export function Directory({ onViewProfile }: DirectoryProps) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {recommendations.map((rec) => (
-                <RecommendationCard key={rec.businessId} rec={rec} onViewProfile={onViewProfile} />
+                <RecommendationCard key={rec.businessId} rec={rec} onViewProfile={onViewProfile} onFeedback={handleMatchFeedback} />
               ))}
             </div>
 

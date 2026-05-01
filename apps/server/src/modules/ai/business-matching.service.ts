@@ -120,6 +120,55 @@ export class BusinessMatchingService {
     }));
   }
 
+  async submitFeedback(businessId: string, targetBusinessId: string, feedback: 'HELPFUL' | 'DISMISSED', matchScore?: number, matchType?: string) {
+    const result = await this.prisma.client.matchFeedback.upsert({
+      where: { businessId_targetBusinessId: { businessId, targetBusinessId } },
+      create: { businessId, targetBusinessId, feedback, matchScore, matchType },
+      update: { feedback, matchScore, matchType },
+    });
+    try {
+      await this.prisma.client.businessMatch.deleteMany({ where: { businessId } });
+    } catch (err) {
+      this.logger.warn(`Failed to invalidate match cache for ${businessId}: ${(err as Error).message}`);
+    }
+    return result;
+  }
+
+  async getFeedback(businessId: string) {
+    return this.prisma.client.matchFeedback.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getMatchAnalytics(businessId: string) {
+    const feedback = await this.prisma.client.matchFeedback.findMany({
+      where: { businessId },
+    });
+    const total = feedback.length;
+    const helpful = feedback.filter((f) => f.feedback === 'HELPFUL').length;
+    const dismissed = feedback.filter((f) => f.feedback === 'DISMISSED').length;
+    const helpfulRate = total > 0 ? Math.round((helpful / total) * 100) : 0;
+
+    const byType: Record<string, { helpful: number; dismissed: number; total: number }> = {};
+    for (const f of feedback) {
+      const type = f.matchType || 'unknown';
+      if (!byType[type]) byType[type] = { helpful: 0, dismissed: 0, total: 0 };
+      byType[type].total++;
+      if (f.feedback === 'HELPFUL') byType[type].helpful++;
+      else byType[type].dismissed++;
+    }
+
+    const avgScoreHelpful = helpful > 0
+      ? Math.round(feedback.filter((f) => f.feedback === 'HELPFUL' && f.matchScore).reduce((sum, f) => sum + (f.matchScore || 0), 0) / helpful)
+      : null;
+    const avgScoreDismissed = dismissed > 0
+      ? Math.round(feedback.filter((f) => f.feedback === 'DISMISSED' && f.matchScore).reduce((sum, f) => sum + (f.matchScore || 0), 0) / dismissed)
+      : null;
+
+    return { total, helpful, dismissed, helpfulRate, avgScoreHelpful, avgScoreDismissed, byType };
+  }
+
   private async loadFromDb(businessId: string): Promise<(MatchResult & { business: BusinessProfile })[] | null> {
     const cutoff = new Date(Date.now() - DB_CACHE_TTL_MS);
 
@@ -216,9 +265,15 @@ export class BusinessMatchingService {
 
     if (!sourceBusiness) return [];
 
+    const dismissedFeedback = await this.prisma.client.matchFeedback.findMany({
+      where: { businessId, feedback: 'DISMISSED' },
+      select: { targetBusinessId: true },
+    });
+    const dismissedIds = dismissedFeedback.map((f) => f.targetBusinessId);
+
     const candidates = await this.prisma.client.business.findMany({
       where: {
-        id: { not: businessId },
+        id: { notIn: [businessId, ...dismissedIds] },
         deletedAt: null,
         profileCompleteness: { gte: 20 },
       },
