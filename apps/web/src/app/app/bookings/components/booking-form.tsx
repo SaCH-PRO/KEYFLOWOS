@@ -11,10 +11,13 @@ import {
   Loader2,
   Check,
   StickyNote,
+  MapPin,
 } from "lucide-react";
 import type { Service, StaffMember, Contact } from "./bookings-types";
 import { formatTime } from "./bookings-types";
 import { ContactSelect } from "@/components/contacts";
+import { BusinessAddressAutocomplete } from "@/components/ui/business-address-autocomplete";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 interface BookingFormProps {
   services: Service[];
@@ -89,7 +92,9 @@ export default function BookingForm({
   const [bookingServiceId, setBookingServiceId] = useState("");
   const [bookingStaffId, setBookingStaffId] = useState("");
   const [bookingContactId, setBookingContactId] = useState(defaultContactId ?? "");
+  const [bookingLocation, setBookingLocation] = useState("");
   const [bookingNotes, setBookingNotes] = useState("");
+  const businessId = getStoredBusinessId();
   const [weekBase, setWeekBase] = useState(() => {
     if (defaultDate) return new Date(defaultDate + "T12:00:00");
     return new Date();
@@ -159,13 +164,20 @@ export default function BookingForm({
   const isComplete = bookingDate && bookingTime && bookingServiceId && bookingStaffId;
 
   function handleSubmit() {
+    const trimmedLoc = bookingLocation.trim();
+    const trimmedNotes = bookingNotes.trim();
+    const combinedNotes = trimmedLoc
+      ? trimmedNotes
+        ? `Location: ${trimmedLoc}\n\n${trimmedNotes}`
+        : `Location: ${trimmedLoc}`
+      : trimmedNotes;
     onSubmit({
       date: bookingDate,
       time: bookingTime,
       serviceId: bookingServiceId,
       staffId: bookingStaffId,
       contactId: bookingContactId,
-      notes: bookingNotes.trim() || undefined,
+      notes: combinedNotes || undefined,
     });
   }
 
@@ -398,6 +410,22 @@ export default function BookingForm({
               contacts={contacts}
               label="Client"
               placeholder="Search or add a client..."
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Location</span>
+              <span className="text-[10px] text-muted-foreground/50">(optional)</span>
+            </div>
+            <BusinessAddressAutocomplete
+              businessId={businessId}
+              value={bookingLocation}
+              onChange={setBookingLocation}
+              onSelect={(p) => setBookingLocation(p.formattedAddress)}
+              placeholder="Where will this booking happen?"
+              inputClassName="text-xs"
             />
           </div>
 
