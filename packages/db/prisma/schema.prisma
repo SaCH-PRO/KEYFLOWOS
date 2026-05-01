@@ -208,6 +208,14 @@ model Business {
   endorsementsGiven    Endorsement[] @relation("EndorsementFrom")
   endorsementsReceived Endorsement[] @relation("EndorsementTo")
 
+  // Direct Messaging & Collaboration (Community Phase 2)
+  conversationsAsA       Conversation[]         @relation("ConversationParticipantA")
+  conversationsAsB       Conversation[]         @relation("ConversationParticipantB")
+  sentMessages           DirectMessage[]        @relation("DirectMessageSender")
+  collabRequestsFrom     CollaborationRequest[] @relation("CollabRequestFrom")
+  collabRequestsTo       CollaborationRequest[] @relation("CollabRequestTo")
+  communityNotifications CommunityNotification[]
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -1931,6 +1939,79 @@ model Endorsement {
   @@index([fromBusinessId])
   @@index([toBusinessId])
   @@map("endorsements")
+}
+
+model Conversation {
+  id             String   @id @default(cuid())
+  participantAId String   @map("participant_a_id")
+  participantBId String   @map("participant_b_id")
+  participantA   Business @relation("ConversationParticipantA", fields: [participantAId], references: [id], onDelete: Cascade)
+  participantB   Business @relation("ConversationParticipantB", fields: [participantBId], references: [id], onDelete: Cascade)
+  lastMessageAt  DateTime? @map("last_message_at")
+  messages       DirectMessage[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@unique([participantAId, participantBId])
+  @@index([participantAId])
+  @@index([participantBId])
+  @@map("conversations")
+}
+
+model DirectMessage {
+  id             String   @id @default(cuid())
+  conversationId String   @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderBusinessId String @map("sender_business_id")
+  senderBusiness Business @relation("DirectMessageSender", fields: [senderBusinessId], references: [id], onDelete: Cascade)
+  content        String
+  readAt         DateTime? @map("read_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([conversationId, createdAt])
+  @@index([senderBusinessId])
+  @@map("direct_messages")
+}
+
+model CollaborationRequest {
+  id               String   @id @default(cuid())
+  fromBusinessId   String   @map("from_business_id")
+  toBusinessId     String   @map("to_business_id")
+  fromBusiness     Business @relation("CollabRequestFrom", fields: [fromBusinessId], references: [id], onDelete: Cascade)
+  toBusiness       Business @relation("CollabRequestTo", fields: [toBusinessId], references: [id], onDelete: Cascade)
+  type             String   @default("COLLABORATION") // COLLABORATION, REFERRAL, PARTNERSHIP
+  title            String
+  message          String?
+  status           String   @default("PENDING") // PENDING, ACCEPTED, DECLINED
+  respondedAt      DateTime? @map("responded_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([fromBusinessId])
+  @@index([toBusinessId])
+  @@index([status])
+  @@map("collaboration_requests")
+}
+
+model CommunityNotification {
+  id             String   @id @default(cuid())
+  businessId     String   @map("business_id")
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  type           String   // MESSAGE, COLLAB_REQUEST, COLLAB_RESPONSE, FOLLOW
+  title          String
+  body           String?
+  referenceId    String?  @map("reference_id")
+  referenceType  String?  @map("reference_type")
+  isRead         Boolean  @default(false) @map("is_read")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, isRead])
+  @@index([businessId, createdAt])
+  @@map("community_notifications")
 }
 
 // ---
