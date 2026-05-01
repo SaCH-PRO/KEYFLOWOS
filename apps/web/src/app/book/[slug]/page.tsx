@@ -75,6 +75,7 @@ export default function PublicBookingPage() {
     serviceNames: string[];
     dates: string[];
     times: string[];
+    locations: (string | null)[];
     businessName: string;
   } | null>(null);
   const [confirmedOrderItems, setConfirmedOrderItems] = useState<CartItem[]>([]);
@@ -577,7 +578,7 @@ export default function PublicBookingPage() {
     paymentMethodUI: PaymentMethod,
     shippingZoneId: string | null,
     orderPayload: typeof failedOrderPayload,
-    serviceDetails: { serviceNames: string[]; dates: string[]; times: string[]; businessName: string } | null,
+    serviceDetails: { serviceNames: string[]; dates: string[]; times: string[]; locations: (string | null)[]; businessName: string } | null,
   ) => {
     const allResults = [...bookingRefs];
     if (storeOrder?.order) {
@@ -686,6 +687,7 @@ export default function PublicBookingPage() {
         const startTime = new Date(`${bd.date}T${bd.time}`).toISOString();
 
         for (let q = 0; q < si.quantity; q++) {
+          const trimmedLocation = bd.location?.trim() || undefined;
           const { data: resData, error: err } = await apiPost<{
             bookingId: string;
             invoiceId?: string;
@@ -700,6 +702,9 @@ export default function PublicBookingPage() {
               lastName: data.lastName || undefined,
               email: data.email || undefined,
               phone: data.phone || undefined,
+              location: trimmedLocation,
+              locationPlaceId: trimmedLocation ? bd.locationPlaceId ?? undefined : undefined,
+              locationLatLng: trimmedLocation ? bd.locationLatLng ?? undefined : undefined,
             },
           });
 
@@ -712,18 +717,21 @@ export default function PublicBookingPage() {
     const svcNames: string[] = [];
     const svcDates: string[] = [];
     const svcTimes: string[] = [];
+    const svcLocations: (string | null)[] = [];
     for (const si of serviceItemsInCart) {
       const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
       if (bd) {
         svcNames.push(si.name);
         svcDates.push(bd.date);
         svcTimes.push(bd.time);
+        svcLocations.push(bd.location?.trim() ? bd.location.trim() : null);
       }
     }
     const computedServiceDetails = svcNames.length > 0 ? {
       serviceNames: svcNames,
       dates: svcDates,
       times: svcTimes,
+      locations: svcLocations,
       businessName: business?.name || "",
     } : null;
     setConfirmedDetails(computedServiceDetails);
@@ -846,7 +854,8 @@ export default function PublicBookingPage() {
           const end = new Date(start.getTime() + 60 * 60 * 1000);
           const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
           const title = encodeURIComponent(`${confirmedDetails.serviceNames[0] || "Appointment"} - ${confirmedDetails.businessName}`);
-          const location = encodeURIComponent(business?.address || "");
+          const firstBookingLocation = confirmedDetails.locations?.[0] || null;
+          const location = encodeURIComponent(firstBookingLocation || business?.address || "");
           return `https://calendar.google.com/calendar/event?action=TEMPLATE&text=${title}&dates=${fmt(start)}/${fmt(end)}&location=${location}`;
         })()
       : null;

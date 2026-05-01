@@ -86,14 +86,65 @@ function formatCurrency(amount: number, currency: string): string {
   return `${currency} ${amount.toFixed(2)}`;
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function googleMapsUrl(opts: {
+  text?: string | null;
+  placeId?: string | null;
+  latLng?: { lat: number; lng: number } | null;
+}): string {
+  const params = new URLSearchParams({ api: '1' });
+  if (opts.latLng && Number.isFinite(opts.latLng.lat) && Number.isFinite(opts.latLng.lng)) {
+    params.set('query', `${opts.latLng.lat},${opts.latLng.lng}`);
+  } else if (opts.text && opts.text.trim()) {
+    params.set('query', opts.text.trim());
+  } else if (opts.placeId) {
+    params.set('query', opts.placeId);
+  }
+  if (opts.placeId) params.set('query_place_id', opts.placeId);
+  return `https://www.google.com/maps/search/?${params.toString()}`;
+}
+
+function locationLine(opts: {
+  text?: string | null;
+  placeId?: string | null;
+  latLng?: { lat: number; lng: number } | null;
+  label?: string;
+}): string {
+  const text = opts.text?.trim();
+  const hasCoords = opts.latLng && Number.isFinite(opts.latLng.lat) && Number.isFinite(opts.latLng.lng);
+  if (!text && !opts.placeId && !hasCoords) return '';
+  const display = text || (hasCoords ? `${opts.latLng!.lat.toFixed(5)}, ${opts.latLng!.lng.toFixed(5)}` : 'View location');
+  const url = googleMapsUrl({ text, placeId: opts.placeId, latLng: opts.latLng });
+  const label = opts.label ?? 'Location';
+  return paragraph(
+    `&#128205; <strong>${escapeHtml(label)}:</strong> ${escapeHtml(display)} &middot; <a href="${url}" target="_blank" style="color:#fafafa;text-decoration:underline;">Open in Google Maps</a>`,
+  );
+}
+
 export function bookingConfirmedTemplate(ctx: TemplateContext & {
   serviceName: string;
   startTime: Date | string;
   endTime: Date | string;
   staffName?: string;
   bookingId: string;
+  location?: string | null;
+  locationPlaceId?: string | null;
+  locationLatLng?: { lat: number; lng: number } | null;
 }): { subject: string; html: string } {
   const subject = `Your booking with ${ctx.businessName} is confirmed`;
+  const hasBookingLocation = !!(
+    (ctx.location && ctx.location.trim()) ||
+    ctx.locationPlaceId ||
+    (ctx.locationLatLng && Number.isFinite(ctx.locationLatLng.lat) && Number.isFinite(ctx.locationLatLng.lng))
+  );
   const body = [
     heading('Booking Confirmed &#10003;'),
     paragraph(`Hi ${ctx.customerName},`),
@@ -105,7 +156,17 @@ export function bookingConfirmedTemplate(ctx: TemplateContext & {
       ctx.staffName ? detailRow('With', ctx.staffName) : '',
       detailRow('Reference', ctx.bookingId.slice(-8).toUpperCase()),
     ].join('')),
-    ctx.businessAddress ? paragraph(`&#128205; ${ctx.businessAddress}`) : '',
+    hasBookingLocation
+      ? locationLine({
+          text: ctx.location,
+          placeId: ctx.locationPlaceId,
+          latLng: ctx.locationLatLng,
+          label: 'Service location',
+        })
+      : '',
+    ctx.businessAddress
+      ? locationLine({ text: ctx.businessAddress, label: hasBookingLocation ? 'Business' : 'Location' })
+      : '',
     paragraph('We look forward to seeing you!'),
   ].join('');
   return { subject, html: baseLayout(ctx, subject, body) };
@@ -117,8 +178,16 @@ export function bookingReminderTemplate(ctx: TemplateContext & {
   endTime: Date | string;
   staffName?: string;
   bookingId: string;
+  location?: string | null;
+  locationPlaceId?: string | null;
+  locationLatLng?: { lat: number; lng: number } | null;
 }): { subject: string; html: string } {
   const subject = `Reminder: Your appointment with ${ctx.businessName} is tomorrow`;
+  const hasBookingLocation = !!(
+    (ctx.location && ctx.location.trim()) ||
+    ctx.locationPlaceId ||
+    (ctx.locationLatLng && Number.isFinite(ctx.locationLatLng.lat) && Number.isFinite(ctx.locationLatLng.lng))
+  );
   const body = [
     heading('Appointment Reminder'),
     paragraph(`Hi ${ctx.customerName},`),
@@ -129,7 +198,17 @@ export function bookingReminderTemplate(ctx: TemplateContext & {
       detailRow('Time', `${formatTime(ctx.startTime)} &ndash; ${formatTime(ctx.endTime)}`),
       ctx.staffName ? detailRow('With', ctx.staffName) : '',
     ].join('')),
-    ctx.businessAddress ? paragraph(`&#128205; ${ctx.businessAddress}`) : '',
+    hasBookingLocation
+      ? locationLine({
+          text: ctx.location,
+          placeId: ctx.locationPlaceId,
+          latLng: ctx.locationLatLng,
+          label: 'Service location',
+        })
+      : '',
+    ctx.businessAddress
+      ? locationLine({ text: ctx.businessAddress, label: hasBookingLocation ? 'Business' : 'Location' })
+      : '',
     paragraph('If you need to reschedule, please contact us as soon as possible.'),
   ].join('');
   return { subject, html: baseLayout(ctx, subject, body) };
@@ -195,8 +274,16 @@ export function bookingRescheduledTemplate(ctx: TemplateContext & {
   newEndTime: Date | string;
   previousStartTime: Date | string;
   staffName?: string;
+  location?: string | null;
+  locationPlaceId?: string | null;
+  locationLatLng?: { lat: number; lng: number } | null;
 }): { subject: string; html: string } {
   const subject = `Your appointment with ${ctx.businessName} has been rescheduled`;
+  const hasBookingLocation = !!(
+    (ctx.location && ctx.location.trim()) ||
+    ctx.locationPlaceId ||
+    (ctx.locationLatLng && Number.isFinite(ctx.locationLatLng.lat) && Number.isFinite(ctx.locationLatLng.lng))
+  );
   const body = [
     heading('Appointment Rescheduled'),
     paragraph(`Hi ${ctx.customerName},`),
@@ -208,7 +295,17 @@ export function bookingRescheduledTemplate(ctx: TemplateContext & {
       ctx.staffName ? detailRow('With', ctx.staffName) : '',
     ].join('')),
     paragraph(`<span style="color:#71717a;">Previous: ${formatDate(ctx.previousStartTime)} at ${formatTime(ctx.previousStartTime)}</span>`),
-    ctx.businessAddress ? paragraph(`&#128205; ${ctx.businessAddress}`) : '',
+    hasBookingLocation
+      ? locationLine({
+          text: ctx.location,
+          placeId: ctx.locationPlaceId,
+          latLng: ctx.locationLatLng,
+          label: 'Service location',
+        })
+      : '',
+    ctx.businessAddress
+      ? locationLine({ text: ctx.businessAddress, label: hasBookingLocation ? 'Business' : 'Location' })
+      : '',
     paragraph('If you have any questions, please contact us.'),
   ].join('');
   return { subject, html: baseLayout(ctx, subject, body) };

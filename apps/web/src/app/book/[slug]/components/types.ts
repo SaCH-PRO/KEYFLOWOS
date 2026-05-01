@@ -73,6 +73,9 @@ export type ServiceBookingData = {
   staffId: string;
   date: string;
   time: string;
+  location?: string;
+  locationPlaceId?: string | null;
+  locationLatLng?: { lat: number; lng: number } | null;
 };
 
 export type PromoCode = {

@@ -164,6 +164,10 @@ export class BookingsController {
         phone: body.phone,
         companyName: body.company,
       },
+      notes: body.notes ?? undefined,
+      location: body.location ?? undefined,
+      locationPlaceId: body.locationPlaceId ?? undefined,
+      locationLatLng: body.locationLatLng ?? undefined,
     });
   }
 

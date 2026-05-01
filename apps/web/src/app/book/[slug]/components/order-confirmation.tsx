@@ -31,6 +31,7 @@ type Props = {
     serviceNames: string[];
     dates: string[];
     times: string[];
+    locations?: (string | null)[];
     businessName: string;
   } | null;
   bookingResults: { bookingId: string; invoiceId?: string }[];
@@ -337,28 +338,59 @@ export function OrderConfirmation({
 
       {confirmedDetails && confirmedDetails.serviceNames.length > 0 && !isOrder && (
         <div className="space-y-2" style={{ animation: "fadeUp 500ms ease-out 400ms both" }}>
-          {confirmedDetails.serviceNames.map((name, idx) => (
-            <div
-              key={idx}
-              className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-left space-y-1.5"
-            >
-              <p className="text-sm font-medium text-gray-700">{name}</p>
-              <div className="flex items-center gap-4 text-[12px] text-gray-400">
-                {confirmedDetails.dates[idx] && (
-                  <span className="flex items-center gap-1">
-                    <CalendarPlus className="w-3 h-3" />
-                    {formatDate(confirmedDetails.dates[idx])}
-                  </span>
-                )}
-                {confirmedDetails.times[idx] && (
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {formatTime(confirmedDetails.times[idx])}
-                  </span>
+          {confirmedDetails.serviceNames.map((name, idx) => {
+            const bookingLocation = confirmedDetails.locations?.[idx] ?? null;
+            const mapsHref = (() => {
+              const text = bookingLocation?.trim() || businessAddress?.trim() || "";
+              if (!text) return null;
+              return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(text)}`;
+            })();
+            const showLocation = bookingLocation || businessAddress;
+            return (
+              <div
+                key={idx}
+                className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-left space-y-1.5"
+              >
+                <p className="text-sm font-medium text-gray-700">{name}</p>
+                <div className="flex items-center gap-4 text-[12px] text-gray-400 flex-wrap">
+                  {confirmedDetails.dates[idx] && (
+                    <span className="flex items-center gap-1">
+                      <CalendarPlus className="w-3 h-3" />
+                      {formatDate(confirmedDetails.dates[idx])}
+                    </span>
+                  )}
+                  {confirmedDetails.times[idx] && (
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {formatTime(confirmedDetails.times[idx])}
+                    </span>
+                  )}
+                </div>
+                {showLocation && (
+                  <div className="flex items-start gap-1.5 text-[12px] text-gray-500">
+                    <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <span className="break-words">{bookingLocation || businessAddress}</span>
+                      {mapsHref && (
+                        <>
+                          {" · "}
+                          <a
+                            href={mapsHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline whitespace-nowrap"
+                            style={{ color: primaryColor }}
+                          >
+                            Open in Google Maps
+                          </a>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

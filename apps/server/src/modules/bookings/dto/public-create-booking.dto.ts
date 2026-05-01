@@ -1,8 +1,25 @@
 import { Type, Transform } from 'class-transformer';
-import { IsISO8601, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsISO8601,
+  IsNotEmpty,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
 
 const stripHtml = ({ value }: { value: any }) =>
   typeof value === 'string' ? value.replace(/<[^>]*>/g, '').trim() : value;
+
+export class PublicBookingLatLngDto {
+  @IsNumber()
+  lat!: number;
+
+  @IsNumber()
+  lng!: number;
+}
 
 export class PublicCreateBookingDto {
   @IsString()
@@ -52,4 +69,21 @@ export class PublicCreateBookingDto {
   @MaxLength(1000)
   @Transform(stripHtml)
   notes?: string | null;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  @Transform(stripHtml)
+  location?: string | null;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  locationPlaceId?: string | null;
+
+  @IsObject()
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PublicBookingLatLngDto)
+  locationLatLng?: PublicBookingLatLngDto | null;
 }

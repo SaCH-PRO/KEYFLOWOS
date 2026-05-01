@@ -233,6 +233,9 @@ export class TransactionalEmailService implements OnModuleInit {
             endTime: data.endTime,
             staffName: data.staffName,
             bookingId: data.bookingId,
+            location: data.location,
+            locationPlaceId: data.locationPlaceId,
+            locationLatLng: data.locationLatLng,
           });
           break;
         case 'booking_reminder':
@@ -243,6 +246,9 @@ export class TransactionalEmailService implements OnModuleInit {
             endTime: data.endTime,
             staffName: data.staffName,
             bookingId: data.bookingId,
+            location: data.location,
+            locationPlaceId: data.locationPlaceId,
+            locationLatLng: data.locationLatLng,
           });
           break;
         case 'booking_rescheduled':
@@ -253,6 +259,9 @@ export class TransactionalEmailService implements OnModuleInit {
             newEndTime: data.newEndTime,
             previousStartTime: data.previousStartTime,
             staffName: data.staffName,
+            location: data.location,
+            locationPlaceId: data.locationPlaceId,
+            locationLatLng: data.locationLatLng,
           });
           break;
         case 'booking_cancelled':

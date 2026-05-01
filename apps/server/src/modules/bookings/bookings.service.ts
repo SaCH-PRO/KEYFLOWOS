@@ -110,6 +110,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
               endTime: endTime.toISOString(),
               staffName: '',
               bookingId: booking.id,
+              location: (booking as any).location ?? null,
+              locationPlaceId: (booking as any).locationPlaceId ?? null,
+              locationLatLng: (booking as any).locationLatLng ?? null,
             },
             dedupeKey: `booking-reminder-${booking.id}`,
           });
@@ -573,6 +576,10 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     staffId?: string | null;
     startTime: Date;
     contact: { firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null; companyName?: string | null };
+    notes?: string | null;
+    location?: string | null;
+    locationPlaceId?: string | null;
+    locationLatLng?: { lat: number; lng: number } | null;
   }) {
     const business = await this.prisma.client.business.findFirstOrThrow({
       where: { id: input.businessId, deletedAt: null },
@@ -690,6 +697,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     };
     if (input.staffId) bookingData.staffId = input.staffId;
     if (invoice?.id) bookingData.invoiceId = invoice.id;
+    if (input.notes && input.notes.trim()) bookingData.notes = input.notes.trim();
+    if (input.location && input.location.trim()) bookingData.location = input.location.trim();
+    if (input.locationPlaceId && input.locationPlaceId.trim())
+      bookingData.locationPlaceId = input.locationPlaceId.trim();
+    if (
+      input.locationLatLng &&
+      typeof input.locationLatLng.lat === 'number' &&
+      typeof input.locationLatLng.lng === 'number'
+    ) {
+      bookingData.locationLatLng = {
+        lat: input.locationLatLng.lat,
+        lng: input.locationLatLng.lng,
+      };
+    }
 
     const booking = await this.prisma.client.booking.create({
       data: bookingData,
