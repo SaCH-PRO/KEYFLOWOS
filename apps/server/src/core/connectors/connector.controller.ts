@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Param, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { ConnectorRegistryService } from './connector-registry.service';
+import { ConnectorActivityService } from './connector-activity.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { BusinessGuard } from '../auth/business.guard';
 import type { ConnectorType } from './connector.interface';
@@ -7,7 +8,10 @@ import type { ConnectorType } from './connector.interface';
 @Controller('connectors')
 @UseGuards(AuthGuard, BusinessGuard)
 export class ConnectorController {
-  constructor(private readonly registry: ConnectorRegistryService) {}
+  constructor(
+    private readonly registry: ConnectorRegistryService,
+    private readonly activity: ConnectorActivityService,
+  ) {}
 
   @Get('businesses/:businessId/dashboard')
   async getDashboard(@Param('businessId') businessId: string) {
@@ -85,5 +89,30 @@ export class ConnectorController {
       const message = err instanceof Error ? err.message : 'Reconnect failed';
       throw new BadRequestException(message);
     }
+  }
+
+  @Post('businesses/:businessId/test/:type')
+  async test(
+    @Param('businessId') businessId: string,
+    @Param('type') type: string,
+  ) {
+    try {
+      return await this.registry.testConnector(type as ConnectorType, businessId);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Test failed';
+      throw new BadRequestException(message);
+    }
+  }
+
+  @Get('businesses/:businessId/activity')
+  async listActivity(
+    @Param('businessId') businessId: string,
+    @Query('type') type?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.activity.list(businessId, {
+      connectorType: type ? (type as ConnectorType) : undefined,
+      limit: limit ? Number.parseInt(limit, 10) : undefined,
+    });
   }
 }

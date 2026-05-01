@@ -11,12 +11,18 @@ export class GoogleCalendarConnector implements IConnector {
   readonly meta: ConnectorMeta = {
     type: 'google_calendar',
     name: 'Google Calendar',
-    description: 'Sync bookings with your Google Calendar automatically',
+    description: 'Sync bookings and events with your Google Calendar automatically',
     category: 'calendar',
+    group: 'google',
     icon: 'calendar',
     supportsSync: true,
     supportsWebhook: false,
     authType: 'oauth2',
+    scopes: [
+      'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/userinfo.email',
+    ],
+    externalUrl: 'https://calendar.google.com',
   };
 
   constructor(
@@ -97,6 +103,28 @@ export class GoogleCalendarConnector implements IConnector {
     });
 
     return { success: true, itemsSynced: upcomingBookings, errors: [], duration: Date.now() - start };
+  }
+
+  async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { calendarAccessToken: true, calendarEmail: true },
+    });
+    if (!business?.calendarAccessToken) {
+      return { success: false, error: 'Google Calendar is not connected' };
+    }
+    try {
+      const res = await fetch(
+        'https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1',
+        { headers: { Authorization: `Bearer ${business.calendarAccessToken}` } },
+      );
+      if (!res.ok) {
+        return { success: false, error: `Calendar API returned ${res.status}` };
+      }
+      return { success: true, account: business.calendarEmail ?? undefined };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async disconnect(businessId: string): Promise<void> {

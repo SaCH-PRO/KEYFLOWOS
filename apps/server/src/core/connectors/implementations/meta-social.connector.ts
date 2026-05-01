@@ -13,6 +13,7 @@ export class MetaSocialConnector implements IConnector {
     name: 'Meta (Facebook & Instagram)',
     description: 'Publish posts and track engagement on Facebook and Instagram',
     category: 'social',
+    group: 'social',
     icon: 'share-2',
     supportsSync: true,
     supportsWebhook: true,

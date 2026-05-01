@@ -28,6 +28,7 @@ import type { Booking } from "./bookings-types";
 import { STATUS_STYLE, formatTime, formatFullDate, contactName } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 import Link from "next/link";
+import { googleDeepLinks } from "@/lib/google-deep-links";
 
 interface BookingDetailDrawerProps {
   selectedBooking: Booking;
@@ -237,6 +238,17 @@ export default function BookingDetailDrawer({
               </span>
             )}
           </div>
+          {selectedBooking.calendarEventId && (
+            <a
+              href={googleDeepLinks.calendarEvent(selectedBooking.calendarEventId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] font-medium hover:underline pt-1"
+              style={{ color: "hsl(var(--kf-accent2))" }}
+            >
+              Open in Google Calendar <ExternalLink className="w-2.5 h-2.5" />
+            </a>
+          )}
         </div>
 
         {selectedBooking.contact && (

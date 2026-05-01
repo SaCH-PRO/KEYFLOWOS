@@ -10,12 +10,20 @@ export class GoogleDriveConnector implements IConnector {
   readonly meta: ConnectorMeta = {
     type: 'google_drive',
     name: 'Google Drive',
-    description: 'Store documents and sync spreadsheets with Google Drive',
+    description: 'Browse, upload, edit, and delete files; create Docs and Sheets',
     category: 'storage',
+    group: 'google',
     icon: 'hard-drive',
     supportsSync: true,
     supportsWebhook: false,
     authType: 'oauth2',
+    scopes: [
+      'https://www.googleapis.com/auth/drive',
+      'https://www.googleapis.com/auth/spreadsheets',
+      'https://www.googleapis.com/auth/documents',
+      'https://www.googleapis.com/auth/userinfo.email',
+    ],
+    externalUrl: 'https://drive.google.com',
   };
 
   constructor(
@@ -91,6 +99,28 @@ export class GoogleDriveConnector implements IConnector {
     });
 
     return { success: true, itemsSynced: docCount, errors: [], duration: Date.now() - start };
+  }
+
+  async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { driveAccessToken: true, driveEmail: true },
+    });
+    if (!business?.driveAccessToken) {
+      return { success: false, error: 'Google Drive is not connected' };
+    }
+    try {
+      const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+        headers: { Authorization: `Bearer ${business.driveAccessToken}` },
+      });
+      if (!res.ok) {
+        return { success: false, error: `Drive API returned ${res.status}` };
+      }
+      const data = await res.json();
+      return { success: true, account: data.user?.emailAddress ?? business.driveEmail ?? undefined };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async disconnect(businessId: string): Promise<void> {

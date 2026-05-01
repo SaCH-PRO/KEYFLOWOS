@@ -4,6 +4,10 @@ import {
   GmailConnector,
   GoogleCalendarConnector,
   GoogleDriveConnector,
+  GoogleFormsConnector,
+  GoogleContactsConnector,
+  GoogleBusinessProfileConnector,
+  GoogleMapsConnector,
   WhatsAppConnector,
   MetaSocialConnector,
   PayPalConnector,
@@ -20,6 +24,11 @@ export class ConnectorInitializerService implements OnModuleInit {
     @Inject(GmailConnector) private readonly gmail: GmailConnector,
     @Inject(GoogleCalendarConnector) private readonly calendar: GoogleCalendarConnector,
     @Inject(GoogleDriveConnector) private readonly drive: GoogleDriveConnector,
+    @Inject(GoogleFormsConnector) private readonly forms: GoogleFormsConnector,
+    @Inject(GoogleContactsConnector) private readonly contacts: GoogleContactsConnector,
+    @Inject(GoogleBusinessProfileConnector)
+    private readonly businessProfile: GoogleBusinessProfileConnector,
+    @Inject(GoogleMapsConnector) private readonly maps: GoogleMapsConnector,
     @Inject(WhatsAppConnector) private readonly whatsapp: WhatsAppConnector,
     @Inject(MetaSocialConnector) private readonly meta: MetaSocialConnector,
     @Inject(PayPalConnector) private readonly paypal: PayPalConnector,
@@ -31,11 +40,15 @@ export class ConnectorInitializerService implements OnModuleInit {
     this.registry.register(this.gmail);
     this.registry.register(this.calendar);
     this.registry.register(this.drive);
+    this.registry.register(this.forms);
+    this.registry.register(this.contacts);
+    this.registry.register(this.businessProfile);
+    this.registry.register(this.maps);
     this.registry.register(this.whatsapp);
     this.registry.register(this.meta);
     this.registry.register(this.paypal);
     this.registry.register(this.wipay);
     this.registry.register(this.stripe);
-    this.logger.log(`Initialized ${8} connectors in the registry`);
+    this.logger.log(`Initialized ${12} connectors in the registry`);
   }
 }

@@ -332,6 +332,158 @@ export class GoogleDriveService {
     return res.json();
   }
 
+  async renameFile(
+    businessId: string,
+    fileId: string,
+    newName: string,
+  ): Promise<DriveFile> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,webViewLink,modifiedTime`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName }),
+      },
+    );
+    if (!res.ok) throw new BadRequestException(`Drive rename failed: ${res.status}`);
+    return res.json();
+  }
+
+  async moveFile(
+    businessId: string,
+    fileId: string,
+    addParents: string[] = [],
+    removeParents: string[] = [],
+  ): Promise<DriveFile> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const params = new URLSearchParams({
+      fields: 'id,name,parents,webViewLink',
+    });
+    if (addParents.length) params.set('addParents', addParents.join(','));
+    if (removeParents.length) params.set('removeParents', removeParents.join(','));
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?${params.toString()}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    );
+    if (!res.ok) throw new BadRequestException(`Drive move failed: ${res.status}`);
+    return res.json();
+  }
+
+  async trashFile(businessId: string, fileId: string): Promise<void> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashed: true }),
+    });
+    if (!res.ok) throw new BadRequestException(`Drive trash failed: ${res.status}`);
+  }
+
+  async untrashFile(businessId: string, fileId: string): Promise<void> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashed: false }),
+    });
+    if (!res.ok) throw new BadRequestException(`Drive untrash failed: ${res.status}`);
+  }
+
+  async deleteFile(businessId: string, fileId: string): Promise<void> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok && res.status !== 204) {
+      throw new BadRequestException(`Drive delete failed: ${res.status}`);
+    }
+  }
+
+  async shareFile(
+    businessId: string,
+    fileId: string,
+    opts: {
+      type: 'user' | 'group' | 'domain' | 'anyone';
+      role: 'reader' | 'commenter' | 'writer' | 'owner';
+      emailAddress?: string;
+      domain?: string;
+      sendNotification?: boolean;
+    },
+  ) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const params = new URLSearchParams();
+    if (opts.sendNotification === false) params.set('sendNotificationEmail', 'false');
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/permissions?${params.toString()}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: opts.type,
+          role: opts.role,
+          emailAddress: opts.emailAddress,
+          domain: opts.domain,
+        }),
+      },
+    );
+    if (!res.ok) {
+      const err = await res.text();
+      throw new BadRequestException(`Drive share failed: ${res.status} ${err}`);
+    }
+    return res.json();
+  }
+
+  async createDoc(businessId: string, title: string, parentId?: string) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: title,
+        mimeType: 'application/vnd.google-apps.document',
+        ...(parentId ? { parents: [parentId] } : {}),
+      }),
+    });
+    if (!res.ok) throw new BadRequestException(`Drive createDoc failed: ${res.status}`);
+    return res.json();
+  }
+
+  async createSheet(businessId: string, title: string, parentId?: string) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: title,
+        mimeType: 'application/vnd.google-apps.spreadsheet',
+        ...(parentId ? { parents: [parentId] } : {}),
+      }),
+    });
+    if (!res.ok) throw new BadRequestException(`Drive createSheet failed: ${res.status}`);
+    return res.json();
+  }
+
+  async createFolder(businessId: string, name: string, parentId?: string) {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        mimeType: 'application/vnd.google-apps.folder',
+        ...(parentId ? { parents: [parentId] } : {}),
+      }),
+    });
+    if (!res.ok) throw new BadRequestException(`Drive createFolder failed: ${res.status}`);
+    return res.json();
+  }
+
   async saveDocumentToDrive(
     businessId: string,
     document: {

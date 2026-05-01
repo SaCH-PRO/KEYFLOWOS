@@ -10,7 +10,7 @@ import { useNavigationContext } from "@/lib/navigation-context";
 const navItems = [
   { href: "/app/settings/business", label: "Payments", icon: CreditCard, description: "Billing & gateways" },
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
-  { href: "/app/settings/connections", label: "Connections", icon: Link2, description: "Integrations" },
+  { href: "/app/connect", label: "Connect", icon: Link2, description: "Integrations hub" },
   { href: "/app/settings/notifications", label: "Notifications", icon: Bell, description: "Customer emails" },
   { href: "/app/settings/webhooks", label: "Webhooks", icon: Webhook, description: "Event hooks" },
   { href: "/app/settings/templates", label: "Templates", icon: Palette, description: "Gallery" },

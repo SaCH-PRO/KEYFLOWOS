@@ -13,6 +13,7 @@ export class PayPalConnector implements IConnector {
     name: 'PayPal',
     description: 'Accept international card payments via PayPal',
     category: 'payment',
+    group: 'payments',
     icon: 'credit-card',
     supportsSync: false,
     supportsWebhook: true,

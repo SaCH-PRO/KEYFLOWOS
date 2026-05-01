@@ -46,6 +46,7 @@ import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { CommunicationsModule } from './modules/communications/communications.module';
 import { ConnectorModule } from './core/connectors/connector.module';
 import { KeyflowCommandModule } from './modules/keyflow-command/keyflow-command.module';
+import { ConnectModule } from './modules/connect/connect.module';
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { KeyflowCommandModule } from './modules/keyflow-command/keyflow-command.
     DiagnosticsModule,
     CommunicationsModule,
     KeyflowCommandModule,
+    ConnectModule,
   ],
   controllers: [AppController],
   providers: [
