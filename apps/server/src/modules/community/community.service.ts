@@ -60,7 +60,7 @@ function computeBadgesAndReputation(input: BadgeComputeInput): { badges: Badge[]
 export class CommunityService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    private readonly notificationsService: NotificationsService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
   async listPosts(filters?: { type?: string; tag?: string; page?: number; limit?: number }) {
@@ -339,7 +339,7 @@ export class CommunityService {
             orderBy: { createdAt: 'desc' },
           },
           services: {
-            select: { id: true, name: true, price: true, currency: true },
+            select: { id: true, name: true, price: true },
             take: 3,
             orderBy: { createdAt: 'desc' },
           },
@@ -351,10 +351,11 @@ export class CommunityService {
               endorsementsReceived: true,
             },
           },
+          createdAt: true,
         },
         skip,
         take: limit,
-        orderBy,
+        orderBy: filters.sort ? orderBy : [{ profileCompleteness: 'desc' }, { createdAt: 'desc' }],
       }),
       this.prisma.client.business.count({ where }),
     ]);
@@ -375,6 +376,530 @@ export class CommunityService {
     return { data: enriched, total, page, limit };
   }
 
+  // ==========================================
+  // QUOTE REQUESTS
+  // ==========================================
+
+  private readonly businessSelect = { id: true, name: true, logoUrl: true, headline: true, industry: true, acceptingWork: true, currentCapacity: true, slug: true };
+
+  async createQuoteRequest(fromBusinessId: string, input: {
+    toBusinessId: string;
+    title: string;
+    description: string;
+    budgetMin?: number;
+    budgetMax?: number;
+    currency?: string;
+    timeline?: string;
+    attachments?: string[];
+  }) {
+    const request = await this.prisma.client.communityQuoteRequest.create({
+      data: {
+        fromBusinessId,
+        toBusinessId: input.toBusinessId,
+        title: input.title,
+        description: input.description,
+        budgetMin: input.budgetMin ?? null,
+        budgetMax: input.budgetMax ?? null,
+        currency: input.currency ?? 'TTD',
+        timeline: input.timeline ?? null,
+        attachments: input.attachments ?? [],
+      },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    await this.notifications.create({
+      businessId: input.toBusinessId,
+      type: 'community_quote_request',
+      title: 'New Quote Request',
+      body: `${request.fromBusiness.name} sent you a quote request: "${input.title}"`,
+      data: { quoteRequestId: request.id, fromBusinessId },
+    });
+
+    return request;
+  }
+
+  async listQuoteRequests(businessId: string, direction: 'sent' | 'received' = 'received') {
+    const where = direction === 'sent'
+      ? { fromBusinessId: businessId }
+      : { toBusinessId: businessId };
+
+    return this.prisma.client.communityQuoteRequest.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+  }
+
+  async respondToQuoteRequest(businessId: string, requestId: string, input: {
+    status: 'RESPONDED' | 'DECLINED';
+    responseNote?: string;
+  }) {
+    const request = await this.prisma.client.communityQuoteRequest.update({
+      where: { id: requestId, toBusinessId: businessId },
+      data: {
+        status: input.status,
+        responseNote: input.responseNote ?? null,
+        respondedAt: new Date(),
+      },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    const action = input.status === 'RESPONDED' ? 'responded to' : 'declined';
+    await this.notifications.create({
+      businessId: request.fromBusinessId,
+      type: 'community_quote_response',
+      title: `Quote Request ${input.status === 'RESPONDED' ? 'Response' : 'Declined'}`,
+      body: `${request.toBusiness.name} ${action} your quote request: "${request.title}"`,
+      data: { quoteRequestId: request.id, toBusinessId: businessId },
+    });
+
+    return request;
+  }
+
+  // ==========================================
+  // REFERRALS
+  // ==========================================
+
+  async createReferral(fromBusinessId: string, input: {
+    toBusinessId: string;
+    referredToName: string;
+    referredToEmail?: string;
+    referredToPhone?: string;
+    opportunity: string;
+    context?: string;
+  }) {
+    const referral = await this.prisma.client.communityReferral.create({
+      data: {
+        fromBusinessId,
+        toBusinessId: input.toBusinessId,
+        referredToName: input.referredToName,
+        referredToEmail: input.referredToEmail ?? null,
+        referredToPhone: input.referredToPhone ?? null,
+        opportunity: input.opportunity,
+        context: input.context ?? null,
+      },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    await this.notifications.create({
+      businessId: input.toBusinessId,
+      type: 'community_referral',
+      title: 'New Referral',
+      body: `${referral.fromBusiness.name} referred you to ${input.referredToName} for: "${input.opportunity}"`,
+      data: { referralId: referral.id, fromBusinessId },
+    });
+
+    return referral;
+  }
+
+  async listReferrals(businessId: string, direction: 'sent' | 'received' = 'received') {
+    const where = direction === 'sent'
+      ? { fromBusinessId: businessId }
+      : { toBusinessId: businessId };
+
+    return this.prisma.client.communityReferral.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+  }
+
+  async updateReferralStatus(businessId: string, referralId: string, input: {
+    status: 'VIEWED' | 'ACCEPTED' | 'COMPLETED' | 'DECLINED';
+    statusNote?: string;
+  }) {
+    const referral = await this.prisma.client.communityReferral.update({
+      where: { id: referralId, toBusinessId: businessId },
+      data: {
+        status: input.status,
+        statusNote: input.statusNote ?? null,
+      },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    if (['ACCEPTED', 'COMPLETED', 'DECLINED'].includes(input.status)) {
+      await this.notifications.create({
+        businessId: referral.fromBusinessId,
+        type: 'community_referral_update',
+        title: `Referral ${input.status.toLowerCase()}`,
+        body: `${referral.toBusiness.name} ${input.status.toLowerCase()} your referral for "${referral.opportunity}"`,
+        data: { referralId: referral.id },
+      });
+    }
+
+    return referral;
+  }
+
+  // ==========================================
+  // COLLABORATION REQUESTS
+  // ==========================================
+
+  async createCollaboration(fromBusinessId: string, input: {
+    toBusinessId: string;
+    type?: string;
+    title: string;
+    scope: string;
+    proposedTerms?: string;
+    timeline?: string;
+  }) {
+    const collab = await this.prisma.client.communityCollaboration.create({
+      data: {
+        fromBusinessId,
+        toBusinessId: input.toBusinessId,
+        type: input.type ?? 'SUBCONTRACTING',
+        title: input.title,
+        scope: input.scope,
+        proposedTerms: input.proposedTerms ?? null,
+        timeline: input.timeline ?? null,
+      },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    await this.notifications.create({
+      businessId: input.toBusinessId,
+      type: 'community_collaboration',
+      title: 'New Collaboration Proposal',
+      body: `${collab.fromBusiness.name} proposed a collaboration: "${input.title}"`,
+      data: { collaborationId: collab.id, fromBusinessId, type: input.type ?? 'SUBCONTRACTING' },
+    });
+
+    return collab;
+  }
+
+  async listCollaborations(businessId: string, direction: 'sent' | 'received' = 'received') {
+    const where = direction === 'sent'
+      ? { fromBusinessId: businessId }
+      : { toBusinessId: businessId };
+
+    return this.prisma.client.communityCollaboration.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+  }
+
+  async respondToCollaboration(businessId: string, collabId: string, input: {
+    status: 'ACCEPTED' | 'DECLINED';
+    responseNote?: string;
+  }) {
+    const collab = await this.prisma.client.communityCollaboration.update({
+      where: { id: collabId, toBusinessId: businessId },
+      data: {
+        status: input.status,
+        responseNote: input.responseNote ?? null,
+        respondedAt: new Date(),
+      },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    const action = input.status === 'ACCEPTED' ? 'accepted' : 'declined';
+    await this.notifications.create({
+      businessId: collab.fromBusinessId,
+      type: 'community_collaboration_response',
+      title: `Collaboration ${input.status === 'ACCEPTED' ? 'Accepted' : 'Declined'}`,
+      body: `${collab.toBusiness.name} ${action} your collaboration proposal: "${collab.title}"`,
+      data: { collaborationId: collab.id },
+    });
+
+    return collab;
+  }
+
+  // ==========================================
+  // BUSINESS MESSAGING
+  // ==========================================
+
+  private generateThreadId(businessId1: string, businessId2: string): string {
+    const sorted = [businessId1, businessId2].sort();
+    return `thread_${sorted[0]}_${sorted[1]}`;
+  }
+
+  async sendMessage(fromBusinessId: string, input: {
+    toBusinessId: string;
+    content: string;
+  }) {
+    const threadId = this.generateThreadId(fromBusinessId, input.toBusinessId);
+
+    const message = await this.prisma.client.businessMessage.create({
+      data: {
+        fromBusinessId,
+        toBusinessId: input.toBusinessId,
+        threadId,
+        content: input.content,
+      },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    await this.notifications.create({
+      businessId: input.toBusinessId,
+      type: 'community_message',
+      title: 'New Message',
+      body: `${message.fromBusiness.name} sent you a message`,
+      data: { messageId: message.id, threadId, fromBusinessId },
+    });
+
+    return message;
+  }
+
+  async listThreads(businessId: string) {
+    const messages = await this.prisma.client.businessMessage.findMany({
+      where: {
+        OR: [
+          { fromBusinessId: businessId },
+          { toBusinessId: businessId },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        fromBusiness: { select: this.businessSelect },
+        toBusiness: { select: this.businessSelect },
+      },
+    });
+
+    const threadMap = new Map<string, {
+      threadId: string;
+      otherBusiness: any;
+      lastMessage: any;
+      unreadCount: number;
+    }>();
+
+    for (const msg of messages) {
+      const tid = msg.threadId ?? this.generateThreadId(msg.fromBusinessId, msg.toBusinessId);
+      if (!threadMap.has(tid)) {
+        const otherBusiness = msg.fromBusinessId === businessId ? msg.toBusiness : msg.fromBusiness;
+        threadMap.set(tid, {
+          threadId: tid,
+          otherBusiness,
+          lastMessage: msg,
+          unreadCount: 0,
+        });
+      }
+      if (msg.toBusinessId === businessId && !msg.read) {
+        const existing = threadMap.get(tid)!;
+        existing.unreadCount++;
+      }
+    }
+
+    return Array.from(threadMap.values());
+  }
+
+  async getThread(businessId: string, otherBusinessId: string) {
+    const threadId = this.generateThreadId(businessId, otherBusinessId);
+
+    const [messages, otherBusiness] = await Promise.all([
+      this.prisma.client.businessMessage.findMany({
+        where: { threadId },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          fromBusiness: { select: this.businessSelect },
+        },
+      }),
+      this.prisma.client.business.findUnique({
+        where: { id: otherBusinessId },
+        select: this.businessSelect,
+      }),
+    ]);
+
+    await this.prisma.client.businessMessage.updateMany({
+      where: { threadId, toBusinessId: businessId, read: false },
+      data: { read: true, readAt: new Date() },
+    });
+
+    return { messages, otherBusiness };
+  }
+
+  // ==========================================
+  // SAVED BUSINESSES / SHORTLIST
+  // ==========================================
+
+  async saveBusiness(businessId: string, savedBusinessId: string, note?: string) {
+    return this.prisma.client.savedBusiness.upsert({
+      where: { businessId_savedBusinessId: { businessId, savedBusinessId } },
+      create: { businessId, savedBusinessId, note: note ?? null },
+      update: { note: note ?? undefined },
+      include: {
+        savedBusiness: { select: { ...this.businessSelect, bio: true, city: true, country: true, skills: true } },
+      },
+    });
+  }
+
+  async unsaveBusiness(businessId: string, savedBusinessId: string) {
+    return this.prisma.client.savedBusiness.delete({
+      where: { businessId_savedBusinessId: { businessId, savedBusinessId } },
+    });
+  }
+
+  async listSavedBusinesses(businessId: string) {
+    return this.prisma.client.savedBusiness.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        savedBusiness: { select: { ...this.businessSelect, bio: true, city: true, country: true, skills: true } },
+      },
+    });
+  }
+
+  async isBusinessSaved(businessId: string, savedBusinessId: string) {
+    const record = await this.prisma.client.savedBusiness.findUnique({
+      where: { businessId_savedBusinessId: { businessId, savedBusinessId } },
+    });
+    return { saved: !!record };
+  }
+
+  // ==========================================
+  // INTERACTION HISTORY
+  // ==========================================
+
+  async getInteractionHistory(businessId: string, otherBusinessId: string) {
+    const [quoteRequests, referrals, collaborations, messages] = await Promise.all([
+      this.prisma.client.communityQuoteRequest.findMany({
+        where: {
+          OR: [
+            { fromBusinessId: businessId, toBusinessId: otherBusinessId },
+            { fromBusinessId: otherBusinessId, toBusinessId: businessId },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      this.prisma.client.communityReferral.findMany({
+        where: {
+          OR: [
+            { fromBusinessId: businessId, toBusinessId: otherBusinessId },
+            { fromBusinessId: otherBusinessId, toBusinessId: businessId },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      this.prisma.client.communityCollaboration.findMany({
+        where: {
+          OR: [
+            { fromBusinessId: businessId, toBusinessId: otherBusinessId },
+            { fromBusinessId: otherBusinessId, toBusinessId: businessId },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      this.prisma.client.businessMessage.findMany({
+        where: {
+          OR: [
+            { fromBusinessId: businessId, toBusinessId: otherBusinessId },
+            { fromBusinessId: otherBusinessId, toBusinessId: businessId },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
+    ]);
+
+    return { quoteRequests, referrals, collaborations, recentMessages: messages };
+  }
+
+  // ==========================================
+  // DIRECTORY LISTING
+  // ==========================================
+
+  async listDirectory(filters?: { search?: string; industry?: string; stage?: string; skill?: string; page?: number; limit?: number }) {
+    const where: any = { deletedAt: null };
+    if (filters?.industry) where.industry = filters.industry;
+    if (filters?.stage) where.businessStage = filters.stage;
+    if (filters?.skill) where.skills = { has: filters.skill };
+    if (filters?.search) {
+      where.OR = [
+        { name: { contains: filters.search, mode: 'insensitive' } },
+        { headline: { contains: filters.search, mode: 'insensitive' } },
+        { industry: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const page = filters?.page ?? 1;
+    const limit = filters?.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.client.business.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          logoUrl: true,
+          headline: true,
+          bio: true,
+          industry: true,
+          skills: true,
+          businessStage: true,
+          city: true,
+          country: true,
+          tagline: true,
+          acceptingWork: true,
+          currentCapacity: true,
+          leadTime: true,
+          preferredProjectTypes: true,
+          budgetFit: true,
+          positioningStatement: true,
+          profileCompleteness: true,
+          products: {
+            where: { isActive: true },
+            select: { id: true, name: true, price: true, currency: true, category: true },
+            take: 3,
+            orderBy: { createdAt: 'desc' },
+          },
+          services: {
+            select: { id: true, name: true, price: true },
+            take: 3,
+            orderBy: { createdAt: 'desc' },
+          },
+          _count: {
+            select: {
+              communityPosts: true,
+              cohortMembers: true,
+              networkConnectionsTo: true,
+              endorsementsReceived: true,
+            },
+          },
+          createdAt: true,
+        },
+        skip,
+        take: limit,
+        orderBy: [{ profileCompleteness: 'desc' }, { createdAt: 'desc' }],
+      }),
+      this.prisma.client.business.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
+  }
   async createConnection(fromBusinessId: string, toBusinessId: string, type: string = 'FOLLOW') {
     if (fromBusinessId === toBusinessId) return { error: 'Cannot connect to yourself' };
 
@@ -459,7 +984,7 @@ export class CommunityService {
       },
     });
 
-    this.notificationsService.create({
+    this.notifications.create({
       businessId: toBusinessId,
       type: 'endorsement',
       title: `${endorsement.fromBusiness.name} endorsed your skill`,
@@ -574,10 +1099,6 @@ export class CommunityService {
     };
   }
 
-  private readonly businessSelect = {
-    id: true, name: true, logoUrl: true, headline: true, industry: true,
-  } as const;
-
   async getOrCreateConversation(businessIdA: string, businessIdB: string) {
     if (businessIdA === businessIdB) return { error: 'Cannot message yourself' };
 
@@ -599,57 +1120,6 @@ export class CommunityService {
         participantB: { select: this.businessSelect },
       },
     });
-  }
-
-  async sendMessage(senderBusinessId: string, toBusinessId: string, content: string) {
-    if (senderBusinessId === toBusinessId) return { error: 'Cannot message yourself' };
-    if (!content.trim()) return { error: 'Message cannot be empty' };
-
-    const [participantAId, participantBId] = [senderBusinessId, toBusinessId].sort();
-
-    let conversation = await this.prisma.client.conversation.findUnique({
-      where: { participantAId_participantBId: { participantAId, participantBId } },
-    });
-
-    if (!conversation) {
-      conversation = await this.prisma.client.conversation.create({
-        data: { participantAId, participantBId, lastMessageAt: new Date() },
-      });
-    } else {
-      await this.prisma.client.conversation.update({
-        where: { id: conversation.id },
-        data: { lastMessageAt: new Date() },
-      });
-    }
-
-    const message = await this.prisma.client.directMessage.create({
-      data: {
-        conversationId: conversation.id,
-        senderBusinessId,
-        content: content.trim(),
-      },
-      include: {
-        senderBusiness: { select: this.businessSelect },
-      },
-    });
-
-    const sender = await this.prisma.client.business.findUnique({
-      where: { id: senderBusinessId },
-      select: { name: true },
-    });
-
-    await this.prisma.client.communityNotification.create({
-      data: {
-        businessId: toBusinessId,
-        type: 'MESSAGE',
-        title: `New message from ${sender?.name ?? 'a business'}`,
-        body: content.trim().substring(0, 100),
-        referenceId: conversation.id,
-        referenceType: 'CONVERSATION',
-      },
-    });
-
-    return message;
   }
 
   async getConversations(businessId: string) {

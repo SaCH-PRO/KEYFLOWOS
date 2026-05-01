@@ -5581,6 +5581,169 @@ export async function fetchDocumentGuidance(businessId: string): Promise<ApiResu
   return apiGetSimple<{ recommendations: DocumentRecommendation[] }>(`/identity/businesses/${encodeURIComponent(businessId)}/document-guidance`);
 }
 
+// ---
+// COMMUNITY RELATIONSHIPS & TRANSACTIONS
+// ---
+export interface CommunityQuoteRequest {
+  id: string;
+  fromBusinessId: string;
+  toBusinessId: string;
+  fromBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  toBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  title: string;
+  description: string;
+  budgetMin?: number;
+  budgetMax?: number;
+  currency: string;
+  timeline?: string;
+  attachments: string[];
+  status: string;
+  responseNote?: string;
+  respondedAt?: string;
+  createdAt: string;
+}
+export interface CommunityReferral {
+  id: string;
+  fromBusinessId: string;
+  toBusinessId: string;
+  fromBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  toBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  referredToName: string;
+  referredToEmail?: string;
+  referredToPhone?: string;
+  opportunity: string;
+  context?: string;
+  status: string;
+  statusNote?: string;
+  createdAt: string;
+}
+export interface CommunityCollaboration {
+  id: string;
+  fromBusinessId: string;
+  toBusinessId: string;
+  fromBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  toBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  type: string;
+  title: string;
+  scope: string;
+  proposedTerms?: string;
+  timeline?: string;
+  status: string;
+  responseNote?: string;
+  projectId?: string;
+  respondedAt?: string;
+  createdAt: string;
+}
+export interface BusinessMessageItem {
+  id: string;
+  fromBusinessId: string;
+  toBusinessId: string;
+  fromBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  toBusiness?: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  threadId?: string;
+  content: string;
+  read: boolean;
+  readAt?: string;
+  createdAt: string;
+}
+export interface MessageThread {
+  threadId: string;
+  otherBusiness: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string };
+  lastMessage: BusinessMessageItem;
+  unreadCount: number;
+}
+export interface SavedBusinessItem {
+  id: string;
+  businessId: string;
+  savedBusinessId: string;
+  savedBusiness: { id: string; name: string; logoUrl?: string; headline?: string; industry?: string; bio?: string; city?: string; country?: string; skills?: string[] };
+  note?: string;
+  createdAt: string;
+}
+export interface InteractionHistory {
+  quoteRequests: CommunityQuoteRequest[];
+  referrals: CommunityReferral[];
+  collaborations: CommunityCollaboration[];
+  recentMessages: BusinessMessageItem[];
+}
+export interface DirectoryBusiness {
+  id: string;
+  name: string;
+  logoUrl?: string;
+  headline?: string;
+  bio?: string;
+  industry?: string;
+  city?: string;
+  country?: string;
+  skills: string[];
+  businessStage?: string;
+  profileCompleteness: number;
+  createdAt: string;
+}
+
+export async function createCommunityQuoteRequest(businessId: string, data: { toBusinessId: string; title: string; description: string; budgetMin?: number; budgetMax?: number; currency?: string; timeline?: string }): Promise<ApiResult<CommunityQuoteRequest>> {
+  return apiPost<CommunityQuoteRequest>({ path: `/businesses/${encodeURIComponent(businessId)}/community/quote-requests`, body: data });
+}
+export async function fetchCommunityQuoteRequests(businessId: string, direction: 'sent' | 'received' = 'received'): Promise<ApiResult<CommunityQuoteRequest[]>> {
+  return apiGetSimple<CommunityQuoteRequest[]>(`/businesses/${encodeURIComponent(businessId)}/community/quote-requests?direction=${direction}`);
+}
+export async function respondToCommunityQuoteRequest(businessId: string, requestId: string, data: { status: string; responseNote?: string }): Promise<ApiResult<CommunityQuoteRequest>> {
+  return apiPatch<CommunityQuoteRequest>(`/businesses/${encodeURIComponent(businessId)}/community/quote-requests/${requestId}/respond`, data);
+}
+export async function createCommunityReferral(businessId: string, data: { toBusinessId: string; referredToName: string; referredToEmail?: string; referredToPhone?: string; opportunity: string; context?: string }): Promise<ApiResult<CommunityReferral>> {
+  return apiPost<CommunityReferral>({ path: `/businesses/${encodeURIComponent(businessId)}/community/referrals`, body: data });
+}
+export async function fetchCommunityReferrals(businessId: string, direction: 'sent' | 'received' = 'received'): Promise<ApiResult<CommunityReferral[]>> {
+  return apiGetSimple<CommunityReferral[]>(`/businesses/${encodeURIComponent(businessId)}/community/referrals?direction=${direction}`);
+}
+export async function updateCommunityReferralStatus(businessId: string, referralId: string, data: { status: string; statusNote?: string }): Promise<ApiResult<CommunityReferral>> {
+  return apiPatch<CommunityReferral>(`/businesses/${encodeURIComponent(businessId)}/community/referrals/${referralId}/status`, data);
+}
+export async function createCommunityCollaboration(businessId: string, data: { toBusinessId: string; type?: string; title: string; scope: string; proposedTerms?: string; timeline?: string }): Promise<ApiResult<CommunityCollaboration>> {
+  return apiPost<CommunityCollaboration>({ path: `/businesses/${encodeURIComponent(businessId)}/community/collaborations`, body: data });
+}
+export async function fetchCommunityCollaborations(businessId: string, direction: 'sent' | 'received' = 'received'): Promise<ApiResult<CommunityCollaboration[]>> {
+  return apiGetSimple<CommunityCollaboration[]>(`/businesses/${encodeURIComponent(businessId)}/community/collaborations?direction=${direction}`);
+}
+export async function respondToCommunityCollaboration(businessId: string, collabId: string, data: { status: string; responseNote?: string }): Promise<ApiResult<CommunityCollaboration>> {
+  return apiPatch<CommunityCollaboration>(`/businesses/${encodeURIComponent(businessId)}/community/collaborations/${collabId}/respond`, data);
+}
+export async function sendBusinessMessage(businessId: string, data: { toBusinessId: string; content: string }): Promise<ApiResult<BusinessMessageItem>> {
+  return apiPost<BusinessMessageItem>({ path: `/businesses/${encodeURIComponent(businessId)}/community/messages`, body: data });
+}
+export async function fetchMessageThreads(businessId: string): Promise<ApiResult<MessageThread[]>> {
+  return apiGetSimple<MessageThread[]>(`/businesses/${encodeURIComponent(businessId)}/community/messages/threads`);
+}
+export async function fetchMessageThread(businessId: string, otherBusinessId: string): Promise<ApiResult<{ messages: BusinessMessageItem[]; otherBusiness: any }>> {
+  return apiGetSimple<{ messages: BusinessMessageItem[]; otherBusiness: any }>(`/businesses/${encodeURIComponent(businessId)}/community/messages/thread/${encodeURIComponent(otherBusinessId)}`);
+}
+export async function saveBusinessToShortlist(businessId: string, savedBusinessId: string, note?: string): Promise<ApiResult<SavedBusinessItem>> {
+  return apiPost<SavedBusinessItem>({ path: `/businesses/${encodeURIComponent(businessId)}/community/saved`, body: { savedBusinessId, note } });
+}
+export async function unsaveBusinessFromShortlist(businessId: string, savedBusinessId: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/community/saved/${encodeURIComponent(savedBusinessId)}`);
+}
+export async function fetchSavedBusinesses(businessId: string): Promise<ApiResult<SavedBusinessItem[]>> {
+  return apiGetSimple<SavedBusinessItem[]>(`/businesses/${encodeURIComponent(businessId)}/community/saved`);
+}
+export async function checkBusinessSaved(businessId: string, targetBusinessId: string): Promise<ApiResult<{ saved: boolean }>> {
+  return apiGetSimple<{ saved: boolean }>(`/businesses/${encodeURIComponent(businessId)}/community/saved/check/${encodeURIComponent(targetBusinessId)}`);
+}
+export async function fetchInteractionHistory(businessId: string, otherBusinessId: string): Promise<ApiResult<InteractionHistory>> {
+  return apiGetSimple<InteractionHistory>(`/businesses/${encodeURIComponent(businessId)}/community/history/${encodeURIComponent(otherBusinessId)}`);
+}
+export async function fetchCommunityDirectory(params?: { search?: string; industry?: string; stage?: string; skill?: string; page?: number; limit?: number }): Promise<ApiResult<{ data: DirectoryBusiness[]; total: number }>> {
+  const sp = new URLSearchParams();
+  if (params?.search) sp.set('search', params.search);
+  if (params?.industry) sp.set('industry', params.industry);
+  if (params?.stage) sp.set('stage', params.stage);
+  if (params?.skill) sp.set('skill', params.skill);
+  if (params?.page) sp.set('page', String(params.page));
+  if (params?.limit) sp.set('limit', String(params.limit));
+  const q = sp.toString() ? `?${sp.toString()}` : '';
+  return apiGetSimple<{ data: DirectoryBusiness[]; total: number }>(`/community/directory${q}`);
+}
+
 
 // ---
 // BUSINESS SIMULATION

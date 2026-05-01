@@ -29,6 +29,8 @@ import {
   Star,
   ThumbsUp,
   Pencil,
+  FileText,
+  Handshake,
 } from "lucide-react";
 import {
   fetchCommunityProfile,
@@ -42,6 +44,12 @@ import {
   createEndorsement,
   updateEndorsement,
   removeEndorsement,
+  createCommunityQuoteRequest,
+  createCommunityReferral,
+  createCommunityCollaboration,
+  saveBusinessToShortlist,
+  unsaveBusinessFromShortlist,
+  checkBusinessSaved,
   type CommunityProfile,
   type CommunityPost,
   type NetworkConnectionStatus,
@@ -50,6 +58,11 @@ import {
 } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { QuoteRequestModal } from "../../components/quote-request-modal";
+import { ReferralModal } from "../../components/referral-modal";
+import { CollaborationModal } from "../../components/collaboration-modal";
+import { MessageModal } from "../../components/message-modal";
+import { InteractionHistorySection } from "../../components/interaction-history";
 
 const stagger = {
   hidden: { opacity: 0 },
@@ -134,10 +147,10 @@ export default function PublicProfilePage() {
   const params = useParams();
   const router = useRouter();
   const businessId = params.businessId as string;
+  const [myBusinessId, setMyBusinessId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CommunityProfile | null>(null);
   const [posts, setPosts] = useState<CommunityPost[]>([]);
   const [loading, setLoading] = useState(true);
-  const [myBusinessId, setMyBusinessId] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<NetworkConnectionStatus>({ following: false, saved: false });
   const [togglingConnection, setTogglingConnection] = useState(false);
   const [trustSignals, setTrustSignals] = useState<TrustSignals | null>(null);
@@ -153,6 +166,12 @@ export default function PublicProfilePage() {
   const [editMessage, setEditMessage] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [endorsementsVisible, setEndorsementsVisible] = useState(6);
+  const [saved, setSaved] = useState(false);
+  const [savingBookmark, setSavingBookmark] = useState(false);
+  const [showQuoteModal, setShowQuoteModal] = useState(false);
+  const [showReferralModal, setShowReferralModal] = useState(false);
+  const [showCollabModal, setShowCollabModal] = useState(false);
+  const [showMessageModal, setShowMessageModal] = useState(false);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -188,8 +207,9 @@ export default function PublicProfilePage() {
     Promise.all([
       getConnectionStatus(myBusinessId, businessId),
       fetchMyEndorsementsGiven(myBusinessId, businessId),
+      checkBusinessSaved(myBusinessId, businessId),
     ])
-      .then(([connRes, endorseRes]) => {
+      .then(([connRes, endorseRes, savedRes]) => {
         if (connRes.data) setConnectionStatus(connRes.data);
         if (endorseRes.data) {
           setMyEndorsedSkills(endorseRes.data.map(e => e.skill));
@@ -197,6 +217,7 @@ export default function PublicProfilePage() {
           endorseRes.data.forEach(e => { if (e.message) msgMap[e.skill] = e.message; });
           setMyEndorsementMessages(msgMap);
         }
+        if (savedRes.data) setSaved(savedRes.data.saved);
       })
       .catch(() => {});
   }, [myBusinessId, businessId]);
@@ -217,19 +238,19 @@ export default function PublicProfilePage() {
   }, [myBusinessId, businessId, connectionStatus.following, togglingConnection]);
 
   const toggleSave = useCallback(async () => {
-    if (!myBusinessId || togglingConnection) return;
-    setTogglingConnection(true);
+    if (!myBusinessId || savingBookmark) return;
+    setSavingBookmark(true);
     try {
-      if (connectionStatus.saved) {
-        await removeNetworkConnection(myBusinessId, businessId, "SAVE");
-        setConnectionStatus((s) => ({ ...s, saved: false }));
+      if (saved) {
+        await unsaveBusinessFromShortlist(myBusinessId, businessId);
+        setSaved(false);
       } else {
-        await createNetworkConnection(myBusinessId, businessId, "SAVE");
-        setConnectionStatus((s) => ({ ...s, saved: true }));
+        await saveBusinessToShortlist(myBusinessId, businessId);
+        setSaved(true);
       }
     } catch {}
-    setTogglingConnection(false);
-  }, [myBusinessId, businessId, connectionStatus.saved, togglingConnection]);
+    setSavingBookmark(false);
+  }, [myBusinessId, businessId, saved, savingBookmark]);
 
   const handleEndorse = useCallback(async (skill: string) => {
     if (!myBusinessId || endorsingSkill) return;
@@ -301,6 +322,23 @@ export default function PublicProfilePage() {
     setSavingEdit(false);
   }, [myBusinessId, editingEndorsement, editMessage, savingEdit]);
 
+  const handleQuoteSubmit = useCallback(async (data: any) => {
+    if (!myBusinessId) return;
+    await createCommunityQuoteRequest(myBusinessId, { toBusinessId: businessId, ...data });
+  }, [myBusinessId, businessId]);
+
+  const handleReferralSubmit = useCallback(async (data: any) => {
+    if (!myBusinessId) return;
+    await createCommunityReferral(myBusinessId, { toBusinessId: businessId, ...data });
+  }, [myBusinessId, businessId]);
+
+  const handleCollabSubmit = useCallback(async (data: any) => {
+    if (!myBusinessId) return;
+    await createCommunityCollaboration(myBusinessId, { toBusinessId: businessId, ...data });
+  }, [myBusinessId, businessId]);
+
+  const isOwnProfile = myBusinessId === businessId;
+
   const resolvedLogo = profile?.logoUrl
     ? profile.logoUrl.startsWith("http") ? profile.logoUrl : `${API_BASE}${profile.logoUrl}`
     : null;
@@ -308,7 +346,6 @@ export default function PublicProfilePage() {
   const memberSince = profile?.createdAt
     ? new Date(profile.createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })
     : "";
-  const isOwnProfile = myBusinessId === businessId;
 
   if (loading) {
     return (
@@ -393,14 +430,15 @@ export default function PublicProfilePage() {
                 </button>
                 <button
                   onClick={toggleSave}
-                  disabled={togglingConnection}
+                  disabled={savingBookmark}
                   className={`p-2 rounded-xl transition-colors ${
-                    connectionStatus.saved
+                    saved
                       ? "bg-amber-500/20 text-amber-400"
                       : "bg-white/5 text-muted-foreground hover:bg-white/10"
                   }`}
+                  title={saved ? "Remove from shortlist" : "Save to shortlist"}
                 >
-                  {connectionStatus.saved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+                  {saved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
                 </button>
               </div>
             )}
@@ -440,11 +478,7 @@ export default function PublicProfilePage() {
             </div>
           )}
 
-          {profile.bio && !profile.positioningStatement && (
-            <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">{profile.bio}</p>
-          )}
-
-          {profile.bio && profile.positioningStatement && (
+          {profile.bio && (
             <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">{profile.bio}</p>
           )}
 
@@ -514,6 +548,39 @@ export default function PublicProfilePage() {
           )}
         </div>
       </motion.div>
+
+      {!isOwnProfile && myBusinessId && (
+        <motion.div variants={fadeUp} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <button
+            onClick={() => setShowMessageModal(true)}
+            className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[hsl(var(--kf-accent1))]/10 hover:bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))] text-xs font-medium transition-colors"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            Message
+          </button>
+          <button
+            onClick={() => setShowQuoteModal(true)}
+            className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[hsl(var(--kf-accent1))]/10 hover:bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))] text-xs font-medium transition-colors"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            Request Quote
+          </button>
+          <button
+            onClick={() => setShowReferralModal(true)}
+            className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium transition-colors"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            Refer
+          </button>
+          <button
+            onClick={() => setShowCollabModal(true)}
+            className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-xs font-medium transition-colors"
+          >
+            <Handshake className="w-3.5 h-3.5" />
+            Collaborate
+          </button>
+        </motion.div>
+      )}
 
       {trustSignals && (
         <motion.div variants={fadeUp} className="kf-card rounded-xl p-5 border border-border/30 space-y-4">
@@ -874,6 +941,10 @@ export default function PublicProfilePage() {
         </div>
       )}
 
+      {!isOwnProfile && myBusinessId && (
+        <InteractionHistorySection businessId={myBusinessId} otherBusinessId={businessId} />
+      )}
+
       {posts.length > 0 && (
         <motion.div variants={fadeUp} className="space-y-3">
           <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -907,6 +978,35 @@ export default function PublicProfilePage() {
             </div>
           ))}
         </motion.div>
+      )}
+
+      <QuoteRequestModal
+        isOpen={showQuoteModal}
+        onClose={() => setShowQuoteModal(false)}
+        toBusinessName={profile.name}
+        onSubmit={handleQuoteSubmit}
+      />
+      <ReferralModal
+        isOpen={showReferralModal}
+        onClose={() => setShowReferralModal(false)}
+        toBusinessName={profile.name}
+        onSubmit={handleReferralSubmit}
+      />
+      <CollaborationModal
+        isOpen={showCollabModal}
+        onClose={() => setShowCollabModal(false)}
+        toBusinessName={profile.name}
+        onSubmit={handleCollabSubmit}
+      />
+      {myBusinessId && (
+        <MessageModal
+          isOpen={showMessageModal}
+          onClose={() => setShowMessageModal(false)}
+          businessId={myBusinessId}
+          otherBusinessId={businessId}
+          otherBusinessName={profile.name}
+          otherBusinessLogo={profile.logoUrl}
+        />
       )}
     </motion.div>
   );

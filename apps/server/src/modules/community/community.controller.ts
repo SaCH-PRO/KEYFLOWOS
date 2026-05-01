@@ -124,7 +124,9 @@ export class CommunityController {
     @Query('city') city?: string,
     @Query('country') country?: string,
     @Query('skills') skills?: string,
+    @Query('skill') skill?: string,
     @Query('businessStage') businessStage?: string,
+    @Query('stage') stage?: string,
     @Query('acceptingWork') acceptingWork?: string,
     @Query('currentCapacity') currentCapacity?: string,
     @Query('budgetFit') budgetFit?: string,
@@ -135,13 +137,14 @@ export class CommunityController {
     @Query('limit') limit?: string,
     @Query('sort') sort?: string,
   ) {
+    const resolvedSkills = skills || skill;
     return this.community.searchDirectory({
       search,
       industry,
       city,
       country,
-      skills: skills ? skills.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
-      businessStage,
+      skills: resolvedSkills ? resolvedSkills.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+      businessStage: businessStage || stage,
       acceptingWork: acceptingWork !== undefined ? acceptingWork === 'true' : undefined,
       currentCapacity,
       budgetFit,
@@ -255,13 +258,133 @@ export class CommunityController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
-  @Get('businesses/:businessId/community/match-history')
-  getMatchHistory(
-    @Param('businessId') businessId: string,
-    @Query('limit') limit?: string,
-  ) {
-    return this.matching.getMatchHistory(businessId, limit ? parseInt(limit, 10) : 50);
+  @Get('businesses/:businessId/community/match-analytics')
+  getMatchAnalytics(@Param('businessId') businessId: string) {
+    return this.matching.getMatchAnalytics(businessId);
   }
+
+  // ==========================================
+  // QUOTE REQUESTS
+  // ==========================================
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/quote-requests')
+  createQuoteRequest(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      toBusinessId: string;
+      title: string;
+      description: string;
+      budgetMin?: number;
+      budgetMax?: number;
+      currency?: string;
+      timeline?: string;
+      attachments?: string[];
+    },
+  ) {
+    return this.community.createQuoteRequest(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/quote-requests')
+  listQuoteRequests(
+    @Param('businessId') businessId: string,
+    @Query('direction') direction?: 'sent' | 'received',
+  ) {
+    return this.community.listQuoteRequests(businessId, direction);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/quote-requests/:requestId/respond')
+  respondToQuoteRequest(
+    @Param('businessId') businessId: string,
+    @Param('requestId') requestId: string,
+    @Body() body: { status: 'RESPONDED' | 'DECLINED'; responseNote?: string },
+  ) {
+    return this.community.respondToQuoteRequest(businessId, requestId, body);
+  }
+
+  // ==========================================
+  // REFERRALS
+  // ==========================================
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/referrals')
+  createReferral(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      toBusinessId: string;
+      referredToName: string;
+      referredToEmail?: string;
+      referredToPhone?: string;
+      opportunity: string;
+      context?: string;
+    },
+  ) {
+    return this.community.createReferral(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/referrals')
+  listReferrals(
+    @Param('businessId') businessId: string,
+    @Query('direction') direction?: 'sent' | 'received',
+  ) {
+    return this.community.listReferrals(businessId, direction);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/referrals/:referralId/status')
+  updateReferralStatus(
+    @Param('businessId') businessId: string,
+    @Param('referralId') referralId: string,
+    @Body() body: { status: 'VIEWED' | 'ACCEPTED' | 'COMPLETED' | 'DECLINED'; statusNote?: string },
+  ) {
+    return this.community.updateReferralStatus(businessId, referralId, body);
+  }
+
+  // ==========================================
+  // COLLABORATIONS
+  // ==========================================
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/collaborations')
+  createCollaboration(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      toBusinessId: string;
+      type?: string;
+      title: string;
+      scope: string;
+      proposedTerms?: string;
+      timeline?: string;
+    },
+  ) {
+    return this.community.createCollaboration(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/collaborations')
+  listCollaborations(
+    @Param('businessId') businessId: string,
+    @Query('direction') direction?: 'sent' | 'received',
+  ) {
+    return this.community.listCollaborations(businessId, direction);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/community/collaborations/:collabId/respond')
+  respondToCollaboration(
+    @Param('businessId') businessId: string,
+    @Param('collabId') collabId: string,
+    @Body() body: { status: 'ACCEPTED' | 'DECLINED'; responseNote?: string },
+  ) {
+    return this.community.respondToCollaboration(businessId, collabId, body);
+  }
+
+  // ==========================================
+  // MESSAGING
+  // ==========================================
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/community/messages')
@@ -269,7 +392,7 @@ export class CommunityController {
     @Param('businessId') businessId: string,
     @Body() body: { toBusinessId: string; content: string },
   ) {
-    return this.community.sendMessage(businessId, body.toBusinessId, body.content);
+    return this.community.sendMessage(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -388,8 +511,67 @@ export class CommunityController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
-  @Get('businesses/:businessId/community/match-analytics')
-  getMatchAnalytics(@Param('businessId') businessId: string) {
-    return this.matching.getMatchAnalytics(businessId);
+  @Get('businesses/:businessId/community/messages/threads')
+  listThreads(@Param('businessId') businessId: string) {
+    return this.community.listThreads(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/messages/thread/:otherBusinessId')
+  getThread(
+    @Param('businessId') businessId: string,
+    @Param('otherBusinessId') otherBusinessId: string,
+  ) {
+    return this.community.getThread(businessId, otherBusinessId);
+  }
+
+  // ==========================================
+  // SAVED BUSINESSES / SHORTLIST
+  // ==========================================
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/community/saved')
+  saveBusiness(
+    @Param('businessId') businessId: string,
+    @Body() body: { savedBusinessId: string; note?: string },
+  ) {
+    return this.community.saveBusiness(businessId, body.savedBusinessId, body.note);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/community/saved/:savedBusinessId')
+  unsaveBusiness(
+    @Param('businessId') businessId: string,
+    @Param('savedBusinessId') savedBusinessId: string,
+  ) {
+    return this.community.unsaveBusiness(businessId, savedBusinessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/saved')
+  listSavedBusinesses(@Param('businessId') businessId: string) {
+    return this.community.listSavedBusinesses(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/saved/check/:targetBusinessId')
+  isBusinessSaved(
+    @Param('businessId') businessId: string,
+    @Param('targetBusinessId') targetBusinessId: string,
+  ) {
+    return this.community.isBusinessSaved(businessId, targetBusinessId);
+  }
+
+  // ==========================================
+  // INTERACTION HISTORY
+  // ==========================================
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/community/history/:otherBusinessId')
+  getInteractionHistory(
+    @Param('businessId') businessId: string,
+    @Param('otherBusinessId') otherBusinessId: string,
+  ) {
+    return this.community.getInteractionHistory(businessId, otherBusinessId);
   }
 }

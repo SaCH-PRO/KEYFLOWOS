@@ -11,6 +11,9 @@ import {
   Mail,
   Handshake,
   Bell,
+  Globe,
+  Bookmark,
+  Inbox,
 } from "lucide-react";
 import {
   fetchCommunityPosts,
@@ -36,7 +39,7 @@ import { Feed } from "./components/feed";
 import { CohortList } from "./components/cohort-list";
 import { ProfileCard } from "./components/profile-card";
 import { Directory } from "./components/directory";
-import { Inbox } from "./components/inbox";
+import { Inbox as CommunityInbox } from "./components/inbox";
 import { CollabRequests } from "./components/collab-requests";
 import { NotificationsPanel } from "./components/notifications-panel";
 import { SendMessageModal } from "./components/send-message-modal";
@@ -53,6 +56,7 @@ const COMMUNITY_TABS = [
 const TAB_KEYS = COMMUNITY_TABS.map((t) => t.key);
 
 export default function CommunityPage() {
+  const communityRouter = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [tab, setTab] = useState("feed");
   const [posts, setPosts] = useState<CommunityPost[]>([]);
@@ -336,6 +340,23 @@ export default function CommunityPage() {
         )}
       </AnimatePresence>
 
+      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+        {[
+          { label: "Directory", icon: Globe, href: "/app/community/directory" },
+          { label: "Messages", icon: Inbox, href: "/app/community/messages" },
+          { label: "Saved", icon: Bookmark, href: "/app/community/saved" },
+        ].map((item) => (
+          <button
+            key={item.label}
+            onClick={() => communityRouter.push(item.href)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/20 hover:bg-muted/40 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap border border-border/20"
+          >
+            <item.icon className="w-3.5 h-3.5" />
+            {item.label}
+          </button>
+        ))}
+      </div>
+
       {tab === "feed" && (
         <Feed
           posts={posts}
@@ -358,7 +379,7 @@ export default function CommunityPage() {
       )}
 
       {tab === "inbox" && (
-        <Inbox
+        <CommunityInbox
           businessId={businessId}
           openConversationWith={openConversationWith}
           onClearOpenWith={() => setOpenConversationWith(null)}
