@@ -184,6 +184,18 @@ model Business {
   // Qualification Journeys
   qualificationJourneys QualificationJourney[]
 
+  // Community Relationships & Transactions
+  sentQuoteRequests       CommunityQuoteRequest[] @relation("SentQuoteRequests")
+  receivedQuoteRequests   CommunityQuoteRequest[] @relation("ReceivedQuoteRequests")
+  sentReferrals           CommunityReferral[]     @relation("SentReferrals")
+  receivedReferrals       CommunityReferral[]     @relation("ReceivedReferrals")
+  sentCollaborations      CommunityCollaboration[] @relation("SentCollaborations")
+  receivedCollaborations  CommunityCollaboration[] @relation("ReceivedCollaborations")
+  sentMessages            BusinessMessage[]       @relation("SentMessages")
+  receivedMessages        BusinessMessage[]       @relation("ReceivedMessages")
+  savedByOthers           SavedBusiness[]         @relation("SavedByOthers")
+  mySavedBusinesses       SavedBusiness[]         @relation("MySavedBusinesses")
+
   // Flow AI Bot Sessions
   flowSessions         FlowSession[]
 
@@ -211,7 +223,7 @@ model Business {
   // Direct Messaging & Collaboration (Community Phase 2)
   conversationsAsA       Conversation[]         @relation("ConversationParticipantA")
   conversationsAsB       Conversation[]         @relation("ConversationParticipantB")
-  sentMessages           DirectMessage[]        @relation("DirectMessageSender")
+  sentDirectMessages     DirectMessage[]        @relation("DirectMessageSender")
   collabRequestsFrom     CollaborationRequest[] @relation("CollabRequestFrom")
   collabRequestsTo       CollaborationRequest[] @relation("CollabRequestTo")
   communityNotifications CommunityNotification[]
@@ -3938,5 +3950,119 @@ model AiPlanStep {
 
   @@index([planId, order])
   @@map("ai_plan_steps")
+}
+
+// ---
+// MODULE: COMMUNITY RELATIONSHIPS & TRANSACTIONS
+// ---
+
+model CommunityQuoteRequest {
+  id              String   @id @default(cuid())
+  fromBusinessId  String   @map("from_business_id")
+  fromBusiness    Business @relation("SentQuoteRequests", fields: [fromBusinessId], references: [id], onDelete: Cascade)
+  toBusinessId    String   @map("to_business_id")
+  toBusiness      Business @relation("ReceivedQuoteRequests", fields: [toBusinessId], references: [id], onDelete: Cascade)
+
+  title           String
+  description     String
+  budgetMin       Float?   @map("budget_min")
+  budgetMax       Float?   @map("budget_max")
+  currency        String   @default("TTD")
+  timeline        String?
+  attachments     String[] @default([])
+  status          String   @default("PENDING") // PENDING, RESPONDED, ACCEPTED, DECLINED, EXPIRED
+  responseNote    String?  @map("response_note")
+  respondedAt     DateTime? @map("responded_at")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+
+  @@index([fromBusinessId, createdAt])
+  @@index([toBusinessId, status])
+  @@map("community_quote_requests")
+}
+
+model CommunityReferral {
+  id              String   @id @default(cuid())
+  fromBusinessId  String   @map("from_business_id")
+  fromBusiness    Business @relation("SentReferrals", fields: [fromBusinessId], references: [id], onDelete: Cascade)
+  toBusinessId    String   @map("to_business_id")
+  toBusiness      Business @relation("ReceivedReferrals", fields: [toBusinessId], references: [id], onDelete: Cascade)
+
+  referredToName    String  @map("referred_to_name")
+  referredToEmail   String? @map("referred_to_email")
+  referredToPhone   String? @map("referred_to_phone")
+  opportunity       String
+  context           String?
+  status            String  @default("SENT") // SENT, VIEWED, ACCEPTED, COMPLETED, DECLINED
+  statusNote        String? @map("status_note")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+
+  @@index([fromBusinessId, createdAt])
+  @@index([toBusinessId, status])
+  @@map("community_referrals")
+}
+
+model CommunityCollaboration {
+  id              String   @id @default(cuid())
+  fromBusinessId  String   @map("from_business_id")
+  fromBusiness    Business @relation("SentCollaborations", fields: [fromBusinessId], references: [id], onDelete: Cascade)
+  toBusinessId    String   @map("to_business_id")
+  toBusiness      Business @relation("ReceivedCollaborations", fields: [toBusinessId], references: [id], onDelete: Cascade)
+
+  type            String   @default("SUBCONTRACTING") // SUBCONTRACTING, JOINT_PROJECT, RESOURCE_SHARING
+  title           String
+  scope           String
+  proposedTerms   String?  @map("proposed_terms")
+  timeline        String?
+  status          String   @default("PROPOSED") // PROPOSED, ACCEPTED, DECLINED, IN_PROGRESS, COMPLETED, CANCELLED
+  responseNote    String?  @map("response_note")
+  projectId       String?  @map("project_id")
+  respondedAt     DateTime? @map("responded_at")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+
+  @@index([fromBusinessId, createdAt])
+  @@index([toBusinessId, status])
+  @@map("community_collaborations")
+}
+
+model BusinessMessage {
+  id              String   @id @default(cuid())
+  fromBusinessId  String   @map("from_business_id")
+  fromBusiness    Business @relation("SentMessages", fields: [fromBusinessId], references: [id], onDelete: Cascade)
+  toBusinessId    String   @map("to_business_id")
+  toBusiness      Business @relation("ReceivedMessages", fields: [toBusinessId], references: [id], onDelete: Cascade)
+
+  threadId        String?  @map("thread_id")
+  content         String
+  read            Boolean  @default(false)
+  readAt          DateTime? @map("read_at")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([fromBusinessId, toBusinessId, createdAt])
+  @@index([toBusinessId, read])
+  @@index([threadId, createdAt])
+  @@map("business_messages")
+}
+
+model SavedBusiness {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  business        Business @relation("SavedByOthers", fields: [businessId], references: [id], onDelete: Cascade)
+  savedBusinessId String   @map("saved_business_id")
+  savedBusiness   Business @relation("MySavedBusinesses", fields: [savedBusinessId], references: [id], onDelete: Cascade)
+
+  note            String?
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([businessId, savedBusinessId])
+  @@index([businessId, createdAt])
+  @@map("saved_businesses")
 }
 
