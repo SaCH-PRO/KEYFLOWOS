@@ -163,8 +163,7 @@ export function Feed({
           {currentBusinessId &&
             expandedPost.businessId === currentBusinessId &&
             MATCH_NOTIFIED_TYPES.has(expandedPost.type?.toUpperCase()) &&
-            expandedPost.matchedProviders &&
-            expandedPost.matchedProviders.providers?.length > 0 && (
+            expandedPost.matchedProviders && (
               <MatchedProvidersPanel matchedProviders={expandedPost.matchedProviders} />
             )}
         </div>

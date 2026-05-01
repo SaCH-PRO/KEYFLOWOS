@@ -5324,7 +5324,9 @@ export interface MatchedProviderEntry {
   explanation: string;
 }
 export interface MatchedProvidersSnapshot {
-  computedAt: string;
+  status?: "pending" | "complete";
+  startedAt?: string;
+  computedAt?: string;
   providers: MatchedProviderEntry[];
 }
 export interface CommunityPost {

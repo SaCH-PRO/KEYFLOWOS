@@ -132,6 +132,14 @@ export class CommunityService {
 
   async createPost(businessId: string, input: { title?: string; content: string; type?: string; tags?: string[] }) {
     const type = input.type ?? 'DISCUSSION';
+    const isNeedStyle = ['QUESTION', 'OPPORTUNITY', 'HELP', 'NEED'].includes(type.toUpperCase());
+
+    // For need-style posts, mark matching as pending immediately so the author
+    // sees a "Looking for providers…" indicator while the async match runs.
+    const initialMatchedProviders = isNeedStyle
+      ? { status: 'pending', startedAt: new Date().toISOString(), providers: [] }
+      : undefined;
+
     const post = await this.prisma.client.communityPost.create({
       data: {
         businessId,
@@ -139,6 +147,7 @@ export class CommunityService {
         content: input.content,
         type,
         tags: input.tags ?? [],
+        ...(initialMatchedProviders ? { matchedProviders: initialMatchedProviders as any } : {}),
       },
       include: {
         business: { select: { id: true, name: true, logoUrl: true, headline: true, bio: true, industry: true } },
@@ -150,14 +159,26 @@ export class CommunityService {
     // Run async so that post creation isn't blocked by the AI explanation call.
     // The matched providers will be persisted on the post and surfaced to the author
     // via the next /community/posts fetch.
-    if (['QUESTION', 'OPPORTUNITY', 'HELP', 'NEED'].includes(type.toUpperCase())) {
+    if (isNeedStyle) {
       this.notifyMatchedProvidersForPost(businessId, post.id, post.business.name, {
         title: input.title,
         content: input.content,
         type,
         tags: input.tags,
-      }).catch((err) => {
+      }).catch(async (err) => {
         this.logger.warn(`Failed to notify matched providers for post ${post.id}: ${err?.message ?? err}`);
+        // Even on failure, mark matching as complete so the UI stops showing
+        // the pending state forever.
+        await this.prisma.client.communityPost.update({
+          where: { id: post.id },
+          data: {
+            matchedProviders: {
+              status: 'complete',
+              computedAt: new Date().toISOString(),
+              providers: [],
+            } as any,
+          },
+        }).catch(() => {});
       });
     }
 
@@ -179,20 +200,26 @@ export class CommunityService {
       tags: args.tags,
     }, 3);
 
-    if (matches.length === 0) return;
-
     // Hydrate provider details so the post-author can see who was notified
     // without an extra round trip per provider.
-    const providerIds = matches.map((m) => m.businessId);
-    const providers = await this.prisma.client.business.findMany({
-      where: { id: { in: providerIds } },
-      select: { id: true, name: true, logoUrl: true, headline: true },
-    });
-    const byId = new Map(providers.map((p) => [p.id, p]));
+    let hydratedProviders: Array<{
+      businessId: string;
+      name: string;
+      logoUrl: string | null;
+      headline: string | null;
+      score: number;
+      explanation: string;
+    }> = [];
 
-    const matchedSnapshot = {
-      computedAt: new Date().toISOString(),
-      providers: matches
+    if (matches.length > 0) {
+      const providerIds = matches.map((m) => m.businessId);
+      const providers = await this.prisma.client.business.findMany({
+        where: { id: { in: providerIds } },
+        select: { id: true, name: true, logoUrl: true, headline: true },
+      });
+      const byId = new Map(providers.map((p) => [p.id, p]));
+
+      hydratedProviders = matches
         .map((m) => {
           const biz = byId.get(m.businessId);
           if (!biz) return null;
@@ -205,17 +232,26 @@ export class CommunityService {
             explanation: m.explanation || '',
           };
         })
-        .filter((p): p is NonNullable<typeof p> => p !== null),
+        .filter((p): p is NonNullable<typeof p> => p !== null);
+    }
+
+    // Always persist a "complete" snapshot — even when there are zero matches —
+    // so the UI can transition out of the "Looking for providers…" pending state
+    // and show the empty / "no matches yet" feedback to the post author.
+    const matchedSnapshot = {
+      status: 'complete',
+      computedAt: new Date().toISOString(),
+      providers: hydratedProviders,
     };
 
-    if (matchedSnapshot.providers.length > 0) {
-      await this.prisma.client.communityPost.update({
-        where: { id: postId },
-        data: { matchedProviders: matchedSnapshot as any },
-      }).catch((err) => {
-        this.logger.warn(`Failed to persist matched providers for post ${postId}: ${err?.message ?? err}`);
-      });
-    }
+    await this.prisma.client.communityPost.update({
+      where: { id: postId },
+      data: { matchedProviders: matchedSnapshot as any },
+    }).catch((err) => {
+      this.logger.warn(`Failed to persist matched providers for post ${postId}: ${err?.message ?? err}`);
+    });
+
+    if (matches.length === 0) return;
 
     const subject = args.title?.slice(0, 80) || args.content.slice(0, 80);
     await Promise.all(matches.map((m) =>
