@@ -146,7 +146,10 @@ export class CommunityService {
       },
     });
 
-    // AI-powered match: notify relevant providers when a need-style post is created
+    // AI-powered match: notify relevant providers when a need-style post is created.
+    // Run async so that post creation isn't blocked by the AI explanation call.
+    // The matched providers will be persisted on the post and surfaced to the author
+    // via the next /community/posts fetch.
     if (['QUESTION', 'OPPORTUNITY', 'HELP', 'NEED'].includes(type.toUpperCase())) {
       this.notifyMatchedProvidersForPost(businessId, post.id, post.business.name, {
         title: input.title,
@@ -177,6 +180,42 @@ export class CommunityService {
     }, 3);
 
     if (matches.length === 0) return;
+
+    // Hydrate provider details so the post-author can see who was notified
+    // without an extra round trip per provider.
+    const providerIds = matches.map((m) => m.businessId);
+    const providers = await this.prisma.client.business.findMany({
+      where: { id: { in: providerIds } },
+      select: { id: true, name: true, logoUrl: true, headline: true },
+    });
+    const byId = new Map(providers.map((p) => [p.id, p]));
+
+    const matchedSnapshot = {
+      computedAt: new Date().toISOString(),
+      providers: matches
+        .map((m) => {
+          const biz = byId.get(m.businessId);
+          if (!biz) return null;
+          return {
+            businessId: biz.id,
+            name: biz.name,
+            logoUrl: biz.logoUrl ?? null,
+            headline: biz.headline ?? null,
+            score: m.score,
+            explanation: m.explanation || '',
+          };
+        })
+        .filter((p): p is NonNullable<typeof p> => p !== null),
+    };
+
+    if (matchedSnapshot.providers.length > 0) {
+      await this.prisma.client.communityPost.update({
+        where: { id: postId },
+        data: { matchedProviders: matchedSnapshot as any },
+      }).catch((err) => {
+        this.logger.warn(`Failed to persist matched providers for post ${postId}: ${err?.message ?? err}`);
+      });
+    }
 
     const subject = args.title?.slice(0, 80) || args.content.slice(0, 80);
     await Promise.all(matches.map((m) =>

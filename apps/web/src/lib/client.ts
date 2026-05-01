@@ -5295,6 +5295,18 @@ export async function fetchMyEnrollments(businessId: string): Promise<ApiResult<
 // ---
 // COMMUNITY
 // ---
+export interface MatchedProviderEntry {
+  businessId: string;
+  name: string;
+  logoUrl?: string | null;
+  headline?: string | null;
+  score: number;
+  explanation: string;
+}
+export interface MatchedProvidersSnapshot {
+  computedAt: string;
+  providers: MatchedProviderEntry[];
+}
 export interface CommunityPost {
   id: string;
   title?: string;
@@ -5306,6 +5318,7 @@ export interface CommunityPost {
   businessId: string;
   business?: { id: string; name: string; logoUrl?: string; headline?: string; bio?: string; industry?: string };
   _count?: { comments: number };
+  matchedProviders?: MatchedProvidersSnapshot | null;
   createdAt: string;
 }
 export interface CommunityComment {

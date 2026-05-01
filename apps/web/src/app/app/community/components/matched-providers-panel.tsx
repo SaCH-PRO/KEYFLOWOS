@@ -1,0 +1,95 @@
+"use client";
+
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Sparkles, MessageSquare, ChevronDown } from "lucide-react";
+import { useRouter } from "next/navigation";
+import type { MatchedProvidersSnapshot } from "@/lib/client";
+import { API_BASE } from "@/lib/api";
+
+interface MatchedProvidersPanelProps {
+  matchedProviders: MatchedProvidersSnapshot;
+}
+
+export function MatchedProvidersPanel({ matchedProviders }: MatchedProvidersPanelProps) {
+  const [open, setOpen] = useState(false);
+  const router = useRouter();
+  const count = matchedProviders.providers.length;
+
+  if (count === 0) return null;
+
+  return (
+    <div
+      className="rounded-lg border border-[hsl(var(--kf-accent1))]/25 bg-[hsl(var(--kf-accent1))]/5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((p) => !p);
+        }}
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left"
+      >
+        <Sparkles className="w-3 h-3 text-[hsl(var(--kf-accent1))] flex-shrink-0" />
+        <span className="text-[11px] text-[hsl(var(--kf-accent1))] font-medium">
+          We notified {count} {count === 1 ? "provider" : "providers"} who can help
+        </span>
+        <ChevronDown
+          className={`w-3 h-3 text-[hsl(var(--kf-accent1))] ml-auto transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden"
+          >
+            <div className="px-2.5 pb-2 space-y-1.5">
+              {matchedProviders.providers.map((p) => {
+                const logo = p.logoUrl
+                  ? p.logoUrl.startsWith("http")
+                    ? p.logoUrl
+                    : `${API_BASE}${p.logoUrl}`
+                  : null;
+                return (
+                  <div
+                    key={p.businessId}
+                    className="flex items-center gap-2 p-1.5 rounded-md bg-white/5 border border-white/10"
+                  >
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-[10px] overflow-hidden flex-shrink-0">
+                      {logo ? (
+                        <img src={logo} alt={p.name} className="w-full h-full object-cover" />
+                      ) : (
+                        p.name?.[0] || "?"
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-medium truncate">{p.name}</p>
+                      <p className="text-[10px] text-muted-foreground line-clamp-1" title={p.explanation}>
+                        {p.explanation || p.headline || "Likely a good fit"}
+                      </p>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/app/community?message=${p.businessId}`);
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-[hsl(var(--kf-accent1))]/15 hover:bg-[hsl(var(--kf-accent1))]/25 text-[hsl(var(--kf-accent1))] text-[10px] font-medium transition-colors flex-shrink-0"
+                      aria-label={`Message ${p.name}`}
+                    >
+                      <MessageSquare className="w-3 h-3" />
+                      DM
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

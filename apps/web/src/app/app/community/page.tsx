@@ -168,7 +168,37 @@ export default function CommunityPage() {
         tags,
       });
       if (res.data) {
-        setPosts((prev) => [res.data!, ...prev]);
+        const created = res.data;
+        setPosts((prev) => [created, ...prev]);
+
+        // Provider matching runs async on the server; re-fetch this post after
+        // a short delay so the "We notified N providers" indicator appears
+        // without the author needing to manually refresh.
+        const NEED_TYPES = new Set(["QUESTION", "OPPORTUNITY", "HELP", "NEED"]);
+        if (NEED_TYPES.has(created.type?.toUpperCase())) {
+          const tryFetch = async (delayMs: number) => {
+            await new Promise((r) => setTimeout(r, delayMs));
+            try {
+              const refreshed = await fetchCommunityPost(created.id);
+              if (refreshed.data?.matchedProviders) {
+                setPosts((prev) =>
+                  prev.map((p) =>
+                    p.id === created.id
+                      ? { ...p, matchedProviders: refreshed.data!.matchedProviders }
+                      : p,
+                  ),
+                );
+                return true;
+              }
+            } catch {}
+            return false;
+          };
+          // Two attempts: 3s and 8s after creation.
+          (async () => {
+            const ok = await tryFetch(3000);
+            if (!ok) await tryFetch(5000);
+          })();
+        }
       }
     } catch {}
   }, [businessId]);
@@ -381,6 +411,7 @@ export default function CommunityPage() {
           onAddComment={handleAddComment}
           submittingComment={submittingComment}
           onAuthorClick={setProfileCardBusinessId}
+          currentBusinessId={businessId}
         />
       )}
 
