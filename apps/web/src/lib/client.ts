@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, type PlanLimitError } from "./api";
+import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, emitUnauthorizedEvent, type PlanLimitError } from "./api";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 
@@ -269,6 +269,7 @@ async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, op
         message = (json as Record<string, string>).message;
       }
       console.warn(`[apiGet] ${path} failed:`, message);
+      if (res.status === 401) emitUnauthorizedEvent(path);
       return { data: fallback ?? null, error: message };
     }
     if (!schema) {
@@ -1578,6 +1579,29 @@ export async function identitySignup(input: {
 }) {
   return apiPost<SignupResponse>({
     path: `/identity/signup`,
+    body: input,
+  });
+}
+
+/**
+ * Server-driven sign-in. Sends credentials to `POST /identity/login` so
+ * the backend can rate-limit, audit, and proxy to Supabase. The legacy
+ * direct-to-Supabase fetch in `auth/login/page.tsx` is no longer used —
+ * this path is the single source of truth for password sign-in.
+ *
+ * Returns `{ status: 'authenticated', accessToken, refreshToken, email }`
+ * on success. On failure surfaces a `{ code, message }` BadRequest body
+ * via the standard `ApiResponse.error` channel; recognised codes include
+ * `invalid_credentials`, `email_not_confirmed`, `rate_limited`.
+ */
+export async function identityLogin(input: { email: string; password: string }) {
+  return apiPost<{
+    status: "authenticated";
+    email: string;
+    accessToken: string;
+    refreshToken: string;
+  }>({
+    path: `/identity/login`,
     body: input,
   });
 }

@@ -151,8 +151,11 @@ export function validateServerEnv(env: NodeJS.ProcessEnv = process.env): EnvVali
     }
   } else {
     const r = recommendedResult.data;
-    if (!r.SUPABASE_URL || !r.SUPABASE_JWT_SECRET) {
-      warnings.push('SUPABASE_URL/SUPABASE_JWT_SECRET: not set — Supabase auth disabled (dev-auth bypass may apply)');
+    if (!r.SUPABASE_URL && !env.NEXT_PUBLIC_SUPABASE_URL) {
+      warnings.push('SUPABASE_URL: not set (and no NEXT_PUBLIC_SUPABASE_URL fallback) — all authenticated requests will be rejected');
+    }
+    if (!r.SUPABASE_JWT_SECRET) {
+      warnings.push('SUPABASE_JWT_SECRET: not set — local JWT verification unavailable; backend will rely on Supabase getUser() round-trip only');
     }
     if (!r.AI_INTEGRATIONS_OPENAI_API_KEY && !r.ANTHROPIC_API_KEY && !r.XAI_API_KEY) {
       warnings.push('AI provider keys: none of OPENAI/ANTHROPIC/XAI set — AI features will return errors');

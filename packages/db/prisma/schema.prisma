@@ -4793,3 +4793,46 @@ model GrowthInsight {
   @@index([businessId, severity, status])
   @@map("growth_insights")
 }
+
+// =====================================================================
+// Auth hardening (Tier 2): per-IP/email rate limiting + audit trail
+// =====================================================================
+
+/// Sliding-window rate-limit ledger. One row per attempt; the limiter
+/// counts rows in (NOW() - windowMs) and rejects when threshold reached.
+/// A periodic prune deletes rows older than the longest active window.
+model AuthRateLimit {
+  id     String   @id @default(cuid())
+  /// Logical bucket key, e.g. "login:ip:1.2.3.4" or "signup:email:foo@bar.com".
+  /// Always lower-cased and namespace-prefixed by the limiter.
+  bucket String
+  hitAt  DateTime @default(now()) @map("hit_at")
+
+  @@index([bucket, hitAt])
+  @@map("auth_rate_limits")
+}
+
+/// Append-only audit log of every authentication-relevant event:
+/// signup, login_success, login_failure, resend_verification, rate_limited.
+/// Surfaced in the admin Security UI; retained for forensic review.
+model AuthAuditLog {
+  id        String   @id @default(cuid())
+  /// signup | login_success | login_failure | resend_verification | rate_limited
+  event     String
+  /// Outcome bucket: success | failure | rate_limited | error
+  outcome   String
+  email     String?
+  userId    String?  @map("user_id")
+  ip        String?
+  userAgent String?  @map("user_agent")
+  reason    String?
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([event, createdAt])
+  @@index([email, createdAt])
+  @@index([userId, createdAt])
+  @@index([ip, createdAt])
+  @@map("auth_audit_logs")
+}
+

@@ -26,6 +26,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
+import { setStoredToken } from "@/lib/workspace";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -149,7 +150,7 @@ export default function AuthSignup() {
       if (data.status === "authenticated") {
         // Auto-confirm path (dev / verification disabled): we received a session,
         // bootstrap the user and route into the app.
-        window.localStorage.setItem("kf_token", data.accessToken);
+        setStoredToken(data.accessToken);
         if (data.refreshToken) window.localStorage.setItem("kf_refresh_token", data.refreshToken);
         const bootstrap = await bootstrapIdentity({
           email: email.trim(), username: username.trim(),
