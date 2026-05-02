@@ -61,6 +61,7 @@ export function MessageModal({ isOpen, onClose, businessId, otherBusinessId, oth
 
   useEffect(() => {
     if (!isOpen || !businessId || !otherBusinessId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag tied to async data fetch lifecycle
     setLoading(true);
     fetchMessageThread(businessId, otherBusinessId)
       .then((res) => {

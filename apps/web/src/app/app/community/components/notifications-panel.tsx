@@ -76,6 +76,7 @@ export function NotificationsPanel({ businessId, onNavigateToInbox, onNavigateTo
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrates async/server data into local state
     void loadNotifications();
   }, [loadNotifications]);
 

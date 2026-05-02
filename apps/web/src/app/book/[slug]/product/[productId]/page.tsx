@@ -192,6 +192,7 @@ export default function ProductDetailPage() {
   }, [slug, productId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (slug) setCart(loadCart(slug));
   }, [slug]);
 

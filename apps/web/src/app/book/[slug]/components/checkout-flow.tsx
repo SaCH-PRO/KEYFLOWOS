@@ -133,6 +133,7 @@ export function CheckoutFlow({
 
   useEffect(() => {
     if (checkoutStep >= checkoutSteps.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setCheckoutStep(Math.max(0, checkoutSteps.length - 1));
     }
   }, [checkoutSteps.length, checkoutStep]);

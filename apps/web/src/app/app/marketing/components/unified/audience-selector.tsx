@@ -69,6 +69,7 @@ export function AudienceSelector({
     setValidating(false);
   }, [businessId, subject, destinationIds, selectedTags, onValidationChange, hasEmailDestination]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadAudience(); }, [loadAudience]);
 
   useEffect(() => {

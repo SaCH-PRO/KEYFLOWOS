@@ -263,7 +263,9 @@ export function OutboundHistory({ businessId, refreshTrigger }: OutboundHistoryP
     setLoading(false);
   }, [businessId, statusFilter]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void load(); }, [load, refreshTrigger]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { if (statusFilter) void loadAll(); }, [statusFilter, loadAll, refreshTrigger]);
 
   const statuses = ["Sent", "Scheduled", "Queued", "Sending", "Failed", "PartiallyFailed", "Cancelled"];

@@ -105,6 +105,7 @@ export default function OutputTemplatesPage() {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setBusinessId(bid);
   }, []);
 
@@ -120,6 +121,7 @@ export default function OutputTemplatesPage() {
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { load(); }, [load]);
 
   const openCreate = () => {

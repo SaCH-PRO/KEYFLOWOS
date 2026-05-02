@@ -23,6 +23,7 @@ export function FeatureGuide({ featureKey, title, description, steps }: FeatureG
 
   useEffect(() => {
     const stored = localStorage.getItem(storageKey);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setDismissed(stored === "true");
   }, [storageKey]);
 

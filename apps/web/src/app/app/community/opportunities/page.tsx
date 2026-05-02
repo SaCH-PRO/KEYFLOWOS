@@ -54,6 +54,7 @@ export default function OpportunitiesPage() {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setBusinessId(bid);
   }, []);
 
@@ -72,6 +73,7 @@ export default function OpportunitiesPage() {
     setLoading(false);
   }, [tab, businessId, search, typeFilter]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void load(); }, [load]);
 
   const openDetails = useCallback(async (id: string) => {

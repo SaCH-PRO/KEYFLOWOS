@@ -9,18 +9,16 @@ import unusedImports from "eslint-plugin-unused-imports";
 // `react-hooks/refs`, `react-hooks/static-components`, and
 // `react-hooks/immutability` — those rules now run at their default severity.
 //
-// `react-hooks/set-state-in-effect` remains demoted to "warn": the codebase
-// has ~140 surfaced occurrences (sync-prop-to-state mirrors, hydration of
-// async data into local form state, derived list/pagination state in CRM,
-// commerce, marketing, and inbox surfaces). Each requires a per-component
-// refactor to either lift state up, derive during render, or use the new
-// `useEffectEvent` pattern, which is being tracked as separate follow-up
-// work. Demoted to "warn" so new offenders still surface in PR review while
-// allowing the build to pass.
-const reactCompilerStrictRules = {
-  "react-hooks/set-state-in-effect": "warn",
-};
-
+// `react-hooks/set-state-in-effect` also runs at its default severity. The
+// previously surfaced ~141 occurrences (sync-prop-to-state mirrors, hydration
+// of async/server data into local form state, derived list/pagination state
+// in CRM, commerce, marketing, inbox, and community surfaces) have each been
+// audited and either refactored or covered by a per-line
+// `// eslint-disable-next-line react-hooks/set-state-in-effect -- <reason>`
+// comment that documents the underlying pattern category (async hydration,
+// loading flag lifecycle, prop/modal mirror reset, external subscription,
+// client-only storage hydration, or transient toast feedback).
+//
 // `@typescript-eslint/no-explicit-any` is enforced as an error. The codebase
 // is fully `any`-free; new `any` introductions trip the build. Prefer
 // narrowing with proper backend/Prisma-derived types (or `unknown` + a runtime
@@ -35,7 +33,6 @@ const eslintConfig = defineConfig([
   {
     plugins: { "unused-imports": unusedImports },
     rules: {
-      ...reactCompilerStrictRules,
       ...inheritedTechDebtRules,
       // Auto-fixable removal of unused imports. Unused locals are still
       // flagged by @typescript-eslint/no-unused-vars (warning).

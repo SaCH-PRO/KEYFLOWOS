@@ -26,6 +26,7 @@ export function FontBrandingPanel({ config, onConfigChange, onSave, saving, busi
 
   useEffect(() => {
     if (document.querySelector('link[data-font-pairings]')) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setFontsLoaded(true);
       return;
     }

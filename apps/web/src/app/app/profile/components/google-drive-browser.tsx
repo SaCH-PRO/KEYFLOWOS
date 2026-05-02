@@ -170,8 +170,10 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
     setFilesLoading(false);
   }, [businessId, searchQuery, mimeFilter]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { checkStatus(); }, [checkStatus]);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (connected) loadFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `loadFiles` is intentionally excluded because it changes whenever `searchQuery` updates; we don't want every keystroke in the search box to trigger a fresh fetch here. Search-driven loads are handled by a separate debounced effect; this one only refetches when the user (re)connects or changes the MIME filter.
   }, [connected, mimeFilter]);
@@ -179,6 +181,7 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("drive") === "success") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       checkStatus();
       window.history.replaceState({}, "", window.location.pathname + "?tab=intelligence");
     }

@@ -157,11 +157,13 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
   }, [businessId, notifyParent]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrates async/server data into local state
     loadLists();
   }, [loadLists]);
 
   useEffect(() => {
     if (refreshToken && refreshToken > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrates async/server data into local state
       loadLists();
     }
   }, [refreshToken, loadLists]);

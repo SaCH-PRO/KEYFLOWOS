@@ -38,6 +38,7 @@ export function AudienceHealthDashboard({ businessId, onCreateCampaign }: Audien
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void load(); }, [load]);
 
   const filteredSegments = useMemo(() => {

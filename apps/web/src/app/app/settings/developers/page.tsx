@@ -59,6 +59,7 @@ export default function DevelopersSettingsPage() {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setBusinessId(bid);
   }, []);
 
@@ -72,6 +73,7 @@ export default function DevelopersSettingsPage() {
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { loadKeys(); }, [loadKeys]);
 
   const handleCreate = async () => {

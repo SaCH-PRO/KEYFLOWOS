@@ -156,6 +156,7 @@ export function CampaignBriefingsSection({ businessId }: { businessId: string | 
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void load(); }, [load]);
 
   if (loading) {
@@ -207,6 +208,7 @@ export function AudienceHealthSection({ businessId }: { businessId: string | nul
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void load(); }, [load]);
 
   if (loading) {
@@ -348,6 +350,7 @@ export function SendTimeSection({ businessId }: { businessId: string | null }) {
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void load(); }, [load]);
 
   if (loading) {

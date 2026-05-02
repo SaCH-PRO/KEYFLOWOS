@@ -43,6 +43,7 @@ export default function NetworkAnalyticsPage() {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setBusinessId(bid);
   }, []);
 
@@ -58,6 +59,7 @@ export default function NetworkAnalyticsPage() {
     setLoading(false);
   }, [businessId, days]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void load(); }, [load]);
 
   const maxTrend = Math.max(1, ...(data?.profileViews.trend.map((t) => t.views) ?? [0]));

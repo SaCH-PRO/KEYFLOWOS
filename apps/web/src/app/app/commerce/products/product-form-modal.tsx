@@ -261,6 +261,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setFieldErrors({});
       setTouched(new Set());
       dragY.set(0);

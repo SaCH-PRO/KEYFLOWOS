@@ -137,6 +137,7 @@ export function ReadinessTab({ businessId, businessData, profileCompleteness, on
   const [expandedTier, setExpandedTier] = useState<string | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
     apiGet<TieredCompletenessResult>(`/identity/businesses/${businessId}/tiered-completeness`)

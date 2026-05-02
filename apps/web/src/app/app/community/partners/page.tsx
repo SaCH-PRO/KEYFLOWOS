@@ -34,6 +34,7 @@ export default function PartnersPage() {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setBusinessId(bid);
   }, []);
 
@@ -46,6 +47,7 @@ export default function PartnersPage() {
     setLoading(false);
   }, [businessId, tab]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void load(); }, [load]);
 
   const handleRespond = async (id: string, status: "ACTIVE" | "DECLINED") => {
@@ -164,6 +166,7 @@ function ProposeModal({ businessId, onClose, onProposed }: { businessId: string;
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (search.length < 2) { setResults([]); return; }
     const t = setTimeout(async () => {
       const r = await searchDirectory({ search, limit: "5" });

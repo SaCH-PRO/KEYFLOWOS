@@ -52,6 +52,7 @@ export function ClientTab({ contactId }: ClientTabProps) {
     const businessId = getStoredBusinessId();
     if (!businessId) return;
     const ctrl = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag tied to async data fetch lifecycle
     setLoading(true);
     setError(null);
     fetchContactDetail(contactId, businessId, { signal: ctrl.signal })

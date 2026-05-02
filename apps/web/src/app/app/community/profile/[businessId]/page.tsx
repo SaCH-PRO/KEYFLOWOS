@@ -179,6 +179,7 @@ export default function PublicProfilePage() {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setMyBusinessId(bid);
   }, []);
 
@@ -1138,6 +1139,7 @@ function ProfileReviewsSection({ businessId }: { businessId: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag tied to async data fetch lifecycle
     setLoading(true);
     fetchBusinessReviews(businessId, 50)
       .then((res) => {

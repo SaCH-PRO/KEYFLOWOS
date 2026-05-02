@@ -97,6 +97,7 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag tied to async data fetch lifecycle
     setLoading(true);
     setError(null);
     fetchKeyflowEvents(businessId, {

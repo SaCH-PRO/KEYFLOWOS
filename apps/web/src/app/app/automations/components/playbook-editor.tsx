@@ -65,6 +65,7 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
       const actions = Array.isArray(editingPlaybook.actions)
         ? (editingPlaybook.actions as ActionStep[])
         : [{ type: "" }];
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets/mirrors prop or modal-open state into local form state
       setForm({ name: editingPlaybook.name, triggerEvent: editingPlaybook.triggerEvent });
       setConditionGroup(parseConditionFromPlaybook(editingPlaybook.condition));
       setActionSteps(actions.length ? [...actions] : [{ type: "" }]);

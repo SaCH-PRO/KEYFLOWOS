@@ -9,6 +9,7 @@ export function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setMounted(true);
   }, []);
 

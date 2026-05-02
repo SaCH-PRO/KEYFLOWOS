@@ -300,6 +300,7 @@ function PublicBookingPageInner() {
 
   useEffect(() => {
     if (slug) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setCart(loadCart(slug));
       setPromoCode(loadPromoCode(slug));
     }

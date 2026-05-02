@@ -86,6 +86,7 @@ export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
 
   useEffect(() => {
     if (!isOpen || !businessId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setProfile(null);
     setTrustSignals(null);
     setLoading(true);

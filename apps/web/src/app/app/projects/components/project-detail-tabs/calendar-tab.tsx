@@ -16,6 +16,7 @@ export function CalendarTab({ project, milestones = [] }: CalendarTabProps) {
   const [loadingBooking, setLoadingBooking] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setLinkedBooking(null);
     if (!project.bookingId) return;
     const businessId = getStoredBusinessId();

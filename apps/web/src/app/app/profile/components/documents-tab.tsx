@@ -259,11 +259,13 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("drive") === "success" || params.get("drive") === "error") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setView("drive");
     }
     const generateSlug = params.get("generate");

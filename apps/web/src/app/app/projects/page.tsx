@@ -56,12 +56,14 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setBusinessId(bid);
   }, []);
 
   useEffect(() => {
     const contactIdParam = searchParams?.get("contactId");
     if (contactIdParam) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setPrefillContactId(contactIdParam);
       window.history.replaceState({}, "", "/app/projects");
     }
@@ -106,6 +108,7 @@ export default function ProjectsPage() {
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadProjects(); }, [loadProjects]);
 
   useEffect(() => {

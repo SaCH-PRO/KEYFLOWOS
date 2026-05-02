@@ -32,11 +32,13 @@ export default function SavedBusinessesPage() {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setBusinessId(bid);
   }, []);
 
   useEffect(() => {
     if (!businessId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag tied to async data fetch lifecycle
       setLoading(false);
       return;
     }

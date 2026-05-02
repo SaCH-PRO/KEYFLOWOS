@@ -49,6 +49,7 @@ export function ResumePrompt({
   }, [module, maxShown]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     refresh();
 
     const onStorage = () => refresh();
@@ -206,6 +207,7 @@ export function useResumeTaskRegistry(module: string) {
   }, [module]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     refresh();
 
     const onStorage = () => refresh();

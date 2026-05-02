@@ -23,6 +23,7 @@ export function PWAInstallPrompt() {
       (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
 
     if (isStandalone) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setIsInstalled(true);
       return;
     }

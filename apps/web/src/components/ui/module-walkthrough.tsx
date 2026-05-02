@@ -26,6 +26,7 @@ export function useWalkthrough(moduleKey: string) {
 
   useEffect(() => {
     const seen = localStorage.getItem(getStorageKey(moduleKey));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setHasSeenTour(seen === "true");
   }, [moduleKey]);
 
@@ -85,6 +86,7 @@ export function ModuleWalkthrough({ moduleKey, steps, onComplete }: ModuleWalkth
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- client-side hydration of stored value after mount
     setViewportWidth(window.innerWidth);
     const onResize = () => setViewportWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
@@ -113,6 +115,7 @@ export function ModuleWalkthrough({ moduleKey, steps, onComplete }: ModuleWalkth
 
   useEffect(() => {
     if (!active || !steps[currentStep]?.target) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setTargetRect(null);
       return;
     }

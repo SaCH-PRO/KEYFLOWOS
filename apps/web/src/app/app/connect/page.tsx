@@ -367,6 +367,7 @@ export default function KeyFlowConnectPage() {
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrates async/server data into local state
     fetchDashboard();
   }, [fetchDashboard]);
 
@@ -381,6 +382,7 @@ export default function KeyFlowConnectPage() {
           services ? ` — ${services.split(",").length} services enabled` : ""
         }`,
       );
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrates async/server data into local state
       fetchDashboard();
     } else if (status === "error") {
       const reason = searchParams.get("reason") || "Connection failed";
@@ -617,6 +619,7 @@ export default function KeyFlowConnectPage() {
       if (initial) setActivityLoading(false);
     };
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setActivityLive(true);
     void fetchOnce(true);
     activityPollRef.current = setInterval(() => {

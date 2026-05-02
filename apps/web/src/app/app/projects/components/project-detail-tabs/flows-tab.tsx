@@ -28,6 +28,7 @@ export function FlowsTab({ businessId: propBusinessId }: FlowsTabProps) {
     const businessId = propBusinessId || getStoredBusinessId();
     if (!businessId) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag tied to async data fetch lifecycle
     setLoading(true);
 
     Promise.all([

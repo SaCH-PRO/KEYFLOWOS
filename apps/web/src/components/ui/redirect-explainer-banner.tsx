@@ -14,6 +14,7 @@ export function DeletedTargetBanner({ className }: { className?: string }) {
     if (typeof window === "undefined") return;
     const msg = sessionStorage.getItem(DELETED_TARGET_KEY);
     if (msg) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setMessage(msg);
       sessionStorage.removeItem(DELETED_TARGET_KEY);
     }

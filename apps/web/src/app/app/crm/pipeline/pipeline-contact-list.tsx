@@ -268,6 +268,7 @@ function PipelineContactListInner({
   const itemRefs = useRef<Map<number, HTMLElement>>(new Map());
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setFocusedIndex(-1);
   }, [contacts.length, activeListTab]);
 

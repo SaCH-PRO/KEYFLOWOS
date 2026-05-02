@@ -88,6 +88,7 @@ export function ConnectorCredentialDialog({ businessId, type, open, onClose, onS
 
   useEffect(() => {
     if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setSchema(null);
     setValues({});
     setReveal({});

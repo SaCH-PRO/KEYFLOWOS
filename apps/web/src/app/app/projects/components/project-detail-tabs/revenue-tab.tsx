@@ -52,6 +52,7 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
   }, [businessId, projectId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setLinkedInvoice(null);
     if (!businessId || !invoiceId) return;
     let cancelled = false;

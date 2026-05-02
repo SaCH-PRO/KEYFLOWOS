@@ -44,6 +44,7 @@ export default function LearnPage() {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setBusinessId(bid);
   }, []);
 
@@ -61,6 +62,7 @@ export default function LearnPage() {
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     void loadData();
   }, [loadData]);
 

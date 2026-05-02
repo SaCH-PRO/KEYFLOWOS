@@ -17,6 +17,7 @@ export function LazyWidget({ children, height = 120, className }: LazyWidgetProp
     const el = ref.current;
     if (!el) return;
     if (typeof IntersectionObserver === "undefined") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setVisible(true);
       return;
     }

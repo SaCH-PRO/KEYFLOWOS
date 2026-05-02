@@ -79,6 +79,7 @@ export function ShareLinkModal({
 
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets/mirrors prop or modal-open state into local form state
       setCopied(false);
       setShowQr(false);
     }
