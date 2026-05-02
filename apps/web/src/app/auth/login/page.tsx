@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Layers,
@@ -65,7 +65,7 @@ const FEATURES = [
   { icon: ShieldCheck, label: "Caribbean-Ready", desc: "TTD currency & local payments" },
 ];
 
-export default function AuthLogin() {
+function AuthLoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const verified = useMemo(() => searchParams?.get("verified") === "1", [searchParams]);
@@ -336,3 +336,12 @@ export default function AuthLogin() {
     </div>
   );
 }
+
+export default function AuthLogin() {
+  return (
+    <Suspense fallback={null}>
+      <AuthLoginInner />
+    </Suspense>
+  );
+}
+

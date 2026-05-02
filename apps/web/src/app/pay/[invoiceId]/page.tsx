@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Button, Card } from "@keyflow/ui";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
@@ -159,7 +159,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export default function PublicPaymentPage() {
+function PublicPaymentPageInner() {
   const params = useParams();
   const searchParams = useSearchParams();
   const invoiceId = params.invoiceId as string;
@@ -1183,3 +1183,12 @@ export default function PublicPaymentPage() {
     </main>
   );
 }
+
+export default function PublicPaymentPage() {
+  return (
+    <Suspense fallback={null}>
+      <PublicPaymentPageInner />
+    </Suspense>
+  );
+}
+
