@@ -17,6 +17,9 @@ export class LinkedInConnector extends SocialPlatformConnector {
     supportsSync: true,
     supportsWebhook: true,
     authType: 'oauth2',
+    connectMode: 'oauth',
+    oauthStartPath: '/social/businesses/{businessId}/connections/linkedin/oauth/start',
+    connectInstructions: 'You will be redirected to LinkedIn to grant access for posting and analytics.',
   };
   protected readonly platformKey = 'LINKEDIN';
 

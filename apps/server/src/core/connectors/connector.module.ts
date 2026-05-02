@@ -3,11 +3,13 @@ import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
 import { ConnectorHealthMonitorService } from './connector-health-monitor.service';
 import { ConnectorSyncSchedulerService } from './connector-sync-scheduler.service';
+import { ConnectorCredentialsService } from './connector-credentials.service';
 import { EntityResolutionService } from './entity-resolution.service';
 import { ConnectorController } from './connector.controller';
 import { ConnectorInitializerService } from './connector-initializer.service';
 import { GoogleSuiteService } from './google-suite.service';
 import { GoogleSuiteController } from './google-suite.controller';
+import { FormWebhookController } from './form-webhook.controller';
 import { NotificationsModule } from '../../modules/notifications/notifications.module';
 import {
   GmailConnector,
@@ -37,12 +39,13 @@ import {
 @Global()
 @Module({
   imports: [NotificationsModule],
-  controllers: [ConnectorController, GoogleSuiteController],
+  controllers: [ConnectorController, GoogleSuiteController, FormWebhookController],
   providers: [
     ConnectorRegistryService,
     ConnectorActivityService,
     ConnectorHealthMonitorService,
     ConnectorSyncSchedulerService,
+    ConnectorCredentialsService,
     EntityResolutionService,
     ConnectorInitializerService,
     GoogleSuiteService,
@@ -74,6 +77,7 @@ import {
     ConnectorActivityService,
     ConnectorHealthMonitorService,
     ConnectorSyncSchedulerService,
+    ConnectorCredentialsService,
     EntityResolutionService,
     GoogleSuiteService,
     QuickbooksConnector,

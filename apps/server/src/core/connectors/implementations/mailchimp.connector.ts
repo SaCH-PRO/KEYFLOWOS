@@ -2,6 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
+import { ConnectorCredentialsService } from '../connector-credentials.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
 
 const CONNECTOR_TYPE = 'mailchimp' as const;
@@ -20,12 +21,20 @@ export class MailchimpConnector implements IConnector {
     supportsSync: true,
     supportsWebhook: true,
     authType: 'api_key',
+    connectMode: 'dialog',
+    connectInstructions:
+      'In Mailchimp go to Account → Extras → API keys to generate a key. Paste the key (it ends with the data-center, e.g. "-us21") below.',
+    credentialFields: [
+      { key: 'apiKey', label: 'API key', type: 'password', required: true, secret: true, placeholder: 'abcdef1234567890-us21' },
+      { key: 'accountName', label: 'Account name (display)', type: 'text', placeholder: 'Acme Tobago' },
+    ],
   };
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+    @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
   ) {}
 
   async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
@@ -33,12 +42,10 @@ export class MailchimpConnector implements IConnector {
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-    const meta = (business?.metaData as Record<string, unknown>) ?? {};
-    const apiKey = (meta.mailchimpApiKey as string | undefined) || process.env.MAILCHIMP_API_KEY;
+    const apiKey =
+      (await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'mailchimpApiKey')) ||
+      process.env.MAILCHIMP_API_KEY;
+    const accountName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accountName', 'mailchimpAccount');
     const stored = await this.getConnectorStatus(businessId);
     return {
       status: apiKey ? 'connected' : 'disconnected',
@@ -48,7 +55,7 @@ export class MailchimpConnector implements IConnector {
       errorCount: stored?.errorCount ?? 0,
       syncCount: stored?.syncCount ?? 0,
       connectedAt: stored?.connectedAt ?? null,
-      connectedAccount: apiKey ? (stored?.connectedAccount ?? String(meta.mailchimpAccount ?? 'Mailchimp Account')) : null,
+      connectedAccount: apiKey ? (stored?.connectedAccount ?? accountName ?? 'Mailchimp Account') : null,
     };
   }
 
@@ -77,11 +84,14 @@ export class MailchimpConnector implements IConnector {
   }
 
   async disconnect(businessId: string): Promise<void> {
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: CONNECTOR_TYPE } },
-      create: { businessId, connectorType: CONNECTOR_TYPE, status: 'disconnected' },
-      update: { status: 'disconnected' },
-    });
+    await this.credentials.clearCredentials(businessId, CONNECTOR_TYPE);
+  }
+
+  async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
+    const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'mailchimpApiKey');
+    if (!apiKey) return { success: false, error: 'No Mailchimp API key configured' };
+    const accountName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accountName', 'mailchimpAccount');
+    return { success: true, account: accountName ?? 'Mailchimp Account' };
   }
 
   async emitCampaignSent(businessId: string, opts: { campaignId: string; campaignName: string; recipientCount: number; externalId?: string }) {

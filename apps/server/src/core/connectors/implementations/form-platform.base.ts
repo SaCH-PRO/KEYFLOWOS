@@ -2,18 +2,24 @@ import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
+import { ConnectorCredentialsService } from '../connector-credentials.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorType } from '../connector.interface';
 
 /**
- * Base for form/landing-page connectors. Each provider stores its credential blob inside
- * `business.metaData[<credentialKey>]`. Form submissions are normalized into the standard
+ * Base for form/landing-page connectors. Credentials are stored encrypted in
+ * `ConnectorStatus.metadata` via `ConnectorCredentialsService`, with a fallback read of
+ * legacy `business.metaData[<legacyKey>]` so older installs keep working until they
+ * re-save credentials. Form submissions are normalized into the standard
  * `form.submitted` + `lead_form.submitted` events and routed through entity resolution so a
  * Contact is created or updated automatically.
  */
 export abstract class FormPlatformConnector implements IConnector {
   protected readonly logger: Logger;
   abstract readonly meta: ConnectorMeta;
-  protected abstract readonly credentialKey: string;
+  /** The credential field key that signals "the connector is configured" (e.g. "apiKey", "webhookSecret"). */
+  protected abstract readonly primaryCredentialKey: string;
+  /** Optional legacy key inside business.metaData used by older installs. */
+  protected abstract readonly legacyCredentialKey: string | undefined;
   /** Source string passed to entity resolution for this connector. */
   protected abstract readonly source: string;
 
@@ -21,6 +27,7 @@ export abstract class FormPlatformConnector implements IConnector {
     protected readonly prisma: PrismaService,
     protected readonly events: EventEmitter2,
     protected readonly entityResolution: EntityResolutionService,
+    protected readonly credentials: ConnectorCredentialsService,
   ) {
     this.logger = new Logger(this.constructor.name);
   }
@@ -34,12 +41,12 @@ export abstract class FormPlatformConnector implements IConnector {
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-    const meta = (business?.metaData as Record<string, unknown>) ?? {};
-    const credential = meta[this.credentialKey] as string | undefined;
+    const credential = await this.credentials.readCredential(
+      businessId,
+      this.connectorType,
+      this.primaryCredentialKey,
+      this.legacyCredentialKey,
+    );
     const stored = await this.getConnectorStatus(businessId);
     return {
       status: credential ? 'connected' : 'disconnected',
@@ -75,11 +82,18 @@ export abstract class FormPlatformConnector implements IConnector {
   }
 
   async disconnect(businessId: string): Promise<void> {
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: this.connectorType } },
-      create: { businessId, connectorType: this.connectorType, status: 'disconnected' },
-      update: { status: 'disconnected' },
-    });
+    await this.credentials.clearCredentials(businessId, this.connectorType);
+  }
+
+  async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
+    const credential = await this.credentials.readCredential(
+      businessId,
+      this.connectorType,
+      this.primaryCredentialKey,
+      this.legacyCredentialKey,
+    );
+    if (!credential) return { success: false, error: `${this.meta.name} not configured` };
+    return { success: true, account: this.meta.name };
   }
 
   /**
