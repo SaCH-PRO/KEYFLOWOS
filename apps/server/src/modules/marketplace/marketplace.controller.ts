@@ -407,8 +407,8 @@ export class MarketplaceController {
   }
 
   @Get('businesses/:businessId/inventory/template-excel')
-  getInventoryTemplate(@Param('businessId') businessId: string, @Res() res: Response) {
-    const buffer = this.marketplaceService.getInventoryExcelTemplate();
+  async getInventoryTemplate(@Param('businessId') businessId: string, @Res() res: Response) {
+    const buffer = await this.marketplaceService.getInventoryExcelTemplate();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="inventory-import-template.xlsx"');
     res.send(buffer);

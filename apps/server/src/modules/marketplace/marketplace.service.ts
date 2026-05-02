@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
-import { utils as xlsxUtils, write as xlsxWrite, read as xlsxRead } from 'xlsx';
+import ExcelJS from 'exceljs';
 import { createHash } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -1590,9 +1590,16 @@ export class MarketplaceService {
       Status: inv.quantity <= 0 ? 'Out of Stock' : (inv.reorderAt && inv.quantity <= inv.reorderAt ? 'Low Stock' : 'In Stock'),
     }));
 
-    const ws = xlsxUtils.json_to_sheet(rows);
-    const wb = xlsxUtils.book_new();
-    xlsxUtils.book_append_sheet(wb, ws, 'Inventory');
+    const wb = new ExcelJS.Workbook();
+    const inventoryHeaders = [
+      'SKU', 'Product Name', 'Warehouse', 'Quantity On Hand', 'Reserved',
+      'Available', 'Reorder Level', 'Cost Per Unit', 'Currency', 'Status',
+    ];
+    const ws = wb.addWorksheet('Inventory');
+    ws.columns = inventoryHeaders.map(header => ({ header, key: header }));
+    for (const row of rows) {
+      ws.addRow(row);
+    }
 
     const summaryRows = [
       { Metric: 'Total SKUs', Value: inventory.length },
@@ -1600,17 +1607,24 @@ export class MarketplaceService {
       { Metric: 'Low Stock', Value: inventory.filter(i => i.reorderAt && i.quantity <= i.reorderAt && i.quantity > 0).length },
       { Metric: 'Report Date', Value: new Date().toISOString().split('T')[0] },
     ];
-    const summaryWs = xlsxUtils.json_to_sheet(summaryRows);
-    xlsxUtils.book_append_sheet(wb, summaryWs, 'Summary');
+    const summaryWs = wb.addWorksheet('Summary');
+    summaryWs.columns = [
+      { header: 'Metric', key: 'Metric' },
+      { header: 'Value', key: 'Value' },
+    ];
+    for (const row of summaryRows) {
+      summaryWs.addRow(row);
+    }
 
-    return Buffer.from(xlsxWrite(wb, { type: 'buffer', bookType: 'xlsx' }));
+    const arrayBuffer = await wb.xlsx.writeBuffer();
+    return Buffer.from(arrayBuffer as ArrayBuffer);
   }
 
   async importInventoryExcel(businessId: string, buffer: Buffer) {
-    const wb = xlsxRead(buffer, { type: 'buffer' });
-    const sheetName = wb.SheetNames[0];
-    const sheet = wb.Sheets[sheetName];
-    const rows: any[] = xlsxUtils.sheet_to_json(sheet, { defval: null });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+    const sheet = wb.worksheets[0];
+    const rows: any[] = sheet ? this.sheetToObjects(sheet) : [];
 
     const warehouses = await this.prisma.client.warehouse.findMany({ where: { businessId, isActive: true } });
     const products = await this.prisma.client.product.findMany({ where: { businessId, deletedAt: null }, select: { id: true, name: true, sku: true } });
@@ -1676,13 +1690,70 @@ export class MarketplaceService {
     return results;
   }
 
-  getInventoryExcelTemplate(): Buffer {
-    const rows = [
-      { SKU: 'EXAMPLE-SKU-001', 'Product Name': 'Example Product', Warehouse: 'Main Warehouse', 'Quantity On Hand': 100, Reserved: 0, 'Reorder Level': 10, 'Cost Per Unit': 25.00, Currency: 'TTD' },
-    ];
-    const ws = xlsxUtils.json_to_sheet(rows);
-    const wb = xlsxUtils.book_new();
-    xlsxUtils.book_append_sheet(wb, ws, 'Inventory Import Template');
-    return Buffer.from(xlsxWrite(wb, { type: 'buffer', bookType: 'xlsx' }));
+  async getInventoryExcelTemplate(): Promise<Buffer> {
+    const headers = ['SKU', 'Product Name', 'Warehouse', 'Quantity On Hand', 'Reserved', 'Reorder Level', 'Cost Per Unit', 'Currency'];
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Inventory Import Template');
+    ws.columns = headers.map(header => ({ header, key: header }));
+    ws.addRow({
+      SKU: 'EXAMPLE-SKU-001',
+      'Product Name': 'Example Product',
+      Warehouse: 'Main Warehouse',
+      'Quantity On Hand': 100,
+      Reserved: 0,
+      'Reorder Level': 10,
+      'Cost Per Unit': 25.0,
+      Currency: 'TTD',
+    });
+    const arrayBuffer = await wb.xlsx.writeBuffer();
+    return Buffer.from(arrayBuffer as ArrayBuffer);
+  }
+
+  private cellValueToPrimitive(value: ExcelJS.CellValue): unknown {
+    if (value === null || value === undefined) return null;
+    if (value instanceof Date) return value;
+    if (typeof value === 'object') {
+      if ('result' in value && (value as { result?: unknown }).result !== undefined) {
+        return this.cellValueToPrimitive((value as { result: ExcelJS.CellValue }).result);
+      }
+      if ('richText' in value && Array.isArray((value as { richText?: unknown }).richText)) {
+        return (value as { richText: Array<{ text?: string }> }).richText
+          .map((rt) => rt.text ?? '')
+          .join('');
+      }
+      if ('text' in value && (value as { text?: unknown }).text !== undefined) {
+        const text = (value as { text: unknown }).text;
+        return typeof text === 'string' ? text : String(text);
+      }
+      if ('error' in value) return null;
+      return String(value);
+    }
+    return value;
+  }
+
+  private sheetToObjects(sheet: ExcelJS.Worksheet): Array<Record<string, unknown>> {
+    const headers: string[] = [];
+    const headerRow = sheet.getRow(1);
+    headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      const value = this.cellValueToPrimitive(cell.value);
+      headers[colNumber - 1] = value === null || value === undefined ? '' : String(value);
+    });
+
+    const rows: Array<Record<string, unknown>> = [];
+    const lastRow = sheet.actualRowCount > 0 ? sheet.rowCount : 0;
+    for (let rowNumber = 2; rowNumber <= lastRow; rowNumber++) {
+      const row = sheet.getRow(rowNumber);
+      const record: Record<string, unknown> = {};
+      let hasValue = false;
+      for (let col = 0; col < headers.length; col++) {
+        const header = headers[col];
+        if (!header) continue;
+        const value = this.cellValueToPrimitive(row.getCell(col + 1).value);
+        record[header] = value;
+        if (value !== null && value !== '') hasValue = true;
+      }
+      if (hasValue) rows.push(record);
+    }
+    return rows;
   }
 }

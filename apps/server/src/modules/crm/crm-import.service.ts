@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { parse } from 'csv-parse/sync';
-import { read, utils } from 'xlsx';
+import ExcelJS from 'exceljs';
 import pdfParse from 'pdf-parse';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from './crm.service';
@@ -550,6 +550,59 @@ export class CrmImportService {
     return contact;
   }
 
+  private cellValueToString(value: ExcelJS.CellValue): string | null {
+    if (value === null || value === undefined) return null;
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'object') {
+      if ('result' in value && (value as { result?: unknown }).result !== undefined) {
+        return this.cellValueToString((value as { result: ExcelJS.CellValue }).result);
+      }
+      if ('richText' in value && Array.isArray((value as { richText?: unknown }).richText)) {
+        return (value as { richText: Array<{ text?: string }> }).richText
+          .map((rt) => rt.text ?? '')
+          .join('');
+      }
+      if ('text' in value && (value as { text?: unknown }).text !== undefined) {
+        const text = (value as { text: unknown }).text;
+        return typeof text === 'string' ? text : String(text);
+      }
+      if ('error' in value) return null;
+      return String(value);
+    }
+    return String(value);
+  }
+
+  private async parseXlsxBuffer(buffer: Buffer): Promise<ParsedRow[]> {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return [];
+
+    const headers: string[] = [];
+    const headerRow = sheet.getRow(1);
+    headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      const headerText = this.cellValueToString(cell.value);
+      headers[colNumber - 1] = headerText ?? '';
+    });
+
+    const rows: ParsedRow[] = [];
+    const lastRow = sheet.actualRowCount > 0 ? sheet.rowCount : 0;
+    for (let rowNumber = 2; rowNumber <= lastRow; rowNumber++) {
+      const row = sheet.getRow(rowNumber);
+      const record: ParsedRow = {};
+      let hasValue = false;
+      for (let col = 0; col < headers.length; col++) {
+        const header = headers[col];
+        if (!header) continue;
+        const value = this.cellValueToString(row.getCell(col + 1).value);
+        record[header] = value;
+        if (value !== null && value !== '') hasValue = true;
+      }
+      if (hasValue) rows.push(record);
+    }
+    return rows;
+  }
+
   private async extractRows(type: 'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf', buffer?: Buffer, ocrText?: string): Promise<ParsedRow[]> {
     if (type === 'csv') {
       if (!buffer) throw new BadRequestException('File buffer required');
@@ -561,9 +614,7 @@ export class CrmImportService {
     }
     if (type === 'xlsx') {
       if (!buffer) throw new BadRequestException('File buffer required');
-      const workbook = read(buffer, { type: 'buffer' });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      return utils.sheet_to_json(sheet, { defval: null }) as ParsedRow[];
+      return this.parseXlsxBuffer(buffer);
     }
     if (type === 'pdf') {
       if (!buffer) throw new BadRequestException('File buffer required');
