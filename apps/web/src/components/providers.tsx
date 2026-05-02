@@ -6,8 +6,16 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeColorsProvider } from "@/lib/theme-context";
 import { RegisterSW } from "@/components/register-sw";
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
+import { useSuppressTurbopackHmrFactoryError } from "@/components/dev-hmr-error-suppressor";
 
 export function Providers({ children }: { children: ReactNode }) {
+  // Dev-only: suppress the recurring Turbopack jsx-dev-runtime HMR
+  // factory-drop overlay error. The page renders correctly; only the
+  // overlay is showing a stale internal-state warning. Real errors
+  // pass through untouched. See dev-hmr-error-suppressor.ts for the
+  // full root-cause / context. This is a no-op in production.
+  useSuppressTurbopackHmrFactoryError();
+
   return (
     <ThemeProvider>
       <ThemeColorsProvider>
