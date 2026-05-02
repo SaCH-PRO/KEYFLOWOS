@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Layers,
@@ -21,6 +21,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { bootstrapIdentity } from "@/lib/client";
+import { applyDevBypassToLocalStorage, isDevAuthBypassEnabled } from "@/lib/keyflow-dev-auth";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -76,6 +77,13 @@ export default function AuthLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [resetSent, setResetSent] = useState(false);
+
+  useEffect(() => {
+    if (isDevAuthBypassEnabled()) {
+      applyDevBypassToLocalStorage();
+      router.replace("/app");
+    }
+  }, [router]);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

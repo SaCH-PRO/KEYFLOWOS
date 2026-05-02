@@ -1,6 +1,11 @@
 "use client";
 
 import { bootstrapIdentity } from "./client";
+import {
+  applyDevBypassToLocalStorage,
+  isDevAuthBypassEnabled,
+  KEYFLOW_DEV_BUSINESS_ID,
+} from "./keyflow-dev-auth";
 
 const BUSINESS_ID_KEY = "kf_business_id";
 const TOKEN_KEY = "kf_token";
@@ -99,6 +104,7 @@ export function clearStoredBusinessId() {
 
 export async function ensureWorkspace(): Promise<string | null> {
   if (typeof window === "undefined") return null;
+  applyDevBypassToLocalStorage();
   const existing = getStoredBusinessId();
   if (existing) return existing;
 
@@ -114,12 +120,17 @@ export async function ensureWorkspace(): Promise<string | null> {
     }
     return result.data.business.id;
   }
+  if (isDevAuthBypassEnabled()) {
+    setStoredBusinessId(KEYFLOW_DEV_BUSINESS_ID);
+    return KEYFLOW_DEV_BUSINESS_ID;
+  }
   return null;
 }
 
 export async function refreshWorkspace(): Promise<string | null> {
   if (typeof window === "undefined") return null;
-  
+  applyDevBypassToLocalStorage();
+
   const token = window.localStorage.getItem(TOKEN_KEY);
   if (!token) return null;
 
@@ -131,6 +142,10 @@ export async function refreshWorkspace(): Promise<string | null> {
       setCachedUser(result.data.user as CachedUser);
     }
     return result.data.business.id;
+  }
+  if (isDevAuthBypassEnabled()) {
+    setStoredBusinessId(KEYFLOW_DEV_BUSINESS_ID);
+    return KEYFLOW_DEV_BUSINESS_ID;
   }
   return null;
 }

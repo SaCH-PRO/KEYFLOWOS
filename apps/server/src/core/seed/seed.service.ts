@@ -1,6 +1,15 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DOCUMENT_CATEGORIES, DOCUMENT_TYPES } from '../../modules/documents/document-taxonomy';
+import {
+  KEYFLOW_DEV_BUSINESS_ID,
+  KEYFLOW_DEV_BUSINESS_NAME,
+  KEYFLOW_DEV_USER_EMAIL,
+  KEYFLOW_DEV_USER_ID,
+  KEYFLOW_DEV_USER_NAME,
+  KEYFLOW_DEV_USER_ROLE,
+  isDevAuthBypassEnabled,
+} from '../auth/keyflow-dev-auth';
 
 @Injectable()
 export class SeedService implements OnApplicationBootstrap {
@@ -16,6 +25,65 @@ export class SeedService implements OnApplicationBootstrap {
     await this.seedCohorts();
     await this.seedDocumentTaxonomy();
     await this.seedSuperAdmin();
+    if (isDevAuthBypassEnabled()) {
+      await this.seedKeyflowDevProfile();
+    }
+  }
+
+  private async seedKeyflowDevProfile() {
+    try {
+      await this.prisma.client.user.upsert({
+        where: { id: KEYFLOW_DEV_USER_ID },
+        create: {
+          id: KEYFLOW_DEV_USER_ID,
+          email: KEYFLOW_DEV_USER_EMAIL,
+          name: KEYFLOW_DEV_USER_NAME,
+          firstName: 'Keyflow',
+          lastName: 'Dev',
+          role: KEYFLOW_DEV_USER_ROLE,
+        },
+        update: {
+          email: KEYFLOW_DEV_USER_EMAIL,
+          role: KEYFLOW_DEV_USER_ROLE,
+        },
+      });
+
+      await this.prisma.client.business.upsert({
+        where: { id: KEYFLOW_DEV_BUSINESS_ID },
+        create: {
+          id: KEYFLOW_DEV_BUSINESS_ID,
+          name: KEYFLOW_DEV_BUSINESS_NAME,
+          ownerId: KEYFLOW_DEV_USER_ID,
+          onboardingComplete: true,
+        },
+        update: {
+          ownerId: KEYFLOW_DEV_USER_ID,
+        },
+      });
+
+      await this.prisma.client.membership.upsert({
+        where: {
+          userId_businessId: {
+            userId: KEYFLOW_DEV_USER_ID,
+            businessId: KEYFLOW_DEV_BUSINESS_ID,
+          },
+        },
+        create: {
+          userId: KEYFLOW_DEV_USER_ID,
+          businessId: KEYFLOW_DEV_BUSINESS_ID,
+          role: 'OWNER',
+        },
+        update: {
+          role: 'OWNER',
+        },
+      });
+
+      this.logger.log(
+        `[KEYFLOW_DEV_AUTH_BYPASS] Seeded dev profile (${KEYFLOW_DEV_USER_EMAIL}) and business (${KEYFLOW_DEV_BUSINESS_NAME}) — id=${KEYFLOW_DEV_BUSINESS_ID}`,
+      );
+    } catch (e) {
+      this.logger.warn('Keyflow dev profile seed failed: ' + (e as Error).message);
+    }
   }
 
   private async seedSuperAdmin() {
