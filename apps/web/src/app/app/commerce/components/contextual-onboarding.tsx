@@ -73,14 +73,13 @@ export function SmartChecklist({ productCount, invoiceCount, quoteCount, onNavig
   const allDone = completedItems.length === CHECKLIST_ITEMS.length;
 
   useEffect(() => {
-    const autoCompleted = CHECKLIST_ITEMS.filter(item => item.check(completionData) && !state.completedFeatures.includes(item.id));
-    if (autoCompleted.length > 0) {
-      setState(prev => {
-        const next = { ...prev, completedFeatures: [...prev.completedFeatures, ...autoCompleted.map(i => i.id)] };
-        saveState(next);
-        return next;
-      });
-    }
+    setState(prev => {
+      const autoCompleted = CHECKLIST_ITEMS.filter(item => item.check(completionData) && !prev.completedFeatures.includes(item.id));
+      if (autoCompleted.length === 0) return prev;
+      const next = { ...prev, completedFeatures: [...prev.completedFeatures, ...autoCompleted.map(i => i.id)] };
+      saveState(next);
+      return next;
+    });
   }, [completionData]);
 
   const markComplete = useCallback((id: string) => {

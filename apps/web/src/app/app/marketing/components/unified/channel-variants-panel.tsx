@@ -81,6 +81,7 @@ export function ChannelVariantsPanel({
     if (JSON.stringify(filtered) !== JSON.stringify(variants)) {
       onVariantsChange(filtered);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `variants`/`onVariantsChange` are intentionally excluded; including them would create a feedback loop where each variants update re-fires this effect. This effect only reconciles when destinations or the master body/subject change, and uses a JSON.stringify guard to avoid redundant updates when reading the latest variants.
   }, [selectedDestinations, masterBody, masterSubject]);
 
   const updateVariant = useCallback((destinationId: string, field: keyof VariantData, value: string) => {

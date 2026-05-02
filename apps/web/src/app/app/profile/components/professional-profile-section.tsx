@@ -204,6 +204,7 @@ export default function ProfessionalProfileSection({
     setBizForm(bf);
     setInitialBizForm(bf);
     onCompletenessChange(businessData.profileCompleteness || 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot initialization guarded by `initializedRef`. Setters from useState are stable; including parent-supplied `onCompletenessChange` would re-fire if the parent forgot to memoize and clobber edits.
   }, [businessId, businessLoading, businessData]);
 
   useEffect(() => {

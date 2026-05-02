@@ -400,8 +400,9 @@ export function useMarketing(): UseMarketingReturn {
   );
 
   useEffect(() => {
+    const timeoutRef = signalTimeoutRef;
     return () => {
-      if (signalTimeoutRef.current) clearTimeout(signalTimeoutRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, []);
 

@@ -173,6 +173,7 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
   useEffect(() => { checkStatus(); }, [checkStatus]);
   useEffect(() => {
     if (connected) loadFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `loadFiles` is intentionally excluded because it changes whenever `searchQuery` updates; we don't want every keystroke in the search box to trigger a fresh fetch here. Search-driven loads are handled by a separate debounced effect; this one only refetches when the user (re)connects or changes the MIME filter.
   }, [connected, mimeFilter]);
 
   useEffect(() => {

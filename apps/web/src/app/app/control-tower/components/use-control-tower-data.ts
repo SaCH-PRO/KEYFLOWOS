@@ -351,7 +351,7 @@ export function useControlTowerData(): ControlTowerState {
     () => (snapshot ? deriveGraphPriorities(snapshot) : []),
     [snapshot],
   );
-  const ctPriorities = data?.priorities ?? [];
+  const ctPriorities = useMemo(() => data?.priorities ?? [], [data?.priorities]);
 
   const priorities = useMemo(
     () => enrichPriorities(ctPriorities, graphPriorities, snapshot, actionItems),

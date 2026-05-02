@@ -378,12 +378,12 @@ export default function BookingsPage() {
     }
   }
 
-  async function handleStatusChange(bookingId: string, newStatus: string) {
+  const handleStatusChange = useCallback(async (bookingId: string, newStatus: string) => {
     if (!businessId) return;
     const res = await updateBookingStatus(bookingId, newStatus, businessId);
     if (res.data) {
       await loadData();
-      if (selectedBooking?.id === bookingId) setSelectedBooking(res.data);
+      setSelectedBooking((prev) => (prev?.id === bookingId ? res.data : prev));
       setBanner({ text: `Booking ${newStatus.toLowerCase()}.`, type: "success" });
       if (newStatus === "CONFIRMED") {
         moduleEvents.emit("booking:confirmed", "bookings", { booking: res.data });
@@ -391,7 +391,7 @@ export default function BookingsPage() {
         moduleEvents.emit("booking:cancelled", "bookings", { booking: res.data });
       }
     }
-  }
+  }, [businessId, loadData]);
 
   async function handleSyncBooking(bookingId: string) {
     if (!businessId) return;
@@ -469,7 +469,7 @@ export default function BookingsPage() {
     } else {
       void handleStatusChange(booking.id, action);
     }
-  }, [handleCreateInvoice]);
+  }, [handleCreateInvoice, handleStatusChange]);
 
   async function handleCreateStaff() {
     if (!businessId || !staffForm.name.trim()) return;

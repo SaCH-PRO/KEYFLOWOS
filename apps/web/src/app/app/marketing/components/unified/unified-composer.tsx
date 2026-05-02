@@ -579,7 +579,7 @@ export function UnifiedComposer({
     } finally {
       setAiRunning(null);
     }
-  }, [aiRunning, body, contentType, objective, tone, audience, businessId, timezone, selectedDestinations]);
+  }, [aiRunning, body, contentType, objective, tone, audience, businessId, timezone, selectedDestinations, subject]);
 
   const handleMediaUpload = useCallback(async (files: FileList) => {
     if (files.length === 0) return;
@@ -717,7 +717,7 @@ export function UnifiedComposer({
     } finally {
       setPublishing(false);
     }
-  }, [body, subject, objective, audience, tone, mediaUrls, selectedDestinations, variants, savedContentId, businessId, contentTypeForApi, scheduleMode, scheduledAt, timezone, onContentCreated, onClose, hasBlockingWarnings, segmentTags]);
+  }, [body, subject, objective, audience, tone, mediaUrls, selectedDestinations, savedContentId, businessId, contentTypeForApi, scheduleMode, scheduledAt, timezone, onContentCreated, onClose, hasBlockingWarnings, segmentTags, persistVariants]);
 
   return (
     <div className="space-y-4">

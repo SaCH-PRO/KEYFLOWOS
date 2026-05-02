@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { FileText, AlertTriangle, CheckCircle2, ChevronRight, Shield, RefreshCw } from "lucide-react";
@@ -21,7 +21,7 @@ export default function DocumentHealthSection({ businessId }: { businessId: stri
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const fetchHealth = () => {
+  const fetchHealth = useCallback(() => {
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
     setError(false);
@@ -29,9 +29,9 @@ export default function DocumentHealthSection({ businessId }: { businessId: stri
       .then(({ data }) => { if (data) setHealth(data); })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
-  };
+  }, [businessId]);
 
-  useEffect(() => { fetchHealth(); }, [businessId]);
+  useEffect(() => { fetchHealth(); }, [fetchHealth]);
 
   if (loading) {
     return (

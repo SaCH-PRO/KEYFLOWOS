@@ -127,6 +127,7 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
       setSaving(false);
       dragY.set(0);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only when the selected product identity changes, to reset all editor state. Including `product`/`cachedImage`/`dragY` would clobber in-progress edits whenever any field of the same product mutated.
   }, [product?.id]);
 
   useEffect(() => {
@@ -134,6 +135,7 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
       setForm(productToForm(product));
       setImagePreview(cachedImage || product.imageUrl || null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-syncs the form from the current product fields only; including `product`/`cachedImage`/`editing` directly would either refetch on identity churn or fight the `editing` guard.
   }, [product?.name, product?.price, product?.description, product?.category, product?.sku, product?.duration, product?.imageUrl, product?.isActive]);
 
   useEffect(() => {

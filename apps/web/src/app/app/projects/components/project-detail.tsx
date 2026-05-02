@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -84,9 +84,13 @@ export function ProjectDetail({
   const router = useRouter();
   const { getOriginContext } = useNavigationContext();
   const originContext = getOriginContext();
-  const crossModuleOrigin = originContext && originContext.workspace && originContext.workspace !== "Projects"
-    ? { label: originContext.workspace, route: originContext.route }
-    : null;
+  const crossModuleOrigin = useMemo(
+    () =>
+      originContext && originContext.workspace && originContext.workspace !== "Projects"
+        ? { label: originContext.workspace, route: originContext.route }
+        : null,
+    [originContext],
+  );
 
   const handleBack = useCallback(() => {
     if (crossModuleOrigin?.route) {

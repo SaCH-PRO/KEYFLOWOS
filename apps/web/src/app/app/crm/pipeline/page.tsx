@@ -35,6 +35,8 @@ import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 
+const CRM_TABS = ["contacts"];
+
 export default function ContactsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -46,8 +48,6 @@ export default function ContactsPage() {
   const [, setSlideDirection] = useState(0);
   const { setCurrentMeta } = useNavigationContext();
   useReturnNavigation({ restoreScrollOnMount: true });
-
-  const CRM_TABS = ["contacts"];
 
   const {
     workspaceLoading, workspaceError, businessId,
@@ -102,6 +102,7 @@ export default function ContactsPage() {
         { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
       ],
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to the specific setters used; including the full `state` bag would re-create shortcuts on every contact-pipeline state change and re-bind keyboard handlers.
   ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowAddMenu, state.setShowBroadcast]);
 
   useKeyboardShortcuts(crmShortcuts, !workspaceLoading);
@@ -131,6 +132,7 @@ export default function ContactsPage() {
       state.setShowAddMenu(true);
       router.replace("/app/crm/pipeline");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to the OAuth callback inputs; including the full `state` bag would re-fire this one-shot effect on unrelated pipeline state changes.
   }, [searchParams, router, loadContacts, loadFlowData, state.setShowAddMenu]);
 
   const confirmStateRef = useRef(confirmState);

@@ -85,15 +85,16 @@ export function useReturnNavigation(options: ReturnNavigationOptions = {}) {
     if (!pathname || options.skipScrollListener) return;
     const el = getAppScrollContainer();
     const scrollTarget = el ?? window;
+    const pathnameRefSnapshot = pathnameRef;
 
     const onScroll = () => {
-      saveScrollPosition(pathnameRef.current ?? "", readContainerScroll());
+      saveScrollPosition(pathnameRefSnapshot.current ?? "", readContainerScroll());
     };
 
     scrollTarget.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       scrollTarget.removeEventListener("scroll", onScroll);
-      saveScrollPosition(pathnameRef.current ?? "", readContainerScroll());
+      saveScrollPosition(pathnameRefSnapshot.current ?? "", readContainerScroll());
     };
   }, [pathname, options.skipScrollListener, pathnameRef]);
 

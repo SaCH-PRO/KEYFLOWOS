@@ -135,6 +135,7 @@ export default function CommercePage() {
       setOpsSection("invoices");
       overview.handleTabChange("invoices");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed to overview.handleTabChange; including the full `overview` bag would re-create this AI action handler on every overview state change.
   }, [overview.handleTabChange]);
 
   useEffect(() => {
@@ -146,6 +147,7 @@ export default function CommercePage() {
       setOpsSection(paramTab);
       overview.handleTabChange(paramTab);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time read of the URL `tab` param to seed mode/section. Re-firing on `searchParams`/`overview` changes would fight the user's in-app navigation by snapping back to the URL.
   }, []);
 
   const handleTabChange = useCallback((t: string) => {
@@ -157,6 +159,7 @@ export default function CommercePage() {
     const url = new URL(window.location.href);
     url.searchParams.set("tab", t);
     window.history.replaceState({}, "", url.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed to overview.handleTabChange; including the full `overview` bag would re-create this tab-change callback on every overview state change and break memoized children.
   }, [overview.handleTabChange]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
@@ -168,6 +171,7 @@ export default function CommercePage() {
       handleTabChange("quotes");
       toast.success("Opening quote builder for contact...");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed to billing.prefillForContact; including the full `billing` bag would re-bind this event listener on every billing state change.
   }, [billing.prefillForContact, handleTabChange]));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
@@ -179,6 +183,7 @@ export default function CommercePage() {
       handleTabChange("invoices");
       toast.success("Opening invoice builder for contact...");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed to billing.prefillForContact; including the full `billing` bag would re-bind this event listener on every billing state change.
   }, [billing.prefillForContact, handleTabChange]));
 
   useEffect(() => {
@@ -187,6 +192,7 @@ export default function CommercePage() {
       setMode("operations");
       if (tab !== target) handleTabChange(target);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only when a new prefill arrives; including `tab`/`handleTabChange` would refire when the user navigates away from the prefilled segment.
   }, [billing.pendingPrefill]);
 
   useEffect(() => {
@@ -317,6 +323,7 @@ export default function CommercePage() {
         { key: "?", description: "Help", action: () => setHelpOpen(true) },
       ],
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed to the specific methods used; including the full `composer`/`shell` bags would re-create shortcuts on every commerce state change and re-bind keyboard handlers.
   ], [composer.handleNewItem, shell.refreshProducts]);
 
   useKeyboardShortcuts(commerceShortcuts, !shell.workspaceLoading);
@@ -342,6 +349,7 @@ export default function CommercePage() {
   const toggleOpsSection = useCallback((key: string) => {
     setOpsSection(key);
     overview.handleTabChange(key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed to overview.handleTabChange; including the full `overview` bag would re-create this callback on every overview state change.
   }, [overview.handleTabChange]);
 
   const handleResumeCommerceTask = useCallback((task: import("@/lib/resume-task-registry").InterruptedTask) => {

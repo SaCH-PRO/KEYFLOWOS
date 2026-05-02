@@ -88,6 +88,7 @@ export function useCommerceShell() {
       }
     };
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `integrations` is a setter bag from useIntegrations() that is recreated each render; including it would re-fetch all commerce data on every render. Only re-run when the businessId itself changes.
   }, [businessId]);
 
   useEffect(() => {

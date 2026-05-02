@@ -236,7 +236,7 @@ export function useModuleAi(config: ModuleAiConfig) {
         toolError: errorMessage,
       }));
     }
-  }, []);
+  }, [notifyGlobalQueue, openGlobalCopilot]);
 
   const clearToolResult = useCallback(() => {
     setState(prev => ({
