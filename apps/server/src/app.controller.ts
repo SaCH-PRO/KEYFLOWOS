@@ -1,19 +1,12 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { AppService } from './app.service';
 import { PrismaService } from './core/prisma/prisma.service';
+import { getReleaseVersion } from './core/utils/release-version';
 
 const BOOT_TIME_MS = Date.now();
 
-let cachedCommit: string | null = null;
 function getCommit(): string {
-  if (cachedCommit !== null) return cachedCommit;
-  cachedCommit = (
-    process.env.GIT_COMMIT ||
-    process.env.REPL_COMMIT_SHA ||
-    process.env.SOURCE_COMMIT ||
-    'unknown'
-  ).slice(0, 12);
-  return cachedCommit;
+  return getReleaseVersion().short;
 }
 
 @Controller()

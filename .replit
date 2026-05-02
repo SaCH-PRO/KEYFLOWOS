@@ -64,7 +64,7 @@ externalPort = 80
 [deployment]
 deploymentTarget = "autoscale"
 run = ["bash", "scripts/start-prod.sh"]
-build = ["bash", "-c", "pnpm install --frozen-lockfile && pnpm --filter @keyflow/db run db:generate && pnpm --filter web build"]
+build = ["bash", "-c", '''(git rev-parse HEAD 2>/dev/null || echo unknown) | tr -d '\n' > .deploy-version && pnpm install --frozen-lockfile && pnpm --filter @keyflow/db run db:generate && pnpm --filter web build''']
 
 [postMerge]
 path = "scripts/post-merge.sh"

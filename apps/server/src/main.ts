@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './core/filters/http-exception.filter';
 import { allowedCorsOrigins } from './core/config/runtime-urls';
 import { ensureValidServerEnv } from './core/config/env';
+import { getReleaseVersion } from './core/utils/release-version';
 
 async function bootstrap() {
   // Fail fast on missing/malformed env. Prints a single, readable list and
@@ -108,7 +109,7 @@ async function bootstrap() {
   const port = Number(process.env.PORT) || 3001;
   await app.listen(port, '0.0.0.0');
   // eslint-disable-next-line no-console
-  console.log(`[boot] API ready on http://localhost:${port} (commit=${(process.env.GIT_COMMIT || 'unknown').slice(0, 12)}, env=${process.env.NODE_ENV || 'development'})`);
+  console.log(`[boot] API ready on http://localhost:${port} (commit=${getReleaseVersion().short}, env=${process.env.NODE_ENV || 'development'})`);
   // eslint-disable-next-line no-console
   console.log(`[boot] Health: GET /healthz  Readiness: GET /readyz`);
 }
