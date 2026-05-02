@@ -348,6 +348,12 @@ git checkout -b main-restore pre-consolidation/main-2026-05-02
 6. Run §5 — but only if `git rev-list --left-right --count
    origin/main...origin/develop` reports `<N> 0`.
 7. Update §5.2 with dates and operator initials.
-8. (Optional follow-up — not part of this task.) Wire
-   `scripts/check-branch-divergence.sh` into CI as a required check on
-   any non-`main` long-lived branch.
+8. **Done (Task #273).** `scripts/check-branch-divergence.sh` is wired
+   into CI via `.github/workflows/branch-divergence.yml`. It runs on
+   every PR targeting `main` and on every push to a known long-lived
+   branch (`develop`, `staging`, `next`, `release/**`, `long-lived/**`)
+   with thresholds of 25 commits / 50 files. Mark
+   `Branch divergence / Check divergence vs main` as a required status
+   check in GitHub branch protection for `main` to enforce the gate
+   on merge. See `docs/branch-hygiene-policy.md` Rule 5 for the local
+   re-run command and the temporary-bump procedure.
