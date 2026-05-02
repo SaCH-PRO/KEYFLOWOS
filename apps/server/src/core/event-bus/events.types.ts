@@ -457,6 +457,45 @@ export class EntityResolvedPayload {
   merged!: boolean;
 }
 
+export class SeoRankingDropPayload {
+  businessId!: string;
+  keywordId!: string;
+  keyword!: string;
+  previousPosition!: number;
+  currentPosition!: number;
+  pageUrl?: string;
+}
+
+export class SeoIssueDetectedPayload {
+  businessId!: string;
+  issueId!: string;
+  issueType!: string;
+  severity!: string;
+  title!: string;
+}
+
+export class SeoContentBriefCreatedPayload {
+  businessId!: string;
+  briefId!: string;
+  title!: string;
+  targetKeyword!: string;
+}
+
+export class SeoPageIndexedPayload {
+  businessId!: string;
+  pageId!: string;
+  url!: string;
+  indexingStatus!: string;
+}
+
+export class SeoSyncCompletedPayload {
+  businessId!: string;
+  source!: string;
+  pagesUpdated!: number;
+  keywordsUpdated!: number;
+}
+
+// Master event map for reference and typing
 export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
   'contact.updated': ContactUpdatedPayload;
@@ -521,4 +560,10 @@ export interface KeyFlowEventMap {
   'social.engagement_received': SocialEngagementReceivedPayload;
   'form.submitted': FormSubmittedPayload;
   'entity.resolved': EntityResolvedPayload;
+
+  'seo.ranking_drop': SeoRankingDropPayload;
+  'seo.issue_detected': SeoIssueDetectedPayload;
+  'seo.content_brief_created': SeoContentBriefCreatedPayload;
+  'seo.page_indexed': SeoPageIndexedPayload;
+  'seo.sync_completed': SeoSyncCompletedPayload;
 }

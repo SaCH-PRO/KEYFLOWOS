@@ -97,6 +97,8 @@ const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
   intro_draft: 'content-generation',
   need_match: 'reasoning',
   relationship_insights: 'reasoning',
+  seo_content_brief: 'content-generation',
+  seo_gap_analysis: 'reasoning',
 };
 
 @Injectable()

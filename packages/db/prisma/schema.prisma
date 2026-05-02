@@ -215,6 +215,12 @@ model Business {
   channelConnections   ChannelConnection[]
   outboundContent      OutboundContent[]
 
+  // SEO Operations Engine
+  seoPages          SeoPage[]
+  seoKeywords       SeoKeyword[]
+  seoIssues         SeoIssue[]
+  contentBriefs     ContentBrief[]
+
   // Mission 2: Supplier connections
   supplierConnections  SupplierConnection[]
 
@@ -4427,5 +4433,173 @@ model AiSuggestionEvent {
   @@index([businessId, source])
   @@index([targetBusinessId])
   @@map("ai_suggestion_events")
+}
+
+// ---
+// MODULE: SEO OPERATIONS ENGINE
+// ---
+
+model SeoPage {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  url           String
+  path          String
+  pageType      String   @map("page_type")
+  title         String?
+  metaTitle     String?  @map("meta_title")
+  metaDescription String? @map("meta_description")
+  h1            String?
+  wordCount     Int?     @map("word_count")
+  indexingStatus String  @default("unknown") @map("indexing_status")
+
+  impressions   Int      @default(0)
+  clicks        Int      @default(0)
+  ctr           Float    @default(0)
+  avgPosition   Float    @default(0) @map("avg_position")
+
+  organicSessions  Int   @default(0) @map("organic_sessions")
+  bounceRate       Float @default(0) @map("bounce_rate")
+  avgSessionDuration Float @default(0) @map("avg_session_duration")
+  conversions      Int   @default(0)
+  revenue          Float @default(0)
+
+  productId   String?  @map("product_id")
+  serviceId   String?  @map("service_id")
+
+  lastCrawled DateTime? @map("last_crawled")
+  lastSynced  DateTime? @map("last_synced")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt      @map("updated_at")
+
+  keywords    SeoKeyword[]
+  rankings    RankingSnapshot[]
+
+  @@unique([businessId, path])
+  @@index([businessId])
+  @@index([businessId, pageType])
+  @@index([businessId, impressions])
+  @@map("seo_pages")
+}
+
+model SeoKeyword {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  keyword       String
+  pageId        String?  @map("page_id")
+  page          SeoPage? @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  isPrimary     Boolean  @default(false) @map("is_primary")
+  isTracked     Boolean  @default(true) @map("is_tracked")
+  searchVolume  Int?     @map("search_volume")
+  difficulty    Int?
+  currentPosition Float? @map("current_position")
+  previousPosition Float? @map("previous_position")
+  bestPosition  Float?   @map("best_position")
+
+  impressions   Int      @default(0)
+  clicks        Int      @default(0)
+  ctr           Float    @default(0)
+
+  trend         String   @default("stable")
+  positionChange Float   @default(0) @map("position_change")
+
+  lastUpdated DateTime? @map("last_updated")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt      @map("updated_at")
+
+  rankings    RankingSnapshot[]
+
+  @@unique([businessId, keyword])
+  @@index([businessId])
+  @@index([businessId, isTracked])
+  @@index([businessId, currentPosition])
+  @@map("seo_keywords")
+}
+
+model RankingSnapshot {
+  id          String   @id @default(cuid())
+
+  keywordId   String   @map("keyword_id")
+  keyword     SeoKeyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  pageId      String?  @map("page_id")
+  page        SeoPage? @relation(fields: [pageId], references: [id], onDelete: SetNull)
+
+  position    Float
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  ctr         Float    @default(0)
+
+  snapshotDate DateTime @map("snapshot_date")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([keywordId, snapshotDate])
+  @@index([pageId, snapshotDate])
+  @@map("ranking_snapshots")
+}
+
+model SeoIssue {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  issueType   String   @map("issue_type")
+  severity    String   @default("medium")
+  category    String
+  title       String
+  description String?
+  pageUrl     String?  @map("page_url")
+  keyword     String?
+
+  status      String   @default("open")
+  impact      String?
+  recommendation String?
+
+  detectedAt  DateTime @default(now()) @map("detected_at")
+  resolvedAt  DateTime? @map("resolved_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, severity])
+  @@index([businessId, category])
+  @@map("seo_issues")
+}
+
+model ContentBrief {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  pageId        String?  @map("page_id")
+  title         String
+  targetKeyword String  @map("target_keyword")
+  secondaryKeywords String[] @default([]) @map("secondary_keywords")
+  contentType   String  @default("article") @map("content_type")
+  searchIntent  String? @map("search_intent")
+  status        String  @default("draft")
+  priority      String  @default("medium")
+
+  outline       Json?
+  suggestedMetaTitle String? @map("suggested_meta_title")
+  suggestedMetaDescription String? @map("suggested_meta_description")
+  recommendedWordCount Int? @map("recommended_word_count")
+  callToAction  String? @map("call_to_action")
+  competitorAngle String? @map("competitor_angle")
+  internalLinkSuggestions String[] @default([]) @map("internal_link_suggestions")
+  contentGapSource String? @map("content_gap_source")
+
+  approvalStatus String @default("pending") @map("approval_status")
+  approvedBy     String? @map("approved_by")
+  approvedAt     DateTime? @map("approved_at")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, priority])
+  @@map("content_briefs")
 }
 
