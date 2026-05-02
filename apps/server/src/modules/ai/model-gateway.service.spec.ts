@@ -50,6 +50,7 @@ describe('ModelGatewayService', () => {
   beforeEach(() => {
     savedEnv = { ...process.env };
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     mockPrismaClient.aiMemory.findUnique.mockResolvedValue(null);
     mockPrismaClient.aiMemory.upsert.mockResolvedValue({});
     service = createService();

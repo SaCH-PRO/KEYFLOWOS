@@ -23,7 +23,18 @@ export async function GET(request: NextRequest) {
 
     const location = res.headers.get("location");
     if (location) {
-      const redirectUrl = location.startsWith("/") ? new URL(location, request.url) : new URL(location);
+      // SECURITY: only follow redirects that point back at our own origin —
+      // an attacker-controlled backend must not be able to redirect users to
+      // arbitrary external URLs (ported from develop 1c7e6f93).
+      const appOrigin = new URL(request.url).origin;
+      const redirectUrl = location.startsWith("/")
+        ? new URL(location, request.url)
+        : new URL(location);
+      if (redirectUrl.origin !== appOrigin) {
+        return NextResponse.redirect(
+          new URL("/app/profile?tab=documents&drive=error&reason=invalid_redirect", request.url),
+        );
+      }
       return NextResponse.redirect(redirectUrl);
     }
 

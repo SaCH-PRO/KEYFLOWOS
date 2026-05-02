@@ -1,14 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 
-type DecodedJwt = {
-  sub?: string;
-  user_id?: string;
-  email?: string;
-  exp?: number;
-  [key: string]: unknown;
-};
-
 @Injectable()
 export class SupabaseAuthService {
   private readonly logger = new Logger(SupabaseAuthService.name);
@@ -29,45 +21,25 @@ export class SupabaseAuthService {
     return this.client;
   }
 
-  private decodeJwt(token: string): DecodedJwt | null {
-    try {
-      const parts = token.split('.');
-      if (parts.length < 2) return null;
-      const payload = parts[1];
-      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-      const decoded = Buffer.from(normalized, 'base64').toString('utf8');
-      return JSON.parse(decoded);
-    } catch (err) {
-      this.logger.debug(`JWT decode failed: ${(err as Error).message}`);
-      return null;
-    }
-  }
-
+  /**
+   * Resolve a Supabase access token to a verified user.
+   *
+   * SECURITY: this method *only* trusts tokens that Supabase confirms with a
+   * valid signature. Earlier versions had a "decode JWT locally" fallback for
+   * dev convenience that effectively let any well-formed JWT through; that
+   * was a critical authentication bypass and has been removed (ported from
+   * develop 1c7e6f93).
+   */
   async getUserFromToken(token?: string): Promise<User | null> {
     if (!token) return null;
     const supabase = this.supabase;
-    if (supabase) {
-      const { data, error } = await supabase.auth.getUser(token);
-      if (error) {
-        this.logger.debug(`Supabase auth error: ${error.message}`);
-      } else if (data?.user) {
-        return data.user;
-      }
-    }
+    if (!supabase) return null;
 
-    // Fallback: decode JWT locally (dev-friendly to avoid hard failures)
-    const decoded = this.decodeJwt(token);
-    const userId = decoded?.sub || decoded?.user_id;
-    if (!userId) return null;
-    return {
-      id: userId,
-      aud: 'authenticated',
-      app_metadata: {},
-      user_metadata: {},
-      factors: [],
-      email: typeof decoded?.email === 'string' ? decoded.email : undefined,
-      created_at: '',
-      updated_at: '',
-    } as User;
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error) {
+      this.logger.debug(`Supabase auth error: ${error.message}`);
+      return null;
+    }
+    return data?.user ?? null;
   }
 }

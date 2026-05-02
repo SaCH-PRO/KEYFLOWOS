@@ -49,6 +49,11 @@ function buildAllowedDevOrigins(): string[] {
     new Set([
       ...fromEnv,
       ...(replitDev ? [replitDev] : []),
+      // Wildcard hosts so any Replit preview URL works on mobile devices
+      // without "Invalid Host" errors (ported from develop e91d037a).
+      "*.replit.dev",
+      "*.worf.replit.dev",
+      "*.repl.co",
       "127.0.0.1",
       "localhost",
     ]),
@@ -71,12 +76,27 @@ const nextConfig: NextConfig = {
   },
   allowedDevOrigins: buildAllowedDevOrigins(),
   async headers() {
+    // Static assets always get the immutable long-cache treatment so
+    // repeat-visit performance doesn't regress in production
+    // (security patch ported from develop 1c7e6f93).
+    const staticHeaders = {
+      source: "/_next/static/(.*)",
+      headers: [
+        {
+          key: "Cache-Control",
+          value: "public, max-age=31536000, immutable",
+        },
+      ],
+    };
+
     if (isProd) {
-      return [];
+      return [staticHeaders];
     }
+
     return [
+      staticHeaders,
       {
-        source: "/(.*)",
+        source: "/((?!_next/static).*)",
         headers: [
           {
             key: "Cache-Control",

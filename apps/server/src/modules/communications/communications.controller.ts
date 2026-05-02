@@ -8,14 +8,19 @@ import { DeliveryQueueService } from './delivery-queue.service';
 import { ContentAiService } from './content-ai.service';
 import { WhatsAppAdapter } from './adapters/whatsapp-adapter';
 
-const TRACKING_SECRET = process.env.TRACKING_HMAC_SECRET || '';
+// SECURITY: TRACKING_HMAC_SECRET must not silently fall back to an empty string —
+// an empty HMAC key would let any caller forge tracking tokens (ported from
+// develop 1c7e6f93).
+const TRACKING_SECRET = process.env.TRACKING_HMAC_SECRET;
 
 function signTrackingToken(deliveryId: string, extra?: string): string {
+  if (!TRACKING_SECRET) throw new Error('TRACKING_HMAC_SECRET is not configured');
   const data = extra ? `${deliveryId}:${extra}` : deliveryId;
   return createHmac('sha256', TRACKING_SECRET).update(data).digest('hex').slice(0, 16);
 }
 
 function verifyTrackingToken(deliveryId: string, token: string, extra?: string): boolean {
+  if (!TRACKING_SECRET) return false;
   return signTrackingToken(deliveryId, extra) === token;
 }
 
