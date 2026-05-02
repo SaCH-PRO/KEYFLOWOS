@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
@@ -49,7 +49,7 @@ const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
   "hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact", "policies",
 ];
 
-export default function PublicBookingPage() {
+function PublicBookingPageInner() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1471,3 +1471,12 @@ export default function PublicBookingPage() {
     </main>
   );
 }
+
+export default function PublicBookingPage() {
+  return (
+    <Suspense fallback={null}>
+      <PublicBookingPageInner />
+    </Suspense>
+  );
+}
+

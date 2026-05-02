@@ -51,8 +51,8 @@ export function ClientTab({ contactId }: ClientTabProps) {
           const meta = res.data.meta;
           setClient({
             ...contact,
-            leadScore: meta?.leadScore ?? contact.leadScore ?? null,
-            lastInteractionAt: meta?.lastInteractionAt ?? contact.lastInteractionAt ?? null,
+            leadScore: meta?.leadScore ?? contact.meta?.leadScore ?? null,
+            lastInteractionAt: meta?.lastInteractionAt ?? contact.meta?.lastInteractionAt ?? null,
           } as ClientData);
         } else if (res.error) {
           setError(res.error);

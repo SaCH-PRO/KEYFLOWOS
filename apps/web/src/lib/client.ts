@@ -8206,10 +8206,10 @@ export async function updateKeyflowNote(
   noteId: string,
   patch: { body?: string; pinned?: boolean; targetLabel?: string | null },
 ): Promise<ApiResult<KeyflowNote>> {
-  return apiPut<KeyflowNote>({
-    path: `/keyflow/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`,
-    body: patch,
-  });
+  return apiPut<KeyflowNote>(
+    `/keyflow/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`,
+    patch,
+  );
 }
 
 export async function deleteKeyflowNote(
