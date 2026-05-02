@@ -68,6 +68,30 @@ export interface ConnectorStatusSummary {
   connectedAccount: string | null;
 }
 
+/**
+ * Single field in a connector's credential form (rendered by the connect dialog).
+ * `secret: true` means the value is masked once stored and never returned in plaintext
+ * to the client — the connector framework only ever returns a "•••• <last4>" preview.
+ */
+export interface ConnectorCredentialField {
+  key: string;
+  label: string;
+  type: 'text' | 'password' | 'textarea';
+  placeholder?: string;
+  helpText?: string;
+  required?: boolean;
+  secret?: boolean;
+}
+
+/**
+ * How the "Connect account" button behaves on the frontend.
+ *  - `dialog`  → open the credential dialog and POST to the credentials endpoint
+ *  - `oauth`   → open `oauthStartPath` in a new tab / redirect (real OAuth flow)
+ *  - `webhook` → show the auto-generated per-business webhook URL
+ *  - `external`→ open `externalUrl` in a new tab (rare)
+ */
+export type ConnectorConnectMode = 'dialog' | 'oauth' | 'webhook' | 'external';
+
 export interface ConnectorMeta {
   type: ConnectorType;
   name: string;
@@ -90,6 +114,26 @@ export interface ConnectorMeta {
    * Deep-link URL pattern to open this service in its native Google UI.
    */
   externalUrl?: string;
+  /**
+   * UX hint for the frontend "Connect" button. Defaults to `oauth` for oauth2 + `dialog`
+   * for api_key / credentials. Webhook-only connectors use `webhook`.
+   */
+  connectMode?: ConnectorConnectMode;
+  /**
+   * Schema for the connect-account credential dialog.
+   * Empty / omitted means "no manual credentials needed" (e.g. OAuth-only).
+   */
+  credentialFields?: ConnectorCredentialField[];
+  /**
+   * For `connectMode: 'oauth'` connectors that delegate to another module's OAuth flow
+   * (e.g. social platforms reuse `/social/.../oauth/start`).
+   */
+  oauthStartPath?: string;
+  /**
+   * Short user-facing instructions rendered above the credential form
+   * ("Where do I get this?" copy).
+   */
+  connectInstructions?: string;
 }
 
 export interface ConnectorSyncResult {

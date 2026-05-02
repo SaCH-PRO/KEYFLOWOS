@@ -17,6 +17,9 @@ export class TikTokConnector extends SocialPlatformConnector {
     supportsSync: true,
     supportsWebhook: true,
     authType: 'oauth2',
+    connectMode: 'oauth',
+    oauthStartPath: '/social/businesses/{businessId}/connections/tiktok/oauth/start',
+    connectInstructions: 'You will be redirected to TikTok to grant access for posting and analytics.',
   };
   protected readonly platformKey = 'TIKTOK';
 

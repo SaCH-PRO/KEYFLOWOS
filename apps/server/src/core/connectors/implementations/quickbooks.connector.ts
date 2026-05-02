@@ -2,6 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
+import { ConnectorCredentialsService } from '../connector-credentials.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
 
 const CONNECTOR_TYPE = 'quickbooks' as const;
@@ -20,39 +21,43 @@ export class QuickbooksConnector implements IConnector {
     supportsSync: true,
     supportsWebhook: true,
     authType: 'oauth2',
+    connectMode: 'dialog',
+    connectInstructions:
+      'Generate an OAuth access token from your Intuit Developer dashboard (Sandbox or Production), then paste it below along with your QuickBooks Realm ID.',
+    credentialFields: [
+      { key: 'accessToken', label: 'Access token', type: 'password', required: true, secret: true, placeholder: 'eyJhbGciOi…' },
+      { key: 'realmId', label: 'Realm ID (Company ID)', type: 'text', required: true, placeholder: '4620816365xxxxxx' },
+      { key: 'realmName', label: 'Company name (display)', type: 'text', placeholder: 'Acme Tobago Co.' },
+    ],
   };
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+    @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
   ) {}
 
   async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
-    const connected = await this.isConnected(businessId);
-    if (connected) return { connected: true };
-    return { connected: false, authUrl: `/connectors/${businessId}/quickbooks/oauth/start` };
+    return { connected: await this.isConnected(businessId) };
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-    const meta = (business?.metaData as Record<string, unknown>) ?? {};
-    const hasToken = !!(meta.quickbooksAccessToken || process.env.QUICKBOOKS_TEST_TOKEN);
-    const realStatus = hasToken ? 'connected' : 'disconnected';
-
+    const accessToken = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accessToken', 'quickbooksAccessToken');
+    const realmName =
+      (await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'realmName')) ||
+      (await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'realmId', 'quickbooksRealmId'));
     const stored = await this.getConnectorStatus(businessId);
+    const hasToken = !!(accessToken || process.env.QUICKBOOKS_TEST_TOKEN);
     return {
-      status: realStatus,
+      status: hasToken ? 'connected' : 'disconnected',
       lastSyncAt: stored?.lastSyncAt ?? null,
       lastErrorAt: stored?.lastErrorAt ?? null,
       lastError: stored?.lastError ?? null,
       errorCount: stored?.errorCount ?? 0,
       syncCount: stored?.syncCount ?? 0,
       connectedAt: stored?.connectedAt ?? null,
-      connectedAccount: hasToken ? (stored?.connectedAccount ?? String(meta.quickbooksRealmId ?? 'QuickBooks Realm')) : null,
+      connectedAccount: hasToken ? (stored?.connectedAccount ?? realmName ?? 'QuickBooks Realm') : null,
     };
   }
 
@@ -68,8 +73,7 @@ export class QuickbooksConnector implements IConnector {
   }
 
   async isConnected(businessId: string): Promise<boolean> {
-    const health = await this.healthCheck(businessId);
-    return health.status === 'connected';
+    return (await this.healthCheck(businessId)).status === 'connected';
   }
 
   /**
@@ -96,11 +100,16 @@ export class QuickbooksConnector implements IConnector {
   }
 
   async disconnect(businessId: string): Promise<void> {
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: CONNECTOR_TYPE } },
-      create: { businessId, connectorType: CONNECTOR_TYPE, status: 'disconnected' },
-      update: { status: 'disconnected' },
-    });
+    await this.credentials.clearCredentials(businessId, CONNECTOR_TYPE);
+  }
+
+  async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
+    const accessToken = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accessToken', 'quickbooksAccessToken');
+    if (!accessToken) return { success: false, error: 'No QuickBooks access token configured' };
+    const realmId = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'realmId', 'quickbooksRealmId');
+    if (!realmId) return { success: false, error: 'Missing QuickBooks Realm ID' };
+    const realmName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'realmName');
+    return { success: true, account: realmName ?? `Realm ${realmId}` };
   }
 
   /**

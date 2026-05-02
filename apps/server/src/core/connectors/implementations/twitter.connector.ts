@@ -17,6 +17,9 @@ export class TwitterConnector extends SocialPlatformConnector {
     supportsSync: true,
     supportsWebhook: true,
     authType: 'oauth2',
+    connectMode: 'oauth',
+    oauthStartPath: '/social/businesses/{businessId}/connections/twitter/oauth/start',
+    connectInstructions: 'You will be redirected to X to grant access for posting and engagement tracking.',
   };
   protected readonly platformKey = 'TWITTER';
 

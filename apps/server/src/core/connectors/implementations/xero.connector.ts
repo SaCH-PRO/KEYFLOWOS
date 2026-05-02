@@ -2,6 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
+import { ConnectorCredentialsService } from '../connector-credentials.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
 
 const CONNECTOR_TYPE = 'xero' as const;
@@ -20,28 +21,33 @@ export class XeroConnector implements IConnector {
     supportsSync: true,
     supportsWebhook: true,
     authType: 'oauth2',
+    connectMode: 'dialog',
+    connectInstructions:
+      'Generate an access token from your Xero developer portal and paste it below along with your Xero tenant ID.',
+    credentialFields: [
+      { key: 'accessToken', label: 'Access token', type: 'password', required: true, secret: true },
+      { key: 'tenantId', label: 'Tenant ID', type: 'text', required: true, placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' },
+      { key: 'tenantName', label: 'Tenant name (display)', type: 'text', placeholder: 'Acme Tobago Co.' },
+    ],
   };
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+    @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
   ) {}
 
   async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
-    const connected = await this.isConnected(businessId);
-    if (connected) return { connected: true };
-    return { connected: false, authUrl: `/connectors/${businessId}/xero/oauth/start` };
+    return { connected: await this.isConnected(businessId) };
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-    const meta = (business?.metaData as Record<string, unknown>) ?? {};
-    const hasToken = !!(meta.xeroAccessToken || process.env.XERO_TEST_TOKEN);
-
+    const accessToken = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accessToken', 'xeroAccessToken');
+    const tenantName =
+      (await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'tenantName', 'xeroTenantName')) ||
+      (await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'tenantId'));
+    const hasToken = !!(accessToken || process.env.XERO_TEST_TOKEN);
     const stored = await this.getConnectorStatus(businessId);
     return {
       status: hasToken ? 'connected' : 'disconnected',
@@ -51,7 +57,7 @@ export class XeroConnector implements IConnector {
       errorCount: stored?.errorCount ?? 0,
       syncCount: stored?.syncCount ?? 0,
       connectedAt: stored?.connectedAt ?? null,
-      connectedAccount: hasToken ? (stored?.connectedAccount ?? String(meta.xeroTenantName ?? 'Xero Tenant')) : null,
+      connectedAccount: hasToken ? (stored?.connectedAccount ?? tenantName ?? 'Xero Tenant') : null,
     };
   }
 
@@ -87,11 +93,16 @@ export class XeroConnector implements IConnector {
   }
 
   async disconnect(businessId: string): Promise<void> {
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: CONNECTOR_TYPE } },
-      create: { businessId, connectorType: CONNECTOR_TYPE, status: 'disconnected' },
-      update: { status: 'disconnected' },
-    });
+    await this.credentials.clearCredentials(businessId, CONNECTOR_TYPE);
+  }
+
+  async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
+    const accessToken = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accessToken', 'xeroAccessToken');
+    if (!accessToken) return { success: false, error: 'No Xero access token configured' };
+    const tenantId = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'tenantId');
+    if (!tenantId) return { success: false, error: 'Missing Xero tenant ID' };
+    const tenantName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'tenantName', 'xeroTenantName');
+    return { success: true, account: tenantName ?? `Tenant ${tenantId}` };
   }
 
   async emitContactSynced(businessId: string, opts: { externalId: string; email?: string; firstName?: string; lastName?: string; companyName?: string }) {

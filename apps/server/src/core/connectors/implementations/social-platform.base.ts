@@ -29,7 +29,8 @@ export abstract class SocialPlatformConnector implements IConnector {
 
   async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
     if (await this.isConnected(businessId)) return { connected: true };
-    return { connected: false, authUrl: `/social/businesses/${businessId}/connect/${this.platformKey.toLowerCase()}` };
+    // The frontend will POST to this OAuth start endpoint to receive the live provider URL.
+    return { connected: false, authUrl: `/social/businesses/${businessId}/connections/${this.platformKey.toLowerCase()}/oauth/start` };
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {

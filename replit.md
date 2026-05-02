@@ -14,51 +14,53 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 
 **UI/UX Decisions:**
 - Redesigned design system with a warm Caribbean color palette (orange `#F97316` primary, teal `#14B8A6` secondary), selective glassmorphism, clean elevation system, and PWA capabilities.
-- Compact listing/grid views with hover-revealed additional info and click-to-detail.
+- Compact listing/grid views with hover-revealed details and click-to-full-detail.
 - Standardized shared component library and consolidated shell design.
 - Simplified "Today" surface with greeting, cash flow forecast, priority queue, and AI briefing.
 - Tiered navigation with Primary Rail + Secondary Panel, featuring five master surfaces: Cockpit, KEYFLOW COMMAND, Workspaces, Studio, and Public.
-- Consistent design system elements: error boundaries, skeleton/empty/loading states, typography, radius utilities, and card hierarchies.
+- Consistent design system elements for error boundaries, loading states, typography, radius utilities, and card hierarchies.
 
 **Technical Implementations & Features:**
-- **AI-Powered Automation:** Implements a Business Autopilot System with an Intent → Plan → Execute → Log pipeline, a 4-tier governance engine, and a Global AI Command Layer for unified interaction. Includes an AI Copilot UX Shell for contextual quick actions and monitoring.
-- **Business Intelligence Context System:** Gathers comprehensive business context from 16 guidance sub-profiles with a 5-tier weighted completeness system.
-- **KEYFLOW COMMAND (Flagship Operator HQ):** The default home surface, centralizing Command Entry, Business Health, Priority Queue, AI Daily Plan, and module health. Includes a Unified Calendar, Keyflow Notes, and Jarvis Voice surface.
-- **Workspaces:** Dedicated workspaces for Revenue, Clients, Calendar, Content, Autopilot, Profile & Intelligence, Projects (Kanban boards, health scores), and Expenses (spending intelligence, AI cost-control guidance).
-- **Core Business Functions:** Incorporates Billing & Payment (multi-method payments, subscription billing), User & Security (Multi-Tenant System, personalized authentication, granular permissions, Team Activity Log), and a Financial Copilot Agent.
-- **Connector Framework & Event Normalization:** A unified connector framework for integrations with a canonical event schema, entity resolution, health monitoring, and scheduled synchronization.
-- **Communication & Content:** Features a Customer Notification System, Unified Composer & Distribution UX, Communications Delivery Engine with adapter-based architecture (Meta, Google, WhatsApp), and WhatsApp Business Integration.
-- **Commerce & Fulfillment:** Offers a Public Storefront, Store Dashboard, Fulfillment Engine & Order Routing, Commerce Data Layer, and Commerce Intelligence & AI with a full commerce copilot layer. A Canonical Graph API provides product-service mapping.
-- **Autopilot Governed Delegation Engine:** Provides 5 pre-built delegation loop templates with governance-aware execution and learning loop integration.
-- **Guided Store Qualification Engine:** Transforms the public store into a guided qualification and conversion experience with interactive package selectors, execution model tiers, and AI quote generation.
-- **Community Transactional Presence Network:** Transforms the community module into a business directory with mini-storefronts, transactional presence, network connection models, and directory search.
-- **Multi-Model AI Gateway:** An infrastructure layer abstracting AI provider selection (OpenAI, Anthropic, xAI) behind a unified routing layer, supporting task-based routing, multiple AI modes, automatic fallback, and streaming capabilities.
-- **AI-Powered Business Matching:** Provides AI-powered business recommendations in the community directory using a hybrid approach of algorithmic scoring and AI-generated match explanations.
-- **Community Trust & Reputation Signals:** Adds trust signals and reputation scoring to community profiles, including an Endorsement model, a computed reputation score, and verified badges.
-- **Strategic Intelligence & Forecasting:** Utilizes 7 AI-powered engines for Revenue Forecasting, Profitability Analysis, Pricing Advice, Seasonal Pattern Detection, Opportunity Scanning, Risk Scanning, and Weekly Planning.
-- **Second-Wave Connectors & Growth Intelligence:** Adds 10 new connectors (accounting, email marketing, expanded social, forms) and introduces a Growth Intelligence Module for journey tracking, attribution, and insight generation.
-- **SEO Operations Engine:** Operational SEO module wired into the Business Graph, providing page inventory sync, keyword tracking, ranking history, automated issue detection, content gap analysis, and revenue attribution. Integrates with Google Search Console and GA4.
-- **Platform Utilities:** Includes Cross-Module Intelligence Agents, Gamification, online store, public booking page, module event bus, keyboard shortcuts, webhook dispatcher, developer settings, Universal Export System, Business Documentation Engine, Navigation & Command System, and System Diagnostics & Health Center.
-- **Community Relationship & Transaction Actions:** Business-to-business relationship features including quote requests, referrals, collaboration proposals, direct messaging, and business shortlisting with notifications.
-- **Community Visible AI Matchmaking:** Finds and notifies top candidate providers for community posts (`QUESTION`/`OPPORTUNITY`/`HELP`/`NEED`).
-- **Community Trust & Reputation Engine:** Adds peer reviews (`CommunityReview`) and a computed `BusinessReputation` snapshot including average rating, completed transactions, on-time rate, and reputation score.
-- **Community Network Activity & Growth Layer:** Five-system growth layer for the community marketplace: Opportunity Board, Partner Programs, Resource Marketplace, Network Activity Feed, and Network Analytics.
-- **Security:** Implements Error Boundaries for core modules and rate limiting for unauthenticated endpoints.
-- **Server-Driven Email Verification (Resend):** Signup flow with email verification via Resend.
-- **Launch & Maintenance Hardening:** Both apps validate environment with Zod, expose health endpoints (`/healthz`, `/readyz`, `/api/healthz`), and include scripts for production deployment and smoke tests.
+- **AI-Powered Automation:** Business Autopilot System for archetype inference, revenue model detection, task orchestration, legal/compliance, and global AI entry point with route-aware context. Utilizes an Intent → Plan → Execute → Log pipeline with 4-tier governance and audit trail. AI Copilot UX Shell provides a Global Copilot Panel and module-contextual quick actions.
+- **Global AI Command Layer:** Copilot Panel acts as the sole AI interaction surface with plan-first chat execution, dynamic prompts, and unified cross-module queues.
+- **Business Intelligence Context System:** Gathers business context from 16 guidance sub-profiles with a 5-tier weighted completeness system and a Business Builder intake wizard.
+- **KEYFLOW COMMAND (Flagship Operator HQ):** Default home surface, centralizing Command Entry, Business Health, Priority Queue, Risk Alerts, Approvals, AI Daily Plan, Storefront Intelligence, Growth Operations, Module Health, Unified Calendar, Keyflow Notes, and Jarvis Voice surface with Whisper STT and GPT-4o-mini-TTS.
+- **Workspaces:** Dedicated workspaces for Revenue, Clients, Calendar, Content, Autopilot, Profile & Intelligence, Projects (Kanban, cards, health scores), and Expenses (spending intelligence, budgets, AI cost-control).
+- **Core Business Functions:** Billing & Payment (multi-method, subscription), User & Security (Multi-Tenant, personalized auth, granular permissions, Team Activity Log), and a Financial Copilot Agent.
+- **Connector Framework & Event Normalization:** Unified connector framework with `ConnectorRegistryService`, canonical event schema, `EntityResolutionService` for deduplication, `ConnectorStatus`, `ConnectorHealthMonitorService`, `ConnectorSyncSchedulerService`, and a Health Dashboard.
+- **Communication & Content:** Customer Notification System, Unified Composer & Distribution UX, Communications Delivery Engine with adapters (Meta, Google, WhatsApp), WhatsApp Business Integration, and Audience Health Dashboard.
+- **Commerce & Fulfillment:** Public Storefront, Store Dashboard, Fulfillment Engine & Order Routing, Commerce Data Layer, and Commerce Intelligence & AI with a full commerce copilot layer. Canonical Graph API for product-service mapping and readiness scoring.
+- **Autopilot Governed Delegation Engine:** 5 pre-built delegation loop templates with governance, learning loop integration, 5-minute scheduler, and dedicated Autopilot dashboard.
+- **Guided Store Qualification Engine:** Transforms public store into a guided qualification and conversion experience with interactive package selectors, execution model tiers, AI quote-from-conversation, asset intake, and a QualificationConfig UI.
+- **Community Transactional Presence Network:** Community module as a business directory with mini-storefront profiles, transactional fields, network connection models, directory search, and enhanced profile cards.
+- **Multi-Model AI Gateway:** Infrastructure layer abstracting AI provider selection (OpenAI, Anthropic, xAI) behind a unified routing layer. Supports task-based routing, multiple AI modes, automatic fallback, health tracking, BYOK, strict typed output contracts, and streaming. Includes cost budget caps and observability.
+- **AI-Powered Business Matching:** AI-powered business recommendations in the community directory using algorithmic scoring and AI-generated match explanations.
+- **Community Trust & Reputation Signals:** Trust signals and reputation scoring for community profiles, including Endorsement model, computed reputation score, and verified badges.
+- **Strategic Intelligence & Forecasting:** `StrategicIntelligenceService` with 7 AI-powered engines for Revenue Forecasting, Profitability Analysis, Pricing Advice, Seasonal Pattern Detection, Opportunity Scanning, Risk Scanning, and Weekly Planning.
+- **Second-Wave Connectors & Growth Intelligence:** Adds 10 new connectors (accounting, email marketing, expanded social, forms) and 4 new Prisma models (`CustomerJourney`, `JourneyTouchpoint`, `AttributionResult`, `GrowthInsight`). Includes `GrowthIntelligenceModule` for journey tracking, attribution, and heuristic insight generation. Per-business credentials are stored encrypted in `ConnectorStatus.metadata.encryptedCredentials` via `ConnectorCredentialsService` (AES-GCM). Owners connect each connector through a unified Connect dialog on `/app/connect`: API-key connectors (QuickBooks, Xero, Mailchimp, Klaviyo, Typeform, Jotform) show a credential form; OAuth connectors (LinkedIn, TikTok, Twitter) redirect through the social OAuth start endpoint; `webhook_form` exposes a per-business webhook URL + auto-generated secret. Form ingest goes through `POST /webhooks/forms/:businessId/:type` with HMAC signature validation.
+- **SEO Operations Engine:** Operational SEO module wired into the Business Graph with Prisma models for `SeoPage`, `SeoKeyword`, `RankingSnapshot`, `SeoIssue`, `ContentBrief`. `SeoService` covers page inventory sync, keyword tracking, ranking history, automated issue detection, content gap analysis, and revenue attribution. Integrates with Google Search Console and GA4.
+- **Platform Utilities:** Cross-Module Intelligence Agents, Gamification, online store, public booking page, module event bus, keyboard shortcuts, webhook dispatcher, developer settings, Universal Export System, Business Documentation Engine, Navigation & Command System, and System Diagnostics & Health Center.
+- **Community Relationship & Transaction Actions:** Business-to-business features including quote requests, referrals, collaboration proposals, direct messaging, and business shortlisting.
+- **Community Visible AI Matchmaking:** `CommunityService` notifies matched providers for posts (`QUESTION`/`OPPORTUNITY`/`HELP`/`NEED`).
+- **Community Trust & Reputation Engine:** Peer reviews (`CommunityReview`) and computed `BusinessReputation` snapshot including average rating, sub-ratings, transaction metrics, and reputation score.
+- **Community Network Activity & Growth Layer:** Five-system growth layer: Opportunity Board, Partner Programs, Resource Marketplace, Network Activity Feed, and Network Analytics.
+- **Security:** Error Boundaries for core modules and rate limiting for unauthenticated endpoints.
+- **Server-Driven Email Verification (Resend):** Email verification during signup with confirmation links sent via Resend, including resend functionality and "Email not confirmed" handling on login.
+- **Launch & Maintenance Hardening:** Environment validation with Zod at startup. API exposes `GET /healthz` and `GET /readyz`. Web exposes `GET /api/healthz`. Production deploy uses `scripts/start-prod.sh`. `scripts/verify-up.sh` for smoke tests. `scripts/post-merge.sh` for Prisma migration drift detection.
 - **Release Version Surfacing:** Health endpoints and boot logs report the real git SHA.
 - **Web App Lint Policy:** Configures ESLint to demote certain React 19 compiler-aware hook rules and `@typescript-eslint/no-explicit-any` to warnings for specific legacy code areas, while maintaining strictness for new code.
-- **Dev Auth Bypass:** Opt-in development-only feature for auto-authentication as a seeded `SUPER_ADMIN` profile.
+- **Dev Auth Bypass (development only, opt-in):** Local development authentication bypass as a fixed seeded `keyflowdev` `SUPER_ADMIN` profile.
 
 ## External Dependencies
-- **Database:** PostgreSQL (e.g., Supabase, RDS, Neon)
+- **Database:** PostgreSQL
 - **Authentication:** Supabase Auth
 - **AI:** OpenAI, Anthropic, xAI
 - **Email:** Resend
 - **Google Services:** Google Calendar, Google Sign-In, Gmail, Google Contacts, Google Drive, Google Search Console, Google Analytics 4
 - **Payment Gateways:** Stripe, WiPay, PayPal, Google Pay
-- **Object Storage:** Any S3-compatible service (e.g., AWS S3, Cloudflare R2, MinIO)
+- **Object Storage:** Any S3-compatible service
 - **Rich Text:** TipTap (React)
 - **Charts:** Recharts
 - **Package Manager:** pnpm
 - **Web e2e Tests:** Playwright
+- **Email:** Resend

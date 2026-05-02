@@ -15,8 +15,9 @@ import { Button, Badge } from "@keyflow/ui";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { apiGet, apiPostSimple } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { ConnectorCredentialDialog } from "./ConnectorCredentialDialog";
 
-type ConnectorGroup = "google" | "social" | "payments" | "messaging" | "other";
+type ConnectorGroup = "google" | "social" | "payments" | "messaging" | "accounting" | "marketing" | "forms" | "other";
 
 interface ConnectorMeta {
   type: string;
@@ -26,8 +27,11 @@ interface ConnectorMeta {
   group?: ConnectorGroup;
   icon: string;
   supportsSync: boolean;
+  supportsWebhook?: boolean;
   authType?: string;
   externalUrl?: string;
+  connectMode?: "dialog" | "oauth" | "webhook" | "external";
+  oauthStartPath?: string;
 }
 
 interface ConnectorHealth {
@@ -77,10 +81,13 @@ const GROUP_LABELS: Record<ConnectorGroup, { label: string; emoji: string; gradi
   social: { label: "Social", emoji: "S", gradient: "from-pink-500/20 to-purple-500/20" },
   payments: { label: "Payments", emoji: "P", gradient: "from-emerald-500/20 to-teal-500/20" },
   messaging: { label: "Messaging", emoji: "M", gradient: "from-cyan-500/20 to-blue-500/20" },
+  accounting: { label: "Accounting", emoji: "A", gradient: "from-indigo-500/20 to-violet-500/20" },
+  marketing: { label: "Marketing", emoji: "E", gradient: "from-fuchsia-500/20 to-rose-500/20" },
+  forms: { label: "Forms & Webhooks", emoji: "F", gradient: "from-amber-500/20 to-orange-500/20" },
   other: { label: "Other", emoji: "•", gradient: "from-zinc-500/20 to-zinc-600/20" },
 };
 
-const GROUP_ORDER: ConnectorGroup[] = ["google", "social", "messaging", "payments", "other"];
+const GROUP_ORDER: ConnectorGroup[] = ["google", "social", "messaging", "payments", "accounting", "marketing", "forms", "other"];
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
   connected: { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/30", label: "Connected" },
@@ -109,6 +116,7 @@ function ConnectorCard({
   onReconnect,
   onDisconnect,
   onActivity,
+  onCredentials,
   busy,
   testResult,
 }: {
@@ -118,6 +126,7 @@ function ConnectorCard({
   onReconnect: (type: string) => void;
   onDisconnect: (type: string) => void;
   onActivity: (type: string) => void;
+  onCredentials: (type: string) => void;
   busy: { sync?: boolean; test?: boolean; reconnect?: boolean; disconnect?: boolean };
   testResult?: { success: boolean; error?: string; account?: string };
 }) {
@@ -241,20 +250,32 @@ function ConnectorCard({
               <Activity className="h-3 w-3 mr-1" />
               Activity
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => onReconnect(entry.meta.type)}
-              disabled={busy.reconnect}
-              className="h-7 px-2 text-xs"
-            >
-              {busy.reconnect ? (
-                <Loader2 className="h-3 w-3 animate-spin mr-1" />
-              ) : (
+            {(entry.meta.connectMode === "dialog" || entry.meta.connectMode === "webhook") ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onCredentials(entry.meta.type)}
+                className="h-7 px-2 text-xs"
+              >
                 <Plug className="h-3 w-3 mr-1" />
-              )}
-              Reconnect
-            </Button>
+                {entry.meta.connectMode === "webhook" ? "Webhook URL" : "Manage credentials"}
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onReconnect(entry.meta.type)}
+                disabled={busy.reconnect}
+                className="h-7 px-2 text-xs"
+              >
+                {busy.reconnect ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <Plug className="h-3 w-3 mr-1" />
+                )}
+                Reconnect
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -270,7 +291,11 @@ function ConnectorCard({
           <Button
             size="sm"
             variant="default"
-            onClick={() => onReconnect(entry.meta.type)}
+            onClick={() =>
+              entry.meta.connectMode === "dialog" || entry.meta.connectMode === "webhook"
+                ? onCredentials(entry.meta.type)
+                : onReconnect(entry.meta.type)
+            }
             disabled={busy.reconnect}
             className="h-7 px-3 text-xs"
           >
@@ -306,6 +331,7 @@ export default function KeyFlowConnectPage() {
     message: "",
     action: () => {},
   });
+  const [credentialDialog, setCredentialDialog] = useState<string | null>(null);
 
   const businessId = getStoredBusinessId();
 
@@ -402,8 +428,26 @@ export default function KeyFlowConnectPage() {
     if (res.error) {
       toast.error(res.error);
     } else if (res.data?.authUrl) {
-      window.location.href = res.data.authUrl;
-      return;
+      // Backend may return either:
+      //   1. An absolute provider URL (https://...) — redirect directly.
+      //   2. A relative backend endpoint that needs to be POSTed (e.g. social oauth/start) —
+      //      call it server-side, then redirect to the live provider URL it returns.
+      const authUrl = res.data.authUrl;
+      if (/^https?:\/\//i.test(authUrl)) {
+        window.location.href = authUrl;
+        return;
+      }
+      if (authUrl.endsWith("/oauth/start")) {
+        const start = await apiPostSimple<{ authUrl?: string }>(authUrl, {});
+        if (start.error || !start.data?.authUrl) {
+          toast.error(start.error || "Could not start OAuth flow");
+        } else {
+          window.location.href = start.data.authUrl;
+          return;
+        }
+      } else {
+        toast.error("Reconnect returned an unsupported URL");
+      }
     } else if (res.data?.connected) {
       toast.success("Reconnected");
     } else {
@@ -578,7 +622,7 @@ export default function KeyFlowConnectPage() {
       acc[group].push(e);
       return acc;
     },
-    { google: [], social: [], payments: [], messaging: [], other: [] },
+    { google: [], social: [], payments: [], messaging: [], accounting: [], marketing: [], forms: [], other: [] },
   );
 
   const googleConnectedCount = grouped.google.filter(
@@ -740,6 +784,7 @@ export default function KeyFlowConnectPage() {
                   onReconnect={handleReconnect}
                   onDisconnect={handleDisconnect}
                   onActivity={handleActivity}
+                  onCredentials={(t) => setCredentialDialog(t)}
                 />
               ))}
             </div>
@@ -872,6 +917,16 @@ export default function KeyFlowConnectPage() {
         }}
         onCancel={() => setConfirm((p) => ({ ...p, open: false }))}
       />
+
+      {businessId && credentialDialog && (
+        <ConnectorCredentialDialog
+          businessId={businessId}
+          type={credentialDialog}
+          open={!!credentialDialog}
+          onClose={() => setCredentialDialog(null)}
+          onSaved={fetchDashboard}
+        />
+      )}
     </div>
   );
 }

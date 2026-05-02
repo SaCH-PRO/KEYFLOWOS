@@ -64,7 +64,7 @@ export class EntityResolutionService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    private readonly events: EventEmitter2,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   configureMergeRules(rules: Partial<MergeRuleConfig>): void {

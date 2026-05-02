@@ -2,6 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
+import { ConnectorCredentialsService } from '../connector-credentials.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
 
 const CONNECTOR_TYPE = 'klaviyo' as const;
@@ -20,12 +21,20 @@ export class KlaviyoConnector implements IConnector {
     supportsSync: true,
     supportsWebhook: true,
     authType: 'api_key',
+    connectMode: 'dialog',
+    connectInstructions:
+      'In Klaviyo go to Settings → API keys to generate a Private API key (full access). Paste it below.',
+    credentialFields: [
+      { key: 'apiKey', label: 'Private API key', type: 'password', required: true, secret: true, placeholder: 'pk_xxxxxxxxxxxxxxxx' },
+      { key: 'accountName', label: 'Account name (display)', type: 'text', placeholder: 'Acme Tobago' },
+    ],
   };
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+    @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
   ) {}
 
   async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
@@ -33,12 +42,10 @@ export class KlaviyoConnector implements IConnector {
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-    const meta = (business?.metaData as Record<string, unknown>) ?? {};
-    const apiKey = (meta.klaviyoApiKey as string | undefined) || process.env.KLAVIYO_API_KEY;
+    const apiKey =
+      (await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'klaviyoApiKey')) ||
+      process.env.KLAVIYO_API_KEY;
+    const accountName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accountName', 'klaviyoAccount');
     const stored = await this.getConnectorStatus(businessId);
     return {
       status: apiKey ? 'connected' : 'disconnected',
@@ -48,7 +55,7 @@ export class KlaviyoConnector implements IConnector {
       errorCount: stored?.errorCount ?? 0,
       syncCount: stored?.syncCount ?? 0,
       connectedAt: stored?.connectedAt ?? null,
-      connectedAccount: apiKey ? (stored?.connectedAccount ?? String(meta.klaviyoAccount ?? 'Klaviyo Account')) : null,
+      connectedAccount: apiKey ? (stored?.connectedAccount ?? accountName ?? 'Klaviyo Account') : null,
     };
   }
 
@@ -72,11 +79,14 @@ export class KlaviyoConnector implements IConnector {
   }
 
   async disconnect(businessId: string): Promise<void> {
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: CONNECTOR_TYPE } },
-      create: { businessId, connectorType: CONNECTOR_TYPE, status: 'disconnected' },
-      update: { status: 'disconnected' },
-    });
+    await this.credentials.clearCredentials(businessId, CONNECTOR_TYPE);
+  }
+
+  async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
+    const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'klaviyoApiKey');
+    if (!apiKey) return { success: false, error: 'No Klaviyo API key configured' };
+    const accountName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accountName', 'klaviyoAccount');
+    return { success: true, account: accountName ?? 'Klaviyo Account' };
   }
 
   async emitCampaignSent(businessId: string, opts: { campaignId: string; campaignName: string; recipientCount: number; externalId?: string }) {

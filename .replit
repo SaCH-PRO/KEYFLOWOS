@@ -33,13 +33,13 @@ args = "Backend API"
 name = "Web Frontend"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd apps/web && pnpm dev"
-waitForPort = 5000
-
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd apps/web && NEXT_PUBLIC_API_BASE_URL=http://localhost:3001 NEXT_PUBLIC_KEYFLOW_DEV_AUTH_BYPASS=true pnpm dev"
+waitForPort = 5000
 
 [[workflows.workflow]]
 name = "Backend API"
