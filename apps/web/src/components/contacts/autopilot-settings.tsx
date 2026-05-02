@@ -149,6 +149,7 @@ export function AutopilotSettingsPanel({ open, onClose, businessId }: AutopilotS
                       </div>
                       <Toggle
                         checked={settings.enabled}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
                         onChange={(v) => save({ enabled: v } as any)}
                         disabled={saving}
                       />

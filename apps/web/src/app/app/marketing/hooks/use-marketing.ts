@@ -41,6 +41,7 @@ export interface CrossModuleSignal {
   type: "new_contacts" | "invoice_paid" | "booking_created" | "contacts_imported";
   message: string;
   timestamp: number;
+
   data?: Record<string, unknown>;
 }
 
@@ -365,6 +366,7 @@ export function useMarketing(): UseMarketingReturn {
   useModuleEvent(
     "contact:imported",
     useCallback(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       (event: any) => {
         const count = event?.data?.count ?? "multiple";
         addSignal({

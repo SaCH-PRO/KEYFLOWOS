@@ -56,6 +56,7 @@ export function useCommerceShell() {
           fetchContacts(businessId),
           listQuotes(businessId),
           getGmailStatus(businessId),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
           apiGet<{ metaData: Record<string, any> }>(`/identity/businesses/${businessId}`),
         ]);
         setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
@@ -64,10 +65,12 @@ export function useCommerceShell() {
         setQuotes(quotesRes.data ?? []);
         if (gmailRes.data) integrations.setGmailStatus(gmailRes.data);
         if (bizRes.data) {
+
           const biz = bizRes.data as Record<string, unknown>;
           if (typeof biz.currency === "string" && biz.currency) {
             setBusinessCurrency(biz.currency);
           }
+
           const meta = biz.metaData as Record<string, unknown> | undefined;
           if (meta) {
             integrations.setPaymentGateways({

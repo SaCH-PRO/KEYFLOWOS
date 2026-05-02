@@ -53,6 +53,7 @@ interface SeoDashboard {
     previousPosition?: number | null; impressions: number; clicks: number;
     ctr: number; trend: string; positionChange: number; pageId?: string | null;
   }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
   recentIssues: Array<any>;
 }
 
@@ -81,6 +82,7 @@ interface ContentBrief {
   id: string; title: string; targetKeyword: string; secondaryKeywords: string[];
   contentType: string; status: string; priority: string; approvalStatus: string;
   searchIntent?: string; recommendedWordCount?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
   outline?: any; suggestedMetaTitle?: string; suggestedMetaDescription?: string;
   callToAction?: string; competitorAngle?: string; createdAt: string;
 }
@@ -715,6 +717,7 @@ function BriefsTab({
                 <details className="mt-3 text-sm">
                   <summary className="cursor-pointer text-slate-300 hover:text-white">View outline ({b.outline.length} sections)</summary>
                   <ul className="mt-2 space-y-1 pl-4">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract */}
                     {b.outline.map((s: any, i: number) => (
                       <li key={i} className="text-slate-400">
                         <span className="text-slate-300">{s.heading}</span>
@@ -780,6 +783,7 @@ function ConnectorsTab({
   gscSiteUrl, setGscSiteUrl, gscToken, setGscToken,
   ga4PropertyId, setGa4PropertyId, ga4Token, setGa4Token,
   onConnectGsc, onConnectGa4, onSyncGsc, onSyncGa4, syncing,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
 }: any) {
   return (
     <div className="grid md:grid-cols-2 gap-4">

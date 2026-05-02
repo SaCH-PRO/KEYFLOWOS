@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { FileCheck, Hash, Pencil } from "lucide-react";
 import { formatCurrency, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 export function CustomsTab({ declarations, onEdit }: { declarations: any[]; onEdit: (item: any) => void }) {
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(declarations);
   if (declarations.length === 0) {
@@ -11,6 +12,7 @@ export function CustomsTab({ declarations, onEdit }: { declarations: any[]; onEd
   }
   return (
     <div className="space-y-3">
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
       {paginated.map((decl: any) => (
         <motion.div
           key={decl.id}

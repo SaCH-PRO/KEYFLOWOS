@@ -35,23 +35,31 @@ import {
 } from "@/lib/client";
 
 export type CommerceCommand =
+
   | { type: "create_invoice"; params?: Record<string, unknown> }
+
   | { type: "create_quote"; params?: Record<string, unknown> }
   | { type: "create_quote_for_contact"; contactId: string; contactName?: string; productIds?: string[] }
   | { type: "create_invoice_for_contact"; contactId: string; contactName?: string; productIds?: string[] }
+
   | { type: "mark_paid"; invoiceId?: string; params?: Record<string, unknown> }
+
   | { type: "send_reminder"; invoiceId?: string; params?: Record<string, unknown> }
+
   | { type: "void_invoice"; invoiceId?: string; params?: Record<string, unknown> }
+
   | { type: "view_invoice"; invoiceId?: string; params?: Record<string, unknown> }
   | { type: "switch_tab"; tab: string }
   | { type: "filter_status"; status: string }
   | { type: "show_overdue" }
   | { type: "generate_ai_analysis" }
+
   | { type: "ai_execute"; action: string; params?: Record<string, unknown> };
 
 interface CommerceAiSearchBarProps {
   onExecuteCommand?: (command: CommerceCommand) => void;
   onSelectResult?: (result: { id: string; type: string }) => void;
+
   onApplyFilters?: (filters: Record<string, unknown>) => void;
   currency?: string;
 }
@@ -109,6 +117,7 @@ const RESULT_TYPE_COLORS: Record<string, string> = {
   quote: "bg-purple-500/10 text-purple-400",
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function mapSearchResult(type: string, r: Record<string, any>): { id: string; type: string; name: string; status?: string; total?: number; date?: string } {
   if (type === "products") {
     return { id: r.id, type: "product", name: r.name || "Untitled", status: r.isActive ? "ACTIVE" : "INACTIVE", total: r.price ? Number(r.price) : undefined };
@@ -369,6 +378,7 @@ export function CommerceAiSearchBar({ onExecuteCommand, onSelectResult, onApplyF
       )}
 
       {searchData && (() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
         const mappedResults = (searchData.results || []).map((r: Record<string, any>) => mapSearchResult(searchData.type, r));
         return (
         <div className="absolute top-full left-0 right-0 mt-1 rounded-xl border border-border/50 bg-card shadow-xl z-50 max-h-[400px] overflow-hidden flex flex-col">

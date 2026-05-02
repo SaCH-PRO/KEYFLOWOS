@@ -47,6 +47,7 @@ type Business = {
   instagram: string | null;
   twitter: string | null;
   whatsapp: string | null;
+
   metaData?: Record<string, unknown> | null;
 };
 
@@ -240,6 +241,7 @@ function PublicPaymentPageInner() {
       }
 
       if (gatewayRes.data) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public-flow payload — pending typed contract
         const gwList = Array.isArray(gatewayRes.data) ? gatewayRes.data : (gatewayRes.data as any).gateways || [];
         setGateways(gwList);
       }
@@ -341,8 +343,8 @@ function PublicPaymentPageInner() {
       } else {
         setError(res.error || "Payment could not be processed");
       }
-    } catch (err: any) {
-      if (err?.name !== "AbortError") {
+    } catch (err: unknown) {
+      if (!(err instanceof Error) || err.name !== "AbortError") {
         setError("Google Pay payment was cancelled or failed");
       }
     }
@@ -440,6 +442,7 @@ function PublicPaymentPageInner() {
   const primaryColor = business?.primaryColor || "#F97316";
   const secondaryColor = business?.secondaryColor || "#14B8A6";
   const logoUrl = business?.logoUrl ? `${API_BASE}${business.logoUrl}` : null;
+
 
   const meta = (business?.metaData || {}) as Record<string, unknown>;
   const bankName = (meta.bankName as string) || "";

@@ -17,6 +17,7 @@ export type PriorityAction = {
   key: string;
   toolName: string;
   label: string;
+
   args: Record<string, unknown>;
   tier: number;
   variant: "primary" | "secondary" | "ai";

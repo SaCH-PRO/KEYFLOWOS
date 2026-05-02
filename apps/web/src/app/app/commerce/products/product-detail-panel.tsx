@@ -458,6 +458,7 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
                   if (invoiceCount === 0 && quoteCount === 0) { healthIssues.push("No sales activity"); score -= 25; }
                   const price = Number(product.price ?? 0);
                   if (price === 0) { healthIssues.push("Price is zero"); score -= 30; }
+
                   const rawCreatedAt = (product as Record<string, unknown>)["createdAt"];
                   const daysSinceCreated = rawCreatedAt ? Math.floor((Date.now() - new Date(rawCreatedAt as string).getTime()) / (1000 * 60 * 60 * 24)) : 0;
                   if (daysSinceCreated > 180 && invoiceCount === 0) { healthIssues.push("Stale — no sales in 6+ months"); score -= 20; }

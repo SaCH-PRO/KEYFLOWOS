@@ -57,6 +57,7 @@ function extractModuleFromTool(toolName: string): string | null {
 }
 
 function extractExpectedBenefit(item: AiApprovalItem): string | null {
+
   const payload = item.inputPayload as Record<string, unknown> | null;
   if (payload?.expectedBenefit && typeof payload.expectedBenefit === "string") return payload.expectedBenefit;
   if (item.riskTier <= 1) return "Low-risk automated action — saves manual effort";
@@ -68,6 +69,7 @@ function extractAffectedEntities(item: AiApprovalItem): string[] {
   const entities: string[] = [];
   const moduleName = extractModuleFromTool(item.toolName);
   if (moduleName) entities.push(MODULE_LABELS[moduleName]);
+
   const payload = item.inputPayload as Record<string, unknown> | null;
   if (payload?.contactId) entities.push("Contact");
   if (payload?.invoiceId) entities.push("Invoice");

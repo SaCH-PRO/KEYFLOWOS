@@ -50,6 +50,7 @@ export type ContactDetailData = {
   marketingOptIn?: boolean | null;
   doNotContact?: boolean | null;
   notesInternal?: string | null;
+
   custom?: Record<string, unknown> | null;
   createdAt?: string | null;
   meta?: {

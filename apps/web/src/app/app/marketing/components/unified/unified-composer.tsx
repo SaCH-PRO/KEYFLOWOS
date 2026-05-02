@@ -619,6 +619,7 @@ export function UnifiedComposer({
     const customVariants = variants.filter((v) => v.customized);
     let failed = 0;
     for (const v of customVariants) {
+
       const variantMeta: Record<string, unknown> = {};
       if (v.subject) variantMeta.subject = v.subject;
       if (v.previewText) variantMeta.previewText = v.previewText;

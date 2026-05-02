@@ -694,6 +694,7 @@ function CatalogItem({
               {isProcessing ? "Processing..." : isOnStore ? "✓ On store" : "Not on store"}
             </span>
             {(() => {
+
               const updated = formatRelativeTime((p as Record<string, unknown>).updatedAt as string | undefined);
               return updated ? <span className="text-[10px] text-muted-foreground/40">· {updated}</span> : null;
             })()}

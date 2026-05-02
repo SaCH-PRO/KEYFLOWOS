@@ -79,6 +79,7 @@ export function WishlistDrawer({ open, onClose, items, onRemove, onAddToCart, pr
                             price: item.price,
                             currency: item.currency,
                             imageUrl: item.imageUrl,
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public-flow payload — pending typed contract
                             itemType: item.itemType as any,
                             description: null,
                             duration: null,

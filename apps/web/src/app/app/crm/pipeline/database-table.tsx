@@ -46,6 +46,7 @@ const STATUS_HOVER_BORDER: Record<string, string> = {
 function getCustomFieldValue(contact: LocalContact, key: string): string {
   const custom = contact.custom;
   if (!custom || typeof custom !== "object") return "";
+
   const val = (custom as Record<string, unknown>)[key];
   return val ? String(val) : "";
 }
@@ -54,6 +55,7 @@ function getCustomFieldsSummary(contact: LocalContact): string {
   const custom = contact.custom;
   if (!custom || typeof custom !== "object") return "";
   const reserved = new Set(["linkedinUrl", "instagramUrl", "twitterUrl", "referredBy", "nextScheduledInteraction"]);
+
   const entries = Object.entries(custom as Record<string, unknown>).filter(([k]) => !reserved.has(k));
   if (entries.length === 0) return "";
   return entries.slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(", ") + (entries.length > 3 ? ` +${entries.length - 3}` : "");

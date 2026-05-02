@@ -198,6 +198,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
     for (const ev of events) {
       const config = EVENT_CONFIG[ev.type] || DEFAULT_CONFIG;
       const moduleName = classifyEvent(ev.type);
+
       const data = ev.data as Record<string, unknown> | null | undefined;
 
       let description: string | undefined;
@@ -239,6 +240,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
 
     const noteEventIds = new Set(
       events.filter((e) => e.type === "note.created" || e.type === "note.updated").map((e) => {
+
         const d = e.data as Record<string, unknown> | null | undefined;
         return typeof d?.noteId === "string" ? d.noteId : "";
       }).filter(Boolean),
@@ -261,6 +263,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
     const taskEventTitles = new Set<string>();
     for (const e of events) {
       if (e.type === "task.created" || e.type === "task.completed") {
+
         const d = e.data as Record<string, unknown> | null | undefined;
         if (typeof d?.taskId === "string") taskEventIds.add(d.taskId);
         if (typeof d?.title === "string") taskEventTitles.add(d.title);
@@ -283,6 +286,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
 
     for (const inv of invoices) {
       const alreadyTracked = events.some(
+
         (e) => e.type.startsWith("invoice.") && (e.data as Record<string, unknown>)?.invoiceId === inv.id,
       );
       if (alreadyTracked) continue;
@@ -311,6 +315,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
 
     for (const bk of bookings) {
       const alreadyTracked = events.some(
+
         (e) => e.type.startsWith("booking.") && (e.data as Record<string, unknown>)?.bookingId === bk.id,
       );
       if (alreadyTracked) continue;

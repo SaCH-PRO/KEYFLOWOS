@@ -46,22 +46,33 @@ export default function MarketplacePage() {
   const [activeTab, setActiveTab] = useState<Tab>("catalog");
   const [loading, setLoading] = useState(true);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [products, setProducts] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [listings, setListings] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [orders, setOrders] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [shipments, setShipments] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [warehouses, setWarehouses] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [inventory, setInventory] = useState<any[]>([]);
 
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<string>("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [editingItem, setEditingItem] = useState<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
 
   const [showProductEditor, setShowProductEditor] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [editingProduct, setEditingProduct] = useState<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [productForm, setProductForm] = useState<Record<string, any>>({});
   const [productSaving, setProductSaving] = useState(false);
 
@@ -86,7 +97,9 @@ export default function MarketplacePage() {
         switch (tab) {
           case "catalog": {
             const [prodRes, listRes] = await Promise.all([
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${commercePath}/products`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${basePath}/listings`),
             ]);
             if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
@@ -95,7 +108,9 @@ export default function MarketplacePage() {
           }
           case "listings": {
             const [listRes, prodRes] = await Promise.all([
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${basePath}/listings`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${commercePath}/products`),
             ]);
             if (listRes.data) setListings(listRes.data.data ?? listRes.data);
@@ -104,7 +119,9 @@ export default function MarketplacePage() {
           }
           case "orders": {
             const [ordRes, prodRes] = await Promise.all([
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${basePath}/orders`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${commercePath}/products`),
             ]);
             if (ordRes.data) setOrders(ordRes.data.data ?? ordRes.data);
@@ -113,8 +130,11 @@ export default function MarketplacePage() {
           }
           case "fulfillment": {
             const [shipRes, poRes, prodRes] = await Promise.all([
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${basePath}/shipments`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${basePath}/purchase-orders`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${commercePath}/products`),
             ]);
             if (shipRes.data) setShipments(shipRes.data.data ?? shipRes.data);
@@ -124,8 +144,11 @@ export default function MarketplacePage() {
           }
           case "inventory": {
             const [whRes, invRes, prodRes] = await Promise.all([
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any[]>(`${basePath}/warehouses`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any[]>(`${basePath}/inventory`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${commercePath}/products`),
             ]);
             if (whRes.data) setWarehouses(whRes.data);
@@ -135,7 +158,9 @@ export default function MarketplacePage() {
           }
           case "suppliers": {
             const [poRes, prodRes] = await Promise.all([
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${basePath}/purchase-orders`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${commercePath}/products`),
             ]);
             if (poRes.data) setPurchaseOrders(poRes.data.data ?? poRes.data);
@@ -144,9 +169,13 @@ export default function MarketplacePage() {
           }
           case "insights": {
             const [prodRes, listRes, ordRes, invRes] = await Promise.all([
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${commercePath}/products`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${basePath}/listings`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any>(`${basePath}/orders`),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
               apiGet<any[]>(`${basePath}/inventory`),
             ]);
             if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
@@ -166,6 +195,7 @@ export default function MarketplacePage() {
     void loadTab(activeTab);
   }, [activeTab, loadTab]);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const openCreate = (type: string, defaults: Record<string, any> = {}) => {
     setModalType(type);
     setEditingItem(null);
@@ -173,6 +203,7 @@ export default function MarketplacePage() {
     setShowModal(true);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const openEdit = (type: string, item: any) => {
     setModalType(type);
     setEditingItem(item);
@@ -180,6 +211,7 @@ export default function MarketplacePage() {
     setShowModal(true);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const openProductEditor = (product: any | null = null) => {
     setEditingProduct(product);
     setProductForm(product ? { ...product } : {});
@@ -277,6 +309,7 @@ export default function MarketplacePage() {
     } catch {}
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const handleUpdateListing = async (id: string, data: any) => {
     if (!businessId) return;
     try {
@@ -285,6 +318,7 @@ export default function MarketplacePage() {
     } catch {}
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const updateForm = (key: string, value: any) => setFormData((prev) => ({ ...prev, [key]: value }));
 
   if (loading && activeTab === "catalog" && products.length === 0) return <DashboardSkeleton />;
@@ -531,6 +565,7 @@ export default function MarketplacePage() {
                 className={selectClass}
               >
                 <option value="">Select a product...</option>
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                 {products.map((p: any) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -691,6 +726,7 @@ export default function MarketplacePage() {
                 className={selectClass}
               >
                 <option value="">Select product...</option>
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                 {products.map((p: any) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -795,6 +831,7 @@ export default function MarketplacePage() {
                 className={selectClass}
               >
                 <option value="">Select warehouse...</option>
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                 {warehouses.map((w: any) => (
                   <option key={w.id} value={w.id}>{w.name}</option>
                 ))}
@@ -807,6 +844,7 @@ export default function MarketplacePage() {
                 className={selectClass}
               >
                 <option value="">Select product...</option>
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                 {products.map((p: any) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}

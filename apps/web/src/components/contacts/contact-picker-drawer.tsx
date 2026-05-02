@@ -52,6 +52,7 @@ export function ContactPickerDrawer({ isOpen, onClose }: ContactPickerDrawerProp
       if (res.data?.contacts) {
         setContacts(res.data.contacts as ContactCardData[]);
         const tags = new Set<string>();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
         res.data.contacts.forEach((c: any) => c.tags?.forEach((t: string) => tags.add(t)));
         setAvailableTags((prev) => {
           const merged = new Set([...prev, ...tags]);
@@ -148,6 +149,7 @@ export function ContactPickerDrawer({ isOpen, onClose }: ContactPickerDrawerProp
           drag="y"
           dragConstraints={{ top: 0, bottom: 0 }}
           dragElastic={{ top: 0, bottom: 0.6 }}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
           onDragEnd={(_: any, info: PanInfo) => {
             if (info.offset.y > 100 || info.velocity.y > 500) onClose();
           }}

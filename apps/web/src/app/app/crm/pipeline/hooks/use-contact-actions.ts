@@ -78,6 +78,7 @@ export function useContactActions({
   const handleSubmitContact = useCallback(async (formData: ContactFormData) => {
     if (!businessId) return;
     const tagsArray = formData.tags.split(",").map((t) => t.trim()).filter(Boolean);
+
     const customData: Record<string, unknown> = {};
     if (formData.linkedinUrl) customData.linkedinUrl = formData.linkedinUrl;
     if (formData.instagramUrl) customData.instagramUrl = formData.instagramUrl;
@@ -285,6 +286,7 @@ export function useContactActions({
     if (!c) return;
     setEditingContactId(c.id);
     setSelectedContactId(c.id);
+
     const customObj = (c.custom && typeof c.custom === "object" && !Array.isArray(c.custom)) ? c.custom as Record<string, unknown> : {};
     const reservedKeys = new Set(["linkedinUrl", "instagramUrl", "twitterUrl", "referredBy", "nextScheduledInteraction"]);
     const customFields = Object.entries(customObj)

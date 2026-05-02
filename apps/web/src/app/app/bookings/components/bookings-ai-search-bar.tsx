@@ -145,6 +145,7 @@ export default function BookingsAiSearchBar({ businessId, onResults }: BookingsA
             </div>
             {result.results && result.results.length > 0 && (
               <div className="space-y-1 max-h-48 overflow-y-auto">
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
                 {result.results.slice(0, 10).map((r: any, i: number) => {
                   const contactName = r.contact
                     ? [r.contact.firstName, r.contact.lastName].filter(Boolean).join(" ") || "Walk-in"

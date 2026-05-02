@@ -22,6 +22,7 @@ import { marketingAiSearch, type MarketingAiSearchResult } from "@/lib/client";
 interface MarketingAiSearchBarProps {
   businessId: string | null;
   onResults?: (results: MarketingAiSearchResult) => void;
+
   onApplyFilters?: (filters: Record<string, unknown>) => void;
 }
 
@@ -74,6 +75,7 @@ interface ActionData {
   description?: string;
   confirmation?: string;
   confidence?: number;
+
   params?: Record<string, unknown>;
 }
 
@@ -95,6 +97,7 @@ function MarketingAiSearchBarInner({ businessId, onResults, onApplyFilters }: Ma
     try {
       const result = await marketingAiSearch(q, businessId);
       if (result.data) {
+
         const data = result.data as unknown as Record<string, unknown>;
         if (data.action && typeof data.action === "string") {
           setActionData({
@@ -102,6 +105,7 @@ function MarketingAiSearchBarInner({ businessId, onResults, onApplyFilters }: Ma
             description: (data.description as string) || (data.confirmation as string) || q,
             confirmation: (data.confirmation as string) || `Execute: ${data.action}`,
             confidence: (data.confidence as number) ?? 0.8,
+
             params: (data.params as Record<string, unknown>) ?? {},
           });
         } else {
@@ -262,6 +266,7 @@ function MarketingAiSearchBarInner({ businessId, onResults, onApplyFilters }: Ma
                 </div>
               ) : (
                 <div className="p-1.5 space-y-0.5">
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
                   {results.map((r: Record<string, any>, i: number) => {
                     const name = r.name || r.subject || "Untitled";
                     const status = r.status || (r.isActive !== undefined ? (r.isActive ? "ACTIVE" : "INACTIVE") : undefined);

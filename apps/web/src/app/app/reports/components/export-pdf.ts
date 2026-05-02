@@ -150,6 +150,7 @@ export async function exportReportPDF(report: GeneratedReport) {
     ["Bookings (Period)", m.bookings.total.toString()],
   ];
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
   const at = (doc as any).autoTable?.bind(doc);
   if (at) {
     at({
@@ -164,6 +165,7 @@ export async function exportReportPDF(report: GeneratedReport) {
       tableLineColor: [60, 60, 80],
       tableLineWidth: 0.1,
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
     y = (doc as any).lastAutoTable.finalY + 10;
   }
 
@@ -188,6 +190,7 @@ export async function exportReportPDF(report: GeneratedReport) {
       tableLineColor: [60, 60, 80],
       tableLineWidth: 0.1,
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
     y = (doc as any).lastAutoTable.finalY + 10;
   }
 
@@ -212,6 +215,7 @@ export async function exportReportPDF(report: GeneratedReport) {
       tableLineColor: [60, 60, 80],
       tableLineWidth: 0.1,
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
     y = (doc as any).lastAutoTable.finalY + 10;
   }
 

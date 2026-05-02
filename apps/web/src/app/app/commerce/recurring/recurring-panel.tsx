@@ -169,6 +169,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
       taxRate: String(rec.taxRate ?? 0),
       discountType: (rec.discountType as "PERCENT" | "FIXED") || "PERCENT",
       discountValue: rec.discountValue ? String(rec.discountValue) : "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       items: (rec.lineItems ?? []).map((item: any) => ({
         id: generateItemId(),
         productId: "",
@@ -188,6 +189,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
     if (!form.contactId) { setError("Contact is required"); return; }
     if (validItems.length === 0) { setError("At least one line item is required"); return; }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     const payload: any = {
       name: form.name,
       contactId: form.contactId,
@@ -282,6 +284,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
   const handleExportCsv = useCallback(() => {
     const items = dateFiltered.filter((r) => selectedIds.size === 0 || selectedIds.has(r.id));
     exportToCsv(
+
       items as unknown as Record<string, unknown>[],
       [
         { key: "name", header: "Name" },

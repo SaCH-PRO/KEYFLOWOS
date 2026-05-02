@@ -68,6 +68,7 @@ const PRIORITY_COLORS: Record<string, string> = {
   low: "text-blue-400",
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function RevenueAnalysisResult({ data }: { data: any }) {
   if (!data) return null;
   const healthColor = HEALTH_COLORS[data.healthLabel?.toLowerCase()] || "text-blue-400";
@@ -95,6 +96,7 @@ function RevenueAnalysisResult({ data }: { data: any }) {
       {data.trends?.length > 0 && (
         <Section title="Trends">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.trends.map((t: any, i: number) => {
               const Icon = DIRECTION_ICONS[t.direction] || Minus;
               const color = t.direction === "up" ? "text-emerald-400" : t.direction === "down" ? "text-red-400" : "text-blue-400";
@@ -114,6 +116,7 @@ function RevenueAnalysisResult({ data }: { data: any }) {
       {data.topClients?.length > 0 && (
         <Section title="Top Clients">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.topClients.map((c: any, i: number) => (
               <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-border/30">
                 <div>
@@ -129,6 +132,7 @@ function RevenueAnalysisResult({ data }: { data: any }) {
       {data.recommendations?.length > 0 && (
         <Section title="Recommendations">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.recommendations.map((r: any, i: number) => (
               <div key={i} className="flex items-start gap-1.5">
                 <Lightbulb className={`w-3 h-3 shrink-0 mt-0.5 ${PRIORITY_COLORS[r.priority] || "text-amber-400"}`} />
@@ -148,6 +152,7 @@ function RevenueAnalysisResult({ data }: { data: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function CashFlowForecastResult({ data }: { data: any }) {
   if (!data) return null;
   const periods = [
@@ -190,6 +195,7 @@ function CashFlowForecastResult({ data }: { data: any }) {
       {data.risks?.length > 0 && (
         <Section title="Risks">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.risks.map((r: any, i: number) => (
               <div key={i} className="flex items-start gap-1.5">
                 <AlertTriangle className={`w-3 h-3 shrink-0 mt-0.5 ${SEVERITY_COLORS[r.severity] || "text-amber-400"}`} />
@@ -205,6 +211,7 @@ function CashFlowForecastResult({ data }: { data: any }) {
       {data.collectionPriority?.length > 0 && (
         <Section title={`Collection Priority (${data.collectionPriority.length})`}>
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.collectionPriority.slice(0, 8).map((cp: any, i: number) => (
               <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-border/30">
                 <div>
@@ -223,6 +230,7 @@ function CashFlowForecastResult({ data }: { data: any }) {
       {data.opportunities?.length > 0 && (
         <Section title="Opportunities">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.opportunities.map((o: any, i: number) => (
               <div key={i} className="flex items-start gap-1.5">
                 <Target className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
@@ -242,6 +250,7 @@ function CashFlowForecastResult({ data }: { data: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function InvoiceReminderResult({ data }: { data: any }) {
   if (!data) return null;
   return (
@@ -269,6 +278,7 @@ function InvoiceReminderResult({ data }: { data: any }) {
       {data.alternativeMessages?.length > 0 && (
         <Section title="Alternative Tones">
           <div className="space-y-2">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.alternativeMessages.map((alt: any, i: number) => (
               <div key={i} className="rounded-lg border border-border/30 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-white/[0.03] border-b border-border/20">
@@ -287,6 +297,7 @@ function InvoiceReminderResult({ data }: { data: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function PricingAdvisorResult({ data }: { data: any }) {
   if (!data) return null;
   const priceDiff = (data.suggestedPrice || 0) - (data.currentPrice || 0);
@@ -322,6 +333,7 @@ function PricingAdvisorResult({ data }: { data: any }) {
       {data.factors?.length > 0 && (
         <Section title="Price Factors">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.factors.map((f: any, i: number) => (
               <div key={i} className="flex items-start gap-2">
                 {f.impact === "positive" ? <TrendingUp className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" /> :
@@ -339,6 +351,7 @@ function PricingAdvisorResult({ data }: { data: any }) {
       {data.strategies?.length > 0 && (
         <Section title="Pricing Strategies">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.strategies.map((s: any, i: number) => (
               <div key={i} className="flex items-start gap-1.5">
                 <Lightbulb className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
@@ -358,6 +371,7 @@ function PricingAdvisorResult({ data }: { data: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function PipelineAnalysisResult({ data }: { data: any }) {
   if (!data) return null;
   const convRate = Math.round((data.quoteConversionRate || 0) * 100);
@@ -414,6 +428,7 @@ function PipelineAnalysisResult({ data }: { data: any }) {
       {data.topProducts?.length > 0 && (
         <Section title="Top Products">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.topProducts.slice(0, 5).map((p: any, i: number) => (
               <div key={i} className="flex items-center justify-between p-1.5 rounded-lg bg-white/[0.02]">
                 <div className="flex items-center gap-1.5">
@@ -432,6 +447,7 @@ function PipelineAnalysisResult({ data }: { data: any }) {
       {data.revenueByMonth?.length > 0 && (
         <Section title="Revenue Trend">
           <div className="space-y-1">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.revenueByMonth.map((m: any, i: number) => (
               <div key={i} className="flex items-center justify-between">
                 <span className="text-[11px] text-muted-foreground/70">{m.month}</span>
@@ -448,6 +464,7 @@ function PipelineAnalysisResult({ data }: { data: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function OverdueRecoveryResult({ data }: { data: any }) {
   if (!data) return null;
   return (
@@ -472,6 +489,7 @@ function OverdueRecoveryResult({ data }: { data: any }) {
       {data.collectionPriority?.length > 0 && (
         <Section title={`Collection Priority (${data.collectionPriority.length})`}>
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.collectionPriority.slice(0, 8).map((cp: any, i: number) => (
               <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
                 <div className="flex items-center justify-between mb-1">
@@ -493,6 +511,7 @@ function OverdueRecoveryResult({ data }: { data: any }) {
       {data.risks?.length > 0 && (
         <Section title="Risks">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.risks.map((r: any, i: number) => (
               <div key={i} className="flex items-start gap-1.5">
                 <Shield className={`w-3 h-3 shrink-0 mt-0.5 ${SEVERITY_COLORS[r.severity] || "text-amber-400"}`} />
@@ -508,6 +527,7 @@ function OverdueRecoveryResult({ data }: { data: any }) {
       {data.opportunities?.length > 0 && (
         <Section title="Recovery Opportunities">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.opportunities.map((o: any, i: number) => (
               <div key={i} className="flex items-start gap-1.5">
                 <Target className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
@@ -527,6 +547,7 @@ function OverdueRecoveryResult({ data }: { data: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function ProductHealthScanResult({ data }: { data: any }) {
   if (!data) return null;
   const healthColor = HEALTH_COLORS[data.healthLabel?.toLowerCase()?.replace("needs_attention", "poor")] || "text-blue-400";
@@ -569,6 +590,7 @@ function ProductHealthScanResult({ data }: { data: any }) {
       {data.issues?.length > 0 && (
         <Section title={`Issues (${data.issues.length})`}>
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.issues.slice(0, 10).map((issue: any, i: number) => (
               <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
                 <div className="flex items-center justify-between mb-1">
@@ -591,6 +613,7 @@ function ProductHealthScanResult({ data }: { data: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function ClientIntelligenceResult({ data }: { data: any }) {
   if (!data) return null;
   const reliabilityColor = data.reliabilityScore >= 80 ? "text-emerald-400" : data.reliabilityScore >= 60 ? "text-amber-400" : "text-red-400";
@@ -664,6 +687,7 @@ function ClientIntelligenceResult({ data }: { data: any }) {
       {data.recentInvoices?.length > 0 && (
         <Section title="Recent Invoices">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.recentInvoices.slice(0, 5).map((inv: any, i: number) => (
               <div key={i} className="flex items-center justify-between p-1.5 rounded-lg bg-white/[0.02]">
                 <div className="flex items-center gap-1.5">
@@ -685,6 +709,7 @@ function ClientIntelligenceResult({ data }: { data: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function QuoteWinAnalysisResult({ data }: { data: any }) {
   if (!data) return null;
   const convRate = Math.round(data.conversionRate || 0);
@@ -774,6 +799,7 @@ function QuoteWinAnalysisResult({ data }: { data: any }) {
       {data.recentQuotes?.length > 0 && (
         <Section title="Recent Quotes">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.recentQuotes.slice(0, 6).map((q: any, i: number) => (
               <div key={i} className="flex items-center justify-between p-1.5 rounded-lg bg-white/[0.02]">
                 <div>
@@ -795,6 +821,7 @@ function QuoteWinAnalysisResult({ data }: { data: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function mapNlResult(type: string, r: any): { name: string; status?: string; total?: number } {
   if (type === "products") {
     return { name: r.name || "Untitled", status: r.isActive ? "ACTIVE" : "INACTIVE", total: r.price ? Number(r.price) : undefined };
@@ -810,6 +837,7 @@ function mapNlResult(type: string, r: any): { name: string; status?: string; tot
   return { name: r.name || r.invoiceNumber || r.quoteNumber || "Item" };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function CommerceNlSearchResult({ data }: { data: any }) {
   if (!data) return null;
   const TYPE_ICONS: Record<string, typeof Package> = {
@@ -848,6 +876,7 @@ function CommerceNlSearchResult({ data }: { data: any }) {
       </div>
       {results.length > 0 && (
         <div className="space-y-1.5">
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
           {results.slice(0, 12).map((r: any, i: number) => {
             const mapped = mapNlResult(resultType, r);
             return (

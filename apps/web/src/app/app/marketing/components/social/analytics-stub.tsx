@@ -32,6 +32,7 @@ type Props = {
 
 const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 const PLATFORM_ICONS: Record<string, any> = {
   FACEBOOK: Facebook,
   INSTAGRAM: Instagram,
@@ -334,6 +335,7 @@ function EngagementView({ analytics, loading }: { analytics: SocialAnalytics | n
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 function PostStatsView({ stats }: { stats: any }) {
   const statusData = [
     { label: "Draft", count: stats.draftCount, color: "hsl(var(--kf-muted-foreground))", pct: Math.round((stats.draftCount / stats.totalPosts) * 100) },
@@ -409,6 +411,7 @@ function PostStatsView({ stats }: { stats: any }) {
             Recent Activity
           </h4>
           <div className="space-y-3">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
             {stats.recentPosts.map((p: any) => {
               const statusColor = p.status === "POSTED" ? "bg-emerald-400" : p.status === "SCHEDULED" ? "bg-blue-400" : "bg-slate-400";
               return (

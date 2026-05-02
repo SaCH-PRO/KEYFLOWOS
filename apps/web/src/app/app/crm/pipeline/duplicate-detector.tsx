@@ -48,6 +48,7 @@ interface DuplicateContact {
   source?: string | null;
   tags?: string[];
   createdAt?: string | null;
+
   custom?: Record<string, unknown> | null;
 }
 
@@ -103,6 +104,7 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
   useEffect(() => {
     loadDuplicates();
   }, [loadDuplicates]);
+
 
   const handleMerge = async (keepId: string, mergeId: string, fieldOverrides: Record<string, unknown>) => {
     setMerging(true);

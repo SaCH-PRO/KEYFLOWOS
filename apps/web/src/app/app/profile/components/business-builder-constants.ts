@@ -259,7 +259,9 @@ export function safeArray(val: unknown): unknown[] {
 }
 
 export function validateModel(raw: unknown): GeneratedModel {
+
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+
   const canvasRaw = (m.canvas && typeof m.canvas === "object" ? m.canvas : {}) as Record<string, unknown>;
   const toStr = (v: unknown): string => {
     if (typeof v === "string") return v;
@@ -271,18 +273,26 @@ export function validateModel(raw: unknown): GeneratedModel {
   for (const k of ["valueProposition", "customerSegments", "channels", "customerRelationships", "revenueStreams", "keyResources", "keyActivities", "keyPartnerships", "costStructure"]) {
     canvas[k] = toStr(canvasRaw[k]);
   }
+
   const fin = (m.financialOutlook && typeof m.financialOutlook === "object" ? m.financialOutlook : {}) as Record<string, unknown>;
+
   const comp = (m.competitiveAnalysis && typeof m.competitiveAnalysis === "object" ? m.competitiveAnalysis : {}) as Record<string, unknown>;
+
   const swotRaw = (comp.swot && typeof comp.swot === "object" ? comp.swot : {}) as Record<string, unknown>;
+
   const unit = (m.unitEconomics && typeof m.unitEconomics === "object" ? m.unitEconomics : {}) as Record<string, unknown>;
+
   const brief = (m.executiveBrief && typeof m.executiveBrief === "object" ? m.executiveBrief : {}) as Record<string, unknown>;
+
   const gov = (m.governanceFramework && typeof m.governanceFramework === "object" ? m.governanceFramework : {}) as Record<string, unknown>;
+
   const qs = (m.qualityScore && typeof m.qualityScore === "object" ? m.qualityScore : {}) as Record<string, unknown>;
   const s = (v: unknown, f = "") => typeof v === "string" ? v : f;
   const a = (v: unknown) => Array.isArray(v) ? v : [];
   const n = (v: unknown, f = 7) => typeof v === "number" ? v : f;
 
   const safeRoadmap = (arr: unknown[]): RoadmapPhase[] =>
+
     arr.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
       .map((item) => ({
         phase: s(item.phase, "Phase"),
@@ -295,6 +305,7 @@ export function validateModel(raw: unknown): GeneratedModel {
       }));
 
   const safeActions = (arr: unknown[]): ActionItem[] =>
+
     arr.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
       .map((item) => ({
         priority: (s(item.priority, "MEDIUM") as ActionItem["priority"]),
@@ -308,6 +319,7 @@ export function validateModel(raw: unknown): GeneratedModel {
       }));
 
   const safeRisks = (arr: unknown[]): Risk[] =>
+
     arr.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
       .map((item) => ({
         risk: s(item.risk, "Risk"),
@@ -320,6 +332,7 @@ export function validateModel(raw: unknown): GeneratedModel {
       }));
 
   const safeAssumptions = (arr: unknown[]): AssumptionEntry[] =>
+
     arr.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
       .map((item) => ({
         assumption: s(item.assumption, "Assumption"),

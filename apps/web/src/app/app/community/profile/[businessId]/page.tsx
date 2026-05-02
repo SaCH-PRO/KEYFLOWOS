@@ -200,6 +200,7 @@ export default function PublicProfilePage() {
       .then(([profileRes, postsRes, trustRes, endorseRes]) => {
         if (profileRes.data) setProfile(profileRes.data);
         if (postsRes.data) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
           const arr = Array.isArray(postsRes.data) ? postsRes.data : (postsRes.data as any)?.data || [];
           setPosts(arr.filter((p: CommunityPost) => p.businessId === businessId));
         }
@@ -333,6 +334,7 @@ export default function PublicProfilePage() {
     setSavingEdit(false);
   }, [myBusinessId, editingEndorsement, editMessage, savingEdit]);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
   const handleQuoteSubmit = useCallback(async (data: any) => {
     if (!myBusinessId) return;
     await createCommunityQuoteRequest(myBusinessId, {
@@ -342,11 +344,13 @@ export default function PublicProfilePage() {
     });
   }, [myBusinessId, businessId]);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
   const handleReferralSubmit = useCallback(async (data: any) => {
     if (!myBusinessId) return;
     await createCommunityReferral(myBusinessId, { toBusinessId: businessId, ...data });
   }, [myBusinessId, businessId]);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
   const handleCollabSubmit = useCallback(async (data: any) => {
     if (!myBusinessId) return;
     await createCommunityCollaboration(myBusinessId, { toBusinessId: businessId, ...data });

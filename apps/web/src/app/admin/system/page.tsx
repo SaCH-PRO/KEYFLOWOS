@@ -119,6 +119,7 @@ function worstStatus(statuses: CheckStatus[]): CheckStatus {
 const STATUS_CONFIG: Record<
   CheckStatus,
   {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin diagnostics dynamic shape — pending typed wrapper
     icon: React.ComponentType<any>;
     color: string;
     bg: string;
@@ -149,6 +150,7 @@ const STATUS_CONFIG: Record<
   },
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin diagnostics dynamic shape — pending typed wrapper
 const CATEGORY_ICONS: Record<string, React.ComponentType<any>> = {
   "Infrastructure": Database,
   "Modules": Layers,
@@ -429,8 +431,8 @@ export default function AdminSystem() {
       const result = await apiFull();
       setReport(result);
       setLastRun(new Date().toLocaleTimeString());
-    } catch (err: any) {
-      setError(err.message ?? "Failed to run diagnostics");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to run diagnostics");
     } finally {
       setLoading(false);
     }

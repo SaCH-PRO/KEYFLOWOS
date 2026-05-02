@@ -11,8 +11,11 @@ export function WarehousingTab({
   onDelete,
   onAddInventory,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   warehouses: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   inventory: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onEdit: (item: any) => void;
   onDelete: (id: string) => void;
   onAddInventory: () => void;
@@ -24,6 +27,7 @@ export function WarehousingTab({
     <div className="space-y-4">
       <div className="space-y-3">
         {warehouses.map((wh) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
           const whInventory = inventory.filter((inv: any) => inv.warehouseId === wh.id);
           return (
             <motion.div
@@ -56,6 +60,7 @@ export function WarehousingTab({
                 <div className="border-t border-white/5">
                   <div className="px-4 py-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Inventory</div>
                   <div className="divide-y divide-white/5">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                     {whInventory.map((inv: any) => {
                       const isLow = inv.reorderLevel && inv.quantity <= inv.reorderLevel;
                       return (

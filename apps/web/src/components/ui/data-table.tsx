@@ -33,6 +33,7 @@ interface DataTableProps<T> {
   headerExtra?: React.ReactNode;
 }
 
+
 export function DataTable<T extends Record<string, unknown>>({
   data,
   columns,

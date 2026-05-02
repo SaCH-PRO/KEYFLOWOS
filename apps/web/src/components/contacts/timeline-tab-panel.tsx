@@ -343,13 +343,19 @@ export function TimelineTabPanel({
                             {new Date(event.createdAt).toLocaleString("en-TT", { dateStyle: "medium", timeStyle: "short" })}
                           </span>
                         </div>
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation */}
                         {event.type === "status.changed" && (event.data as any)?.from && (event.data as any)?.to && (
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
                           <p className="text-xs text-muted-foreground mt-0.5">{(event.data as any).from} &rarr; {(event.data as any).to}</p>
                         )}
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation */}
                         {event.type === "bulk.updated" && (event.data as any)?.status && (
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
                           <p className="text-xs text-muted-foreground mt-0.5">Status &rarr; {(event.data as any).status}</p>
                         )}
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation */}
                         {event.type === "bulk.updated" && (event.data as any)?.addedTags && (
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
                           <p className="text-xs text-muted-foreground mt-0.5">Tags: {(event.data as any).addedTags.join(", ")}</p>
                         )}
                         <div className="flex items-center gap-0.5 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">

@@ -7,6 +7,7 @@ export interface ModuleContextEntry {
   moduleName: string;
   activeView?: string;
   selectedItemId?: string;
+
   customData?: Record<string, unknown>;
   lastUpdated: number;
 }

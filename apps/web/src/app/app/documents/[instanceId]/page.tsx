@@ -92,6 +92,7 @@ interface DocInstance {
   currentVersionNum: number;
   contextInputs: Record<string, string> | null;
   toneSettings: Record<string, string> | null;
+
   generationMeta: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
@@ -141,8 +142,10 @@ const LAYER_LABELS: Record<string, { label: string; icon: React.ReactNode; color
   "jurisdiction-sensitivity": { label: "Jurisdiction Aware", icon: <Globe className="w-3 h-3" />, color: "text-[hsl(var(--kf-info))]" },
 };
 
+
 function AiInsightsPanel({ meta, createdAt }: { meta: Record<string, unknown>; createdAt: string }) {
   const [expanded, setExpanded] = useState(false);
+
   const m = meta as Record<string, unknown>;
   const qualityLayers = (m.qualityLayers as string[]) || [];
   const hasBlueprint = m.hasBlueprint as boolean;

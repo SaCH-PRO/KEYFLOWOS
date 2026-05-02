@@ -42,6 +42,7 @@ type Props = {
   onSaveSlug: () => Promise<void>;
   slugSaving: boolean;
   storefrontConfig: StorefrontConfig;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onConfigChange: (section: string, updates: Record<string, any>) => void;
   onSaveConfig: () => Promise<void>;
   configSaving: boolean;
@@ -63,6 +64,7 @@ type Props = {
 
 type SeoProps = {
   storefrontConfig: StorefrontConfig;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onConfigChange: (section: string, updates: Record<string, any>) => void;
   onSaveConfig: () => Promise<void>;
   configSaving: boolean;

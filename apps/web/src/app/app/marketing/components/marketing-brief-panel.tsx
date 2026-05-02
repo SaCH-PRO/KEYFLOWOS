@@ -256,11 +256,13 @@ export function MarketingBriefPanel({ businessId, isOpen, onClose }: MarketingBr
     setSubmitting(true);
     try {
       const { submitMarketingBrief } = await import("@/lib/client");
+
       const res = await submitMarketingBrief(businessId, brief as unknown as Record<string, unknown>);
       if (res.error) {
         toast.error(res.error);
         return;
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       const data = res.data as any;
       if (data?.success === false) {
         toast.error(data?.message || "Could not send marketing brief. Please connect Gmail in Settings.");

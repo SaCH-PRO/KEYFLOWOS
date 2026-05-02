@@ -23,6 +23,7 @@ import { DEFAULT_SECTIONS, SECTION_LABELS } from "./store-types";
 
 type Props = {
   config: StorefrontConfig;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onConfigChange: (section: string, updates: Record<string, any>) => void;
   onSave: () => Promise<void>;
   saving: boolean;
@@ -46,6 +47,7 @@ export function SectionLayoutManager({ config, onConfigChange, onSave, saving }:
   const toggleSection = useCallback(
     (idx: number) => {
       const updated = sections.map((s, i) => (i === idx ? { ...s, enabled: !s.enabled } : s));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       onConfigChange("sections", updated as any);
     },
     [sections, onConfigChange]
@@ -57,6 +59,7 @@ export function SectionLayoutManager({ config, onConfigChange, onSave, saving }:
       if (swap < 0 || swap >= sections.length) return;
       const updated = [...sections];
       [updated[idx], updated[swap]] = [updated[swap], updated[idx]];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       onConfigChange("sections", updated as any);
     },
     [sections, onConfigChange]

@@ -36,6 +36,7 @@ export interface PlanLimitError {
   upgradeTo?: string;
 }
 
+
 function parsePlanLimitError(parsed: Record<string, unknown> | null): PlanLimitError | null {
   if (!parsed || parsed.error !== "PLAN_LIMIT_REACHED") return null;
   return {
@@ -94,6 +95,7 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
 }
 
 function handleErrorResponse<T>(data: unknown, statusText: string): ApiResponse<T> {
+
   const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
   const planLimit = parsePlanLimitError(parsed);
   if (planLimit) emitPlanLimitEvent(planLimit);

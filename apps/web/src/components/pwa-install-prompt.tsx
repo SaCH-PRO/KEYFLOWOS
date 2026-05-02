@@ -20,6 +20,7 @@ export function PWAInstallPrompt() {
 
     const isStandalone =
       window.matchMedia("(display-mode: standalone)").matches ||
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
       (window.navigator as any).standalone === true;
 
     if (isStandalone) {

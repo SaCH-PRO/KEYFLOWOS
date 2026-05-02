@@ -143,6 +143,7 @@ const towerTools: AiTool[] = [
     requiresSelection: false,
     creditCost: 1,
     execute: async (ctx) => {
+
       const res = await apiGet<Record<string, unknown>>(`/ai/businesses/${ctx.businessId}/ai/strategic/risks`);
       return res.data;
     },
@@ -156,6 +157,7 @@ const towerTools: AiTool[] = [
     requiresSelection: false,
     creditCost: 1,
     execute: async (ctx) => {
+
       const res = await apiGet<Record<string, unknown>>(`/ai/businesses/${ctx.businessId}/ai/strategic/opportunities`);
       return res.data;
     },
@@ -169,6 +171,7 @@ const towerTools: AiTool[] = [
     requiresSelection: false,
     creditCost: 1,
     execute: async (ctx) => {
+
       const res = await apiGet<Record<string, unknown>>(`/ai/businesses/${ctx.businessId}/ai/strategic/revenue-forecast`);
       return res.data;
     },
@@ -182,6 +185,7 @@ const towerTools: AiTool[] = [
     requiresSelection: false,
     creditCost: 1,
     execute: async (ctx) => {
+
       const res = await apiGet<Record<string, unknown>>(`/ai/businesses/${ctx.businessId}/ai/strategic/weekly-plan`);
       return res.data;
     },
@@ -196,6 +200,7 @@ const towerTools: AiTool[] = [
     creditCost: 2,
     execute: async (ctx) => {
       const { apiPostSimple } = await import("@/lib/api");
+
       const res = await apiPostSimple<Record<string, unknown>>(
         `/ai/businesses/${ctx.businessId}/ai/execute`,
         { toolId: "queue_payment_reminder", params: {} },
@@ -220,6 +225,7 @@ export function useControlTowerAiHub(customData: TowerCustomData) {
     ai.updateContext({
       businessId,
       activeView: "control-tower",
+
       customData: customData as Record<string, unknown>,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'ai' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.

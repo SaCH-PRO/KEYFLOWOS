@@ -327,6 +327,7 @@ export function PaymentsTab() {
     const load = async () => {
       const businessId = getStoredBusinessId();
       if (!businessId) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
       const res = await apiGet<{ metaData: Record<string, any>; address?: string }>(`/identity/businesses/${businessId}`);
       if (res.data) {
         const meta = res.data.metaData || {};
@@ -638,7 +639,7 @@ export function PaymentsTab() {
           <div className="flex items-start gap-2 rounded-xl bg-[hsl(var(--kf-accent1))]/5 border border-[hsl(var(--kf-accent1))]/10 p-3">
             <Info className="w-4 h-4 text-[hsl(var(--kf-accent1))] mt-0.5 shrink-0" />
             <p className="text-xs text-[hsl(var(--kf-text-muted))]">
-              When enabled, customers will see an option to pay with cash in person. 
+              When enabled, customers will see an option to pay with cash in person.
               They&apos;ll receive instructions to visit your business location to complete payment.
             </p>
           </div>

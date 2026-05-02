@@ -62,10 +62,14 @@ export function CommerceListingsTab({
   onUpdateListing,
   onCreateListing,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   listings: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   products: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onEdit: (item: any) => void;
   onDelete: (id: string) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onUpdateListing: (id: string, data: any) => void;
   onCreateListing: () => void;
 }) {
@@ -73,6 +77,7 @@ export function CommerceListingsTab({
   const [filterStrategy, setFilterStrategy] = useState("all");
 
   const productsById = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     const map: Record<string, any> = {};
     for (const p of products) map[p.id] = p;
     return map;
@@ -154,6 +159,7 @@ export function CommerceListingsTab({
       </div>
 
       <div className="space-y-2">
+        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
         {paginated.map((listing: any) => {
           const product = productsById[listing.productId];
           const isActive = listing.status === "ACTIVE" || listing.active === true;

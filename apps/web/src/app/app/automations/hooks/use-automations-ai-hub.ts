@@ -18,7 +18,9 @@ async function generateAutomationSuggestions(context: ModuleContext): Promise<Ai
 
   const suggestions: AiSuggestion[] = [];
   const data = (customData ?? {}) as AutomationCustomData;
+
   const playbooks = (data.playbooks ?? []) as Record<string, unknown>[];
+
   const workflows = (data.workflows ?? []) as Record<string, unknown>[];
   const total = playbooks.length + workflows.length;
   const activeCount = data.activeCount ?? 0;

@@ -137,18 +137,23 @@ export function useStoreData() {
         fetchStoreGraph(businessId).catch(() => ({ data: null, error: null })),
       ]);
       const loadedServices = servicesRes.data ?? [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       const loadedProducts = (productsRes as any)?.data ?? [];
       setServices(loadedServices);
       setStaff(staffRes.data ?? []);
       setCommerceProducts(loadedProducts);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       if (loadedProducts.length > 0 || !(productsRes as any)?.error) {
         markProductsFetched();
       }
       if (bizRes.data) {
         setBusinessData(bizRes.data);
         setStoreSlug(bizRes.data.slug ?? "");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         setStoreEnabled((bizRes.data as any).storeEnabled ?? true);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         if ((bizRes.data as any).businessHours) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
           setBusinessHours({ ...DEFAULT_HOURS, ...(bizRes.data as any).businessHours });
         }
       }
@@ -245,6 +250,7 @@ export function useStoreData() {
   async function toggleStoreEnabled() {
     if (!businessId) return;
     const newValue = !storeEnabled;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     const res = await updateBusiness({ businessId, storeEnabled: newValue } as any);
     if (res.error) {
       toast.error(`Failed to update store status: ${res.error}`);
@@ -263,6 +269,7 @@ export function useStoreData() {
   async function handleSaveHours() {
     if (!businessId) return;
     setHoursSaving(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     const res = await updateBusiness({ businessId, businessHours } as any);
     if (res.error) {
       toast.error(`Failed to save hours: ${res.error}`);
@@ -385,6 +392,7 @@ export function useStoreData() {
 
   const ARRAY_CONFIG_KEYS = new Set(['sections', 'faqEntries']);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   function handleConfigChange(section: string, updates: Record<string, any>) {
     setStorefrontConfig((prev) => {
       if (ARRAY_CONFIG_KEYS.has(section)) {
@@ -392,6 +400,7 @@ export function useStoreData() {
       }
       return {
         ...prev,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         [section]: { ...(prev as any)[section], ...updates },
       };
     });

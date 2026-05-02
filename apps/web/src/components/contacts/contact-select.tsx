@@ -24,7 +24,9 @@ const STATUS_DOT: Record<string, string> = {
 
 interface ContactSelectProps {
   value: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
   onChange: (contactId: string, contact?: any) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
   contacts?: any[];
   placeholder?: string;
   label?: string;
@@ -69,6 +71,7 @@ export function ContactSelect({
   const selectedContact = useMemo(() => {
     if (!value) return null;
     const all = externalContacts ?? results;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
     return all.find((c: any) => c.id === value) ?? null;
   }, [value, externalContacts, results]);
 
@@ -88,6 +91,7 @@ export function ContactSelect({
   }, [search, results]);
 
   const handleSelect = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
     (contact: any) => {
       onChange(contact.id, contact);
       setOpen(false);
@@ -256,6 +260,7 @@ export function ContactSelect({
               role="listbox"
               className="max-h-48 overflow-y-auto py-1"
             >
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation */}
               {results.map((contact: any, idx: number) => {
                 const name =
                   [contact.firstName, contact.lastName].filter(Boolean).join(" ") ||

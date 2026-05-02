@@ -19,18 +19,16 @@ const reactCompilerStrictRules = {
   "react-hooks/immutability": "warn",
 };
 
-// `@typescript-eslint/no-explicit-any` was promoted to "error" by the upgrade
-// (it ships as error in @typescript-eslint/recommended, which the new
-// eslint-config-next/typescript pulls in). The codebase pre-dates this and
-// has ~536 occurrences concentrated in domain-handler code that integrates
-// with untyped API responses (inventory dashboard, CRM/commerce tool result
-// renderers, marketplace, the API client wrapper). Cleaning these up
-// correctly requires authoring shared schema types alongside the backend
-// contract, which is being tracked as separate follow-up work. Demoted to
-// "warn" so the rule continues to surface new offenders in PR review while
-// allowing the build to pass.
+// `@typescript-eslint/no-explicit-any` is enforced as an error so that any
+// new `any` introduced after this point trips the build. The bulk of the
+// pre-existing offenders (≈760, concentrated in untyped LLM tool result
+// renderers, the legacy generic API client wrapper, and marketplace/commerce
+// domain DTO consumers) are individually suppressed at their site with a
+// `// eslint-disable-next-line @typescript-eslint/no-explicit-any -- <reason>`
+// comment that documents the underlying tech-debt category. Suppressions
+// should only be added with a similar specific justification.
 const inheritedTechDebtRules = {
-  "@typescript-eslint/no-explicit-any": "warn",
+  "@typescript-eslint/no-explicit-any": "error",
 };
 
 const eslintConfig = defineConfig([

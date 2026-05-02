@@ -317,6 +317,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
         setProducts(prev => [...data.created, ...prev]);
         notifyProductsChanged();
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       const errorCount = (data as any).errors?.length ?? 0;
       if (errorCount > 0) {
         toast.warning(`${data.count} imported, ${errorCount} failed`);

@@ -2,6 +2,7 @@
 
 import type { Business, CatalogItem } from "./types";
 
+
 function safeJsonLd(data: Record<string, unknown>): string {
   return JSON.stringify(data).replace(/<\//g, "<\\/");
 }
@@ -13,6 +14,7 @@ type OrganizationProps = {
 
 export function OrganizationSchema({ business, url }: OrganizationProps) {
   if (!url) return null;
+
 
   const data: Record<string, unknown> = {
     "@context": "https://schema.org",
@@ -47,6 +49,7 @@ type ProductSchemaProps = {
 
 export function ProductSchema({ item, businessName, url }: ProductSchemaProps) {
   if (!url) return null;
+
 
   const data: Record<string, unknown> = {
     "@context": "https://schema.org",
@@ -84,6 +87,7 @@ export function BreadcrumbListSchema({ items }: BreadcrumbSchemaProps) {
 
   const validItems = items.filter((i) => i.url);
   if (validItems.length === 0) return null;
+
 
   const data: Record<string, unknown> = {
     "@context": "https://schema.org",

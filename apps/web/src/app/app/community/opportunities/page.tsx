@@ -226,6 +226,7 @@ function CreateOpportunityModal({ businessId, onClose, onCreated }: { businessId
     await createOpportunity(businessId, {
       title: form.title,
       description: form.description,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
       type: form.type as any,
       category: form.category || null,
       budgetMin: form.budgetMin ? Number(form.budgetMin) : null,

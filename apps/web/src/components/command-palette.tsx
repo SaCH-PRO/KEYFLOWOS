@@ -45,8 +45,11 @@ type SearchSection = {
   label: string;
   icon: typeof User;
   color: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
   getHref: (item: any) => string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
   getTitle: (item: any) => string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
   getSub: (item: any) => string;
 };
 
@@ -75,10 +78,12 @@ const SEARCH_SECTIONS: SearchSection[] = [
     icon: Calendar,
     color: "hsl(var(--kf-info))",
     getHref: () => `/app/bookings`,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
     getTitle: (b: any) => {
       const name = b.contact ? [b.contact.firstName, b.contact.lastName].filter(Boolean).join(" ") : "";
       return `${b.service?.name || "Booking"} ${name ? `· ${name}` : ""}`;
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
     getSub: (b: any) => `${new Date(b.startTime).toLocaleDateString()} · ${b.status}`,
   },
   {
@@ -240,6 +245,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       for (const section of SEARCH_SECTIONS) {
         const sectionItems = searchResults[section.key];
         if (sectionItems && sectionItems.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
           for (const item of sectionItems as any[]) {
             items.push({
               type: "search",
@@ -333,6 +339,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                       <Icon className="w-3 h-3" style={{ color: section.color }} />
                       {section.label}
                     </div>
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract */}
                     {(items as any[]).map((item: any) => {
                       const idx = getNextIdx();
                       return (

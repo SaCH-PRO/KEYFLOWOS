@@ -205,7 +205,9 @@ function InsightsTabInner({
   const hasRevenueClients = periodContacts.some((c) => c.meta?.totalRevenue && c.meta.totalRevenue > 0);
   const hasClients = periodContacts.some((c) => c.status === "CLIENT");
   const hasTags = periodContacts.some((c) => Array.isArray(c.tags) && c.tags.length > 0);
+
   const hasLeadScores = periodContacts.some((c) => (c as Record<string, unknown>).leadScore != null);
+
   const hasMeta = periodContacts.some((c) => (c as Record<string, unknown>).meta);
   return (
     <motion.div initial="hidden" animate="visible" variants={stagger.container} className="space-y-3">

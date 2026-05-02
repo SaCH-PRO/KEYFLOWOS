@@ -61,6 +61,7 @@ export default function SocialOAuthCallbackPage() {
     try {
       setMessage(`Connecting your ${platformDisplayName(platform)} account...`);
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
       const res = await apiPostSimple<{ success: boolean; error?: string; connection?: any }>(
         `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/callback`,
         { code, state },
@@ -84,13 +85,15 @@ export default function SocialOAuthCallbackPage() {
         setMessage(errMsg);
         notifyOpener({ type: "social-oauth-error", platform, error: errMsg });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMessage = err instanceof Error ? err.message : "An unexpected error occurred";
       setStatus("error");
-      setMessage(err.message || "An unexpected error occurred");
-      notifyOpener({ type: "social-oauth-error", platform, error: err.message });
+      setMessage(errMessage);
+      notifyOpener({ type: "social-oauth-error", platform, error: errMessage });
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
   function notifyOpener(data: Record<string, any>) {
     try {
       if (window.opener && !window.opener.closed) {

@@ -15,7 +15,9 @@ async function generateProjectSuggestions(context: ModuleContext): Promise<AiSug
 
   const suggestions: AiSuggestion[] = [];
   const data = (customData ?? {}) as ProjectCustomData;
+
   const projects = (data.projects ?? []) as Record<string, unknown>[];
+
   const tasks = (data.tasks ?? []) as Record<string, unknown>[];
 
   if (projects.length === 0) {

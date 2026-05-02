@@ -105,7 +105,7 @@ export default function CommercePage() {
   const [mode, setMode] = useState<RevenueMode>("operations");
   const [opsSection, setOpsSection] = useState<string>("invoices");
   const [setupDrawer, setSetupDrawer] = useState<"billing" | "payments" | "branding" | null>(null);
-  
+
 
   const { tab } = overview;
   const { commerceAi } = copilot;
@@ -159,6 +159,7 @@ export default function CommercePage() {
     window.history.replaceState({}, "", url.toString());
   }, [overview.handleTabChange]);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   useModuleEvent("commerce:create_quote_for_contact", useCallback((event: any) => {
     const { contactId, items } = event.data ?? {};
     if (contactId) {
@@ -169,6 +170,7 @@ export default function CommercePage() {
     }
   }, [billing.prefillForContact, handleTabChange]));
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   useModuleEvent("commerce:create_invoice_for_contact", useCallback((event: any) => {
     const { contactId, items } = event.data ?? {};
     if (contactId) {

@@ -95,6 +95,7 @@ interface PlanStep {
   toolCallId: string;
   name: string;
   description: string;
+
   arguments: Record<string, unknown>;
   riskLevel: "low" | "medium" | "high";
   status: "pending" | "approved" | "rejected" | "executing" | "completed" | "failed";
@@ -168,6 +169,7 @@ function PlanStepCard({
   step: PlanStep;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
+
   onApproveWithEdits: (id: string, editedArgs: Record<string, unknown>) => void;
   loading: boolean;
 }) {
@@ -186,6 +188,7 @@ function PlanStepCard({
   }, [step.arguments]);
 
   const handleSaveEdits = useCallback(() => {
+
     const parsed: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(editedArgs)) {
       try {
@@ -802,6 +805,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
       setResolvingId(null);
     }
   }, [processFlowResponse, loadSidebarData]);
+
 
   const handlePlanActionWithEdits = useCallback(async (toolCallId: string, editedArgs: Record<string, unknown>, msg: ChatMessage) => {
     const biz = getStoredBusinessId();

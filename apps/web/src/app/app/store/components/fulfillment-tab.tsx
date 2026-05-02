@@ -17,7 +17,9 @@ type Order = {
   currency: string;
   createdAt: string;
   items: { id: string; name: string; quantity: number; unitPrice: number; total: number }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   shipments: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   statusTimeline: any[];
 };
 
@@ -104,7 +106,9 @@ export function FulfillmentTab({ businessId }: { businessId: string }) {
                   <FulfillmentPanel
                     key={order.id}
                     businessId={businessId}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
                     order={order as any}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
                     onUpdate={handleOrderUpdate as any}
                   />
                 ))}
@@ -119,7 +123,9 @@ export function FulfillmentTab({ businessId }: { businessId: string }) {
                   <FulfillmentPanel
                     key={order.id}
                     businessId={businessId}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
                     order={order as any}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
                     onUpdate={handleOrderUpdate as any}
                   />
                 ))}

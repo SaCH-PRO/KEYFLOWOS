@@ -17,6 +17,7 @@ interface ObjectUploaderProps {
    * to request per-file presigned URLs from your backend.
    */
   onGetUploadParameters: (
+
     file: UppyFile<Record<string, unknown>, Record<string, unknown>>
   ) => Promise<{
     method: "PUT";
@@ -24,6 +25,7 @@ interface ObjectUploaderProps {
     headers?: Record<string, string>;
   }>;
   onComplete?: (
+
     result: UploadResult<Record<string, unknown>, Record<string, unknown>>
   ) => void;
   buttonClassName?: string;

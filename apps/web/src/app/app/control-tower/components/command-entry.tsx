@@ -76,6 +76,7 @@ export function CommandEntry({
         const res = await executeAction(
           businessId,
           step.toolName,
+
           (step.inputPayload ?? {}) as Record<string, unknown>,
           preview.plan.id,
           step.id,

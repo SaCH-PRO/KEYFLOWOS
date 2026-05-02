@@ -118,6 +118,7 @@ export function BulkActionBar({
 }
 
 export function exportToCsv(
+
   items: Record<string, unknown>[],
   columns: { key: string; header: string; format?: (val: unknown) => string }[],
   filename: string,

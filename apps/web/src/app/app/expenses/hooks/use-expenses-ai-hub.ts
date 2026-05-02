@@ -7,6 +7,7 @@ type ExpenseCustomData = {
   expenses?: unknown[];
   totalExpenses?: number;
   categories?: unknown[];
+
   summary?: Record<string, unknown> | null;
   budgets?: unknown[];
   vendors?: unknown[];
@@ -18,10 +19,15 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
 
   const suggestions: AiSuggestion[] = [];
   const data = (customData ?? {}) as ExpenseCustomData;
+
   const expenses = (data.expenses ?? []) as Record<string, unknown>[];
+
   const categories = (data.categories ?? []) as Record<string, unknown>[];
+
   const budgets = (data.budgets ?? []) as Record<string, unknown>[];
+
   const vendors = (data.vendors ?? []) as Record<string, unknown>[];
+
   const summary = data.summary as Record<string, unknown> | null;
 
   if (expenses.length === 0) {
@@ -79,6 +85,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
   }
 
   if (summary) {
+
     const comparison = summary.comparison as Record<string, unknown> | undefined;
     const changePercent = (comparison?.changePercent as number) ?? 0;
     if (changePercent > 20) {
@@ -107,6 +114,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
     });
   }
 
+
   const overBudget = (budgets as Record<string, unknown>[]).filter(b => b.isOverBudget);
   if (overBudget.length > 0) {
     suggestions.push({
@@ -122,6 +130,7 @@ async function generateExpenseSuggestions(context: ModuleContext): Promise<AiSug
   }
 
   if (vendors.length > 0) {
+
     const topVendor = vendors[0] as Record<string, unknown>;
     const totalSpend = (summary?.total as number) ?? 0;
     const vendorTotal = (topVendor.total as number) ?? 0;
@@ -231,6 +240,7 @@ export function useExpensesAiHub() {
     categories?: unknown[];
     budgets?: unknown[];
     vendors?: unknown[];
+
     summary?: Record<string, unknown> | null;
   }) => {
     ai.updateContext({

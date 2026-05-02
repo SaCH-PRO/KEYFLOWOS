@@ -731,6 +731,7 @@ export function BillingDetailModal({
         drag="y"
         dragConstraints={{ top: 0, bottom: 200 }}
         dragElastic={{ top: 0, bottom: 0.6 }}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onDragEnd={(_: any, info: { offset: { y: number }; velocity: { y: number } }) => {
           if (info.offset.y > 100 || info.velocity.y > 500) onClose();
         }}

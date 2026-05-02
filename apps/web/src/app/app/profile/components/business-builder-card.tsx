@@ -98,6 +98,7 @@ function useBusinessProgress(businessId: string | null) {
       p.then((v) => ({ ok: true as const, value: v })).catch(() => ({ ok: false as const }));
 
     Promise.all([
+
       settle(apiGet<Record<string, unknown>>(`/identity/businesses/${businessId}`)),
       settle(apiGet<unknown[]>(`/bookings/businesses/${businessId}/services`)),
       settle(apiGet<unknown[]>(`/crm/businesses/${businessId}/contacts?limit=1`)),
@@ -107,11 +108,14 @@ function useBusinessProgress(businessId: string | null) {
       settle(apiGet<unknown[]>(`/projects/businesses/${businessId}?limit=1`)),
       settle(apiGet<unknown[]>(`/bookings/businesses/${businessId}?limit=1`)),
       settle(apiGet<unknown[]>(`/businesses/${businessId}/campaigns?limit=1`)),
+
       settle(apiGet<Record<string, unknown>>(`/commerce/businesses/${businessId}/recurring-invoices?limit=1`)),
     ]).then(([bizRes, servicesRes, contactsRes, invoicesRes, docsRes, expensesRes, projectsRes, bookingsRes, campaignsRes, recurringRes]) => {
+
       const biz = bizRes.ok ? (bizRes.value.data as Record<string, unknown> | null) : null;
       const hasRecurringData = recurringRes.ok && recurringRes.value.data;
       const recurringArr = hasRecurringData ? safeArray(
+
         Array.isArray(recurringRes.value.data) ? recurringRes.value.data : (recurringRes.value.data as Record<string, unknown>)?.invoices
       ) : [];
       setProgress({
@@ -184,6 +188,7 @@ export default function BusinessBuilderCard() {
 
   useEffect(() => {
     if (!businessId || formPreFilled || !serverLoaded) return;
+
     apiGet<Record<string, unknown>>(`/identity/businesses/${businessId}`)
       .then(({ data }) => {
         if (!data) return;
@@ -229,6 +234,7 @@ export default function BusinessBuilderCard() {
 
   const persistIntakeToGuidanceProfiles = useCallback(async (form: IntakeForm) => {
     if (!businessId) return;
+
     const profilePayloads: { name: string; data: Record<string, unknown> }[] = [];
 
     if (form.salesApproach.trim()) {
