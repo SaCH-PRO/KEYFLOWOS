@@ -1,8 +1,7 @@
 "use client";
 
-import { Shield, CheckCircle, AlertTriangle, Users, CreditCard, CalendarDays, Megaphone, UserCog, Timer } from "lucide-react";
+import { Shield, Users, CreditCard, CalendarDays, Megaphone, UserCog, Timer } from "lucide-react";
 import { COVERAGE_MODULES } from "./automation-constants";
-import type { ActionStep } from "./automation-constants";
 
 interface CoverageMapProps {
   activeTriggers: Set<string>;

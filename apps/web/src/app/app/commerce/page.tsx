@@ -34,7 +34,6 @@ import { useBillingWorkspace } from "./hooks/use-billing-workspace";
 import { useCommerceOverview } from "./hooks/use-commerce-overview";
 import { useCommerceCopilot } from "./hooks/use-commerce-copilot";
 import { useCommerceComposer } from "./hooks/use-commerce-composer";
-import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { SearchableHelpDrawer } from "./components/contextual-onboarding";
 import { ProgressivePrompts } from "../profile/components/progressive-prompts";
@@ -197,6 +196,7 @@ export default function CommercePage() {
         itemCount: invoices.length + quotes.length,
       });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'commerceAi' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [businessId, tab, invoices.length, quotes.length, commerceAi.updateCommerceContext]);
 
   const handleWrappedTabChange = useCallback((t: string) => {

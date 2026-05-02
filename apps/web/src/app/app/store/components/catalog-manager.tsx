@@ -5,10 +5,11 @@ import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
   Store, Briefcase, ShoppingBag, Package, Search, Filter,
   ChevronDown, X, CheckCircle2, AlertTriangle, ExternalLink,
-  GripVertical, Eye, EyeOff, Edit3, Tag, ChevronRight, Clock,
-  TrendingUp, Layers, Star, DollarSign, BadgeCheck,
+  GripVertical, Eye, EyeOff, Edit3, Tag, Clock,
+  TrendingUp, Layers,
 } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 import { Product } from "@/lib/client";
 import type { BadgeType, CatalogVisibilityRule, CatalogItemOverride } from "@/lib/client";
 import { formatPrice } from "@/lib/format";
@@ -626,7 +627,7 @@ function CatalogItem({
 
         {p.imageUrl ? (
           <div className="h-10 w-10 rounded-xl overflow-hidden flex-shrink-0" style={{ border: isOnStore ? "1px solid hsl(var(--kf-accent1) / 0.3)" : "1px solid hsl(var(--kf-border))" }}>
-            <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+            <Image src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
           </div>
         ) : (
           <div

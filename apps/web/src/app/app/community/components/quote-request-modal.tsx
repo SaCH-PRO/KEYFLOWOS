@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, FileText, Send, DollarSign, Clock, Sparkles, Loader2, ArrowRight } from "lucide-react";
 import { fetchProvidersForNeed, logAiSuggestionEvent, type NeedMatchProvider } from "@/lib/client";
+import Image from "next/image";
 
 interface QuoteRequestModalProps {
   isOpen: boolean;
@@ -233,7 +234,7 @@ export function QuoteRequestModal({
                           >
                             <div className="w-7 h-7 shrink-0 rounded-md bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-[10px] font-bold overflow-hidden">
                               {s.business.logoUrl ? (
-                                <img src={s.business.logoUrl} alt="" className="w-full h-full object-cover" />
+                                <Image src={s.business.logoUrl} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                               ) : (
                                 s.business.name.charAt(0).toUpperCase()
                               )}

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot, CheckCircle2, Clock, Eye, Pause, Play,
   Settings, MessageSquare, Gift, DollarSign, Bell,
-  Sparkles, X, Copy, Send, Mail, Phone,
+  Sparkles, X, Copy, Mail, Phone,
   Loader2, ChevronDown, ChevronUp, Star, Users, Heart, RotateCcw,
 } from "lucide-react";
 import { generateAutopilotDraft, executeAutopilotAction } from "@/lib/client";

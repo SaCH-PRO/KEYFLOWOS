@@ -13,7 +13,6 @@ import {
   Clock,
   Send,
   X,
-  CheckCircle2,
   Trash2,
 } from "lucide-react";
 import {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, MessageSquare, ChevronDown, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import type { MatchedProvidersSnapshot } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
 
@@ -110,7 +111,7 @@ export function MatchedProvidersPanel({ matchedProviders }: MatchedProvidersPane
                   >
                     <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-[10px] overflow-hidden flex-shrink-0">
                       {logo ? (
-                        <img src={logo} alt={p.name} className="w-full h-full object-cover" />
+                        <Image src={logo} alt={p.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                       ) : (
                         p.name?.[0] || "?"
                       )}

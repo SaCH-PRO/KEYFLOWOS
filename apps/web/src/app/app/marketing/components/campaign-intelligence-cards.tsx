@@ -7,13 +7,11 @@ import {
   TrendingUp,
   TrendingDown,
   Clock,
-  Users,
   AlertTriangle,
   CheckCircle2,
   XCircle,
   Info,
   HeartPulse,
-  Calendar,
   ChevronDown,
   ChevronUp,
   Sparkles,
@@ -26,7 +24,6 @@ import type {
   SendTimeRecommendation,
   SegmentSendTimeResult,
   PreSendValidationResult,
-  PreSendWarning,
 } from "@/lib/client";
 import {
   fetchCampaignBriefings,

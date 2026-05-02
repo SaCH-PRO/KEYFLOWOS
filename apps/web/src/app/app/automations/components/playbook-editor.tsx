@@ -10,8 +10,6 @@ import {
   TRIGGER_GROUPS,
   ACTION_GROUPS,
   CONDITION_OPTIONS,
-  getTriggerLabel,
-  getActionLabel,
   getFlowModules,
   MODULE_COLORS,
   buildNaturalLanguageSummary,

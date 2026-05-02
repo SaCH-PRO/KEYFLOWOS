@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useCallback, useRef, useState, useMemo } from "react";
+import { type ReactNode, useEffect, useCallback, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { InfoBadge } from "@/components/ui/info-badge";
 import {

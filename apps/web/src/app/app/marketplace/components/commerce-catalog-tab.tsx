@@ -11,11 +11,9 @@ import {
   ChevronDown,
   ChevronUp,
   Link2,
-  DollarSign,
   Tag,
   Layers,
   CheckCircle2,
-  AlertCircle,
   Circle,
 } from "lucide-react";
 import { EmptyState, usePagination, PaginationBar } from "./marketplace-utils";

@@ -18,6 +18,7 @@ import {
 import { formatPrice } from "@/lib/format";
 import { ShareButtons } from "./share-buttons";
 import type { CartItem, PaymentMethod } from "./types";
+import Image from "next/image";
 
 type Props = {
   isOrder: boolean;
@@ -305,7 +306,7 @@ export function OrderConfirmation({
               <div key={`${item.id}_${item.itemType}`} className="flex justify-between text-sm items-center">
                 <div className="flex items-center gap-2.5">
                   {item.imageUrl ? (
-                    <img src={item.imageUrl} alt={item.name} className="w-9 h-9 rounded-lg object-cover shadow-sm" />
+                    <Image src={item.imageUrl} alt={item.name} className="w-9 h-9 rounded-lg object-cover shadow-sm"  width={36} height={36} unoptimized />
                   ) : (
                     <div
                       className="w-9 h-9 rounded-lg flex items-center justify-center"

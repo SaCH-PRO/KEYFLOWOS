@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { ContextualSetupDrawer } from "@/components/ui/contextual-setup-drawer";
 import { Receipt, Shield, Palette, ExternalLink } from "lucide-react";
 import Link from "next/link";
@@ -76,7 +75,7 @@ export function RevenueSetupDrawer({ open, onClose, section = "billing" }: Reven
         </Link>
 
         <p className="text-[10px] text-center text-muted-foreground/50">
-          You'll be taken to the Settings page. Use your browser's back button to return here.
+          You&apos;ll be taken to the Settings page. Use your browser&apos;s back button to return here.
         </p>
       </div>
     </ContextualSetupDrawer>

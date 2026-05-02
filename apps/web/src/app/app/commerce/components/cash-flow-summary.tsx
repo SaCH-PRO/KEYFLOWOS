@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { TrendingUp, TrendingDown, ArrowRight, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import { TrendingUp, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { formatCurrencyCompact } from "@/lib/currency";
 import { InfoBadge } from "@/components/ui/info-badge";
 

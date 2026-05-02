@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Sparkles, X, RefreshCw, Loader2, AlertTriangle,
@@ -278,10 +278,12 @@ export function AiCommandHub({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'ai' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [ai.panelOpen, ai.hubMode, ai.clearToolResult, ai.setOpen]);
 
   const handleToolExecute = useCallback((toolId: string) => {
     ai.executeTool(toolId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'ai' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [ai.executeTool]);
 
   if (!ai.panelOpen) return null;

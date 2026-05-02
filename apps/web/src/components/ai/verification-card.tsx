@@ -54,8 +54,8 @@ function extractExpectedBenefit(item: AiApprovalItem): string | null {
 
 function extractAffectedEntities(item: AiApprovalItem): string[] {
   const entities: string[] = [];
-  const module = extractModuleFromTool(item.toolName);
-  if (module) entities.push(MODULE_LABELS[module]);
+  const moduleName = extractModuleFromTool(item.toolName);
+  if (moduleName) entities.push(MODULE_LABELS[moduleName]);
   const payload = item.inputPayload as Record<string, unknown> | null;
   if (payload?.contactId) entities.push("Contact");
   if (payload?.invoiceId) entities.push("Invoice");

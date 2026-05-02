@@ -651,7 +651,7 @@ export function GettingStartedGuide({
                     onClick={handleDismiss}
                     className="text-[11px] text-muted-foreground hover:text-foreground transition-colors focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none rounded px-1"
                   >
-                    Don't show again
+                    Don&apos;t show again
                   </button>
                 )}
                 <button

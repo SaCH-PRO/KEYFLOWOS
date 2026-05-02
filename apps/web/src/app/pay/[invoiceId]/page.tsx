@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { Button, Card } from "@keyflow/ui";
+import Image from "next/image";
+import { Button } from "@keyflow/ui";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
 import {
@@ -15,11 +16,9 @@ import {
   Mail,
   Globe,
   MapPin,
-  Building2,
   Wallet,
   ArrowRight,
   Shield,
-  ChevronLeft,
   Landmark,
   Banknote,
   Copy,
@@ -29,10 +28,7 @@ import {
   Hash,
   User,
   Receipt,
-  Sparkles,
 } from "lucide-react";
-import { InvoiceTemplateRenderer } from "@/app/app/commerce/components/invoice-templates";
-import type { TemplateId, InvoiceTemplateData } from "@/app/app/commerce/components/invoice-templates";
 
 type Business = {
   id: string;
@@ -528,7 +524,7 @@ function PublicPaymentPageInner() {
             {business && (
               <div className="text-center">
                 {logoUrl ? (
-                  <img src={logoUrl} alt={business.name} className="h-14 w-14 object-contain mx-auto rounded-xl" />
+                  <Image src={logoUrl} alt={business.name} className="h-14 w-14 object-contain mx-auto rounded-xl"  width={56} height={56} unoptimized />
                 ) : (
                   <div
                     className="h-14 w-14 rounded-xl flex items-center justify-center mx-auto text-white font-bold text-xl"
@@ -611,7 +607,7 @@ function PublicPaymentPageInner() {
             {business && (
               <div className="text-center">
                 {logoUrl ? (
-                  <img src={logoUrl} alt={business.name} className="h-14 w-14 object-contain mx-auto rounded-xl" />
+                  <Image src={logoUrl} alt={business.name} className="h-14 w-14 object-contain mx-auto rounded-xl"  width={56} height={56} unoptimized />
                 ) : (
                   <div
                     className="h-14 w-14 rounded-xl flex items-center justify-center mx-auto text-white font-bold text-xl"
@@ -669,12 +665,12 @@ function PublicPaymentPageInner() {
         {business && (
           <div className="text-center space-y-3 pt-4">
             {logoUrl ? (
-              <img
+              <Image
                 src={logoUrl}
                 alt={business.name}
                 className="h-16 w-16 object-contain mx-auto rounded-2xl shadow-lg"
                 style={{ boxShadow: `0 0 30px ${primaryColor}30` }}
-              />
+               width={64} height={64} unoptimized />
             ) : (
               <div
                 className="h-16 w-16 rounded-2xl flex items-center justify-center mx-auto text-white font-bold text-2xl shadow-lg"

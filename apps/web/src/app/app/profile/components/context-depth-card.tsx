@@ -4,8 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Brain, ChevronDown, ChevronRight, CheckCircle2, Circle,
-  Lock, Unlock, Sparkles, TrendingUp, DollarSign,
-  Users, Shield, Lightbulb, Settings, Target,
+  Lock, Unlock, Sparkles, TrendingUp, DollarSign, Lightbulb, Settings, Target,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 

@@ -7,7 +7,6 @@ import {
   Search,
   Users,
   Tag,
-  Filter,
   CheckSquare,
   Square,
   Send,

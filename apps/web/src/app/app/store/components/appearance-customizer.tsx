@@ -14,7 +14,7 @@ import {
   Sparkles,
   Palette,
   Check,
-  Image,
+  Image as ImageIcon,
   Zap,
   ChevronRight,
 } from "lucide-react";
@@ -31,6 +31,7 @@ import {
   type StorefrontModel,
 } from "@/lib/storefront-themes";
 import { FONT_PAIRINGS } from "./store-types";
+import Image from "next/image";
 
 type Props = {
   config: StorefrontConfig;
@@ -515,12 +516,12 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
         <div className="space-y-4">
           {businessData?.logoUrl && (
             <div className="flex items-center gap-3">
-              <img
+              <Image
                 src={businessData.logoUrl}
                 alt="Logo"
                 className="w-10 h-10 rounded-xl object-cover"
                 style={{ border: "1px solid hsl(var(--kf-border)/0.5)" }}
-              />
+               width={40} height={40} unoptimized />
               <div>
                 <p className="text-xs font-medium">{businessData.name || "Your Business"}</p>
                 <p className="text-[10px] text-muted-foreground">Logo from your business settings</p>
@@ -596,7 +597,7 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
         </div>
       </Section>
 
-      <Section icon={Image} title="Hero Composer" subtitle="Headline, CTAs, proof chips, and cover media" badge="Enhanced">
+      <Section icon={ImageIcon} title="Hero Composer" subtitle="Headline, CTAs, proof chips, and cover media" badge="Enhanced">
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3">
             <div>
@@ -666,7 +667,7 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
 
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Proof Chips</label>
-            <p className="text-[10px] text-muted-foreground mb-2">Social proof signals shown below the headline (e.g. "500+ clients", "4.9 stars")</p>
+            <p className="text-[10px] text-muted-foreground mb-2">Social proof signals shown below the headline (e.g. &quot;500+ clients&quot;, &quot;4.9 stars&quot;)</p>
             <div className="space-y-2">
               {proofChips.map((chip: ProofChip, idx: number) => (
                 <div key={idx} className="flex gap-2 items-center">
@@ -732,12 +733,12 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
                     className="h-14 w-20 rounded-lg overflow-hidden flex-shrink-0"
                     style={{ border: "1px solid hsl(var(--kf-border)/0.5)" }}
                   >
-                    <img
+                    <Image
                       src={hero.coverImageUrl}
                       alt="Cover preview"
                       className="h-full w-full object-cover"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
+                     fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                   </div>
                 )}
               </div>
@@ -1070,12 +1071,12 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
                   className="h-14 w-20 rounded-lg overflow-hidden flex-shrink-0"
                   style={{ border: "1px solid hsl(var(--kf-border)/0.5)" }}
                 >
-                  <img
+                  <Image
                     src={seo.socialImage}
                     alt="Social preview"
                     className="h-full w-full object-cover"
                     onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
+                   fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                 </div>
               )}
             </div>

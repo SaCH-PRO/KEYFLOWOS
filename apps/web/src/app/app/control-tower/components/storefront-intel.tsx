@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  Store, Package, DollarSign, TrendingUp, ShieldCheck, Search, Sparkles, Loader2,
+  Store, Package, DollarSign, TrendingUp, Sparkles, Loader2,
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import { apiGet } from "@/lib/api";

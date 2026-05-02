@@ -4,7 +4,7 @@ import type { ReactNode, ElementType } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { getStatusBadge } from "./commerce-types";
-import { formatAmount, formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary } from "../utils/commerce-utils";
+import { formatAmount, formatRelativeDate, getStatusAccentColor, getItemsSummary } from "../utils/commerce-utils";
 
 interface OverflowMenuProps {
   children: ReactNode;

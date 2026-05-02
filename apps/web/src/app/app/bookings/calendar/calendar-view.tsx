@@ -8,7 +8,6 @@ import {
   Search,
   CalendarDays,
   LayoutGrid,
-  Clock,
   List,
 } from "lucide-react";
 import type { Booking } from "../components/bookings-types";

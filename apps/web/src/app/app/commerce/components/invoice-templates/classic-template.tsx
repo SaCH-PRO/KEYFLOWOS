@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { InvoiceTemplateData } from "./template-types";
 import { formatCurrencyShort } from "@/lib/currency";
+import Image from "next/image";
 
 const fmt = (amount: number, currency: string) => formatCurrencyShort(amount, currency);
 
@@ -28,11 +29,11 @@ export function ClassicTemplate({ data }: { data: InvoiceTemplateData }) {
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6 sm:mb-8">
           <div className="flex items-center gap-3 sm:gap-4">
             {business.logoUrl ? (
-              <img
+              <Image
                 src={business.logoUrl}
                 alt={business.name}
                 className="h-10 w-10 sm:h-14 sm:w-14 object-contain rounded-lg"
-              />
+               width={40} height={40} unoptimized />
             ) : (
               <div
                 className="h-10 w-10 sm:h-14 sm:w-14 rounded-lg flex items-center justify-center text-white font-bold text-lg sm:text-xl shrink-0"

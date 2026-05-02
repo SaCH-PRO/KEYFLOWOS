@@ -6,6 +6,7 @@ import { Clock, Package, Layers, Zap, Sparkles, AlertTriangle } from "lucide-rea
 import type { Product } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { PRODUCT_CATEGORY_CONFIG } from "../components/commerce-types";
+import Image from "next/image";
 
 const CATEGORY_ICONS = { SERVICE: Zap, PRODUCT: Package, PACKAGE: Layers } as const;
 
@@ -55,13 +56,13 @@ export const ProductCard = React.memo(function ProductCard({
     >
       <div className="h-[72px] relative overflow-hidden">
         {displayImage && !imgError ? (
-          <img
+          <Image
             src={displayImage}
             alt=""
             className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             loading="lazy"
             onError={() => setImgError(true)}
-          />
+           fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
         ) : (
           <div className={`absolute inset-0 bg-gradient-to-br ${config.accent} flex items-center justify-center`}>
             <CategoryIcon className="w-7 h-7 text-muted-foreground/10" />

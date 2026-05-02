@@ -37,7 +37,6 @@ import {
 import { ContactSelect } from "@/components/contacts";
 import {
   InvoiceLineItem,
-  CATEGORIES,
   generateItemId,
 } from "../components/commerce-types";
 import { useModuleEmit } from "@/hooks/use-module-events";

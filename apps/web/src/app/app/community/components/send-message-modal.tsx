@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Send, Loader2, MessageSquare, Handshake, Sparkles } from "lucide-react";
+import Image from "next/image";
 import {
   sendDirectMessage,
   createCollabRequest,
@@ -107,7 +108,7 @@ export function SendMessageModal({ isOpen, onClose, businessId, targetBusiness, 
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden">
                 {targetBusiness.logoUrl ? (
-                  <img src={targetBusiness.logoUrl} alt="" className="w-full h-full object-cover" />
+                  <Image src={targetBusiness.logoUrl} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                 ) : (
                   targetBusiness.name.charAt(0).toUpperCase()
                 )}

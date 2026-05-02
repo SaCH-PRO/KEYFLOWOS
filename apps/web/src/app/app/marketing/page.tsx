@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   Megaphone,
   Mail,
@@ -562,6 +561,7 @@ export default function ContentPage() {
         businessPulse: mk.businessPulse,
       });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'marketingAi' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [mk.businessId, activeTab, mk.dataVersion, mk.campaigns, mk.forms, mk.socialPosts, mk.crossModuleSignals, mk.businessPulse, marketingAi.updateMarketingContext]);
 
   useEffect(() => {

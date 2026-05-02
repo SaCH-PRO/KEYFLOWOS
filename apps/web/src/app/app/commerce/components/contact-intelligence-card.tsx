@@ -3,7 +3,6 @@
 import React, { useMemo } from "react";
 import {
   Shield,
-  Clock,
   DollarSign,
   TrendingUp,
   AlertTriangle,

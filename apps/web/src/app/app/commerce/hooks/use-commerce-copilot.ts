@@ -34,6 +34,7 @@ export function useCommerceCopilot(deps: CopilotDeps) {
         itemCount: invoiceCount + quoteCount,
       });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'commerceAi' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [businessId, tab, invoiceCount, quoteCount, commerceAi.updateCommerceContext]);
 
   const runToolWithToast = useCallback(async (toolId: string, label: string) => {

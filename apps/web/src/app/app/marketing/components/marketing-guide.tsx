@@ -539,7 +539,7 @@ export function MarketingGuide({ isOpen, onToggle, onTabChange }: MarketingGuide
                 {allComplete ? (
                   <button onClick={handleReset} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none rounded px-1">Reset progress</button>
                 ) : (
-                  <button onClick={handleDismiss} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none rounded px-1">Don't show again</button>
+                  <button onClick={handleDismiss} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none rounded px-1">Don&apos;t show again</button>
                 )}
                 <button
                   onClick={closeAndRestore}

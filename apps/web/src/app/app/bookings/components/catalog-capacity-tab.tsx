@@ -21,7 +21,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
-  Zap,
 } from "lucide-react";
 import NextLink from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";

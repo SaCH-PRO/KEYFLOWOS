@@ -9,9 +9,7 @@ import {
   Briefcase,
   CheckCircle,
   Clock,
-  DollarSign,
   X,
-  ChevronDown,
   Store,
   Sparkles,
   ShoppingBag,
@@ -21,7 +19,6 @@ import {
   RefreshCw,
   Zap,
   Users,
-  Target,
   Handshake,
   Star,
   ShieldCheck,
@@ -37,6 +34,7 @@ import {
   MousePointerClick,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   searchDirectory,
@@ -231,7 +229,7 @@ function RecommendationCard({
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0">
               {logo ? (
-                <img src={logo} alt={biz.name} className="w-full h-full object-cover" />
+                <Image src={logo} alt={biz.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
               ) : (
                 initials
               )}
@@ -339,11 +337,11 @@ function RelationshipInsightTile({
       >
         <div className="w-8 h-8 shrink-0 rounded-lg bg-gradient-to-br from-emerald-400 to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden">
           {item.logoUrl ? (
-            <img
+            <Image
               src={item.logoUrl.startsWith("http") ? item.logoUrl : `${API_BASE}${item.logoUrl}`}
               alt=""
               className="w-full h-full object-cover"
-            />
+             fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
           ) : (
             item.name.charAt(0).toUpperCase()
           )}
@@ -396,7 +394,7 @@ function RelationshipInsightTile({
               className="flex items-center gap-2 w-full px-3 py-2 text-[11px] text-left text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors border-t border-white/5"
             >
               <EyeOff className="w-3 h-3 text-red-400" />
-              Don't show again
+              Don&apos;t show again
             </button>
           </div>
         )}
@@ -430,7 +428,7 @@ function DirectoryCard({ biz, onViewProfile }: { biz: DirectoryBusiness; onViewP
       <div className="flex items-start gap-3">
         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-lg font-bold overflow-hidden flex-shrink-0">
           {logo ? (
-            <img src={logo} alt={biz.name} className="w-full h-full object-cover" />
+            <Image src={logo} alt={biz.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
           ) : (
             initials
           )}

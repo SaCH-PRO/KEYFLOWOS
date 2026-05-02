@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Store } from "lucide-react";
 import { useSearchParams } from "next/navigation";
+import Image from "next/image";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -102,7 +103,7 @@ export default function StorePage() {
     setCurrentMeta({ tab: key === "overview" ? null : key });
     s.emitEvent("module:tab_changed", "store", { tab: key });
     const url = new URL(window.location.href);
-    key === "overview" ? url.searchParams.delete("tab") : url.searchParams.set("tab", key);
+    if (key === "overview") { url.searchParams.delete("tab"); } else { url.searchParams.set("tab", key); }
     window.history.replaceState({}, "", url.toString());
   }, [activeTab, s.emitEvent, setCurrentMeta]);
 
@@ -153,7 +154,7 @@ export default function StorePage() {
       <div className="relative rounded-2xl overflow-hidden" style={{ border: `1px solid ${pc}20` }}>
         {coverImage ? (
           <div className="absolute inset-0">
-            <img src={coverImage} alt="" className="w-full h-full object-cover" />
+            <Image src={coverImage} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
             <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, hsl(var(--kf-background)/0.92) 0%, hsl(var(--kf-background)/0.82) 100%)` }} />
             <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${pc}10 0%, transparent 60%)` }} />
           </div>
@@ -171,7 +172,7 @@ export default function StorePage() {
             <div className="flex items-center gap-3.5 min-w-0">
               {logoUrl ? (
                 <div className="h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0 overflow-hidden" style={{ border: `2px solid ${pc}30`, boxShadow: `0 4px 16px ${pc}15`, background: "hsl(var(--kf-card))" }}>
-                  <img src={logoUrl} alt="" className="w-full h-full object-cover" />
+                  <Image src={logoUrl} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                 </div>
               ) : (
                 <div className="h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: `linear-gradient(135deg, ${pc}, ${sc})`, boxShadow: `0 4px 16px ${pc}25` }}>

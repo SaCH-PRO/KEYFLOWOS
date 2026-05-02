@@ -10,7 +10,7 @@ import {
   Users, Trash2, ScanSearch, ClipboardCheck,
   FileText, Receipt, PlayCircle, StopCircle, TrendingUp,
 } from "lucide-react";
-import { aiNaturalLanguageSearch, aiInterpretCommand, aiExecuteCommand, type AiSearchResult, type AiCommandResult } from "@/lib/client";
+import { aiNaturalLanguageSearch, aiInterpretCommand, type AiSearchResult, type AiCommandResult } from "@/lib/client";
 
 export type CrmCommand =
   | { type: "add_contact"; params?: Record<string, unknown> }

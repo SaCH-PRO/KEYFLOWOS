@@ -1,7 +1,8 @@
 "use client";
 
 import { RefObject } from "react";
-import { Building2, Camera, Upload } from "lucide-react";
+import { Camera } from "lucide-react";
+import Image from "next/image";
 
 type Props = {
   logoUrl: string | null;
@@ -17,7 +18,7 @@ export function LogoUploader({ logoUrl, name, uploading, fileInputRef, onUpload 
       <div className="relative group">
         <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] border-2 border-border/30 flex items-center justify-center overflow-hidden shadow-lg">
           {logoUrl ? (
-            <img src={logoUrl} alt="Business logo" className="w-full h-full object-cover" />
+            <Image src={logoUrl} alt="Business logo" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
           ) : (
             <span className="text-2xl font-bold text-white">
               {name?.charAt(0)?.toUpperCase() || "K"}

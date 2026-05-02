@@ -8,7 +8,6 @@ import {
   Zap,
   MessageSquare,
   TrendingUp,
-  AlertCircle,
   Copy,
   Check,
   RefreshCw,
@@ -204,7 +203,7 @@ export function AiCopilot({
                         </div>
                       </div>
                       <p className="text-sm italic border-l-2 border-[hsl(var(--kf-accent1))] pl-3">
-                        "{insight.suggestedMessage}"
+                        &quot;{insight.suggestedMessage}&quot;
                       </p>
                       {onSendSuggestion && (
                         <button

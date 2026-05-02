@@ -9,8 +9,7 @@ import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-re
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { WorkspaceMetricStrip } from "@/components/ui/workspace-metric-strip";
 import {
-  Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus,
-  TrendingUp, AlertTriangle, Tag, FileQuestion, BarChart3, Lightbulb,
+  Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus, AlertTriangle, Tag, FileQuestion, Lightbulb,
   Layers, PieChart, ShieldCheck,
 } from "lucide-react";
 import { deleteExpense, getExpenseExportUrl, Expense } from "@/lib/client";

@@ -4,7 +4,7 @@ import {
   TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Minus,
   Lightbulb, Target, DollarSign, Clock, Mail,
   ChevronDown, ChevronUp, BarChart3, Shield, ArrowRight,
-  MessageSquare, Package, Receipt, Search, Users, Activity,
+  MessageSquare, Package, Receipt, Search,
 } from "lucide-react";
 import { useState } from "react";
 import { formatCurrencyShort } from "@/lib/currency";
@@ -822,7 +822,7 @@ function CommerceNlSearchResult({ data }: { data: any }) {
     <div className="space-y-2.5">
       <div className="flex items-center gap-2 mb-1">
         <Search className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
-        <span className="text-[11px] text-muted-foreground/70 italic">"{data.interpretation || "search"}"</span>
+        <span className="text-[11px] text-muted-foreground/70 italic">&quot;{data.interpretation || "search"}&quot;</span>
         {data.confidence > 0 && (
           <span className="text-[10px] text-muted-foreground/40 ml-auto">{Math.round(data.confidence * 100)}% confidence</span>
         )}

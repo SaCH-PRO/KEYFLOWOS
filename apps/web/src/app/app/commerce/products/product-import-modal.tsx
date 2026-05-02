@@ -10,7 +10,6 @@ import {
   Trash2,
   Loader2,
   AlertCircle,
-  Package,
   Edit3,
   Download,
   Globe,
@@ -503,7 +502,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                 exit={{ opacity: 0 }}
                 className="p-4 pt-2"
               >
-                <p className="text-xs text-muted-foreground mb-3">Choose how you'd like to import products</p>
+                <p className="text-xs text-muted-foreground mb-3">Choose how you&apos;d like to import products</p>
                 <div className="grid grid-cols-2 gap-2">
                   {MODES.map(({ key, label, sublabel, icon: Icon, color }) => (
                     <button
@@ -554,7 +553,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                       </div>
                       <h3 className="font-semibold text-sm mb-1">Scan a Menu or Price List</h3>
                       <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-                        Take a photo or upload an image — we'll extract products, prices, and details automatically
+                        Take a photo or upload an image — we&apos;ll extract products, prices, and details automatically
                       </p>
                     </div>
 
@@ -608,6 +607,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                 ) : (
                   <div className="space-y-3">
                     <div className="relative rounded-xl overflow-hidden border border-border">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- user-supplied URL with unknown host (cannot pre-configure remotePatterns) */}
                       <img
                         src={scanPreview}
                         alt="Scan preview"

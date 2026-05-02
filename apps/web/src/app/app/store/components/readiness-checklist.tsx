@@ -15,7 +15,6 @@ import {
   Palette,
   Clock,
   Power,
-  Share2,
 } from "lucide-react";
 
 interface ReadinessChecklistProps {

@@ -18,6 +18,7 @@ import { PostCard, POST_TYPE_CONFIG, timeAgo } from "./post-card";
 import { CreatePost } from "./create-post";
 import { FeedSkeleton } from "./community-skeleton";
 import { MatchedProvidersPanel } from "./matched-providers-panel";
+import Image from "next/image";
 
 const MATCH_NOTIFIED_TYPES = new Set(["QUESTION", "OPPORTUNITY", "HELP", "NEED"]);
 
@@ -107,7 +108,7 @@ export function Feed({
               className={`w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm overflow-hidden flex-shrink-0 ${onAuthorClick ? "cursor-pointer hover:ring-2 hover:ring-[hsl(var(--kf-accent1))]/50 transition-all" : ""}`}
             >
               {expandedLogo ? (
-                <img src={expandedLogo} alt={expandedPost.business?.name || ""} className="w-full h-full object-cover" />
+                <Image src={expandedLogo} alt={expandedPost.business?.name || ""} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
               ) : (
                 expandedPost.business?.name?.[0] || "?"
               )}
@@ -188,7 +189,7 @@ export function Feed({
                       className={`w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500/80 to-purple-600/80 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden flex-shrink-0 ${onAuthorClick ? "cursor-pointer hover:ring-2 hover:ring-[hsl(var(--kf-accent1))]/50 transition-all" : ""}`}
                     >
                       {commentLogo ? (
-                        <img src={commentLogo} alt={comment.business?.name || ""} className="w-full h-full object-cover" />
+                        <Image src={commentLogo} alt={comment.business?.name || ""} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                       ) : (
                         comment.business?.name?.[0] || "?"
                       )}

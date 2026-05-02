@@ -17,7 +17,6 @@ import {
   RefreshCw,
   ArrowUpRight,
   ArrowDownRight,
-  Minus,
   Megaphone,
 } from "lucide-react";
 import { formatAmount } from "../../commerce/utils/commerce-utils";

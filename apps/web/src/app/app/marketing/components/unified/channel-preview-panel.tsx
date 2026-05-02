@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { Eye, Mail, Facebook, Instagram, MessageCircle, Globe, Smartphone } from "lucide-react";
+import Image from "next/image";
 
 type PreviewPlatform = "FACEBOOK" | "INSTAGRAM" | "EMAIL" | "WHATSAPP" | "GENERIC";
 
@@ -59,7 +60,7 @@ function FacebookPreview({ body, mediaUrls, businessName }: { body: string; medi
       </div>
       {mediaUrls && mediaUrls.length > 0 && (
         <div className="w-full aspect-video bg-muted/20 flex items-center justify-center border-t border-border/20">
-          <img src={mediaUrls[0]} alt="" className="w-full h-full object-cover" />
+          <Image src={mediaUrls[0]} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
         </div>
       )}
       <div className="px-3 py-2 border-t border-border/20 flex items-center gap-4 text-[10px] text-muted-foreground">
@@ -81,7 +82,7 @@ function InstagramPreview({ body, mediaUrls, businessName }: { body: string; med
       </div>
       <div className="w-full aspect-square bg-muted/20 flex items-center justify-center">
         {mediaUrls && mediaUrls.length > 0 ? (
-          <img src={mediaUrls[0]} alt="" className="w-full h-full object-cover" />
+          <Image src={mediaUrls[0]} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
         ) : (
           <div className="flex flex-col items-center gap-2 text-muted-foreground/50">
             <Smartphone className="w-8 h-8" />
@@ -124,6 +125,7 @@ function WhatsAppPreview({ body, mediaUrls }: { body: string; mediaUrls?: string
     <div className="rounded-xl border border-border/30 bg-[#1a1a1e] overflow-hidden p-3">
       <div className="bg-[#005C4B]/20 rounded-lg p-3 max-w-[85%] ml-auto">
         {mediaUrls && mediaUrls.length > 0 && (
+          // eslint-disable-next-line @next/next/no-img-element -- preview of user-pasted media URL; max-h-36 + intrinsic ratio makes Next/Image fill mode unreliable
           <img src={mediaUrls[0]} alt="" className="w-full rounded-md mb-2 max-h-36 object-cover" />
         )}
         <p className="text-xs text-foreground/90 whitespace-pre-wrap">{truncateText(plain, 300)}</p>

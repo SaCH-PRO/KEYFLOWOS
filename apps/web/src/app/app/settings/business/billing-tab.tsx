@@ -1010,7 +1010,7 @@ export function BillingTab() {
                 {/* This month's AI breakdown */}
                 {dashboard.aiUsage.byFeature.length > 0 && (
                   <div className="mb-4">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">This Month's Breakdown</p>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">This Month&apos;s Breakdown</p>
                     <div className="space-y-1.5">
                       {dashboard.aiUsage.byFeature.map(f => (
                         <div key={f.feature} className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/10 border border-border/20">

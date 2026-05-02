@@ -3,8 +3,8 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  FileText, Sparkles, ArrowRight,
-  Shield, Users, DollarSign, Globe,
+  FileText, Sparkles,
+  Shield, DollarSign,
   BarChart3, CheckCircle2, AlertCircle,
   Lock, Package,
 } from "lucide-react";

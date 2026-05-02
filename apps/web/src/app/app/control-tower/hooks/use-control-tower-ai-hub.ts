@@ -222,6 +222,7 @@ export function useControlTowerAiHub(customData: TowerCustomData) {
       activeView: "control-tower",
       customData: customData as Record<string, unknown>,
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'ai' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [businessId, customData, ai.updateContext]);
 
   return ai;

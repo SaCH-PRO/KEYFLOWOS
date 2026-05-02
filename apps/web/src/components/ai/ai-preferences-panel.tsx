@@ -4,14 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Target, MessageSquare, ShieldAlert, Send, Clock,
   Star, AlertCircle, BarChart3, Loader2, Plus, X,
-  RefreshCw, Trash2, Save,
+  RefreshCw, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchAiMemory,
   upsertAiMemory,
-  upsertAiMemoryBulk,
   deleteAiMemory,
   summarizeAiPatterns,
   type AiMemoryEntry,

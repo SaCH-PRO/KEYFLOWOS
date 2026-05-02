@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Handshake,
-  Send,
   Check,
   X,
   Clock,
@@ -13,6 +12,7 @@ import {
   ArrowDownLeft,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import Image from "next/image";
 import {
   fetchCollabRequests,
   respondToCollabRequest,
@@ -147,7 +147,7 @@ export function CollabRequests({ businessId }: CollabRequestsProps) {
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0">
                     {business.logoUrl ? (
-                      <img src={business.logoUrl} alt="" className="w-full h-full object-cover" />
+                      <Image src={business.logoUrl} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                     ) : (
                       business.name.charAt(0).toUpperCase()
                     )}

@@ -4,8 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Facebook, Instagram, Linkedin, Twitter, CheckCircle2, XCircle, Loader2,
-  Key, Globe, AlertCircle, RefreshCw, ExternalLink, Music2, Unlink, Wifi, WifiOff,
-  ChevronDown, ChevronUp, Settings2,
+  Key, Globe, AlertCircle, RefreshCw, ExternalLink, Music2, Unlink, Wifi, WifiOff, ChevronUp, Settings2,
 } from "lucide-react";
 import {
   fetchSocialConnections, startSocialOAuth, connectSocialManual,
@@ -681,7 +680,7 @@ export function ChannelsPanel() {
         <ol className="text-[11px] text-muted-foreground space-y-1 list-decimal list-inside">
           <li>Click <strong>Connect</strong> on any platform above</li>
           <li>If OAuth is configured, sign in directly with the platform</li>
-          <li>Otherwise, paste your API access token from the platform's developer portal</li>
+          <li>Otherwise, paste your API access token from the platform&apos;s developer portal</li>
           <li>Click <strong>Test</strong> to verify the connection is working</li>
           <li>Once connected, select platforms when composing posts to auto-publish</li>
         </ol>

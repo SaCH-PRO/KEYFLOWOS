@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import Image from "next/image";
 import QRCodeLib from "qrcode";
 import {
   Globe,
@@ -10,10 +11,7 @@ import {
   CheckCircle2,
   MessageCircle,
   Link2,
-  ShoppingBag,
   ShoppingCart,
-  CheckCircle,
-  Eye,
   ArrowRight,
   ArrowUpRight,
   BarChart3,
@@ -29,7 +27,7 @@ import {
 } from "lucide-react";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useOpenComposer } from "@/hooks/use-open-composer";
-import type { StoreAnalytics, ConversionFunnel, ConversionFunnelStage } from "@/lib/client";
+import type { StoreAnalytics, ConversionFunnel } from "@/lib/client";
 import { fetchConversionFunnel } from "@/lib/client";
 import { DashboardKpis, type KpiData } from "./dashboard-kpis";
 import { OrdersPanel } from "./orders-panel";
@@ -334,7 +332,7 @@ function QrCodeModal({ url, onClose }: { url: string; onClose: () => void }) {
         <div className="flex justify-center">
           <div className="rounded-xl p-4" style={{ background: "hsl(var(--kf-muted)/0.2)" }}>
             {qrDataUrl ? (
-              <img src={qrDataUrl} alt="Store QR Code" width={200} height={200} className="rounded-lg" />
+              <Image src={qrDataUrl} alt="Store QR Code" width={200} height={200} className="rounded-lg"  unoptimized />
             ) : (
               <div className="w-[200px] h-[200px] flex items-center justify-center animate-pulse bg-muted/30 rounded-lg" />
             )}

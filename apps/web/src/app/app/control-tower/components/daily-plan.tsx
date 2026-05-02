@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  CalendarClock, Sparkles, Loader2, ChevronDown, ChevronUp,
+  CalendarClock, Loader2, ChevronDown, ChevronUp,
   Target, Users, DollarSign, Megaphone, FolderKanban, Zap,
   Play, Check, Bot,
 } from "lucide-react";

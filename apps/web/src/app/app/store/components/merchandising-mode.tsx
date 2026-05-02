@@ -17,6 +17,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { formatPrice } from "@/lib/format";
 import type { Service, Product, StorefrontConfig, FaqEntry } from "@/lib/client";
+import Image from "next/image";
 
 type SeoProps = {
   storefrontConfig: StorefrontConfig;
@@ -105,7 +106,7 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
           <div className="rounded-xl overflow-hidden" style={{ border: "1px solid hsl(var(--kf-border)/0.3)" }}>
             <div className="w-full h-[80px] flex items-center justify-center" style={{ background: "hsl(var(--kf-muted)/0.1)" }}>
               {seo.ogImage ? (
-                <img src={seo.ogImage} alt="Social preview" className="w-full h-full object-cover" />
+                <Image src={seo.ogImage} alt="Social preview" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
               ) : (
                 <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>No OG image</span>
               )}

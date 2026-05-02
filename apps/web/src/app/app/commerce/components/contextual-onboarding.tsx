@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
   Search,
-  Sparkles,
   Package,
   FileText,
   CreditCard,
@@ -462,7 +461,7 @@ export function SearchableHelpDrawer({ isOpen, onClose, onNavigate }: Searchable
               {filtered.length === 0 && (
                 <div className="py-8 text-center">
                   <Search className="w-5 h-5 text-muted-foreground/30 mx-auto mb-2" />
-                  <p className="text-xs text-muted-foreground/50">No topics match "{query}"</p>
+                  <p className="text-xs text-muted-foreground/50">No topics match &quot;{query}&quot;</p>
                 </div>
               )}
             </div>

@@ -3,7 +3,6 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus,
   Trash2,
   Pencil,
   Send,

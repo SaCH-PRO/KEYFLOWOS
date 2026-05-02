@@ -782,7 +782,7 @@ export default function OnboardingPage() {
                   What type of business do you run?
                 </h1>
                 <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                  We'll set up your account with smart defaults — pricing in
+                  We&apos;ll set up your account with smart defaults — pricing in
                   TTD, hours, and services tailored to your industry.
                 </p>
               </div>
@@ -877,7 +877,7 @@ export default function OnboardingPage() {
                   Your first offerings
                 </h1>
                 <p className="text-sm text-muted-foreground">
-                  We've pre-filled popular{" "}
+                  We&apos;ve pre-filled popular{" "}
                   {TEMPLATES.find((t) => t.id === selectedTemplate)?.label.toLowerCase() || "business"}{" "}
                   offerings with TTD pricing. Edit, add, or remove as needed.
                 </p>
@@ -1074,7 +1074,7 @@ export default function OnboardingPage() {
                     style={{ color: "hsl(var(--kf-success))" }}
                   />
                 </motion.div>
-                <h1 className="text-xl font-bold mb-2">You're live!</h1>
+                <h1 className="text-xl font-bold mb-2">You&apos;re live!</h1>
                 <p className="text-sm text-muted-foreground max-w-sm mx-auto">
                   Your business is set up and ready for customers. Share your
                   link to start receiving bookings and orders.
@@ -1214,7 +1214,7 @@ export default function OnboardingPage() {
                   border: "1px solid hsl(var(--kf-accent1) / 0.15)",
                 }}
               >
-                <p className="text-sm font-medium mb-3">What's next?</p>
+                <p className="text-sm font-medium mb-3">What&apos;s next?</p>
                 <div className="space-y-2">
                   {[
                     {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { X, Upload, Image, Repeat, DollarSign, FileText, Store, Tag, Calendar, CreditCard, FolderKanban, Users, Briefcase } from "lucide-react";
+import { X, Upload, Image as ImageIcon, Repeat, DollarSign, FileText, Store, Tag, Calendar, CreditCard, FolderKanban, Users, Briefcase } from "lucide-react";
 import { toast } from "sonner";
 import {
   Expense, ExpenseCategory, PAYMENT_METHODS,
@@ -225,7 +225,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
               </label>
               {formData.receiptUrl && (
                 <div className="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded-lg">
-                  <Image className="w-3.5 h-3.5" />
+                  <ImageIcon className="w-3.5 h-3.5" />
                   <span className="truncate max-w-[150px]">Receipt attached</span>
                   <button onClick={() => setFormData(prev => ({ ...prev, receiptUrl: "" }))} className="text-muted-foreground hover:text-red-400 ml-1"><X className="w-3 h-3" /></button>
                 </div>

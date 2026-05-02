@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
@@ -17,11 +17,7 @@ import {
   Bot,
   Copy,
   X,
-  ChevronDown,
   Sparkles,
-  ChevronRight,
-  Bell,
-  Pencil,
   Settings,
 } from "lucide-react";
 import { useRouter } from "next/navigation";

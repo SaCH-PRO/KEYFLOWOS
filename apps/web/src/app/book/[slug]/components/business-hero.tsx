@@ -5,6 +5,7 @@ import { MapPin, Phone, Mail, CheckCircle, Shield, Award, ExternalLink, Facebook
 import type { Business, BusinessHours } from "./types";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
 import type { StorefrontConfig, StorefrontHeroProofChip } from "@/lib/client";
+import Image from "next/image";
 
 type Props = {
   business: Business;
@@ -141,7 +142,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                 className="w-full h-full object-cover"
               />
             ) : (
-              <img src={coverUrl} alt="" className="w-full h-full object-cover" loading="eager" />
+              <Image src={coverUrl ?? ""} alt="" className="w-full h-full object-cover" loading="eager"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
             )}
           </div>
           <div className="absolute inset-0" style={{ background: `linear-gradient(to bottom, ${ts.pageBg}60, ${ts.pageBg}95 35%, ${ts.pageBg}dd 60%, ${ts.pageBg})` }} />
@@ -188,12 +189,12 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
             {business.logoUrl ? (
               <div className="relative">
                 <div className="absolute -inset-3 rounded-[32px] blur-2xl" style={{ background: `${primaryColor}18` }} />
-                <img
+                <Image
                   src={business.logoUrl}
                   alt={business.name}
                   className={`relative h-16 w-16 sm:h-24 sm:w-24 object-cover border-2 shadow-2xl ${theme === "elegant" || theme === "luxury_editorial" ? "rounded-full" : "rounded-2xl"}`}
                   style={{ borderColor: `${primaryColor}25` }}
-                />
+                 width={64} height={64} unoptimized />
                 <div
                   className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 flex items-center justify-center shadow-lg"
                   style={{ borderColor: ts.pageBg, backgroundColor: openStatus.isOpen ? "#22c55e" : "#ef4444" }}

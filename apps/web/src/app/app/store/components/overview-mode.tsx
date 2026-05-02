@@ -3,10 +3,10 @@
 import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-  Package, ShoppingBag, Truck, Star, FileText, Phone,
+  Package, ShoppingBag, Truck, Star, FileText,
   TrendingUp, AlertTriangle, CheckCircle2, ArrowRight,
-  Image as ImageIcon, Shield, Search, ShoppingCart,
-  Zap, ArrowUpRight, Clock, BarChart3, Users, RefreshCw, Loader2,
+  Image as ImageIcon, Shield, ShoppingCart,
+  Zap, Clock, BarChart3, Users, RefreshCw, Loader2,
   Sparkles, Eye, Target, DollarSign, Percent, Send, UserPlus, Megaphone,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
@@ -15,7 +15,8 @@ import { createCampaign } from "@/lib/client";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { SectionCard } from "@/components/ui/section-card";
 import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
-import type { StoreAnalytics, Product, Service, StorefrontConfig, StorefrontPolicies, StoreGraph, StoreReadinessResult, ReadinessItem } from "@/lib/client";
+import type { StoreAnalytics, Product, Service, StorefrontConfig, StorefrontPolicies, StoreGraph, StoreReadinessResult } from "@/lib/client";
+import Image from "next/image";
 
 type SocialProofSection = { testimonials?: unknown[] };
 type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string };
@@ -225,7 +226,7 @@ function TopProductsGrid({ products, liveProductIds }: { products: Product[]; li
         >
           {p.imageUrl ? (
             <div className="w-full h-16 rounded-lg overflow-hidden">
-              <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" />
+              <Image src={p.imageUrl} alt={p.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
             </div>
           ) : (
             <div className="w-full h-16 rounded-lg flex items-center justify-center" style={{ background: "hsl(var(--kf-muted)/0.15)" }}>

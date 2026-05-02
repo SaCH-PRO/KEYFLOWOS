@@ -1,6 +1,5 @@
 "use client";
 
-import type { TemplateId, InvoiceTemplateData } from "./template-types";
 
 export function buildPrintHtml(innerHTML: string, title: string): string {
   return `<!DOCTYPE html>

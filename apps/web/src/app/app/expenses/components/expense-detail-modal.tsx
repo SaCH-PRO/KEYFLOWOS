@@ -43,6 +43,7 @@ export function ExpenseDetailModal({ expense, onClose, onEdit }: ExpenseDetailMo
           {expense.receiptUrl && (
             <div><p className="text-[10px] text-muted-foreground uppercase mb-1">Receipt</p>
               {expense.receiptUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                // eslint-disable-next-line @next/next/no-img-element -- user-uploaded receipt image; intrinsic dimensions unknown so cannot use Next/Image without layout shift
                 <img src={expense.receiptUrl} alt="Receipt" className="w-full max-h-64 object-contain rounded-lg border border-border/40" />
               ) : (
                 <a href={expense.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-[hsl(var(--kf-accent1))] hover:underline"><FileText className="w-4 h-4" /> View Receipt <ExternalLink className="w-3 h-3" /></a>

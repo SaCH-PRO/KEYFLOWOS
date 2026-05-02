@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { motion } from "framer-motion";
 import {
   ChevronLeft,
@@ -119,7 +120,7 @@ export default function MessagesPage() {
               >
                 <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-sm font-bold overflow-hidden flex-shrink-0">
                   {logo ? (
-                    <img src={logo} alt={biz.name} className="w-full h-full object-cover" />
+                    <Image src={logo} alt={biz.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                   ) : (
                     biz.name[0]?.toUpperCase() || "?"
                   )}

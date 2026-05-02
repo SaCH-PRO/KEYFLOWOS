@@ -205,7 +205,7 @@ export function AutopilotSettingsPanel({ open, onClose, businessId }: AutopilotS
                       Quiet Hours
                     </h3>
                     <p className="text-xs text-muted-foreground/60 mb-3">
-                      Autopilot won't send messages during quiet hours (Trinidad time).
+                      Autopilot won&apos;t send messages during quiet hours (Trinidad time).
                     </p>
                     <div className="flex items-center gap-3">
                       <div className="flex-1">

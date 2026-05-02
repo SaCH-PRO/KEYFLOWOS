@@ -188,7 +188,7 @@ export function ConversationContext({
                   )}
                 </button>
               </div>
-              <p className="text-sm italic">"{data.suggestedOpening}"</p>
+              <p className="text-sm italic">&quot;{data.suggestedOpening}&quot;</p>
             </div>
           )}
         </div>

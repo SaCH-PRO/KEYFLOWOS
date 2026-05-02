@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
   Loader2,
-  ChevronDown,
   Copy,
   Check,
   Wand2,

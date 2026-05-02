@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback } from "react";
 import type { Tab } from "../components/commerce-types";
 
 interface ComposerDeps {

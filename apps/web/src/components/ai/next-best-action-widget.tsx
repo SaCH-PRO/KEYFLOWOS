@@ -5,13 +5,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Brain,
   ChevronRight,
-  Clock,
   DollarSign,
   Users,
   Calendar,
   Megaphone,
   CheckCircle2,
-  AlertTriangle,
   TrendingUp,
   Zap,
   RefreshCw,
@@ -54,16 +52,16 @@ const IMPACT_STYLES: Record<string, { bg: string; text: string }> = {
 
 function deriveActions(aiActions: AiNextAction[]): CrossModuleAction[] {
   return aiActions.slice(0, 6).map((a, i) => {
-    const module = inferModule(a);
+    const moduleName = inferModule(a);
     const typeLabel = a.type.replace(/_/g, " ");
     return {
       id: `nba-${i}`,
-      module,
+      module: moduleName,
       title: `${typeLabel}: ${a.contactName}`,
       description: a.reason ?? "",
       impact: a.priority === "high" ? "high" : a.priority === "low" ? "low" : "medium",
       type: inferType(a),
-      link: moduleLink(module),
+      link: moduleLink(moduleName),
     };
   });
 }

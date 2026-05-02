@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Wifi, WifiOff, Shield, ShieldAlert, ShieldCheck, ShieldX,
@@ -20,13 +20,13 @@ import {
   disconnectSocial,
   testSocialConnection,
 } from "@/lib/client";
-import type { ChannelConnection, ChannelDestination, SocialConnection } from "@/lib/client";
+import type { ChannelDestination, SocialConnection } from "@/lib/client";
+import Image from "next/image";
 import {
   useChannelHealth,
   HEALTH_BG_COLORS,
   type ChannelHealthData,
   type EnrichedConnection,
-  type HealthState,
 } from "@/hooks/use-channel-health";
 
 interface ContentStudioTabProps {
@@ -175,7 +175,7 @@ function DestinationCard({ dest, onToggle }: { dest: ChannelDestination; onToggl
       dest.isActive ? "border-border/30 bg-muted/5" : "border-border/20 bg-muted/5 opacity-60"
     }`}>
       {dest.avatarUrl ? (
-        <img src={dest.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover border border-border/30" />
+        <Image src={dest.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover border border-border/30"  width={32} height={32} unoptimized />
       ) : (
         <div className="w-8 h-8 rounded-full bg-muted/30 border border-border/30 flex items-center justify-center">
           <Globe className="w-4 h-4 text-muted-foreground/50" />

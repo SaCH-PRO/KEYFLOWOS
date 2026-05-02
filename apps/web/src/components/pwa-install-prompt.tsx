@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Download, X, Smartphone, Zap } from "lucide-react";
+import Image from "next/image";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -99,7 +100,7 @@ export function PWAInstallPrompt() {
 
           <div className="flex gap-3.5">
             <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500/20 to-teal-500/20 border border-white/[0.08] flex items-center justify-center">
-              <img
+              <Image
                 src="/icons/icon-192x192.png"
                 alt="KEYFLOWOS"
                 className="w-8 h-8 rounded-lg"
@@ -108,7 +109,7 @@ export function PWAInstallPrompt() {
                   (e.target as HTMLImageElement).parentElement!.innerHTML =
                     '<span class="text-lg font-bold text-white">K</span>';
                 }}
-              />
+               width={32} height={32} unoptimized />
             </div>
 
             <div className="flex-1 min-w-0 pr-6">

@@ -7,8 +7,7 @@ import {
   Brain, X, Send, Loader2, Sparkles, ArrowRight,
   Activity, Shield, CheckCircle2,
   ChevronRight, Settings, TrendingUp, Calendar, AlertCircle,
-  AlertTriangle, Zap, Info, Check, XIcon, Edit3,
-  Clock, Package, Users, DollarSign, FileText,
+  AlertTriangle, Zap, Info, Check, XIcon, Edit3, Package, Users, DollarSign, FileText,
   BarChart3, Target, Layers,
 } from "lucide-react";
 import { toast } from "sonner";

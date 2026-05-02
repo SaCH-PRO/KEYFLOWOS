@@ -13,6 +13,7 @@ import {
 import type { CommunityPost } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
 import { MatchedProvidersPanel } from "./matched-providers-panel";
+import Image from "next/image";
 
 const MATCH_NOTIFIED_TYPES = new Set(["QUESTION", "OPPORTUNITY", "HELP", "NEED"]);
 
@@ -82,7 +83,7 @@ export function PostCard({ post, index, onExpand, onLike, onAuthorClick, current
           className={`w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-[10px] overflow-hidden flex-shrink-0 ${onAuthorClick ? "cursor-pointer hover:ring-2 hover:ring-[hsl(var(--kf-accent1))]/50 transition-all" : ""}`}
         >
           {logoUrl ? (
-            <img src={logoUrl} alt={post.business?.name || ""} className="w-full h-full object-cover" />
+            <Image src={logoUrl} alt={post.business?.name || ""} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
           ) : (
             post.business?.name?.[0] || "?"
           )}

@@ -23,7 +23,8 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { Button } from "@keyflow/ui";
-import { CATEGORIES, ProductForm } from "../components/commerce-types";
+import { ProductForm } from "../components/commerce-types";
+import Image from "next/image";
 
 const CATEGORY_CARDS: {
   value: "SERVICE" | "PRODUCT" | "PACKAGE";
@@ -165,11 +166,11 @@ function LivePreviewCard({
       <div className="p-3 flex gap-3">
         <div className="w-16 h-16 rounded-lg bg-white/[0.04] border border-border/30 flex-shrink-0 overflow-hidden flex items-center justify-center">
           {imagePreview ? (
-            <img
+            <Image
               src={imagePreview}
               alt="Preview"
               className="w-full h-full object-cover"
-            />
+             fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
           ) : (
             <Package className="w-6 h-6 text-muted-foreground/30" />
           )}
@@ -359,7 +360,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
 
   const completionPercent = useMemo(() => {
     let filled = 0;
-    let total = 5;
+    const total = 5;
     if (productForm.name.trim()) filled++;
     if (productForm.price && parseFloat(productForm.price) > 0) filled++;
     if (productForm.description.trim()) filled++;
@@ -697,6 +698,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                   </div>
                   {imagePreview ? (
                     <div className="relative rounded-xl border border-border/50 overflow-hidden bg-muted/20 group/img">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- user-supplied URL with unknown host (cannot pre-configure remotePatterns) */}
                       <img
                         src={imagePreview}
                         alt="Preview"

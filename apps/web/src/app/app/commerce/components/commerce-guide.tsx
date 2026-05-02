@@ -384,7 +384,7 @@ export function CommerceGuideDrawer({ isOpen, onClose, onTabChange }: CommerceGu
               {filteredSections.length === 0 && searchQuery && (
                 <div className="py-8 text-center">
                   <Search className="w-5 h-5 text-muted-foreground/30 mx-auto mb-2" />
-                  <p className="text-xs text-muted-foreground/50">No topics match "{searchQuery}"</p>
+                  <p className="text-xs text-muted-foreground/50">No topics match &quot;{searchQuery}&quot;</p>
                 </div>
               )}
             </div>
@@ -393,7 +393,7 @@ export function CommerceGuideDrawer({ isOpen, onClose, onTabChange }: CommerceGu
               {allComplete ? (
                 <button onClick={handleReset} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors rounded px-1">Reset progress</button>
               ) : (
-                <button onClick={handleDismiss} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors rounded px-1">Don't show again</button>
+                <button onClick={handleDismiss} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors rounded px-1">Don&apos;t show again</button>
               )}
               <button
                 onClick={onClose}

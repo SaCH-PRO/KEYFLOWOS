@@ -8,7 +8,7 @@ import {
   useMemo,
   type KeyboardEvent,
 } from "react";
-import { Search, Plus, Loader2, ChevronDown, X } from "lucide-react";
+import { Search, Plus, Loader2, ChevronDown } from "lucide-react";
 import { useContactSearch } from "@/hooks/use-contact-search";
 import { createContact } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";

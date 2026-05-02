@@ -8,7 +8,6 @@ import {
   X,
   CheckCircle2,
   Palette,
-  Type,
   Users,
   Target,
   MessageSquare,

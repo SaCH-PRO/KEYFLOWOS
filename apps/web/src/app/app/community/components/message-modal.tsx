@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, MessageSquare, Send, Sparkles, Loader2 } from "lucide-react";
 import { fetchMessageThread, sendBusinessMessage, draftAiIntroMessage, type BusinessMessageItem } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
+import Image from "next/image";
 
 interface MessageModalProps {
   isOpen: boolean;
@@ -121,7 +122,7 @@ export function MessageModal({ isOpen, onClose, businessId, otherBusinessId, oth
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-sm font-bold overflow-hidden">
                     {resolvedLogo ? (
-                      <img src={resolvedLogo} alt={otherBusinessName} className="w-full h-full object-cover" />
+                      <Image src={resolvedLogo} alt={otherBusinessName} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                     ) : (
                       otherBusinessName[0]?.toUpperCase() || "?"
                     )}

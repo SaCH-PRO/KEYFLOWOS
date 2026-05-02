@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles, Send, Loader2, CheckCircle2, AlertTriangle,
   ListChecks, Shield, ChevronDown, ChevronRight, Play,
   Brain, Zap, Users, TrendingUp, Clock, Target,
-  BookOpen, Save, X, RefreshCw,
+  BookOpen, Save, X,
 } from "lucide-react";
 import {
   aiAnalyzeContacts,

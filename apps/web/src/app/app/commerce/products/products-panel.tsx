@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown, Upload, LayoutGrid, List, Camera, Sparkles } from "lucide-react";
+import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, Upload, LayoutGrid, List, Camera, Sparkles } from "lucide-react";
 import { ProductImportModal } from "./product-import-modal";
 import { toast } from "sonner";
 import type { Product } from "@/lib/client";
@@ -14,6 +14,7 @@ import { useCommerceSearch } from "../hooks/use-commerce-search";
 import { useProductStats } from "../hooks/use-product-stats";
 import { ProductCard } from "./product-card";
 import { ProductDetailPanel } from "./product-detail-panel";
+import Image from "next/image";
 
 type ViewMode = "grid" | "list";
 function getStoredViewMode(): ViewMode {
@@ -688,7 +689,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                       )}
                       <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-white/[0.04] border border-border/20">
                         {img ? (
-                          <img src={img} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          <Image src={img} alt="" className="w-full h-full object-cover" loading="lazy"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
                             <Package className="w-4 h-4 text-muted-foreground/30" />

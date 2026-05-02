@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { FileQuestion, Home } from "lucide-react";
 
 export default function RootNotFound() {
@@ -13,13 +14,13 @@ export default function RootNotFound() {
             The page you are looking for does not exist or has been moved.
           </p>
         </div>
-        <a
+        <Link
           href="/"
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors"
         >
           <Home className="w-4 h-4" />
           Home
-        </a>
+        </Link>
       </div>
     </div>
   );

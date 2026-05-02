@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Search, Sparkles, X, Loader2 } from "lucide-react";
+import { Sparkles, X, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { bookingsAiSearch } from "@/lib/client";
 import type { BookingsAiSearchResult } from "@/lib/client";

@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Pencil, Trash2, ArrowUpDown, Repeat, FileText, Receipt,
+  Pencil, Trash2, ArrowUpDown, Repeat, FileText,
   CreditCard, Banknote, Smartphone, CheckCircle, AlertCircle,
   Tag, CheckSquare, Square, Layers, FolderKanban, Users, Briefcase,
 } from "lucide-react";

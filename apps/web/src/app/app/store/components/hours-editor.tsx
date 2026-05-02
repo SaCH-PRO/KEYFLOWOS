@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { Clock, Copy, Check, Zap } from "lucide-react";
 
 export type DayHours = { open: string; close: string; closed: boolean };

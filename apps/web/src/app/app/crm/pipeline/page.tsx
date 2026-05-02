@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
-  Users, BarChart3, Layers,
+  Users,
 } from "lucide-react";
 import {
   BroadcastDrawer,
@@ -15,7 +15,6 @@ import { WorkspaceError } from "@/components/ui/workspace-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ProgressivePrompts } from "../../profile/components/progressive-prompts";
 import { PageHeader } from "@/components/ui/page-header";
-import { TabNav } from "@/components/ui/tab-nav";
 import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { CRM_WALKTHROUGH } from "@/lib/walkthrough-definitions";
@@ -81,6 +80,7 @@ export default function ContactsPage() {
         selectedContactId: state.selectedContact?.id,
       });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'crmAi' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [businessId, crmViewTab, contacts.length, state.selectedContact?.id, crmAi.updateCrmContext]);
 
   const handleCrmAiAction = useCallback((actionKey: string) => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
 import { motion } from "framer-motion";
 import {
   ChevronLeft,
@@ -412,7 +413,7 @@ export default function PublicProfilePage() {
           <div className="flex items-end gap-5">
             <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-3xl font-bold overflow-hidden border-4 border-background shadow-xl flex-shrink-0">
               {resolvedLogo ? (
-                <img src={resolvedLogo} alt={profile.name} className="w-full h-full object-cover" />
+                <Image src={resolvedLogo} alt={profile.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
               ) : (
                 initials
               )}
@@ -730,7 +731,7 @@ export default function PublicProfilePage() {
               <div key={product.id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
                 <div className="w-10 h-10 rounded-lg bg-[hsl(var(--kf-accent2))]/10 flex items-center justify-center flex-shrink-0 overflow-hidden">
                   {product.imageUrl ? (
-                    <img src={product.imageUrl.startsWith("http") ? product.imageUrl : `${API_BASE}${product.imageUrl}`} alt={product.name} className="w-full h-full object-cover" />
+                    <Image src={product.imageUrl.startsWith("http") ? product.imageUrl : `${API_BASE}${product.imageUrl}`} alt={product.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                   ) : (
                     <ShoppingBag className="w-5 h-5 text-[hsl(var(--kf-accent2))]" />
                   )}
@@ -831,7 +832,7 @@ export default function PublicProfilePage() {
                 <div key={endorsement.id} className="flex items-start gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
                   <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0">
                     {eLogo ? (
-                      <img src={eLogo} alt={endorsement.fromBusiness.name} className="w-full h-full object-cover" />
+                      <Image src={eLogo} alt={endorsement.fromBusiness.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                     ) : (
                       endorsement.fromBusiness.name[0]?.toUpperCase()
                     )}
@@ -1166,7 +1167,7 @@ function ProfileReviewsSection({ businessId }: { businessId: string }) {
             <div key={r.id} className="flex gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
               <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-sm font-bold overflow-hidden flex-shrink-0">
                 {reviewerLogo ? (
-                  <img src={reviewerLogo} alt={r.reviewerBusiness?.name ?? "reviewer"} className="w-full h-full object-cover" />
+                  <Image src={reviewerLogo} alt={r.reviewerBusiness?.name ?? "reviewer"} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                 ) : (
                   reviewerInitials
                 )}

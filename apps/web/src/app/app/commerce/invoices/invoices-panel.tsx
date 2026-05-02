@@ -6,7 +6,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SkeletonList } from "@/components/ui/skeleton";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { motion, AnimatePresence } from "framer-motion";
-import { Button, Input } from "@keyflow/ui";
+import { Button } from "@keyflow/ui";
 import {
   Search,
   FileText,
@@ -19,8 +19,6 @@ import {
   Plus,
   MessageCircle,
   Mail,
-  Clock,
-  AlertTriangle,
   Loader2,
   Ban,
   Bell,
@@ -49,19 +47,14 @@ import { apiDelete } from "@/lib/api";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
-import { ContactSelect } from "@/components/contacts";
 import {
   INVOICE_STATUS_FILTERS,
   InvoiceLineItem,
-  InvoiceFormState,
-  PAYMENT_TERMS,
   BILLING_SORT_OPTIONS,
   BillingSortKey,
-  getStatusBadge,
   generateItemId,
   getDueDateFromTerms,
 } from "../components/commerce-types";
-import LineItemsEditor from "../components/line-items-editor";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
 import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/standardized-cards";
@@ -74,7 +67,7 @@ import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
 import { TaxSummaryPanel } from "../components/tax-summary-panel";
 import { DunningRulesPanel } from "../components/dunning-rules";
 
-import { formatAmount, formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary, getDaysUntilDue } from "../utils/commerce-utils";
+import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
 import type { ReactNode } from "react";
 

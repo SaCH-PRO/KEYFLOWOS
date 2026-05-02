@@ -20,6 +20,7 @@ export function MinimalTemplate({ data }: { data: InvoiceTemplateData }) {
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8 sm:mb-12">
           <div className="min-w-0">
             {business.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- user-supplied logo with unknown CDN host; w-auto means dimensions are unknown until paint
               <img
                 src={business.logoUrl}
                 alt={business.name}

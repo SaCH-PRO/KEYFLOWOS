@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   User, Briefcase, Target, TrendingUp, Users,
   Sparkles, Globe, FileText, BarChart3, Zap,
-  CheckCircle2, MapPin, ArrowRight, Heart,
+  CheckCircle2, MapPin,
 } from "lucide-react";
 import PersonalInfoSection from "./personal-info-section";
 import ProfessionalProfileSection from "./professional-profile-section";

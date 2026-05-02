@@ -124,6 +124,7 @@ export function ModuleAiAssistant({
         if (intervalRef.current) clearInterval(intervalRef.current);
       };
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'ai' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [autoRefreshInterval, ai.refreshSuggestions]);
 
   if (!ai.panelOpen) return null;

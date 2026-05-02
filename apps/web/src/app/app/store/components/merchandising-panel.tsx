@@ -5,8 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Star, Plus, X, ChevronUp, ChevronDown, Megaphone, Tag, Award,
   Sparkles, Flame, Clock, Save, Loader2, Search, Shield, Truck,
-  CheckCircle2, Headphones, Zap, Package, Briefcase, LayoutGrid,
-  TrendingUp, Gift, Users, BadgeCheck, Boxes, Layers,
+  CheckCircle2, Headphones, Zap, Briefcase, LayoutGrid, Gift, Users, BadgeCheck, Boxes, Layers,
 } from "lucide-react";
 import type { StorefrontConfig, Product, Service, BadgeType, TrustRailItem } from "@/lib/client";
 

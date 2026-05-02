@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { BookOpen, Clock, Users, ArrowRight } from "lucide-react";
+import { Clock, Users, ArrowRight } from "lucide-react";
 import type { Course } from "@/lib/client";
 
 const DIFFICULTY_COLORS: Record<string, { bg: string; text: string }> = {

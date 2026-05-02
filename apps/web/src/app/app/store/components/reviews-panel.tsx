@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Star, MessageSquare, Check, X, Eye, EyeOff, Filter, Send, Loader2, ChevronDown } from "lucide-react";
+import { Star, MessageSquare, Check, EyeOff, Filter, Send, Loader2, ChevronDown } from "lucide-react";
 import { apiGet, apiPatch } from "@/lib/api";
 
 type Review = {

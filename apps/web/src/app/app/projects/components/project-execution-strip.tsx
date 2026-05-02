@@ -2,7 +2,7 @@
 
 import {
   FolderKanban, CalendarClock, AlertTriangle, Clock, CheckCircle,
-  UserX, Sparkles, HeartPulse, TrendingUp, Target, DollarSign,
+  UserX, Sparkles, HeartPulse, TrendingUp, Target,
   BarChart3, Flag,
 } from "lucide-react";
 import { Project } from "@/lib/client";

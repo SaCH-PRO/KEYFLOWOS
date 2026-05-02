@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { PieChart, BarChart3, CreditCard, TrendingUp, DollarSign } from "lucide-react";
-import { Expense, ExpenseSummary, PAYMENT_METHODS } from "@/lib/client";
+import { ExpenseSummary, PAYMENT_METHODS } from "@/lib/client";
 import { formatCurrency, formatDate, PAYMENT_ICONS } from "./expense-utils";
 
 interface ExpenseStatsProps {

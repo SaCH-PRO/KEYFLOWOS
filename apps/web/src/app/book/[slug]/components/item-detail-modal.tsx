@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { X, Clock, ShoppingBag, Plus, CheckCircle2, Star, Shield, Zap, ChevronLeft, ChevronRight, MessageCircle, ExternalLink, Heart } from "lucide-react";
+import { X, Clock, Plus, CheckCircle2, Star, Shield, Zap, MessageCircle, ExternalLink, Heart } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import type { CatalogItem } from "./types";
 import { ReviewSection } from "./review-display";
 import { ShareButtons } from "./share-buttons";
+import Image from "next/image";
 
 type Props = {
   item: CatalogItem;
@@ -89,7 +89,7 @@ export function ItemDetailModal({
 
         {item.imageUrl ? (
           <div className="w-full h-56 sm:h-72 overflow-hidden">
-            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+            <Image src={item.imageUrl} alt={item.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
           </div>
         ) : (
           <ModalPlaceholder name={item.name} color={itemAccent} />
@@ -225,7 +225,7 @@ export function ItemDetailModal({
                     >
                       {ri.imageUrl ? (
                         <div className="w-full h-20 overflow-hidden">
-                          <img src={ri.imageUrl} alt={ri.name} className="w-full h-full object-cover" />
+                          <Image src={ri.imageUrl} alt={ri.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                         </div>
                       ) : (
                         <div

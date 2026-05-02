@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, MoreHorizontal, Calendar, Trash2, FolderKanban,
   ChevronDown, ChevronRight, Archive, Eye, EyeOff, Search,
-  AlertTriangle, Clock, User, ExternalLink, DollarSign,
+  AlertTriangle, User, ExternalLink, DollarSign,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/ui/empty-state";

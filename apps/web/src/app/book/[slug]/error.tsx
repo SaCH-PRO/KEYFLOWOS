@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 
 export default function BookingPageError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
@@ -77,7 +78,7 @@ export default function BookingPageError({ error, reset }: { error: Error & { di
           >
             Try Again
           </button>
-          <a
+          <Link
             href="/"
             style={{
               padding: "0.625rem 1.25rem",
@@ -90,7 +91,7 @@ export default function BookingPageError({ error, reset }: { error: Error & { di
             }}
           >
             Go Home
-          </a>
+          </Link>
         </div>
       </div>
     </main>
