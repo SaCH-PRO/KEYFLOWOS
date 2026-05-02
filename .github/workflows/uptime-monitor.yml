@@ -1,0 +1,67 @@
+name: Uptime monitor
+
+# Pings the production health endpoints every 5 minutes (the GitHub
+# Actions cron minimum). For sub-minute polling, use a hosted service
+# such as UptimeRobot or BetterStack — see MAINTENANCE.md → Uptime
+# monitoring for setup details.
+#
+# Required repository secrets / variables:
+#   vars.PROD_BASE_URL          e.g. https://app.keyflowos.com  (no trailing slash)
+#   vars.PROD_API_BASE_URL      Optional. Defaults to PROD_BASE_URL.
+#   secrets.UPTIME_SLACK_WEBHOOK_URL   Optional Slack incoming webhook.
+#   secrets.UPTIME_ALERT_WEBHOOK_URL   Optional generic webhook (PagerDuty, etc.).
+#
+# State (consecutive-failure counters) is persisted across runs via the
+# actions/cache action. The cache key rolls forward each time the file
+# changes so the latest counters are always restored.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: uptime-monitor
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore monitor state
+        id: state-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .uptime-state
+          key: uptime-state-v1-${{ github.run_id }}
+          restore-keys: |
+            uptime-state-v1-
+
+      - name: Run uptime monitor
+        id: monitor
+        env:
+          BASE_URL: ${{ vars.PROD_BASE_URL }}
+          API_BASE: ${{ vars.PROD_API_BASE_URL }}
+          STATE_FILE: ${{ github.workspace }}/.uptime-state/state.json
+          SLACK_WEBHOOK_URL: ${{ secrets.UPTIME_SLACK_WEBHOOK_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.UPTIME_ALERT_WEBHOOK_URL }}
+          MONITOR_LABEL: keyflowos-prod
+          FAIL_THRESHOLD: "2"
+        run: |
+          if [ -z "${BASE_URL}" ]; then
+            echo "::error::vars.PROD_BASE_URL is not set in this repo." \
+              "Add it under Settings → Secrets and variables → Actions → Variables."
+            exit 1
+          fi
+          mkdir -p "$(dirname "$STATE_FILE")"
+          bash scripts/uptime-monitor.sh
+
+      - name: Save monitor state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .uptime-state
+          key: uptime-state-v1-${{ github.run_id }}
