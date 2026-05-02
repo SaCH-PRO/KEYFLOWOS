@@ -72,6 +72,7 @@ If the error ever resurfaces despite the rules above:
    - **Delete `apps/web/src/app/error.tsx` (root level).** It is optional in Next.js. `apps/web/src/app/global-error.ts` covers every error case it would have caught.
    - **Keep `apps/web/src/app/global-error.ts` as `.ts` (NOT `.tsx`).** Use `React.createElement` in the body. The `.ts` extension blocks SWC's automatic JSX runtime import.
    - Do NOT apply this to ordinary route files or to nested-segment `error.tsx` files (e.g. `app/app/error.tsx`) — those re-render on navigation, so their factories stay warm.
+5. **Dev-only overlay suppression of last resort.** The error can still surface on lazy-loaded `.tsx` route files (e.g. `app/page.tsx`) when Turbopack's HMR cache loses the `jsx-dev-runtime` chunk. The page itself renders correctly — only Next.js's dev error overlay is showing a stale internal-state warning. `apps/web/src/components/dev-hmr-error-suppressor.ts` is mounted via the `Providers` wrapper and filters this *one* known-benign message pattern (`module factory is not available`) from `console.error`, `window.error`, and unhandled rejections in development only. Real errors with any other message pass through untouched. Production builds short-circuit the hook to a no-op. Remove this once Next.js / Turbopack ships an upstream fix.
 
 ## Learn More
 
