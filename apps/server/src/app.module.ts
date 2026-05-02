@@ -48,6 +48,7 @@ import { ConnectorModule } from './core/connectors/connector.module';
 import { KeyflowCommandModule } from './modules/keyflow-command/keyflow-command.module';
 import { ConnectModule } from './modules/connect/connect.module';
 import { SeoModule } from './modules/seo/seo.module';
+import { GrowthIntelligenceModule } from './modules/growth-intelligence/growth-intelligence.module';
 
 @Module({
   imports: [
@@ -97,6 +98,7 @@ import { SeoModule } from './modules/seo/seo.module';
     KeyflowCommandModule,
     ConnectModule,
     SeoModule,
+    GrowthIntelligenceModule,
   ],
   controllers: [AppController],
   providers: [

@@ -23,6 +23,7 @@ import { PriorityQueue } from "../control-tower/components/priority-queue";
 import { DailyPlan } from "../control-tower/components/daily-plan";
 import { ModuleHealthGrid } from "../control-tower/components/module-health-grid";
 import { GrowthOpsPanel } from "../control-tower/components/growth-ops-panel";
+import { GrowthIntelligencePanel } from "../control-tower/components/growth-intelligence-panel";
 import { ApprovalsQueue } from "../control-tower/components/approvals-queue";
 import { RiskAlerts } from "../control-tower/components/risk-alerts";
 import { StorefrontIntel } from "../control-tower/components/storefront-intel";
@@ -272,6 +273,10 @@ export default function KeyflowCommandPage() {
               dashboard={d.data.dashboard}
               modules={d.data.modules}
             />
+
+            <div id="keyflow-growth-intelligence">
+              <GrowthIntelligencePanel businessId={d.businessId} />
+            </div>
 
             <ModuleHealthGrid
               modules={d.data.modules}

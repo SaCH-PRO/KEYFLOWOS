@@ -10,7 +10,17 @@ export type ConnectorType =
   | 'meta_social'
   | 'paypal'
   | 'wipay'
-  | 'stripe';
+  | 'stripe'
+  | 'quickbooks'
+  | 'xero'
+  | 'mailchimp'
+  | 'klaviyo'
+  | 'linkedin'
+  | 'tiktok'
+  | 'twitter'
+  | 'typeform'
+  | 'jotform'
+  | 'webhook_form';
 
 export type ConnectorCategory =
   | 'communication'
@@ -23,9 +33,11 @@ export type ConnectorCategory =
   | 'profile'
   | 'maps'
   | 'messaging'
+  | 'accounting'
+  | 'email_marketing'
   | 'other';
 
-export type ConnectorGroup = 'google' | 'social' | 'payments' | 'messaging' | 'other';
+export type ConnectorGroup = 'google' | 'social' | 'payments' | 'messaging' | 'accounting' | 'marketing' | 'forms' | 'other';
 
 export const CONNECTOR_STATUSES = ['connected', 'disconnected', 'error', 'expired', 'syncing'] as const;
 export type ConnectorStatus = (typeof CONNECTOR_STATUSES)[number];
