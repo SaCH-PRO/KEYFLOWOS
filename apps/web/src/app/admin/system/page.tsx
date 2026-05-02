@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   CheckCircle2,
   XCircle,
@@ -16,6 +16,7 @@ import {
   GitBranch,
   Settings2,
   Play,
+  Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getAuthHeaders } from "@/lib/api";
@@ -45,6 +46,14 @@ interface DiagnosticsReport {
   overallStatus: CheckStatus;
   healthScore: number;
   categories: CategoryResult[];
+}
+
+interface ReleaseInfo {
+  webCommit: string;
+  apiCommit: string;
+  webNodeVersion: string;
+  apiNodeVersion: string;
+  uptimeSec: number;
 }
 
 const CATEGORY_SLUG_MAP: Record<string, string> = {
@@ -82,6 +91,23 @@ async function apiCheck(checkName: string): Promise<CheckResult> {
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
   return res.json();
+}
+
+async function fetchReleaseInfo(): Promise<ReleaseInfo> {
+  // /api/healthz proxies the api's /readyz internally and reports both sides'
+  // commit + node version. Fetch the web side directly and the api side
+  // directly so we can show both.
+  const [webRes, apiRes] = await Promise.all([
+    fetch("/api/healthz", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+    fetch(`${API_BASE}/healthz`, { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+  ]);
+  return {
+    webCommit: webRes?.commit ?? "unknown",
+    apiCommit: apiRes?.commit ?? "unknown",
+    webNodeVersion: webRes?.nodeVersion ?? "",
+    apiNodeVersion: apiRes?.nodeVersion ?? "",
+    uptimeSec: Math.max(webRes?.uptimeSec ?? 0, apiRes?.uptimeSec ?? 0),
+  };
 }
 
 function worstStatus(statuses: CheckStatus[]): CheckStatus {
@@ -379,6 +405,22 @@ export default function AdminSystem() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<string | null>(null);
+  const [release, setRelease] = useState<ReleaseInfo | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchReleaseInfo()
+      .then((info) => {
+        if (!cancelled) setRelease(info);
+      })
+      .catch(() => {
+        // Silent — the release strip is informational; failure leaves it
+        // hidden rather than blocking the diagnostics page.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const runDiagnostics = useCallback(async () => {
     setLoading(true);
@@ -437,6 +479,57 @@ export default function AdminSystem() {
           {loading ? "Running…" : "Run Full Diagnostic"}
         </button>
       </div>
+
+      {release && (
+        <div className="rounded-xl border border-border/60 bg-slate-950/50 px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Tag className="w-3.5 h-3.5 text-primary/80" />
+            <span className="uppercase tracking-wider">Release</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">Web</span>
+            <code
+              className={cn(
+                "font-mono px-1.5 py-0.5 rounded border",
+                release.webCommit === "unknown"
+                  ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
+                  : "border-border/60 bg-slate-900/60 text-foreground",
+              )}
+              title={release.webCommit}
+            >
+              {release.webCommit.slice(0, 12)}
+            </code>
+            {release.webNodeVersion && (
+              <span className="text-muted-foreground">{release.webNodeVersion}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">API</span>
+            <code
+              className={cn(
+                "font-mono px-1.5 py-0.5 rounded border",
+                release.apiCommit === "unknown"
+                  ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
+                  : "border-border/60 bg-slate-900/60 text-foreground",
+              )}
+              title={release.apiCommit}
+            >
+              {release.apiCommit.slice(0, 12)}
+            </code>
+            {release.apiNodeVersion && (
+              <span className="text-muted-foreground">{release.apiNodeVersion}</span>
+            )}
+          </div>
+          {release.webCommit !== "unknown" &&
+            release.apiCommit !== "unknown" &&
+            release.webCommit !== release.apiCommit && (
+              <span className="text-amber-300 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Web and API are on different builds
+              </span>
+            )}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-300">

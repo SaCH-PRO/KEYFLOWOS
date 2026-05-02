@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ensureValidWebEnv } from "@/lib/env";
+import { getReleaseVersion } from "@/lib/release-version";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,12 +20,7 @@ try {
 }
 
 function getCommit(): string {
-  return (
-    process.env.GIT_COMMIT ||
-    process.env.REPL_COMMIT_SHA ||
-    process.env.SOURCE_COMMIT ||
-    "unknown"
-  ).slice(0, 12);
+  return getReleaseVersion().short;
 }
 
 function getApiBase(): string {

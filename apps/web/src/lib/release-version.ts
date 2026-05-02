@@ -1,0 +1,65 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
+/**
+ * Resolve the git commit SHA the running container was built from.
+ *
+ * Lookup order:
+ *   1. GIT_COMMIT / REPL_COMMIT_SHA / SOURCE_COMMIT environment variable
+ *      (set by the platform, CI, or scripts/start-prod.sh)
+ *   2. .deploy-version file written at build time by .replit's build step,
+ *      walking up from the current working directory until found
+ *   3. live `git rev-parse HEAD` (works in dev when .git is present)
+ *   4. "unknown"
+ *
+ * Computed once per Node process and cached.
+ */
+
+let cached: string | null = null;
+
+function readDeployVersionFile(): string | null {
+  let dir = process.cwd();
+  for (let i = 0; i < 6; i++) {
+    const candidate = resolve(dir, ".deploy-version");
+    if (existsSync(candidate)) {
+      try {
+        const value = readFileSync(candidate, "utf8").trim();
+        if (value) return value;
+      } catch {
+        return null;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function readGitHead(): string | null {
+  try {
+    const value = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1500,
+    })
+      .toString()
+      .trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+export function getReleaseVersion(): { full: string; short: string } {
+  if (cached === null) {
+    const fromEnv =
+      process.env.GIT_COMMIT ||
+      process.env.REPL_COMMIT_SHA ||
+      process.env.SOURCE_COMMIT ||
+      "";
+    cached = (fromEnv || readDeployVersionFile() || readGitHead() || "unknown").trim();
+  }
+  return { full: cached, short: cached.slice(0, 12) };
+}

@@ -23,6 +23,24 @@ LOG_PREFIX_WEB="[web]   "
 API_PORT="${PORT:-3001}"
 WEB_PORT="${WEB_PORT:-5000}"
 
+# --- resolve the release version (git SHA) and export it to children ---------
+# Order of precedence:
+#   1. GIT_COMMIT already set in the env (CI / platform override)
+#   2. .deploy-version file written by the build step (see .replit)
+#   3. live `git rev-parse HEAD` (only works when .git is present)
+#   4. "unknown" (last resort — health endpoints will surface this)
+if [ -z "${GIT_COMMIT:-}" ]; then
+  if [ -s "$ROOT_DIR/.deploy-version" ]; then
+    GIT_COMMIT="$(tr -d '[:space:]' < "$ROOT_DIR/.deploy-version")"
+  elif command -v git >/dev/null 2>&1 && git -C "$ROOT_DIR" rev-parse HEAD >/dev/null 2>&1; then
+    GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+  else
+    GIT_COMMIT="unknown"
+  fi
+fi
+export GIT_COMMIT
+echo "[start-prod] release version GIT_COMMIT=${GIT_COMMIT:0:12}"
+
 # --- start the API in the background, prefixed-line logged --------------------
 (
   cd apps/server
