@@ -73,6 +73,109 @@ limiter**, so dashboards and uptime monitors can poll them freely.
 
 ---
 
+## Uptime monitoring
+
+The health endpoints above are useful only if **something polls them
+without you**. We run an external uptime monitor against the deployed
+URL so an outage pages an operator before customers notice.
+
+### What gets probed
+
+| Probe          | URL                                  | Pass criteria                                  |
+| -------------- | ------------------------------------ | ---------------------------------------------- |
+| `web.healthz`  | `https://<your-domain>/api/healthz`  | `HTTP 200` AND body contains `"apiReachable":true` |
+| `api.readyz`   | `https://<your-domain>/readyz`       | `HTTP 200` AND body contains `"ok":true` (the `db.ok` field) |
+
+> **HTTP-status checks alone are not enough.** Both endpoints can return
+> `200 OK` with a "degraded" body (e.g. `apiReachable:false` or
+> `db.ok:false`). Always configure keyword/JSON-content matching on the
+> response body, not just the status code.
+
+Pager rule: **two consecutive failures** (~2 minutes at the recommended
+1-minute interval). Single transient blips do not page.
+
+### Option A — UptimeRobot (recommended, free tier covers this)
+
+1. Sign up at <https://uptimerobot.com> and create a new monitor for
+   each URL above.
+2. **Monitor type:** `Keyword` (not `HTTP(s)`).
+3. **Keyword exists:** for `/api/healthz` use `"apiReachable":true`; for
+   `/readyz` use `"ok":true`.
+4. **Monitoring interval:** `1 minute`.
+5. **Alert contacts:** add at least one email + a Slack webhook (or
+   phone/SMS on a paid plan).
+6. **Alert when:** *down for `2` consecutive minutes* — this matches our
+   "fail twice in a row" rule.
+7. After saving, paste the **public status-page URL** into
+   [Configured monitors](#configured-monitors) below.
+
+### Option B — BetterStack / Pingdom / Datadog Synthetics
+
+Same idea, different UI. The only non-obvious settings:
+
+- **Request method:** `GET`
+- **Assertion:** body contains `"apiReachable":true` (web) /
+  `"ok":true` (api)
+- **Locations:** at least 2 regions to avoid one-region false positives
+- **Retry policy:** 1 retry after 30 s before alerting (equivalent to our
+  "2 consecutive failures" rule)
+
+### Option C — Self-hosted (no third-party account)
+
+A dependency-free shell monitor lives at
+[`scripts/uptime-monitor.sh`](scripts/uptime-monitor.sh) and is exposed
+as `pnpm monitor:uptime`. It implements the exact same semantics as the
+hosted options:
+
+- HTTP 200 + JSON-keyword assertion on each probe
+- Persistent counter so it pages **only on the 2nd consecutive failure**
+- Recovery notification when the counter resets
+- Pluggable notification channels: Slack webhook, generic JSON webhook
+  (PagerDuty Events v2 / Opsgenie compatible), and `mail(1)` if present
+
+Run it once by hand to verify wiring:
+
+```bash
+BASE_URL=https://app.keyflowos.com \
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/... \
+pnpm monitor:uptime
+```
+
+A turnkey schedule is committed at
+[`.github/workflows/uptime-monitor.yml`](.github/workflows/uptime-monitor.yml).
+It runs every 5 minutes (the GitHub Actions cron minimum) and persists
+the failure-counter state via `actions/cache`. To enable it:
+
+1. In GitHub → **Settings → Secrets and variables → Actions**:
+   - Add **variable** `PROD_BASE_URL` = `https://app.keyflowos.com`
+   - (Optional) **variable** `PROD_API_BASE_URL` if the API is on a
+     different host
+   - (Optional) **secret** `UPTIME_SLACK_WEBHOOK_URL`
+   - (Optional) **secret** `UPTIME_ALERT_WEBHOOK_URL`
+2. Trigger the **Uptime monitor** workflow once via "Run workflow" to
+   confirm it's green.
+
+For sub-minute polling, pair the GitHub Actions schedule with one of
+Options A or B — the GHA workflow then becomes an independent secondary
+monitor running from a different network, which protects you from
+single-vendor outages.
+
+### Configured monitors
+
+Update this section when a monitor is created or moved:
+
+| Probe         | Service              | Dashboard / status URL                          | Owner |
+| ------------- | -------------------- | ----------------------------------------------- | ----- |
+| `web.healthz` | _TBD — set up via Option A above_ | `https://stats.uptimerobot.com/<id>` | _ops_ |
+| `api.readyz`  | _TBD — set up via Option A above_ | `https://stats.uptimerobot.com/<id>` | _ops_ |
+| Both (backup) | GitHub Actions       | `https://github.com/<org>/<repo>/actions/workflows/uptime-monitor.yml` | _ops_ |
+
+When a real monitor is wired up, replace the `TBD` rows with the actual
+service name, dashboard URL, and the on-call rotation that receives the
+alert.
+
+---
+
 ## Environment variables
 
 Both apps **fail fast** at startup with a one-line summary if required
@@ -251,6 +354,8 @@ apps/web/src/app/api/healthz/route.ts         # web health endpoint
 scripts/start-prod.sh                         # production process supervisor
 scripts/verify-up.sh                          # one-command smoke test
 scripts/post-merge.sh                         # post-merge db sync + drift gate
+scripts/uptime-monitor.sh                     # self-hosted uptime poller (Option C)
+.github/workflows/uptime-monitor.yml          # GHA schedule for uptime-monitor.sh
 .env / .env.example                           # env config + template
 ```
 
