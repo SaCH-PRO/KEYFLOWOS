@@ -86,9 +86,9 @@ function NlSearchRenderer({ data }: { data: MarketingAiSearchResult }) {
       </div>
       {results.length > 0 ? (
         <div className="space-y-1.5 max-h-64 overflow-y-auto">
-          {(results as Array<{ name?: string; subject?: string; status?: string; isActive?: boolean }>).slice(0, 20).map((r, i: number) => {
-            const name = r.name || r.subject || "Untitled";
-            const status = r.status || (r.isActive !== undefined ? (r.isActive ? "ACTIVE" : "INACTIVE") : "");
+          {results.slice(0, 20).map((r: Record<string, unknown>, i: number) => {
+            const name = (r.name as string) || (r.subject as string) || "Untitled";
+            const status = (r.status as string) || (r.isActive !== undefined ? (r.isActive ? "ACTIVE" : "INACTIVE") : "");
             return (
               <div key={i} className="text-xs p-2 rounded-lg bg-white/[0.02] border border-border/30 flex items-center gap-2">
                 <div className="flex-1 min-w-0">

@@ -17,33 +17,11 @@ import { inputClass, selectClass, FormField } from "./marketplace-utils";
 
 type ProductEditorTab = "general" | "variants" | "sources" | "cost" | "listing";
 
-export interface ProductVariantDraft {
-  name?: string | null;
-  sku?: string | null;
-  price?: string | number | null;
-  stock?: string | number | null;
-}
-
-export type ProductFormValue = unknown;
-
-export interface ProductFormDraft {
-  id?: string;
-  name?: string | null;
-  sku?: string | null;
-  description?: string | null;
-  fulfillmentModel?: string | null;
-  category?: string | null;
-  hsCode?: string | null;
-  supplierName?: string | null;
-  supplierEmail?: string | null;
-  sourceUrl?: string | null;
-  leadTime?: string | number | null;
-  moq?: string | number | null;
-  costPrice?: string | number | null;
-  price?: string | number | null;
-  shippingCost?: string | number | null;
-  dutyRate?: string | number | null;
-  variants?: ProductVariantDraft[];
+interface VariantInput {
+  name?: string;
+  sku?: string;
+  price?: string;
+  stock?: string;
   [key: string]: unknown;
 }
 
@@ -65,29 +43,29 @@ export function ProductEditorModal({
 }: {
   open: boolean;
   onClose: () => void;
-  product: ProductFormDraft;
-  onChange: (key: string, value: ProductFormValue) => void;
+  product: Record<string, unknown>;
+  onChange: (key: string, value: unknown) => void;
   onSave: () => void;
   saving: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<ProductEditorTab>("general");
-  const [variants, setVariants] = useState<ProductVariantDraft[]>([]);
+  const [variants, setVariants] = useState<VariantInput[]>([]);
 
   useEffect(() => {
     if (open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setActiveTab("general");
-      setVariants((product.variants as ProductVariantDraft[] | undefined) ?? []);
+      setVariants((product.variants as VariantInput[] | undefined) ?? []);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only when the modal opens or the selected product identity changes, to seed the editor. Including `product.variants` would clobber in-progress edits whenever the parent updates the variants array.
   }, [open, product.id]);
 
   if (!open) return null;
 
-  const updateField = (key: string, value: ProductFormValue) => onChange(key, value);
+  const updateField = (key: string, value: unknown) => onChange(key, value);
 
   const addVariant = () => {
-    const updated = [...variants, { name: "", sku: "", price: "", stock: "" }];
+    const updated: VariantInput[] = [...variants, { name: "", sku: "", price: "", stock: "" }];
     setVariants(updated);
     onChange("variants", updated);
   };
@@ -165,7 +143,7 @@ export function ProductEditorModal({
               <>
                 <FormField label="Product Name">
                   <input
-                    value={product.name || ""}
+                    value={String(product.name ?? "")}
                     onChange={(e) => updateField("name", e.target.value)}
                     className={inputClass}
                     placeholder="Product name"
@@ -173,7 +151,7 @@ export function ProductEditorModal({
                 </FormField>
                 <FormField label="SKU">
                   <input
-                    value={product.sku || ""}
+                    value={String(product.sku ?? "")}
                     onChange={(e) => updateField("sku", e.target.value)}
                     className={inputClass}
                     placeholder="SKU-001"
@@ -181,7 +159,7 @@ export function ProductEditorModal({
                 </FormField>
                 <FormField label="Description">
                   <textarea
-                    value={product.description || ""}
+                    value={String(product.description ?? "")}
                     onChange={(e) => updateField("description", e.target.value)}
                     className={inputClass}
                     rows={3}
@@ -190,7 +168,7 @@ export function ProductEditorModal({
                 </FormField>
                 <FormField label="Fulfillment Model">
                   <select
-                    value={product.fulfillmentModel || ""}
+                    value={String(product.fulfillmentModel ?? "")}
                     onChange={(e) => updateField("fulfillmentModel", e.target.value)}
                     className={selectClass}
                   >
@@ -205,7 +183,7 @@ export function ProductEditorModal({
                 <div className="grid grid-cols-2 gap-3">
                   <FormField label="Category">
                     <input
-                      value={product.category || ""}
+                      value={String(product.category ?? "")}
                       onChange={(e) => updateField("category", e.target.value)}
                       className={inputClass}
                       placeholder="Electronics"
@@ -213,7 +191,7 @@ export function ProductEditorModal({
                   </FormField>
                   <FormField label="HS Code">
                     <input
-                      value={product.hsCode || ""}
+                      value={String(product.hsCode ?? "")}
                       onChange={(e) => updateField("hsCode", e.target.value)}
                       className={inputClass}
                       placeholder="8471.30"
@@ -289,7 +267,7 @@ export function ProductEditorModal({
               <>
                 <FormField label="Supplier Name">
                   <input
-                    value={product.supplierName || ""}
+                    value={String(product.supplierName ?? "")}
                     onChange={(e) => updateField("supplierName", e.target.value)}
                     className={inputClass}
                     placeholder="Supplier Co."
@@ -297,7 +275,7 @@ export function ProductEditorModal({
                 </FormField>
                 <FormField label="Supplier Email">
                   <input
-                    value={product.supplierEmail || ""}
+                    value={String(product.supplierEmail ?? "")}
                     onChange={(e) => updateField("supplierEmail", e.target.value)}
                     className={inputClass}
                     placeholder="supplier@example.com"
@@ -305,7 +283,7 @@ export function ProductEditorModal({
                 </FormField>
                 <FormField label="Source URL">
                   <input
-                    value={product.sourceUrl || ""}
+                    value={String(product.sourceUrl ?? "")}
                     onChange={(e) => updateField("sourceUrl", e.target.value)}
                     className={inputClass}
                     placeholder="https://supplier.com/product/123"
@@ -314,7 +292,7 @@ export function ProductEditorModal({
                 <FormField label="Lead Time (days)">
                   <input
                     type="number"
-                    value={product.leadTime || ""}
+                    value={String(product.leadTime ?? "")}
                     onChange={(e) => updateField("leadTime", e.target.value)}
                     className={inputClass}
                     placeholder="7"
@@ -323,7 +301,7 @@ export function ProductEditorModal({
                 <FormField label="Min Order Quantity">
                   <input
                     type="number"
-                    value={product.moq || ""}
+                    value={String(product.moq ?? "")}
                     onChange={(e) => updateField("moq", e.target.value)}
                     className={inputClass}
                     placeholder="10"
@@ -338,7 +316,7 @@ export function ProductEditorModal({
                   <FormField label="Cost Price">
                     <input
                       type="number"
-                      value={product.costPrice || ""}
+                      value={String(product.costPrice ?? "")}
                       onChange={(e) => updateField("costPrice", e.target.value)}
                       className={inputClass}
                       placeholder="10.00"
@@ -347,7 +325,7 @@ export function ProductEditorModal({
                   <FormField label="Sell Price">
                     <input
                       type="number"
-                      value={product.price || ""}
+                      value={String(product.price ?? "")}
                       onChange={(e) => updateField("price", e.target.value)}
                       className={inputClass}
                       placeholder="25.00"
@@ -356,7 +334,7 @@ export function ProductEditorModal({
                   <FormField label="Shipping Cost">
                     <input
                       type="number"
-                      value={product.shippingCost || ""}
+                      value={String(product.shippingCost ?? "")}
                       onChange={(e) => updateField("shippingCost", e.target.value)}
                       className={inputClass}
                       placeholder="2.50"
@@ -365,7 +343,7 @@ export function ProductEditorModal({
                   <FormField label="Duty Rate (%)">
                     <input
                       type="number"
-                      value={product.dutyRate || ""}
+                      value={String(product.dutyRate ?? "")}
                       onChange={(e) => updateField("dutyRate", e.target.value)}
                       className={inputClass}
                       placeholder="5"
@@ -409,17 +387,17 @@ export function ProductEditorModal({
                       <Package className="w-6 h-6 text-white/30" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold">{product.name || "Product Name"}</p>
-                      <p className="text-xs text-muted-foreground">{product.category || "Uncategorized"}</p>
+                      <p className="text-sm font-semibold">{String(product.name ?? "Product Name")}</p>
+                      <p className="text-xs text-muted-foreground">{String(product.category ?? "Uncategorized")}</p>
                     </div>
                   </div>
-                  {product.description && (
-                    <p className="text-xs text-muted-foreground">{product.description}</p>
-                  )}
+                  {product.description ? (
+                    <p className="text-xs text-muted-foreground">{String(product.description)}</p>
+                  ) : null}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     {[
                       { label: "Price", value: product.price ? `$${parseFloat(String(product.price)).toFixed(2)}` : "—" },
-                      { label: "Fulfillment", value: product.fulfillmentModel || "—" },
+                      { label: "Fulfillment", value: String(product.fulfillmentModel ?? "—") },
                       { label: "Variants", value: variants.length > 0 ? String(variants.length) : "None" },
                     ].map((item) => (
                       <div key={item.label} className="p-2 rounded-xl bg-white/3" style={{ background: "rgba(255,255,255,0.03)" }}>

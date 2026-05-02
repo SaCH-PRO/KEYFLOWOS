@@ -393,7 +393,7 @@ export function QualificationConfig({ businessId, products }: Props) {
                   value={field.type}
                   onChange={e => {
                     const checklist = [...(config.intakeChecklist ?? [])];
-                    checklist[idx] = { ...checklist[idx], type: e.target.value as 'text' | 'file' | 'color' | 'textarea' };
+                    checklist[idx] = { ...checklist[idx], type: e.target.value as typeof checklist[number]["type"] };
                     setConfig(prev => ({ ...prev, intakeChecklist: checklist }));
                   }}
                   className="text-[10px] rounded border px-1.5 py-0.5"

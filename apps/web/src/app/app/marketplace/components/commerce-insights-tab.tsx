@@ -12,15 +12,11 @@ import {
   Zap,
   Clock,
 } from "lucide-react";
-import type {
-  Product,
-  MarketplaceListing,
-  MarketplaceOrder,
-  InventoryStock,
-} from "@/lib/marketplace-types";
+import type { ProductDto, ListingDto, OrderDto, InventoryStockDto } from "@/lib/types/marketplace";
 
-type ListingRow = MarketplaceListing & { status?: string; active?: boolean };
-type InventoryRow = InventoryStock & { reorderLevel?: number | null };
+interface OrderItemLike {
+  productId?: string;
+}
 
 function InsightCard({
   icon: Icon,
@@ -107,30 +103,27 @@ export function CommerceInsightsTab({
   orders,
   inventory,
 }: {
-  products: Product[];
-  listings: ListingRow[];
-  orders: MarketplaceOrder[];
-  inventory: InventoryRow[];
+  products: ProductDto[];
+  listings: ListingDto[];
+  orders: OrderDto[];
+  inventory: InventoryStockDto[];
 }) {
-  const activeListings = listings.filter((l) => l.status === "ACTIVE" || l.active).length;
+  const activeListings = listings.filter((l) => l.status === "ACTIVE" || (l as { active?: boolean }).active).length;
   const totalRevenue = orders
     .filter((o) => o.status !== "CANCELLED")
     .reduce((sum, o) => sum + Number(o.total ?? 0), 0);
-  const productsWithCost = products.filter((p) => p.costPrice && p.price);
+  const productsWithCost = products.filter((p) => (p as { costPrice?: unknown }).costPrice && p.price);
   const avgMargin =
     productsWithCost.length > 0
       ? productsWithCost.reduce((sum, p) => {
-          const price = parseFloat(String(p.price));
-          const cost = parseFloat(String(p.costPrice));
-          const margin = ((price - cost) / price) * 100;
+          const sellPrice = parseFloat(String(p.price ?? 0));
+          const costPrice = parseFloat(String((p as { costPrice?: unknown }).costPrice ?? 0));
+          const margin = sellPrice > 0 ? ((sellPrice - costPrice) / sellPrice) * 100 : 0;
           return sum + margin;
         }, 0) / productsWithCost.length
       : 0;
-  const lowStockCount = inventory.filter((i) => {
-    const reorder = i.reorderLevel ?? i.reorderAt;
-    return reorder != null && i.quantity <= reorder;
-  }).length;
-  const readyProducts = products.filter((p) => p.price && p.costPrice).length;
+  const lowStockCount = inventory.filter((i) => i.reorderLevel && i.quantity <= i.reorderLevel).length;
+  const readyProducts = products.filter((p) => p.price && (p as { costPrice?: unknown }).costPrice).length;
 
   return (
     <div className="space-y-6">
@@ -237,7 +230,7 @@ export function CommerceInsightsTab({
           {[
             { label: "Priced", count: readyProducts, total: products.length, color: "text-emerald-400", bg: "bg-emerald-500" },
             { label: "Listed", count: listings.length, total: products.length, color: "text-blue-400", bg: "bg-blue-500" },
-            { label: "In Orders", count: new Set(orders.flatMap((o) => o.items?.map((i) => i.productId) ?? [])).size, total: products.length, color: "text-purple-400", bg: "bg-purple-500" },
+            { label: "In Orders", count: new Set(orders.flatMap((o) => ((o as { items?: OrderItemLike[] }).items ?? []).map((i) => i.productId))).size, total: products.length, color: "text-purple-400", bg: "bg-purple-500" },
           ].map((item) => {
             const pct = products.length > 0 ? Math.round((item.count / products.length) * 100) : 0;
             return (

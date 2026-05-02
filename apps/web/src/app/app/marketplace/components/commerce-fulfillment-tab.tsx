@@ -15,23 +15,31 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { Shipment, PurchaseOrder, Product as ProductDTO } from "@/lib/marketplace-types";
+import type { ShipmentDto, PurchaseOrderDto, ProductDto } from "@/lib/types/marketplace";
 
-interface RouteData {
+type FulfillmentSection = "routes" | "purchase-orders" | "shipments";
+
+type ShipmentExt = ShipmentDto & {
+  estimatedDelivery?: string | null;
+};
+
+type PurchaseOrderExt = PurchaseOrderDto & {
+  supplierEmail?: string | null;
+  quantity?: number | string;
+  unitCost?: number | string;
+};
+
+interface RouteLike {
   id?: string;
   name?: string;
   origin?: string;
   destination?: string;
   status?: string;
-  carrier?: string | null;
-  trackingNumber?: string | null;
   risk?: string;
   delayDays?: number;
 }
 
-type FulfillmentSection = "routes" | "purchase-orders" | "shipments";
-
-function ShipmentTracker({ shipment }: { shipment: Shipment }) {
+function ShipmentTracker({ shipment }: { shipment: ShipmentExt }) {
   const timeline = ["PREPARING", "PICKED_UP", "IN_TRANSIT", "CUSTOMS", "DELIVERED"];
   const currentIdx = timeline.indexOf(shipment.status || "PREPARING");
   const isDelayed = shipment.estimatedDelivery && new Date(shipment.estimatedDelivery) < new Date() && shipment.status !== "DELIVERED";
@@ -85,7 +93,7 @@ function ShipmentTracker({ shipment }: { shipment: Shipment }) {
   );
 }
 
-function RouteCard({ route }: { route: RouteData }) {
+function RouteCard({ route }: { route: RouteLike }) {
   const isRisky = route.risk === "high" || (route.delayDays ?? 0) > 3;
   return (
     <motion.div
@@ -96,7 +104,7 @@ function RouteCard({ route }: { route: RouteData }) {
       {isRisky && (
         <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[11px]">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span>{(route.delayDays ?? 0) > 0 ? `${route.delayDays}-day delay risk` : "High risk route"}</span>
+          <span>{route.delayDays ? `${route.delayDays}-day delay risk` : "High risk route"}</span>
         </div>
       )}
       <div className="flex items-center justify-between">
@@ -126,12 +134,12 @@ export function CommerceFulfillmentTab({
   onEditPO,
   onCreatePO,
 }: {
-  shipments: Shipment[];
-  purchaseOrders: PurchaseOrder[];
-  products: ProductDTO[];
-  onEditShipment: (item: Shipment) => void;
+  shipments: ShipmentExt[];
+  purchaseOrders: PurchaseOrderExt[];
+  products: ProductDto[];
+  onEditShipment: (item: ShipmentExt) => void;
   onCreateShipment: () => void;
-  onEditPO: (item: PurchaseOrder) => void;
+  onEditPO: (item: PurchaseOrderExt) => void;
   onCreatePO: () => void;
 }) {
   const [section, setSection] = useState<FulfillmentSection>("shipments");
@@ -140,7 +148,7 @@ export function CommerceFulfillmentTab({
   const { page: poPage, pageSize: poPageSize, setPage: setPoPage, setPageSize: setPoPageSize, totalPages: poTotal, paginated: paginatedPOs } = usePagination(purchaseOrders);
 
   const routeGroups = useMemo(() => {
-    const groups: Record<string, Shipment[]> = {};
+    const groups: Record<string, ShipmentExt[]> = {};
     for (const s of shipments) {
       const key = s.status || "PREPARING";
       if (!groups[key]) groups[key] = [];
@@ -240,7 +248,7 @@ export function CommerceFulfillmentTab({
           ) : (
             <>
               <div className="space-y-2">
-                {(paginatedPOs as Array<PurchaseOrder & { quantity?: string | number; unitCost?: string | number }>).map((po) => (
+                {paginatedPOs.map((po) => (
                   <motion.div
                     key={po.id}
                     initial={{ opacity: 0, y: 6 }}
@@ -262,11 +270,11 @@ export function CommerceFulfillmentTab({
                               Delivery: {formatDate(po.expectedDelivery)}
                             </span>
                           )}
-                          {po.quantity && <span>{po.quantity} units</span>}
+                          {po.quantity != null && <span>{po.quantity} units</span>}
                         </div>
                       </div>
                       <div className="flex items-center gap-3 shrink-0">
-                        {po.unitCost && po.quantity && (
+                        {po.unitCost != null && po.quantity != null && (
                           <div className="text-right">
                             <p className="text-xs text-muted-foreground">Total</p>
                             <p className="text-sm font-semibold">
@@ -301,7 +309,7 @@ export function CommerceFulfillmentTab({
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">{status.replace(/_/g, " ")} ({group.length})</p>
                 <div className="space-y-2">
                   {group.map((route) => (
-                    <RouteCard key={route.id} route={{ ...route, name: `${route.carrier || "Shipment"} — ${route.trackingNumber || route.id?.slice(0, 8)}` }} />
+                    <RouteCard key={route.id} route={{ id: route.id, name: `${route.carrier || "Shipment"} — ${route.trackingNumber || route.id?.slice(0, 8)}`, status: route.status }} />
                   ))}
                 </div>
               </div>

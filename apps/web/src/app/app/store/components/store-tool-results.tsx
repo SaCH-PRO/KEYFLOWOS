@@ -61,12 +61,12 @@ function ScoreGauge({ score, label }: { score: number; label: string }) {
   );
 }
 
-type RecommendationItem = {
+interface RecommendationItem {
   title?: string;
   description?: string;
   priority?: string;
   expectedImpact?: string;
-};
+}
 
 function Recommendations({ recommendations }: { recommendations: RecommendationItem[] }) {
   if (!recommendations?.length) return null;
@@ -222,17 +222,17 @@ function PricingAdvisorRenderer({ data }: { data: PricingAdvisorResult }) {
   );
 }
 
-type FrictionPointItem = {
+interface FrictionPoint {
   area?: string;
   impact?: string;
   suggestion?: string;
-};
+}
 
 type StorefrontAnalyzerResult = {
   summary: string;
   conversionScore: number;
   checks: { label: string; passed: boolean }[];
-  frictionPoints: FrictionPointItem[];
+  frictionPoints: FrictionPoint[];
   recommendations: RecommendationItem[];
 };
 

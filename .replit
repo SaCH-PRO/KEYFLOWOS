@@ -29,6 +29,14 @@ args = "Web Frontend"
 task = "workflow.run"
 args = "Backend API"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "lint"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "build"
+
 [[workflows.workflow]]
 name = "Web Frontend"
 author = "agent"
@@ -52,6 +60,28 @@ waitForPort = 3001
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "lint"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter web lint"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "build"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd apps/web && NODE_ENV=production pnpm exec next build"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [[ports]]
 localPort = 3001

@@ -475,7 +475,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
               drag="y"
               dragConstraints={{ top: 0, bottom: 0 }}
               dragElastic={{ top: 0, bottom: 0.6 }}
-              onDragEnd={(_, info: PanInfo) => {
+              onDragEnd={(_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
                 if (info.offset.y > 100 || info.velocity.y > 500) handleDetailClose();
               }}
               className="absolute bottom-0 left-0 right-0 max-h-[85vh] bg-background rounded-t-3xl overflow-hidden"

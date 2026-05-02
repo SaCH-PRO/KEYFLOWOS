@@ -14,11 +14,11 @@ import {
   Archive,
 } from "lucide-react";
 import { EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { Warehouse as WarehouseDTO, InventoryStock, Product as ProductDTO } from "@/lib/marketplace-types";
+import type { ProductDto, WarehouseDto, InventoryStockDto } from "@/lib/types/marketplace";
 
 type InventoryMode = "warehouses" | "stock";
 
-function InventoryModeTag({ quantity, reorderLevel }: { quantity: number; reorderLevel?: number }) {
+function InventoryModeTag({ quantity, reorderLevel }: { quantity: number; reorderLevel?: number | null }) {
   if (!reorderLevel) return null;
   if (quantity === 0) {
     return (
@@ -50,10 +50,10 @@ export function CommerceInventoryTab({
   onAddInventory,
   onCreateWarehouse,
 }: {
-  warehouses: WarehouseDTO[];
-  inventory: InventoryStock[];
-  products: ProductDTO[];
-  onEditWarehouse: (item: WarehouseDTO) => void;
+  warehouses: WarehouseDto[];
+  inventory: InventoryStockDto[];
+  products: ProductDto[];
+  onEditWarehouse: (item: WarehouseDto) => void;
   onDeleteWarehouse: (id: string) => void;
   onAddInventory: () => void;
   onCreateWarehouse: () => void;
@@ -61,10 +61,10 @@ export function CommerceInventoryTab({
   const [mode, setMode] = useState<InventoryMode>("warehouses");
 
   const reorderAlerts = inventory.filter(
-    (inv) => inv.reorderAt && inv.quantity <= inv.reorderAt
+    (inv) => inv.reorderLevel && inv.quantity <= inv.reorderLevel
   );
 
-  const productsById: Record<string, ProductDTO> = {};
+  const productsById: Record<string, ProductDto> = {};
   for (const p of products) productsById[p.id] = p;
 
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(inventory, 20);
@@ -183,19 +183,19 @@ export function CommerceInventoryTab({
                     </div>
                     <div className="divide-y divide-white/5">
                       {whInventory.map((inv) => {
-                        const product = productsById[inv.productId];
-                        const isLow = inv.reorderAt && inv.quantity <= inv.reorderAt;
+                        const product = inv.productId ? productsById[inv.productId] : undefined;
+                        const isLow = inv.reorderLevel != null && inv.quantity <= inv.reorderLevel;
                         return (
                           <div key={inv.id} className="px-4 py-2.5 flex items-center justify-between">
                             <span className="text-xs">{product?.name || inv.product?.name || "Product"}</span>
                             <div className="flex items-center gap-3">
-                              {inv.reserved > 0 && (
+                              {inv.reserved != null && inv.reserved > 0 && (
                                 <span className="text-[10px] text-muted-foreground">{inv.reserved} reserved</span>
                               )}
                               <span className={`text-sm font-semibold ${isLow ? "text-amber-400" : ""}`}>
                                 {(inv.quantity || 0).toLocaleString()} units
                               </span>
-                              <InventoryModeTag quantity={inv.quantity || 0} reorderLevel={inv.reorderAt ?? undefined} />
+                              <InventoryModeTag quantity={inv.quantity || 0} reorderLevel={inv.reorderLevel} />
                             </div>
                           </div>
                         );
@@ -224,15 +224,15 @@ export function CommerceInventoryTab({
                 </div>
                 <div className="divide-y divide-white/5">
                   {paginated.map((inv) => {
-                    const product = productsById[inv.productId];
+                    const product = inv.productId ? productsById[inv.productId] : undefined;
                     const warehouse = warehouses.find((w) => w.id === inv.warehouseId);
-                    const isLow = inv.reorderAt && inv.quantity <= inv.reorderAt;
+                    const isLow = inv.reorderLevel != null && inv.quantity <= inv.reorderLevel;
                     return (
                       <div key={inv.id} className="grid grid-cols-5 px-4 py-3 items-center">
                         <div className="col-span-2">
                           <p className="text-xs font-medium">{product?.name || inv.product?.name || "Product"}</p>
-                          {inv.reorderAt && (
-                            <p className="text-[10px] text-muted-foreground">Reorder at {inv.reorderAt}</p>
+                          {inv.reorderLevel && (
+                            <p className="text-[10px] text-muted-foreground">Reorder at {inv.reorderLevel}</p>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground truncate">{warehouse?.name || "—"}</p>
@@ -240,12 +240,12 @@ export function CommerceInventoryTab({
                           <p className={`text-sm font-semibold ${isLow ? "text-amber-400" : ""}`}>
                             {(inv.quantity || 0).toLocaleString()}
                           </p>
-                          {inv.reserved > 0 && (
+                          {inv.reserved != null && inv.reserved > 0 && (
                             <p className="text-[10px] text-muted-foreground">{inv.reserved} rsv</p>
                           )}
                         </div>
                         <div className="flex justify-end">
-                          <InventoryModeTag quantity={inv.quantity || 0} reorderLevel={inv.reorderAt ?? undefined} />
+                          <InventoryModeTag quantity={inv.quantity || 0} reorderLevel={inv.reorderLevel} />
                         </div>
                       </div>
                     );

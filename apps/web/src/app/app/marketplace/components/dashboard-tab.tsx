@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { StatCards } from "@/components/ui/stat-cards";
 import { formatCurrency, formatDate, StatusBadge, EmptyState } from "./marketplace-utils";
-import type { MarketplaceOrder } from "@/lib/marketplace-types";
 
 interface DashboardData {
   activeListings?: number;
@@ -21,12 +20,17 @@ interface DashboardData {
   monthlyRevenue?: number;
   preOrders?: number;
   warehouses?: number;
-  marketReach?: Partial<Record<"LOCAL" | "REGIONAL" | "INTERNATIONAL", number>>;
-  recentOrders?: MarketplaceOrder[];
+  totalProducts?: number;
+  totalOrders?: number;
+  totalRevenue?: number;
+  pendingShipments?: number;
+  lowStockCount?: number;
+  marketReach?: { LOCAL?: number; REGIONAL?: number; INTERNATIONAL?: number };
+  recentOrders?: Array<{ id: string; orderNumber?: string; customerName?: string | null; total?: number | string; status?: string; createdAt?: string }>;
 }
 
 export function DashboardTab({ data }: { data: DashboardData | null | undefined }) {
-  const stats: DashboardData = data || {};
+  const stats = data || {};
   return (
     <div className="space-y-6">
       <StatCards
@@ -72,7 +76,7 @@ export function DashboardTab({ data }: { data: DashboardData | null | undefined 
         </motion.div>
       )}
 
-      {stats.recentOrders && stats.recentOrders.length > 0 && (
+      {(stats.recentOrders?.length ?? 0) > 0 && stats.recentOrders && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -93,8 +97,8 @@ export function DashboardTab({ data }: { data: DashboardData | null | undefined 
                   <p className="text-xs text-muted-foreground">{formatDate(order.createdAt ?? "")}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <StatusBadge status={order.status} />
-                  <span className="text-sm font-semibold">{formatCurrency(order.total ?? 0)}</span>
+                  <StatusBadge status={order.status ?? "PENDING"} />
+                  <span className="text-sm font-semibold">{formatCurrency(Number(order.total ?? 0))}</span>
                 </div>
               </div>
             ))}

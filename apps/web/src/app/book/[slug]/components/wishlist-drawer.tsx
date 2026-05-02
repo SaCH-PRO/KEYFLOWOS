@@ -79,7 +79,7 @@ export function WishlistDrawer({ open, onClose, items, onRemove, onAddToCart, pr
                             price: item.price,
                             currency: item.currency,
                             imageUrl: item.imageUrl,
-                            itemType: item.itemType as "service" | "product",
+                            itemType: item.itemType as CatalogItem["itemType"],
                             description: null,
                             duration: null,
                             requiresBooking: false,

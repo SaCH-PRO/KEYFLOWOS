@@ -3,20 +3,24 @@
 import { motion } from "framer-motion";
 import { FileCheck, Hash, Pencil } from "lucide-react";
 import { formatCurrency, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { CustomsDeclaration } from "@/lib/marketplace-types";
 
-type CustomsDeclarationRow = CustomsDeclaration & {
+interface CustomsDeclarationDto {
+  id: string;
+  declarationNumber?: string;
+  status?: string;
   type?: string;
   description?: string;
-};
+  declaredValue?: number | string;
+  dutyAmount?: number | string;
+  currency?: string | null;
+  hsCode?: string | null;
+  destination?: string | null;
+  shipmentId?: string | null;
+  filedAt?: string | null;
+  createdAt?: string;
+}
 
-export function CustomsTab({
-  declarations,
-  onEdit,
-}: {
-  declarations: CustomsDeclarationRow[];
-  onEdit: (item: CustomsDeclarationRow) => void;
-}) {
+export function CustomsTab({ declarations, onEdit }: { declarations: CustomsDeclarationDto[]; onEdit: (item: CustomsDeclarationDto) => void }) {
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(declarations);
   if (declarations.length === 0) {
     return <EmptyState icon={FileCheck} title="No Customs Declarations" description="File customs declarations here for international import/export shipments." />;
@@ -44,7 +48,7 @@ export function CustomsTab({
               <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                 {decl.hsCode && <span className="flex items-center gap-1"><Hash className="w-3 h-3" />HS: {decl.hsCode}</span>}
                 <span>Declared: {formatCurrency(parseFloat(String(decl.declaredValue ?? 0)) || 0)}</span>
-                {decl.dutyAmount && <span>Duty: {formatCurrency(parseFloat(String(decl.dutyAmount)) || 0)}</span>}
+                {decl.dutyAmount != null && <span>Duty: {formatCurrency(parseFloat(String(decl.dutyAmount)) || 0)}</span>}
               </div>
             </div>
             <button onClick={() => onEdit(decl)} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors flex-shrink-0">

@@ -228,7 +228,7 @@ function CreateOpportunityModal({ businessId, onClose, onCreated }: { businessId
     await createOpportunity(businessId, {
       title: form.title,
       description: form.description,
-      type: form.type as "JOB" | "PROJECT" | "COLLABORATION" | "CONTRACT" | "GIG",
+      type: form.type as Parameters<typeof createOpportunity>[1]["type"],
       category: form.category || null,
       budgetMin: form.budgetMin ? Number(form.budgetMin) : null,
       budgetMax: form.budgetMax ? Number(form.budgetMax) : null,

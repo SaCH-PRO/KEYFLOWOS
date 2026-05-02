@@ -23,7 +23,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
-const TYPE_ICONS: Record<NetworkActivityType, React.ElementType> = {
+const TYPE_ICONS: Record<NetworkActivityType, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
   OPPORTUNITY_POSTED: Briefcase,
   OPPORTUNITY_AWARDED: CheckCircle2,
   PARTNERSHIP_FORMED: Link2,

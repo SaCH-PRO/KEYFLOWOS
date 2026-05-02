@@ -26,18 +26,11 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
-type RecentViewerRow = {
-  id: string;
-  createdAt: string;
-  source?: string | null;
-  viewer?: { id: string; name?: string; logoUrl?: string | null; headline?: string | null; slug?: string | null } | null;
-};
-
 export default function NetworkAnalyticsPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [data, setData] = useState<AnalyticsDashboard | null>(null);
-  const [recentViewers, setRecentViewers] = useState<RecentViewerRow[]>([]);
+  const [recentViewers, setRecentViewers] = useState<Array<{ id: string; createdAt: string; source?: string | null; viewer: { id: string; name: string; logoUrl?: string | null; headline?: string | null; slug?: string | null } }>>([]);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
 
@@ -167,7 +160,7 @@ export default function NetworkAnalyticsPage() {
   );
 }
 
-function Stat({ icon: Icon, label, value, sub, delta }: { icon: React.ElementType; label: string; value: number | string; sub?: string; delta?: number }) {
+function Stat({ icon: Icon, label, value, sub, delta }: { icon: React.ComponentType<React.SVGProps<SVGSVGElement>>; label: string; value: number | string; sub?: string; delta?: number }) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="kf-card rounded-xl p-4 border border-border/30">
       <div className="flex items-center justify-between mb-2">

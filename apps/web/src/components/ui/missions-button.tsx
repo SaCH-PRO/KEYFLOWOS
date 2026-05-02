@@ -206,15 +206,7 @@ export function MissionsButton() {
   useEffect(() => {
     fetchGamificationStats()
       .then((result) => {
-        if (result && result.data) setStats(result.data as {
-          totalXp: number;
-          level: number;
-          currentXp: number;
-          xpToNextLevel: number;
-          streakDays: number;
-          achievements: { id: string; achieved: boolean }[];
-          challenges: { id: string; progress: number; target: number }[];
-        });
+        if (result && result.data) setStats(result.data as NonNullable<typeof stats>);
       })
       .catch(() => {});
   }, []);

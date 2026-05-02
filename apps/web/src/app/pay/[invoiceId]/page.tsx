@@ -241,10 +241,8 @@ function PublicPaymentPageInner() {
       }
 
       if (gatewayRes.data) {
-        const gwList = Array.isArray(gatewayRes.data)
-          ? gatewayRes.data
-          : (gatewayRes.data as { gateways?: unknown[] }).gateways || [];
-        setGateways(gwList as typeof gateways);
+        const gwList = Array.isArray(gatewayRes.data) ? gatewayRes.data : (gatewayRes.data as { gateways?: typeof gateways }).gateways || [];
+        setGateways(gwList);
       }
 
       setLoading(false);

@@ -117,11 +117,11 @@ export default function PartnersPage() {
                 {p.commissionRate != null && (
                   <p className="text-xs"><span className="text-muted-foreground">Commission:</span> {p.commissionRate}%</p>
                 )}
-                {typeof p.terms === "string" && p.terms && <p className="text-xs text-muted-foreground mt-2 italic">{p.terms}</p>}
                 {(() => {
-                  if (!p.terms || typeof p.terms !== "object") return null;
-                  const notes = (p.terms as { notes?: unknown }).notes;
-                  return typeof notes === "string" ? <p className="text-xs text-muted-foreground mt-2 italic">{notes}</p> : null;
+                  const terms = p.terms as string | { notes?: string } | null | undefined;
+                  if (typeof terms === "string" && terms) return <p className="text-xs text-muted-foreground mt-2 italic">{terms}</p>;
+                  if (terms && typeof terms === "object" && terms.notes) return <p className="text-xs text-muted-foreground mt-2 italic">{terms.notes}</p>;
+                  return null;
                 })()}
 
                 <div className="flex gap-2 mt-3">
@@ -162,7 +162,7 @@ function ProposeModal({ businessId, onClose, onProposed }: { businessId: string;
     terms: "",
   });
   const [search, setSearch] = useState("");
-  const [results, setResults] = useState<Array<{ id: string; name: string; logoUrl?: string | null; headline?: string | null }>>([]);
+  const [results, setResults] = useState<Array<{ id: string; name: string; logoUrl?: string | null; industry?: string | null; headline?: string | null }>>([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {

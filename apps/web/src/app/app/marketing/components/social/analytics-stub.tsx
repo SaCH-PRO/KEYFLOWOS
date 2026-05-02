@@ -32,7 +32,7 @@ type Props = {
 
 const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-const PLATFORM_ICONS: Record<string, React.ElementType> = {
+const PLATFORM_ICONS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
   FACEBOOK: Facebook,
   INSTAGRAM: Instagram,
   LINKEDIN: Linkedin,
@@ -336,14 +336,14 @@ function EngagementView({ analytics, loading }: { analytics: SocialAnalytics | n
 
 interface PostStats {
   totalPosts: number;
-  postsPerWeek: string;
-  bestDay: string;
-  avgLength: number;
-  hashtagPosts: number;
   draftCount: number;
   scheduledCount: number;
   postedCount: number;
-  recentPosts: SocialPost[];
+  postsPerWeek: number | string;
+  bestDay: string;
+  avgLength: number;
+  hashtagPosts: number;
+  recentPosts: Array<{ id: string; content: string; status: string; createdAt: string }>;
 }
 
 function PostStatsView({ stats }: { stats: PostStats }) {

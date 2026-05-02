@@ -40,16 +40,16 @@ type Action = {
 
 const EMPTY: UniversalSearchResult = { contacts: [], invoices: [], bookings: [], products: [], projects: [] };
 
-type SearchItem = {
+type SearchItemBase = {
   id: string;
   displayName?: string;
-  firstName?: string;
-  lastName?: string;
+  firstName?: string | null;
+  lastName?: string | null;
   email?: string | null;
-  status?: string;
+  status?: string | null;
   invoiceNumber?: string | null;
-  currency?: string | null;
   total?: number | null;
+  currency?: string | null;
   contact?: { firstName?: string | null; lastName?: string | null } | null;
   service?: { name?: string | null } | null;
   startTime?: string;
@@ -63,9 +63,9 @@ type SearchSection = {
   label: string;
   icon: typeof User;
   color: string;
-  getHref: (item: SearchItem) => string;
-  getTitle: (item: SearchItem) => string;
-  getSub: (item: SearchItem) => string;
+  getHref: (item: SearchItemBase) => string;
+  getTitle: (item: SearchItemBase) => string;
+  getSub: (item: SearchItemBase) => string;
 };
 
 const SEARCH_SECTIONS: SearchSection[] = [
@@ -97,7 +97,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
       const name = b.contact ? [b.contact.firstName, b.contact.lastName].filter(Boolean).join(" ") : "";
       return `${b.service?.name || "Booking"} ${name ? `· ${name}` : ""}`;
     },
-    getSub: (b) => `${new Date(b.startTime ?? "").toLocaleDateString()} · ${b.status ?? ""}`,
+    getSub: (b) => `${b.startTime ? new Date(b.startTime).toLocaleDateString() : ""} · ${b.status ?? ""}`,
   },
   {
     key: "products",
@@ -105,7 +105,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
     icon: Package,
     color: "hsl(var(--kf-warning))",
     getHref: () => `/app/commerce?tab=products`,
-    getTitle: (p) => p.name ?? "",
+    getTitle: (p) => p.name ?? "Product",
     getSub: (p) => `${p.currency || "TTD"} ${p.price?.toFixed(2) ?? "0.00"}`,
   },
   {
@@ -114,7 +114,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
     icon: FolderKanban,
     color: "hsl(var(--kf-accent1))",
     getHref: () => `/app/projects`,
-    getTitle: (p) => p.name ?? "",
+    getTitle: (p) => p.name ?? "Project",
     getSub: (p) => `${p.status || ""} · ${p.priority || ""}`,
   },
 ];
@@ -258,7 +258,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       for (const section of SEARCH_SECTIONS) {
         const sectionItems = searchResults[section.key];
         if (sectionItems && sectionItems.length > 0) {
-          for (const item of sectionItems as SearchItem[]) {
+          for (const item of sectionItems as SearchItemBase[]) {
             items.push({
               type: "search",
               id: `search-${section.key}-${item.id}`,
@@ -351,7 +351,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                       <Icon className="w-3 h-3" style={{ color: section.color }} />
                       {section.label}
                     </div>
-                    {(items as SearchItem[]).map((item) => {
+                    {(items as SearchItemBase[]).map((item) => {
                       const idx = getNextIdx();
                       return (
                         <button

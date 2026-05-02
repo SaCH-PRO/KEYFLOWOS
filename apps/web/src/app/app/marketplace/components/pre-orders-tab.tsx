@@ -3,20 +3,25 @@
 import { motion } from "framer-motion";
 import { Clock, User, Mail, Calendar, Pencil } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { PreOrder, Product } from "@/lib/marketplace-types";
 
-type PreOrderRow = PreOrder & {
-  product?: Product | null;
+interface PreOrderDto {
+  id: string;
+  orderNumber?: string;
+  status?: string;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  expectedDate?: string | null;
+  expectedShipDate?: string | null;
+  total?: number | string;
+  currency?: string | null;
+  product?: { name?: string };
   productName?: string;
-};
+  quantity?: number;
+  depositAmount?: number | string;
+  createdAt?: string;
+}
 
-export function PreOrdersTab({
-  preOrders,
-  onEdit,
-}: {
-  preOrders: PreOrderRow[];
-  onEdit: (item: PreOrderRow) => void;
-}) {
+export function PreOrdersTab({ preOrders, onEdit }: { preOrders: PreOrderDto[]; onEdit: (item: PreOrderDto) => void }) {
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(preOrders);
   if (preOrders.length === 0) {
     return <EmptyState icon={Clock} title="No Pre-Orders" description="Manage pre-orders with deposit tracking and expected delivery dates." />;
@@ -43,7 +48,7 @@ export function PreOrdersTab({
               </div>
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
-              {po.depositAmount != null && (
+              {po.depositAmount && (
                 <div className="text-right">
                   <p className="text-xs text-muted-foreground">Deposit</p>
                   <p className="text-sm font-semibold">{formatCurrency(parseFloat(String(po.depositAmount)) || 0)}</p>

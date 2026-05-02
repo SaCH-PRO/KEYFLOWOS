@@ -731,7 +731,7 @@ export function BillingDetailModal({
         drag="y"
         dragConstraints={{ top: 0, bottom: 200 }}
         dragElastic={{ top: 0, bottom: 0.6 }}
-        onDragEnd={(_, info: { offset: { y: number }; velocity: { y: number } }) => {
+        onDragEnd={(_: MouseEvent | TouchEvent | PointerEvent, info: { offset: { y: number }; velocity: { y: number } }) => {
           if (info.offset.y > 100 || info.velocity.y > 500) onClose();
         }}
         className="absolute bottom-0 left-0 right-0 max-h-[92vh] bg-card rounded-t-3xl border-t border-border/60 shadow-2xl flex flex-col sm:hidden"

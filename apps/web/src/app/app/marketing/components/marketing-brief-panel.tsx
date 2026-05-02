@@ -262,7 +262,7 @@ export function MarketingBriefPanel({ businessId, isOpen, onClose }: MarketingBr
         toast.error(res.error);
         return;
       }
-      const data = res.data as { success?: boolean; message?: string; method?: string } | null;
+      const data = res.data as { success?: boolean; message?: string; method?: string } | undefined;
       if (data?.success === false) {
         toast.error(data?.message || "Could not send marketing brief. Please connect Gmail in Settings.");
         return;

@@ -49,30 +49,26 @@ export function useConnections() {
         businessId ? fetchSocialConnections(businessId) : Promise.resolve([]),
       ]);
 
-      const cal = calRes.status === "fulfilled" ? calRes.value : null;
-      const gmail = gmailRes.status === "fulfilled" ? gmailRes.value : null;
-      const socialRaw = socialRes.status === "fulfilled" ? socialRes.value : [];
-      const socialWrapped = socialRaw as SocialConnection[] | { data?: SocialConnection[] } | null | undefined;
-      const social: SocialConnection[] = Array.isArray(socialWrapped)
-        ? socialWrapped
-        : Array.isArray(socialWrapped?.data)
-          ? socialWrapped.data
+      type StatusResult = { connected?: boolean; email?: string | null } | null | undefined;
+      type CalGmailResp = { data?: StatusResult } | StatusResult;
+      const extractStatus = (v: CalGmailResp): StatusResult => {
+        if (v && typeof v === "object" && "data" in v && v.data !== undefined) return v.data;
+        return v as StatusResult;
+      };
+      const cal = calRes.status === "fulfilled" ? extractStatus(calRes.value as CalGmailResp) : null;
+      const gmail = gmailRes.status === "fulfilled" ? extractStatus(gmailRes.value as CalGmailResp) : null;
+      const socialRaw: unknown = socialRes.status === "fulfilled" ? socialRes.value : [];
+      const social: SocialConnection[] = Array.isArray(socialRaw)
+        ? (socialRaw as SocialConnection[])
+        : Array.isArray((socialRaw as { data?: unknown })?.data)
+          ? ((socialRaw as { data: SocialConnection[] }).data)
           : [];
 
-      const calData = (cal && typeof cal === "object" && "data" in cal ? cal.data : cal) as
-        | { connected?: boolean; email?: string | null }
-        | null
-        | undefined;
-      const gmailData = (gmail && typeof gmail === "object" && "data" in gmail ? gmail.data : gmail) as
-        | { connected?: boolean; email?: string | null }
-        | null
-        | undefined;
-
       const data: ConnectionsState = {
-        calendarConnected: !!calData?.connected,
-        calendarEmail: calData?.email ?? null,
-        gmailConnected: !!gmailData?.connected,
-        gmailEmail: gmailData?.email ?? null,
+        calendarConnected: !!cal?.connected,
+        calendarEmail: cal?.email ?? null,
+        gmailConnected: !!gmail?.connected,
+        gmailEmail: gmail?.email ?? null,
         socialConnections: social,
         loading: false,
       };

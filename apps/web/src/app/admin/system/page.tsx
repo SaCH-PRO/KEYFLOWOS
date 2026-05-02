@@ -119,7 +119,7 @@ function worstStatus(statuses: CheckStatus[]): CheckStatus {
 const STATUS_CONFIG: Record<
   CheckStatus,
   {
-    icon: React.ComponentType<{ className?: string }>;
+    icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     color: string;
     bg: string;
     border: string;
@@ -149,7 +149,7 @@ const STATUS_CONFIG: Record<
   },
 };
 
-const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+const CATEGORY_ICONS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
   "Infrastructure": Database,
   "Modules": Layers,
   "Integrations": Globe,

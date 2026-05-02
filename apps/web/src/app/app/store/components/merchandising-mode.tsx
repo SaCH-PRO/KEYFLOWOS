@@ -370,7 +370,7 @@ export function MerchandisingMode({
   const pc = appearance?.primaryColor || businessData?.primaryColor || "#F97316";
   const ac = "#a78bfa";
 
-  const testimonials = storefrontConfig.socialProof?.testimonials ?? [];
+  const testimonials = (storefrontConfig.socialProof as { testimonials?: unknown[] } | undefined)?.testimonials ?? [];
   const faqEntries = storefrontConfig.faqEntries ?? [];
   const seo = storefrontConfig.seo as { metaTitle?: string; metaDescription?: string } | undefined;
   const liveItems = commerceProducts.filter((p) => liveProductIds.has(p.id));

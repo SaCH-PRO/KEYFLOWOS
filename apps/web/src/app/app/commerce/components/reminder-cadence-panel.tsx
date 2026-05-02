@@ -67,10 +67,10 @@ export function ReminderCadencePanel({ businessId: _businessId, invoiceId: _invo
     setSteps(prev => prev.filter(s => s.id !== id));
   }, []);
 
-  const updateStep = useCallback(<K extends keyof ReminderStep>(id: string, field: K, value: ReminderStep[K]) => {
+  const updateStep = useCallback((id: string, field: keyof ReminderStep, value: ReminderStep[keyof ReminderStep]) => {
     setSteps(prev => prev.map(s => {
       if (s.id !== id) return s;
-      const updated: ReminderStep = { ...s, [field]: value };
+      const updated = { ...s, [field]: value };
       if (field === "tone" && !s.template.includes("custom")) {
         updated.template = DEFAULT_TEMPLATES[value as string] ?? s.template;
       }
@@ -128,7 +128,7 @@ export function ReminderCadencePanel({ businessId: _businessId, invoiceId: _invo
                 <select
                   className="text-xs rounded-lg border border-border bg-background px-2 py-1.5"
                   value={step.channel}
-                  onChange={(e) => updateStep(step.id, "channel", e.target.value as ReminderStep["channel"])}
+                  onChange={(e) => updateStep(step.id, "channel", e.target.value)}
                 >
                   <option value="email">Email</option>
                   <option value="whatsapp">WhatsApp</option>
@@ -147,7 +147,7 @@ export function ReminderCadencePanel({ businessId: _businessId, invoiceId: _invo
                 <select
                   className={`text-[10px] rounded-full border px-2 py-1 font-medium ${TONE_COLORS[step.tone]}`}
                   value={step.tone}
-                  onChange={(e) => updateStep(step.id, "tone", e.target.value as ReminderStep["tone"])}
+                  onChange={(e) => updateStep(step.id, "tone", e.target.value)}
                 >
                   <option value="gentle">Gentle</option>
                   <option value="firm">Firm</option>

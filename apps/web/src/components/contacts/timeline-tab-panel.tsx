@@ -344,15 +344,22 @@ export function TimelineTabPanel({
                             {new Date(event.createdAt).toLocaleString("en-TT", { dateStyle: "medium", timeStyle: "short" })}
                           </span>
                         </div>
-                        {event.type === "status.changed" && Boolean((event.data as Record<string, unknown>)?.from) && Boolean((event.data as Record<string, unknown>)?.to) && (
-                          <p className="text-xs text-muted-foreground mt-0.5">{String((event.data as Record<string, unknown>).from)} &rarr; {String((event.data as Record<string, unknown>).to)}</p>
-                        )}
-                        {event.type === "bulk.updated" && Boolean((event.data as Record<string, unknown>)?.status) && (
-                          <p className="text-xs text-muted-foreground mt-0.5">Status &rarr; {String((event.data as Record<string, unknown>).status)}</p>
-                        )}
-                        {event.type === "bulk.updated" && Boolean((event.data as Record<string, unknown>)?.addedTags) && (
-                          <p className="text-xs text-muted-foreground mt-0.5">Tags: {((event.data as Record<string, unknown>).addedTags as string[]).join(", ")}</p>
-                        )}
+                        {(() => {
+                          const data = event.data as { from?: string; to?: string; status?: string; addedTags?: string[] } | undefined;
+                          return (
+                            <>
+                              {event.type === "status.changed" && data?.from && data?.to && (
+                                <p className="text-xs text-muted-foreground mt-0.5">{data.from} &rarr; {data.to}</p>
+                              )}
+                              {event.type === "bulk.updated" && data?.status && (
+                                <p className="text-xs text-muted-foreground mt-0.5">Status &rarr; {data.status}</p>
+                              )}
+                              {event.type === "bulk.updated" && data?.addedTags && (
+                                <p className="text-xs text-muted-foreground mt-0.5">Tags: {data.addedTags.join(", ")}</p>
+                              )}
+                            </>
+                          );
+                        })()}
                         <div className="flex items-center gap-0.5 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button onClick={() => handleCopyEvent(event.id, `${EVENT_LABELS[event.type] || event.type} — ${new Date(event.createdAt).toLocaleString("en-TT")}`)} className="p-1 rounded-md hover:bg-muted transition-colors" title="Copy event">
                             {timelineEventCopied === event.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-muted-foreground" />}
