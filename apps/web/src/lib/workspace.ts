@@ -3,8 +3,8 @@
 import { bootstrapIdentity } from "./client";
 import {
   applyDevBypassToLocalStorage,
+  getActiveDevProfile,
   isDevAuthBypassEnabled,
-  KEYFLOW_DEV_BUSINESS_ID,
 } from "./keyflow-dev-auth";
 
 const BUSINESS_ID_KEY = "kf_business_id";
@@ -104,12 +104,15 @@ export function clearStoredBusinessId() {
 
 export async function ensureWorkspace(): Promise<string | null> {
   if (typeof window === "undefined") return null;
-  applyDevBypassToLocalStorage();
+  // If the dev profile changed (e.g. user just arrived with ?as=staff), the
+  // helper evicts cached user/business so we can short-circuit on the new
+  // businessId but still need to re-fetch identity.
+  const devProfileChanged = applyDevBypassToLocalStorage();
   const existing = getStoredBusinessId();
-  if (existing) return existing;
+  if (existing && !devProfileChanged) return existing;
 
   const token = window.localStorage.getItem(TOKEN_KEY);
-  if (!token) return null;
+  if (!token) return existing ?? null;
 
   const result = await bootstrapIdentity({});
   if (result.data?.business?.id) {
@@ -121,10 +124,11 @@ export async function ensureWorkspace(): Promise<string | null> {
     return result.data.business.id;
   }
   if (isDevAuthBypassEnabled()) {
-    setStoredBusinessId(KEYFLOW_DEV_BUSINESS_ID);
-    return KEYFLOW_DEV_BUSINESS_ID;
+    const profile = getActiveDevProfile();
+    setStoredBusinessId(profile.businessId);
+    return profile.businessId;
   }
-  return null;
+  return existing ?? null;
 }
 
 export async function refreshWorkspace(): Promise<string | null> {
@@ -144,8 +148,9 @@ export async function refreshWorkspace(): Promise<string | null> {
     return result.data.business.id;
   }
   if (isDevAuthBypassEnabled()) {
-    setStoredBusinessId(KEYFLOW_DEV_BUSINESS_ID);
-    return KEYFLOW_DEV_BUSINESS_ID;
+    const profile = getActiveDevProfile();
+    setStoredBusinessId(profile.businessId);
+    return profile.businessId;
   }
   return null;
 }
