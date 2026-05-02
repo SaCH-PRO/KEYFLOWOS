@@ -68,7 +68,10 @@ If the error ever resurfaces despite the rules above:
    ```
 2. Confirm `next-themes` (and any provider library used at the root) declares the React major in use under `peerDependencies`. With React 19 + Next 16 (Turbopack), `next-themes` must be `^0.4.x` or newer — older 0.3.x releases declare React 16-18 only and trigger spurious HMR failures.
 3. Re-check `apps/web/next.config.ts` for any newly added `turbopack.resolveAlias` entries pointing at workspace TypeScript sources, and remove them.
-4. As a last-resort hardening for the **root error boundaries only**, write `apps/web/src/app/error.tsx` and `apps/web/src/app/global-error.tsx` using `React.createElement` instead of JSX (see the comments at the top of those files). These boundaries are loaded on-demand — only when an error actually occurs — so by the time they instantiate, many HMR cycles have already happened and the `jsx-dev-runtime` factory is the most likely casualty. Avoiding JSX in these two files removes them as a possible weak link entirely. Do NOT apply this to ordinary route files; they re-render on every nav and JSX is fine.
+4. **Root error boundaries are special — handle them as follows.** They are loaded on-demand (only when an error actually occurs), so by the time they instantiate, many HMR cycles have already happened and the `jsx-dev-runtime` factory bound to a `.tsx` file is the most likely casualty. Even using `React.createElement` in the body is **not enough** — SWC auto-injects `import "react/jsx-dev-runtime"` into every `.tsx` file regardless of whether JSX is used. The only definitive fixes are:
+   - **Delete `apps/web/src/app/error.tsx` (root level).** It is optional in Next.js. `apps/web/src/app/global-error.ts` covers every error case it would have caught.
+   - **Keep `apps/web/src/app/global-error.ts` as `.ts` (NOT `.tsx`).** Use `React.createElement` in the body. The `.ts` extension blocks SWC's automatic JSX runtime import.
+   - Do NOT apply this to ordinary route files or to nested-segment `error.tsx` files (e.g. `app/app/error.tsx`) — those re-render on navigation, so their factories stay warm.
 
 ## Learn More
 
