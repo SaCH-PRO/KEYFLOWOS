@@ -26,3 +26,6 @@ packages/db/prisma/*.db
 
 # Logs
 *.log
+
+# Build-time release marker (written by .replit build / start-prod.sh)
+.deploy-version
