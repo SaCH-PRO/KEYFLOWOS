@@ -1,213 +1,313 @@
 name: Branch divergence
 
-# Guardrail against the kind of develop-vs-main split documented in
-# `BRANCH_CLEANUP_REPORT.md` (60/31 commits, 247 files diverged before
-# Task #240). Wraps `scripts/check-branch-divergence.sh` so any
-# non-`main` long-lived branch is automatically compared to `main` and
-# the build fails if it has drifted past the configured thresholds.
+# Enforces Rule 5 of docs/branch-hygiene-policy.md: no branch is allowed to
+# silently drift from `main` past the configured thresholds (default
+# 25 commits / 50 files / 0 lines, matching the policy doc). This wraps
+# `scripts/check-branch-divergence.sh`, which exits non-zero with a JSON
+# summary when a threshold is exceeded.
 #
 # Triggers:
-#   - pull_request targeting `main`             (compares PR head <-> main)
-#   - push to a known long-lived branch         (compares branch <-> main)
-#   - workflow_dispatch                         (manual, fully overridable)
+#   - pull_request targeting `main` -> compares PR head <-> PR base. This
+#     is the gate that branch protection should mark as a required check.
+#   - push to any branch except `main` -> immediate per-push status check
+#     for direct pushes (covers long-lived branches like develop/staging
+#     plus any in-flight feature branch).
+#   - schedule (daily 06:00 UTC)    -> sweeps every branch on origin so
+#                                       stale, no-recent-push branches
+#                                       still surface (the original
+#                                       develop-vs-main failure mode).
+#   - workflow_dispatch             -> manual run with overridable
+#                                       thresholds (large-refactor escape
+#                                       hatch).
 #
-# Thresholds default to the values called out in
-# `docs/branch-hygiene-policy.md` Rule 5 (25 commits / 50 files / 0 lines).
-# To request a temporary bump for a specific run, use the
-# `workflow_dispatch` inputs below — do NOT raise the defaults in this
-# file without updating the policy doc in the same PR.
+# Per-branch overrides live in `.github/branch-divergence-overrides.yml`.
+# See that file for the format. To request a temporary bump for a single
+# run, use the `workflow_dispatch` inputs below — do NOT raise the
+# defaults in this file without updating the policy doc in the same PR.
 #
 # Re-run locally:
-#   scripts/check-branch-divergence.sh main <branch> \
+#   scripts/check-branch-divergence.sh main HEAD \
 #     --max-commits 25 --max-files 50 --fetch
 
 on:
   pull_request:
     branches: [main]
   push:
-    branches:
-      - develop
-      - staging
-      - next
-      - 'release/**'
-      - 'long-lived/**'
+    branches-ignore:
+      - main
+  schedule:
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
-      base_ref:
-        description: "Base ref to compare against (default: main)"
-        required: false
-        default: main
-      head_ref:
-        description: "Head ref to compare (default: current branch)"
+      branch:
+        description: "Branch to check (defaults to all non-main remote branches)"
         required: false
         default: ""
       max_commits:
-        description: "Fail if either side has more unique commits than this"
+        description: "Override max unique commits per side (default 25)"
         required: false
         default: "25"
       max_files:
-        description: "Fail if the diff touches more files than this"
+        description: "Override max files changed (default 50)"
         required: false
         default: "50"
       max_lines:
-        description: "Fail if combined +/- lines exceed this (0 = disabled)"
+        description: "Override max diff lines (0 disables, default 0)"
         required: false
         default: "0"
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: read
 
 concurrency:
   group: branch-divergence-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  pull-requests: read
-
 jobs:
-  check:
-    name: Check divergence vs main
+  # ---------------------------------------------------------------------------
+  # Self-test job: exercises the threshold resolver against fixture data so
+  # parser regressions in scripts/ci/resolve-divergence-thresholds.sh are
+  # caught before they silently change which branches get gated. Runs on
+  # every trigger so it acts as a smoke test for the workflow itself.
+  # ---------------------------------------------------------------------------
+  resolver-tests:
+    name: Threshold resolver tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run resolver test fixture
+        run: bash scripts/ci/test-resolve-divergence-thresholds.sh
+
+  # ---------------------------------------------------------------------------
+  # PR job: runs on every PR targeting `main`. Compares the PR head against
+  # the PR base. This is the job that branch protection should mark as a
+  # required check so a drifting branch cannot merge.
+  # ---------------------------------------------------------------------------
+  check-pr:
+    if: github.event_name == 'pull_request'
+    name: Check divergence vs main (PR)
+    needs: resolver-tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      # Defaults aligned with docs/branch-hygiene-policy.md Rule 5.
-      DEFAULT_MAX_COMMITS: "25"
-      DEFAULT_MAX_FILES: "50"
-      DEFAULT_MAX_LINES: "0"
+    steps:
+      - name: Checkout (full history of PR head)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Fetch PR base ref
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git fetch --no-tags --quiet origin "$BASE_REF:refs/remotes/origin/$BASE_REF" || \
+            git fetch --no-tags --quiet origin "$BASE_REF"
+          git rev-parse --verify "origin/$BASE_REF" >/dev/null
+
+      - name: Resolve thresholds for ${{ github.head_ref }}
+        id: thresholds
+        env:
+          BRANCH: ${{ github.head_ref }}
+          DEFAULT_MAX_COMMITS: "25"
+          DEFAULT_MAX_FILES: "50"
+          DEFAULT_MAX_LINES: "0"
+        run: bash scripts/ci/resolve-divergence-thresholds.sh
+
+      - name: Run divergence check
+        id: check
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MAX_COMMITS: ${{ steps.thresholds.outputs.max_commits }}
+          MAX_FILES: ${{ steps.thresholds.outputs.max_files }}
+          MAX_LINES: ${{ steps.thresholds.outputs.max_lines }}
+        run: |
+          set +e
+          OUTPUT=$(scripts/check-branch-divergence.sh \
+            "origin/$BASE_REF" "$HEAD_SHA" \
+            --max-commits "$MAX_COMMITS" \
+            --max-files "$MAX_FILES" \
+            --max-lines "$MAX_LINES" \
+            --json)
+          STATUS=$?
+          set -e
+          echo "$OUTPUT" > divergence.json
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+
+          # Human-readable report, also archived as an artifact for reviewers.
+          scripts/check-branch-divergence.sh \
+            "origin/$BASE_REF" "$HEAD_SHA" \
+            --max-commits "$MAX_COMMITS" \
+            --max-files "$MAX_FILES" \
+            --max-lines "$MAX_LINES" \
+            | tee divergence-report.txt || true
+
+          exit "$STATUS"
+        continue-on-error: true
+
+      - name: Render check summary
+        if: always()
+        env:
+          STATUS: ${{ steps.check.outputs.status }}
+          BRANCH: ${{ github.head_ref }}
+          MAX_COMMITS: ${{ steps.thresholds.outputs.max_commits }}
+          MAX_FILES: ${{ steps.thresholds.outputs.max_files }}
+          MAX_LINES: ${{ steps.thresholds.outputs.max_lines }}
+          OVERRIDE_REASON: ${{ steps.thresholds.outputs.reason }}
+        run: bash scripts/ci/render-divergence-summary.sh
+
+      - name: Upload divergence report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: divergence-report-pr
+          path: divergence-report.txt
+          if-no-files-found: ignore
+
+      - name: Fail when thresholds exceeded
+        if: steps.check.outputs.status != '0'
+        run: |
+          echo "::error title=Branch divergence threshold exceeded::PR head '${{ github.head_ref }}' has drifted past the configured thresholds vs '${{ github.event.pull_request.base.ref }}'. See https://github.com/${{ github.repository }}/blob/main/docs/branch-hygiene-policy.md#rule-5--detect-divergence-early for guidance, or add an override in .github/branch-divergence-overrides.yml."
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Per-push job: runs on every push to a non-main branch. Single check,
+  # using the override file when there is a match, otherwise the workflow
+  # defaults (25 / 50 / 0 — matches Rule 5).
+  # ---------------------------------------------------------------------------
+  check-push:
+    if: github.event_name == 'push'
+    name: Check branch vs origin/main
+    needs: resolver-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # For PRs we want the merge base, not the synthetic merge commit.
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
-      - name: Resolve refs and thresholds
-        id: resolve
-        run: |
-          set -euo pipefail
+      - name: Fetch origin/main
+        run: git fetch --no-tags --quiet origin main:refs/remotes/origin/main
 
-          EVENT="${{ github.event_name }}"
-          BASE=""
-          HEAD=""
-
-          case "$EVENT" in
-            pull_request)
-              BASE="origin/${{ github.event.pull_request.base.ref }}"
-              HEAD="${{ github.event.pull_request.head.sha }}"
-              ;;
-            push)
-              BASE="origin/main"
-              HEAD="${{ github.sha }}"
-              ;;
-            workflow_dispatch)
-              BASE="${{ github.event.inputs.base_ref }}"
-              BASE="${BASE:-main}"
-              # Prefer an explicit ref; otherwise fall back to whatever
-              # the workflow was dispatched against.
-              HEAD="${{ github.event.inputs.head_ref }}"
-              HEAD="${HEAD:-${{ github.ref_name }}}"
-              # Normalise unqualified refs to their origin counterpart so
-              # the script can resolve them after a shallow checkout +
-              # full fetch.
-              if [[ "$BASE" != *"/"* ]] && [[ "$BASE" != "HEAD" ]]; then
-                BASE="origin/$BASE"
-              fi
-              ;;
-            *)
-              echo "::error::Unsupported event '$EVENT'"
-              exit 1
-              ;;
-          esac
-
-          # Skip the check entirely when we're already on main — there's
-          # nothing meaningful to compare against itself.
-          SKIP=0
-          if [[ "$EVENT" == "push" ]] && [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            SKIP=1
-          fi
-
-          MAX_COMMITS="${{ github.event.inputs.max_commits }}"
-          MAX_FILES="${{ github.event.inputs.max_files }}"
-          MAX_LINES="${{ github.event.inputs.max_lines }}"
-          MAX_COMMITS="${MAX_COMMITS:-$DEFAULT_MAX_COMMITS}"
-          MAX_FILES="${MAX_FILES:-$DEFAULT_MAX_FILES}"
-          MAX_LINES="${MAX_LINES:-$DEFAULT_MAX_LINES}"
-
-          {
-            echo "base=$BASE"
-            echo "head=$HEAD"
-            echo "max_commits=$MAX_COMMITS"
-            echo "max_files=$MAX_FILES"
-            echo "max_lines=$MAX_LINES"
-            echo "skip=$SKIP"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Event:        $EVENT"
-          echo "Base ref:     $BASE"
-          echo "Head ref:     $HEAD"
-          echo "Thresholds:   commits=$MAX_COMMITS files=$MAX_FILES lines=$MAX_LINES"
-          echo "Skip:         $SKIP"
-
-      - name: Fetch base ref
-        if: steps.resolve.outputs.skip != '1'
-        run: |
-          set -euo pipefail
-          BASE="${{ steps.resolve.outputs.base }}"
-          # `actions/checkout@v4` with fetch-depth: 0 already fetches all
-          # branches, but be explicit so the script works even if a
-          # future change tightens the fetch.
-          if [[ "$BASE" == origin/* ]]; then
-            git fetch --no-tags --quiet origin "${BASE#origin/}:refs/remotes/$BASE" || \
-              git fetch --no-tags --quiet origin "${BASE#origin/}" || true
-          fi
-          git rev-parse --verify "$BASE" >/dev/null
+      - name: Resolve thresholds for ${{ github.ref_name }}
+        id: thresholds
+        env:
+          BRANCH: ${{ github.ref_name }}
+          DEFAULT_MAX_COMMITS: "25"
+          DEFAULT_MAX_FILES: "50"
+          DEFAULT_MAX_LINES: "0"
+        run: bash scripts/ci/resolve-divergence-thresholds.sh
 
       - name: Run divergence check
-        if: steps.resolve.outputs.skip != '1'
         id: check
+        env:
+          MAX_COMMITS: ${{ steps.thresholds.outputs.max_commits }}
+          MAX_FILES: ${{ steps.thresholds.outputs.max_files }}
+          MAX_LINES: ${{ steps.thresholds.outputs.max_lines }}
         run: |
-          set -euo pipefail
-          chmod +x scripts/check-branch-divergence.sh
-          scripts/check-branch-divergence.sh \
-            "${{ steps.resolve.outputs.base }}" \
-            "${{ steps.resolve.outputs.head }}" \
-            --max-commits "${{ steps.resolve.outputs.max_commits }}" \
-            --max-files   "${{ steps.resolve.outputs.max_files }}" \
-            --max-lines   "${{ steps.resolve.outputs.max_lines }}" \
-          | tee divergence-report.txt
+          set +e
+          OUTPUT=$(scripts/check-branch-divergence.sh \
+            origin/main HEAD \
+            --max-commits "$MAX_COMMITS" \
+            --max-files "$MAX_FILES" \
+            --max-lines "$MAX_LINES" \
+            --json)
+          STATUS=$?
+          set -e
+          echo "$OUTPUT" > divergence.json
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
 
-      - name: Skipped (push to main)
-        if: steps.resolve.outputs.skip == '1'
-        run: echo "Push to main — nothing to compare. Skipping divergence check."
+          # Human-readable summary alongside the JSON, also archived.
+          scripts/check-branch-divergence.sh \
+            origin/main HEAD \
+            --max-commits "$MAX_COMMITS" \
+            --max-files "$MAX_FILES" \
+            --max-lines "$MAX_LINES" \
+            | tee divergence-report.txt || true
+
+          exit "$STATUS"
+        continue-on-error: true
+
+      - name: Render check summary
+        if: always()
+        env:
+          STATUS: ${{ steps.check.outputs.status }}
+          BRANCH: ${{ github.ref_name }}
+          MAX_COMMITS: ${{ steps.thresholds.outputs.max_commits }}
+          MAX_FILES: ${{ steps.thresholds.outputs.max_files }}
+          MAX_LINES: ${{ steps.thresholds.outputs.max_lines }}
+          OVERRIDE_REASON: ${{ steps.thresholds.outputs.reason }}
+        run: bash scripts/ci/render-divergence-summary.sh
 
       - name: Upload divergence report
-        if: always() && steps.resolve.outputs.skip != '1'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: divergence-report
+          name: divergence-report-push
           path: divergence-report.txt
           if-no-files-found: ignore
 
-      - name: Explain failure
-        if: failure() && steps.check.conclusion == 'failure'
+      - name: Fail when thresholds exceeded
+        if: steps.check.outputs.status != '0'
         run: |
-          cat <<'EOF'
-          ::error::Branch divergence threshold exceeded.
-
-          This branch has drifted from `main` past the limits defined in
-          docs/branch-hygiene-policy.md (Rule 5).
-
-          What to do:
-            1. Rebase or merge `main` into this branch and push again, OR
-            2. Split the branch into smaller PRs targeting `main`, OR
-            3. If the spike is intentional and time-boxed, request a
-               temporary threshold bump by re-running this workflow via
-               "Run workflow" with higher max_commits / max_files inputs
-               and link to the run in your PR description. Update the
-               policy doc in the same PR if the bump should become the
-               new default.
-
-          Re-run locally:
-            scripts/check-branch-divergence.sh main HEAD \
-              --max-commits 25 --max-files 50 --fetch
-          EOF
+          echo "::error title=Branch divergence threshold exceeded::Branch '${{ github.ref_name }}' has drifted past the configured thresholds. See https://github.com/${{ github.repository }}/blob/main/docs/branch-hygiene-policy.md#rule-5--detect-divergence-early for guidance, or add an override in .github/branch-divergence-overrides.yml."
           exit 1
+
+  # ---------------------------------------------------------------------------
+  # Manual job: runs only on workflow_dispatch. Lets a maintainer pass an
+  # explicit branch + thresholds (escape hatch for large refactors).
+  # ---------------------------------------------------------------------------
+  check-manual:
+    if: github.event_name == 'workflow_dispatch'
+    name: Check ${{ inputs.branch || 'all branches' }} (manual)
+    needs: resolver-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch origin
+        run: git fetch --no-tags --quiet origin
+
+      - name: Run divergence check(s)
+        env:
+          BRANCH: ${{ inputs.branch }}
+          MAX_COMMITS: ${{ inputs.max_commits }}
+          MAX_FILES: ${{ inputs.max_files }}
+          MAX_LINES: ${{ inputs.max_lines }}
+        run: bash scripts/ci/sweep-divergence.sh
+
+  # ---------------------------------------------------------------------------
+  # Scheduled job: nightly sweep of every non-main branch on origin. Surfaces
+  # branches that stopped getting pushes but kept drifting (the original
+  # develop-vs-main failure mode).
+  # ---------------------------------------------------------------------------
+  check-scheduled:
+    if: github.event_name == 'schedule'
+    name: Nightly sweep of all branches
+    needs: resolver-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch origin
+        run: git fetch --no-tags --quiet origin
+
+      - name: Sweep all non-main branches
+        env:
+          BRANCH: ""
+          MAX_COMMITS: "25"
+          MAX_FILES: "50"
+          MAX_LINES: "0"
+        run: bash scripts/ci/sweep-divergence.sh

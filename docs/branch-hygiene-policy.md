@@ -89,24 +89,36 @@ without losing work.
   to continue diverging silently.
 - **CI enforces this automatically** via
   `.github/workflows/branch-divergence.yml`. The workflow runs on:
-  - every PR targeting `main` (compares the PR head against
-    `origin/main`), and
-  - every push to a known long-lived branch (`develop`, `staging`,
-    `next`, `release/**`, `long-lived/**`).
-
-  The job is `Branch divergence / Check divergence vs main`; mark it
-  **required** in GitHub branch protection for `main` so a drifting
-  branch cannot merge.
+  - every PR targeting `main` (compares the PR head against the PR base) —
+    this is the gate that branch protection should mark **required**;
+  - every push to any non-`main` branch (per-push gate, covers long-lived
+    branches and in-flight feature branches alike);
+  - nightly at 06:00 UTC, sweeping every branch on `origin` so silent
+    drift on stale, no-recent-push branches still surfaces; and
+  - `workflow_dispatch` with overridable thresholds for one-off audits
+    (escape hatch for large refactors).
+- **Per-branch overrides** live in `.github/branch-divergence-overrides.yml`.
+  Use them only when there is a written owner, a written sunset date, and
+  a real justification (e.g. an in-flight large refactor merging as one
+  PR per Rule 2). The workflow logs a warning and asks for renewal once
+  the `expires` date passes.
 - **Re-run the same check locally** before pushing:
   ```bash
   scripts/check-branch-divergence.sh main HEAD \
     --max-commits 25 --max-files 50 --fetch
   ```
-- **Need a temporary threshold bump?** Two options, in order of
+- The CI check fails with a link to this rule and a one-line summary in
+  the run's job summary, so reviewers can see the breach without opening
+  the raw log. The human-readable report is also uploaded as a
+  `divergence-report-*` artifact.
+- **Need a temporary threshold bump?** Three options, in order of
   preference:
   1. Rebase or merge `main` into the branch, or split the work into
      smaller PRs. This is almost always the right answer.
-  2. If a one-off bump is genuinely needed, dispatch the workflow
+  2. Add an entry to `.github/branch-divergence-overrides.yml` with an
+     `owner`, `expires`, and `reason`. Best for in-flight refactors that
+     will land as a single PR per Rule 2.
+  3. If a one-off bump is genuinely needed, dispatch the workflow
      manually via GitHub Actions → **Branch divergence** → **Run
      workflow** with elevated `max_commits` / `max_files` inputs, link
      the run in the PR description, and explain why. Bumping the
@@ -127,9 +139,14 @@ without losing work.
 | Cadence  | Action                                                                 |
 | -------- | ---------------------------------------------------------------------- |
 | Per PR   | Reviewer enforces Rule 2 (one scope per PR, no piggy-backed work).     |
-| Per PR   | CI runs `Branch divergence / Check divergence vs main` (Rule 5).       |
-| Per push | CI re-runs the divergence check on long-lived branches (Rule 5).       |
+| Per PR   | CI runs `Branch divergence / Check divergence vs main (PR)` (Rule 5).  |
+| Per push | CI workflow `Branch divergence` runs `check-branch-divergence.sh` on  |
+|          | every non-`main` branch and fails the check when thresholds are       |
+|          | exceeded (Rule 5).                                                     |
 | Daily    | Platform auto-archives `subrepl-*` branches on task merge (Rule 3).    |
+| Daily    | CI nightly sweep (06:00 UTC) re-runs the divergence check across every |
+|          | branch on `origin`, surfacing stale branches that stopped getting      |
+|          | pushes but kept drifting.                                              |
 | Weekly   | Maintainer runs `scripts/archive-stale-subrepl-branches.sh --days 14`. |
 | Weekly   | Maintainer spot-checks `scripts/check-branch-divergence.sh` for any    |
 |          | branch that still exists outside `main` (CI is the primary gate).      |

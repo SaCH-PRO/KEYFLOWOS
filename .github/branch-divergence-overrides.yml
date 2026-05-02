@@ -1,0 +1,42 @@
+# Per-branch overrides for the "Branch divergence" CI guardrail.
+#
+# Used by .github/workflows/branch-divergence.yml when invoking
+# scripts/check-branch-divergence.sh against `origin/main`.
+#
+# Default thresholds (when no override matches) come from the workflow
+# inputs / Rule 5 of docs/branch-hygiene-policy.md:
+#   max_commits: 50   max_files: 100
+#
+# When to add an override:
+#   - Legitimate large refactor that will be merged or archived by a known
+#     date (set `expires` so the override self-removes from review).
+#   - Long-running spike branch where the team has explicitly accepted the
+#     drift risk in writing (link the discussion in `reason`).
+#
+# Format:
+#   overrides:
+#     - branch: <exact branch name OR glob, e.g. "refactor/*">
+#       max_commits: <int, optional — defaults to workflow default>
+#       max_files:   <int, optional — defaults to workflow default>
+#       max_lines:   <int, optional — 0 disables the line check>
+#       reason:      <human-readable justification>
+#       owner:       <github handle accountable for the branch>
+#       expires:     <YYYY-MM-DD; the workflow warns once this date passes>
+#
+# Examples (commented out — uncomment + edit as needed):
+#
+# overrides:
+#   - branch: refactor/storage-layer
+#     max_commits: 250
+#     max_files: 500
+#     reason: "Storage layer rewrite; merging in one shot per Rule 2."
+#     owner: SaCH-PRO
+#     expires: 2026-06-15
+#
+#   - branch: spike/*
+#     max_commits: 100
+#     reason: "Throwaway spike branches; not merged, archived after review."
+#     owner: SaCH-PRO
+#     expires: 2026-12-31
+
+overrides: []
