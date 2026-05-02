@@ -149,12 +149,23 @@ const NavigationContext = createContext<NavigationContextValue>({
 export function NavigationContextProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [stack, setStack] = useState<NavigationEntry[]>(() => loadStack());
-  const [taskOrigin, setTaskOriginState] = useState<NavigationEntry | null>(() => loadTaskOrigin());
+  const [stack, setStack] = useState<NavigationEntry[]>([]);
+  const [taskOrigin, setTaskOriginState] = useState<NavigationEntry | null>(null);
   const metaOverrideRef = useRef<Partial<NavigationEntry>>({});
+  const hydratedRef = useRef(false);
 
   const prevRouteRef = useRef<string>("");
   const prevTabRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    // Hydrate from localStorage exactly once after mount; the initial render
+    // must use [] to match SSR output and avoid a hydration mismatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot client-only hydration
+    setStack(loadStack());
+    setTaskOriginState(loadTaskOrigin());
+  }, []);
 
   const buildEntry = useCallback(
     (route: string, overrides: Partial<NavigationEntry> = {}): NavigationEntry => {

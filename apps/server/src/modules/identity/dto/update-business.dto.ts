@@ -184,6 +184,11 @@ export class UpdateBusinessDto {
   @MaxLength(100)
   industry?: string;
 
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  businessIntent?: string;
+
   @IsObject()
   @IsOptional()
   metaData?: Record<string, any>;
