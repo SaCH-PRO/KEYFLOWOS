@@ -8,6 +8,18 @@ import { GlobalHttpExceptionFilter } from './core/filters/http-exception.filter'
 import { allowedCorsOrigins } from './core/config/runtime-urls';
 
 async function bootstrap() {
+  if (
+    process.env.NODE_ENV === 'production' &&
+    (process.env.KEYFLOW_DEV_AUTH_BYPASS === 'true' || process.env.KEYFLOW_DEV_AUTH_BYPASS === '1')
+  ) {
+    // Hard-fail: the dev bypass must never run in production.
+    // eslint-disable-next-line no-console
+    console.error(
+      '[FATAL] KEYFLOW_DEV_AUTH_BYPASS is enabled in production. This is unsafe — refusing to start. Unset KEYFLOW_DEV_AUTH_BYPASS or run with NODE_ENV !== "production".',
+    );
+    process.exit(1);
+  }
+
   const app = await NestFactory.create(AppModule);
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.set('trust proxy', 1);
