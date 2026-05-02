@@ -1,11 +1,6 @@
 "use client";
 
 import { bootstrapIdentity } from "./client";
-import {
-  applyDevBypassToLocalStorage,
-  getActiveDevProfile,
-  isDevAuthBypassEnabled,
-} from "./keyflow-dev-auth";
 
 const BUSINESS_ID_KEY = "kf_business_id";
 const TOKEN_KEY = "kf_token";
@@ -92,6 +87,12 @@ export function setStoredBusinessId(id: string) {
   window.localStorage.setItem(BUSINESS_ID_KEY, id);
 }
 
+/**
+ * Wipe every piece of cached identity state from the browser. Called from:
+ *   - Explicit sign-out
+ *   - Global 401 interceptor (token rejected by server → force re-auth)
+ *   - <RequireAuth> when /identity/me reports no session
+ */
 export function clearStoredBusinessId() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(BUSINESS_ID_KEY);
@@ -104,36 +105,8 @@ export function clearStoredBusinessId() {
 
 export async function ensureWorkspace(): Promise<string | null> {
   if (typeof window === "undefined") return null;
-  // If the dev profile changed (e.g. user just arrived with ?as=staff), the
-  // helper evicts cached user/business so we can short-circuit on the new
-  // businessId but still need to re-fetch identity.
-  const devProfileChanged = applyDevBypassToLocalStorage();
   const existing = getStoredBusinessId();
-  if (existing && !devProfileChanged) return existing;
-
-  const token = window.localStorage.getItem(TOKEN_KEY);
-  if (!token) return existing ?? null;
-
-  const result = await bootstrapIdentity({});
-  if (result.data?.business?.id) {
-    setStoredBusinessId(result.data.business.id);
-    setCachedBusiness(result.data.business as CachedBusiness);
-    if (result.data.user) {
-      setCachedUser(result.data.user as CachedUser);
-    }
-    return result.data.business.id;
-  }
-  if (isDevAuthBypassEnabled()) {
-    const profile = getActiveDevProfile();
-    setStoredBusinessId(profile.businessId);
-    return profile.businessId;
-  }
-  return existing ?? null;
-}
-
-export async function refreshWorkspace(): Promise<string | null> {
-  if (typeof window === "undefined") return null;
-  applyDevBypassToLocalStorage();
+  if (existing) return existing;
 
   const token = window.localStorage.getItem(TOKEN_KEY);
   if (!token) return null;
@@ -147,10 +120,23 @@ export async function refreshWorkspace(): Promise<string | null> {
     }
     return result.data.business.id;
   }
-  if (isDevAuthBypassEnabled()) {
-    const profile = getActiveDevProfile();
-    setStoredBusinessId(profile.businessId);
-    return profile.businessId;
+  return null;
+}
+
+export async function refreshWorkspace(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  if (!token) return null;
+
+  const result = await bootstrapIdentity({});
+  if (result.data?.business?.id) {
+    setStoredBusinessId(result.data.business.id);
+    setCachedBusiness(result.data.business as CachedBusiness);
+    if (result.data.user) {
+      setCachedUser(result.data.user as CachedUser);
+    }
+    return result.data.business.id;
   }
   return null;
 }

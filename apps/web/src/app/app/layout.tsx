@@ -60,7 +60,6 @@ import { AiContextProvider } from "@/contexts/ai-context";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
-import { DevBypassBanner } from "@/components/dev-bypass-banner";
 
 function relativeTime(dateStr: string): string {
   const now = Date.now();
@@ -1117,7 +1116,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <PlanLimitDialog planLimit={planLimitHit} onClose={clearPlanLimit} />
       <KeyflowOSStoreDrawer open={kfStoreOpen} onClose={() => setKfStoreOpen(false)} />
       <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} currentModule={copilotModule} initialPrompt={copilotInitialPrompt} onInitialPromptConsumed={() => setCopilotInitialPrompt(undefined)} />
-      <DevBypassBanner />
     </div>
   );
 }

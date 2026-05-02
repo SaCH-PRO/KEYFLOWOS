@@ -10,14 +10,17 @@ async function bootstrap() {
   // exits non-zero before NestFactory tries to initialize anything.
   ensureValidServerEnv(process.env);
 
+  // The KEYFLOW_DEV_AUTH_BYPASS escape hatch was removed in the Tier 2 auth
+  // hardening pass. If anyone still has it set in their env, hard-fail at
+  // boot in EVERY environment so they don't silently expect dev auto-login
+  // and end up with a half-authenticated session instead.
   if (
-    process.env.NODE_ENV === 'production' &&
-    (process.env.KEYFLOW_DEV_AUTH_BYPASS === 'true' || process.env.KEYFLOW_DEV_AUTH_BYPASS === '1')
+    process.env.KEYFLOW_DEV_AUTH_BYPASS === 'true' ||
+    process.env.KEYFLOW_DEV_AUTH_BYPASS === '1'
   ) {
-    // Hard-fail: the dev bypass must never run in production.
     // eslint-disable-next-line no-console
     console.error(
-      '[FATAL] KEYFLOW_DEV_AUTH_BYPASS is enabled in production. This is unsafe — refusing to start. Unset KEYFLOW_DEV_AUTH_BYPASS or run with NODE_ENV !== "production".',
+      '[FATAL] KEYFLOW_DEV_AUTH_BYPASS is set, but the dev auth bypass code path no longer exists. Unset this env var (and remove it from any .env file or workflow command) to start the server. To sign in locally, use the real /auth/signup → email-verify → /auth/login flow.',
     );
     process.exit(1);
   }

@@ -1,23 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { Request, Response } from 'express';
 import { AuthMiddleware } from './auth.middleware';
-import {
-  KEYFLOW_DEV_BYPASS_TOKEN,
-  KEYFLOW_DEV_PROFILES,
-} from './keyflow-dev-auth';
 
-function makeMiddleware(supabaseShouldReturnUser?: { id: string; email?: string }) {
-  const supabaseAuth = {
-    getUserFromToken: vi.fn().mockResolvedValue(supabaseShouldReturnUser ?? null),
-  } as any;
-  const prisma = {
+function makeMiddleware(supabaseUser?: { id: string; email?: string } | null, role = 'USER') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+  const supabaseAuth: any = {
+    getUserFromToken: vi.fn().mockResolvedValue(supabaseUser ?? null),
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+  const prisma: any = {
     client: {
       user: {
-        findUnique: vi.fn().mockResolvedValue({ role: 'USER' }),
+        findUnique: vi.fn().mockResolvedValue({ role }),
       },
     },
-  } as any;
-  return new AuthMiddleware(supabaseAuth, prisma);
+  };
+  return { mw: new AuthMiddleware(supabaseAuth, prisma), supabaseAuth, prisma };
 }
 
 function makeReq(overrides: Partial<Request> = {}): Request {
@@ -31,86 +29,85 @@ function makeReq(overrides: Partial<Request> = {}): Request {
 const next = () => {};
 const res = {} as Response;
 
-describe('AuthMiddleware dev bypass profile resolution', () => {
-  const originalEnv = { ...process.env };
-
-  beforeEach(() => {
-    process.env.NODE_ENV = 'development';
-    process.env.KEYFLOW_DEV_AUTH_BYPASS = 'true';
-  });
-
-  afterEach(() => {
-    process.env = { ...originalEnv };
-  });
-
-  it('attaches the default SUPER_ADMIN profile when no token is present', async () => {
-    const mw = makeMiddleware();
+describe('AuthMiddleware (post-bypass-removal)', () => {
+  it('does not attach a user when no Authorization header is present', async () => {
+    const { mw, supabaseAuth } = makeMiddleware();
     const req = makeReq();
     await mw.use(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+    expect((req as any).user).toBeUndefined();
+    expect(supabaseAuth.getUserFromToken).not.toHaveBeenCalled();
+  });
+
+  it('attaches user with DB role when Supabase verifies a real token', async () => {
+    const { mw, supabaseAuth, prisma } = makeMiddleware(
+      { id: 'user_real', email: 'real@example.com' },
+      'OWNER',
+    );
+    const req = makeReq({ headers: { authorization: 'Bearer real-jwt-here' } });
+    await mw.use(req, res, next);
+    expect(supabaseAuth.getUserFromToken).toHaveBeenCalledWith('real-jwt-here');
+    expect(prisma.client.user.findUnique).toHaveBeenCalledWith({
+      where: { id: 'user_real' },
+      select: { role: true },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
     expect((req as any).user).toEqual({
-      id: 'keyflowdev_user',
-      email: 'dev@keyflow.os',
-      role: 'SUPER_ADMIN',
+      id: 'user_real',
+      email: 'real@example.com',
+      role: 'OWNER',
     });
   });
 
-  it('attaches the legacy SUPER_ADMIN profile for the original sentinel token', async () => {
-    const mw = makeMiddleware();
+  it('does not attach a user when Supabase rejects the token', async () => {
+    const { mw } = makeMiddleware(null);
+    const req = makeReq({ headers: { authorization: 'Bearer invalid-token' } });
+    await mw.use(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+    expect((req as any).user).toBeUndefined();
+  });
+
+  it('does not attach a user when Supabase verification throws', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+    const supabaseAuth: any = {
+      getUserFromToken: vi.fn().mockRejectedValue(new Error('network down')),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+    const prisma: any = { client: { user: { findUnique: vi.fn() } } };
+    const mw = new AuthMiddleware(supabaseAuth, prisma);
+    const req = makeReq({ headers: { authorization: 'Bearer x' } });
+    await mw.use(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+    expect((req as any).user).toBeUndefined();
+  });
+
+  it('falls back to role=USER if the Prisma lookup fails', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+    const supabaseAuth: any = {
+      getUserFromToken: vi.fn().mockResolvedValue({ id: 'u1', email: 'a@b.com' }),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+    const prisma: any = {
+      client: {
+        user: { findUnique: vi.fn().mockRejectedValue(new Error('db down')) },
+      },
+    };
+    const mw = new AuthMiddleware(supabaseAuth, prisma);
+    const req = makeReq({ headers: { authorization: 'Bearer t' } });
+    await mw.use(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+    expect((req as any).user).toEqual({ id: 'u1', email: 'a@b.com', role: 'USER' });
+  });
+
+  it('ignores legacy dev sentinel tokens (no special handling)', async () => {
+    // The middleware just forwards the token to Supabase; sentinel tokens
+    // will fail Supabase verification and result in no user attached.
+    const { mw } = makeMiddleware(null);
     const req = makeReq({
-      headers: { authorization: `Bearer ${KEYFLOW_DEV_BYPASS_TOKEN}` },
+      headers: { authorization: 'Bearer keyflow-dev-bypass-token' },
     });
     await mw.use(req, res, next);
-    expect((req as any).user.role).toBe('SUPER_ADMIN');
-    expect((req as any).user.id).toBe('keyflowdev_user');
-  });
-
-  it.each(KEYFLOW_DEV_PROFILES.map((p) => [p.key, p.token, p.userId, p.userRole]))(
-    'attaches profile "%s" when its sentinel token is presented',
-    async (_key, token, userId, userRole) => {
-      const mw = makeMiddleware();
-      const req = makeReq({
-        headers: { authorization: `Bearer ${token}` },
-      });
-      await mw.use(req, res, next);
-      expect((req as any).user.id).toBe(userId);
-      expect((req as any).user.role).toBe(userRole);
-    },
-  );
-
-  it('honors a ?as=<key> override even when the token would resolve to a different profile', async () => {
-    const mw = makeMiddleware();
-    const req = makeReq({
-      headers: { authorization: `Bearer ${KEYFLOW_DEV_BYPASS_TOKEN}` },
-      query: { as: 'staff' },
-    });
-    await mw.use(req, res, next);
-    expect((req as any).user.id).toBe('keyflowdev_staff');
-    expect((req as any).user.role).toBe('USER');
-  });
-
-  it('also honors the X-Keyflow-Dev-As header', async () => {
-    const mw = makeMiddleware();
-    const req = makeReq({
-      headers: { 'x-keyflow-dev-as': 'admin' },
-    });
-    await mw.use(req, res, next);
-    expect((req as any).user.id).toBe('keyflowdev_admin');
-  });
-
-  it('ignores an unknown ?as value and falls back to default profile', async () => {
-    const mw = makeMiddleware();
-    const req = makeReq({ query: { as: 'sysadmin' } });
-    await mw.use(req, res, next);
-    expect((req as any).user.id).toBe('keyflowdev_user');
-  });
-
-  it('rejects sentinel tokens entirely when bypass is disabled', async () => {
-    process.env.KEYFLOW_DEV_AUTH_BYPASS = 'false';
-    const mw = makeMiddleware();
-    const req = makeReq({
-      headers: { authorization: `Bearer keyflow-dev-bypass-token-staff` },
-    });
-    await mw.use(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
     expect((req as any).user).toBeUndefined();
   });
 });

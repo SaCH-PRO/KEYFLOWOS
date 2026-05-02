@@ -26,7 +26,6 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
-import { applyDevBypassToLocalStorage, isDevAuthBypassEnabled } from "@/lib/keyflow-dev-auth";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -86,13 +85,6 @@ export default function AuthSignup() {
   const passwordChecks = useMemo(() => PW_RULES.map((r) => r.test(password)), [password]);
   const passwordStrength = passwordChecks.filter(Boolean).length;
   const passwordValid = passwordChecks.every(Boolean);
-
-  useEffect(() => {
-    if (isDevAuthBypassEnabled()) {
-      applyDevBypassToLocalStorage();
-      router.replace("/app");
-    }
-  }, [router]);
 
   useEffect(() => {
     if (resendCooldownSec <= 0) return;
