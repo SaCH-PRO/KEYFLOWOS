@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useCallback, useRef, useState, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useState, useEffect, type ReactNode } from "react";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 
 export interface ModuleContextEntry {
   moduleId: string;
@@ -34,8 +35,7 @@ export function AiContextProvider({ children }: { children: ReactNode }) {
     activeModule: null,
   });
 
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  const stateRef = useLatestRef(state);
 
   const registerModuleContext = useCallback((entry: ModuleContextEntry) => {
     setState((prev) => ({
@@ -63,7 +63,7 @@ export function AiContextProvider({ children }: { children: ReactNode }) {
     const s = stateRef.current;
     if (!s.activeModule) return null;
     return s.moduleContexts[s.activeModule] ?? null;
-  }, []);
+  }, [stateRef]);
 
   const getAllContextSummary = useCallback((): string => {
     const s = stateRef.current;
@@ -80,7 +80,7 @@ export function AiContextProvider({ children }: { children: ReactNode }) {
         return parts.join(" | ");
       })
       .join("\n");
-  }, []);
+  }, [stateRef]);
 
   useEffect(() => {
     const handler = (e: Event) => {

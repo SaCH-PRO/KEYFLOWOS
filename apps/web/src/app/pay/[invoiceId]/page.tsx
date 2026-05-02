@@ -91,7 +91,7 @@ type Gateway = {
 type PaymentMethod = "wipay" | "paypal" | "google_pay" | "bank_transfer" | "cash";
 
 function ConfettiParticles() {
-  const particles = useMemo(() => {
+  const [particles] = useState(() => {
     const colors = ["#F97316", "#14B8A6", "#8B5CF6", "#EC4899", "#EAB308", "#3B82F6"];
     return Array.from({ length: 40 }, (_, i) => ({
       id: i,
@@ -102,7 +102,7 @@ function ConfettiParticles() {
       size: 4 + Math.random() * 6,
       rotation: Math.random() * 360,
     }));
-  }, []);
+  });
 
   return (
     <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">

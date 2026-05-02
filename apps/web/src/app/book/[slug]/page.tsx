@@ -806,7 +806,7 @@ function PublicBookingPageInner() {
     } catch {
       setPaymentFailed(true);
     }
-  }, [failedOrderPayload, completedBookingResults, confirmedPaymentMethod, confirmedDetails]);
+  }, [failedOrderPayload, completedBookingResults, confirmedPaymentMethod, confirmedDetails, handleStoreOrderResult, submitStoreOrder]);
 
   if (loading) {
     return (

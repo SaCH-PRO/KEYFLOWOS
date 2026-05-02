@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useCallback } from "react";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 
 export type ShortcutDef = {
   key: string;
@@ -39,8 +40,7 @@ function isTyping(e: KeyboardEvent): boolean {
 }
 
 export function useKeyboardShortcuts(groups: ShortcutGroup[], enabled = true) {
-  const groupsRef = useRef(groups);
-  groupsRef.current = groups;
+  const groupsRef = useLatestRef(groups);
 
   useEffect(() => {
     if (!enabled) return;
@@ -64,7 +64,7 @@ export function useKeyboardShortcuts(groups: ShortcutGroup[], enabled = true) {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [enabled]);
+  }, [enabled, groupsRef]);
 
   const getShortcutMap = useCallback(() => {
     return groupsRef.current.map(g => ({
@@ -74,7 +74,7 @@ export function useKeyboardShortcuts(groups: ShortcutGroup[], enabled = true) {
         description: s.description,
       })),
     }));
-  }, []);
+  }, [groupsRef]);
 
   return { getShortcutMap };
 }

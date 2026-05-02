@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 
 export type TargetStatus = "available" | "deleted" | "unavailable" | "unknown";
 
@@ -61,8 +62,7 @@ export function useReturnNavigation(options: ReturnNavigationOptions = {}) {
   const router = useRouter();
   const pathname = usePathname();
   const { getOriginContext, getTaskOrigin, stack, current } = useNavigationContext();
-  const pathnameRef = useRef(pathname);
-  pathnameRef.current = pathname;
+  const pathnameRef = useLatestRef(pathname);
 
   useEffect(() => {
     if (!options.restoreScrollOnMount) return;
@@ -95,7 +95,7 @@ export function useReturnNavigation(options: ReturnNavigationOptions = {}) {
       scrollTarget.removeEventListener("scroll", onScroll);
       saveScrollPosition(pathnameRef.current ?? "", readContainerScroll());
     };
-  }, [pathname, options.skipScrollListener]);
+  }, [pathname, options.skipScrollListener, pathnameRef]);
 
   const getReturnLabel = useCallback(
     (overrideLabel?: string): string => {
@@ -139,7 +139,7 @@ export function useReturnNavigation(options: ReturnNavigationOptions = {}) {
       const href = overrideHref ?? getReturnHref();
       router.push(href);
     },
-    [getReturnHref, router]
+    [getReturnHref, router, pathnameRef]
   );
 
   const navigateBackWithFallback = useCallback(

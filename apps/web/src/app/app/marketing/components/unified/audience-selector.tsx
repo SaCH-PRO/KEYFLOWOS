@@ -77,11 +77,12 @@ export function AudienceSelector({
   }, [subject, selectedTags, destinationIds, runValidation]);
 
   const filteredTags = useMemo(() => {
-    if (!audienceData?.availableTags) return [];
-    if (!tagSearch.trim()) return audienceData.availableTags;
+    const availableTags = audienceData?.availableTags;
+    if (!availableTags) return [];
+    if (!tagSearch.trim()) return availableTags;
     const q = tagSearch.toLowerCase();
-    return audienceData.availableTags.filter((t) => t.toLowerCase().includes(q));
-  }, [audienceData?.availableTags, tagSearch]);
+    return availableTags.filter((t) => t.toLowerCase().includes(q));
+  }, [audienceData, tagSearch]);
 
   const toggleTag = (tag: string) => {
     onTagsChange(

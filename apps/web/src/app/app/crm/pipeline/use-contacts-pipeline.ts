@@ -19,6 +19,9 @@ export function useContactsPipeline() {
     isPending, startTransition,
     selectedIds, setSelectedIds, setSelectMode,
     loadContacts, trackRecent,
+    setCrmViewTab,
+    search: contactsDataSearch,
+    statusFilter: contactsDataStatusFilter,
   } = contactsData;
 
   const detail = useContactDetail(businessId, contacts);
@@ -41,11 +44,12 @@ export function useContactsPipeline() {
     loadContacts, loadDetail, loadFlowData,
   });
 
+  const detailSelectContact = detail.selectContact;
   const selectContact = useCallback(
     (contactId: string) => {
-      detail.selectContact(contactId, trackRecent);
+      detailSelectContact(contactId, trackRecent);
     },
-    [detail.selectContact, trackRecent],
+    [detailSelectContact, trackRecent],
   );
 
   const handleDoAction = useCallback((action: NextActionUI) => {
@@ -61,25 +65,25 @@ export function useContactsPipeline() {
       case "email":
       case "follow_up":
         selectContact(action.contactId);
-        contactsData.setCrmViewTab("contacts");
+        setCrmViewTab("contacts");
         toast.info(`Opening ${action.contactName} — ${action.description}`);
         break;
       case "call":
         selectContact(action.contactId);
-        contactsData.setCrmViewTab("contacts");
+        setCrmViewTab("contacts");
         toast.info(`Opening ${action.contactName} — ready to call`);
         break;
       case "task":
         selectContact(action.contactId);
-        contactsData.setCrmViewTab("contacts");
+        setCrmViewTab("contacts");
         toast.info(`Opening ${action.contactName} — task details`);
         break;
       default:
         selectContact(action.contactId);
-        contactsData.setCrmViewTab("contacts");
+        setCrmViewTab("contacts");
         break;
     }
-  }, [selectContact, router, contactsData.setCrmViewTab]);
+  }, [selectContact, router, setCrmViewTab]);
 
   useEffect(() => {
     if (businessId) {
@@ -87,7 +91,7 @@ export function useContactsPipeline() {
         void loadContacts();
       });
     }
-  }, [businessId, contactsData.search, contactsData.statusFilter, loadContacts, startTransition]);
+  }, [businessId, contactsDataSearch, contactsDataStatusFilter, loadContacts, startTransition]);
 
   useEffect(() => {
     if (businessId) {
@@ -95,9 +99,10 @@ export function useContactsPipeline() {
     }
   }, [businessId, loadFlowData]);
 
+  const actionsHandleDeleteContact = actions.handleDeleteContact;
   const handleDeleteForPanel = useCallback(() => {
-    void actions.handleDeleteContact();
-  }, [actions.handleDeleteContact]);
+    void actionsHandleDeleteContact();
+  }, [actionsHandleDeleteContact]);
 
   const handleRetryDetail = useCallback(() => {
     if (selectedContactId) void loadDetail(selectedContactId);

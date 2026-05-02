@@ -45,19 +45,21 @@ export function AiCopilot({
   const [sending, setSending] = useState(false);
 
   const copyMessage = useCallback(() => {
-    if (insight?.suggestedMessage) {
-      navigator.clipboard.writeText(insight.suggestedMessage);
+    const suggestedMessage = insight?.suggestedMessage;
+    if (suggestedMessage) {
+      navigator.clipboard.writeText(suggestedMessage);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
-  }, [insight?.suggestedMessage]);
+  }, [insight]);
 
   const handleSend = useCallback(async () => {
-    if (!insight?.suggestedMessage || !onSendSuggestion) return;
+    const suggestedMessage = insight?.suggestedMessage;
+    if (!suggestedMessage || !onSendSuggestion) return;
     setSending(true);
-    await onSendSuggestion(insight.suggestedMessage);
+    await onSendSuggestion(suggestedMessage);
     setSending(false);
-  }, [insight?.suggestedMessage, onSendSuggestion]);
+  }, [insight, onSendSuggestion]);
 
   const confidenceLabel = insight?.confidence
     ? insight.confidence >= 80

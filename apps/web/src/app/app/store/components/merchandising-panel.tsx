@@ -261,6 +261,7 @@ export function MerchandisingPanel({ config, products, services, onConfigChange,
   function addCollection() {
     if (!newCollectionName.trim()) return;
     const newCol = {
+      // eslint-disable-next-line react-hooks/purity -- audited: id generation in user-action handler
       id: `col_${Date.now()}`,
       name: newCollectionName.trim(),
       itemIds: [],
@@ -295,6 +296,7 @@ export function MerchandisingPanel({ config, products, services, onConfigChange,
     const item = allItems.find((i) => i.id === newSpotlightItemId);
     if (!item) return;
     const newSpotlight = {
+      // eslint-disable-next-line react-hooks/purity -- audited: id generation in user-action handler
       id: `sp_${Date.now()}`,
       itemId: newSpotlightItemId,
       itemType: item.type as "service" | "product" | "package",

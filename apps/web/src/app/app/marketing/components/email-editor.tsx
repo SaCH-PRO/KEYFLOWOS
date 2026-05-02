@@ -55,6 +55,24 @@ const STARTER_TEMPLATES: { key: string; label: string; icon: React.ElementType; 
   },
 ];
 
+function ToolButton({ active, onClick, children, title }: { active?: boolean; onClick: () => void; children: React.ReactNode; title: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className={`p-1.5 rounded transition-colors ${
+        active
+          ? "bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))]"
+          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export const EmailEditor = React.memo(function EmailEditor({
   value,
   onChange,
@@ -106,22 +124,6 @@ export const EmailEditor = React.memo(function EmailEditor({
   }, [editor, onChange]);
 
   if (!editor) return null;
-
-  const ToolButton = ({ active, onClick, children, title }: { active?: boolean; onClick: () => void; children: React.ReactNode; title: string }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-label={title}
-      className={`p-1.5 rounded transition-colors ${
-        active
-          ? "bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))]"
-          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-      }`}
-    >
-      {children}
-    </button>
-  );
 
   return (
     <div className="space-y-2">

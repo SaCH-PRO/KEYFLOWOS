@@ -410,6 +410,7 @@ function BusinessPulseStrip({
       }
     }
 
+    // eslint-disable-next-line react-hooks/purity -- audited: time-relative recent-signal filter
     const recentSignals = crossModuleSignals.filter((s) => Date.now() - s.timestamp < 600_000);
     for (const signal of recentSignals.slice(0, 2)) {
       items.push({

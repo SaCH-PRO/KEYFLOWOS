@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useRef } from "react";
+import React, { Suspense, useState } from "react";
 import { MessageSquare, ListTodo, History, AlertCircle, Loader2, Activity, Route } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
@@ -96,9 +96,14 @@ export function ContactDetailTabs({
   onGenerateAiInsight, onRefreshConversationContext,
   invoices = [], bookings = [],
 }: ContactDetailTabsProps) {
-  const activatedTabs = useRef(new Set<string>(["activity"]));
-  if (!activatedTabs.current.has(activeTab)) {
-    activatedTabs.current.add(activeTab);
+  const [activatedTabs, setActivatedTabs] = useState<Set<string>>(() => new Set(["activity", activeTab]));
+  if (!activatedTabs.has(activeTab)) {
+    setActivatedTabs((prev) => {
+      if (prev.has(activeTab)) return prev;
+      const next = new Set(prev);
+      next.add(activeTab);
+      return next;
+    });
   }
 
   return (
@@ -137,35 +142,35 @@ export function ContactDetailTabs({
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>}>
-          {activatedTabs.current.has("activity") && (
+          {activatedTabs.has("activity") && (
             <div className={`space-y-3 pt-3 pb-6 ${activeTab === "activity" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="activity">
                 <ActivityTimeline contact={contact} events={events} notes={notes} tasks={tasks} />
               </TabErrorBoundary>
             </div>
           )}
-          {activatedTabs.current.has("journey") && (
+          {activatedTabs.has("journey") && (
             <div className={`space-y-3 pt-3 pb-6 ${activeTab === "journey" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="journey">
                 <ContactJourneyTimeline contact={contact} events={events} notes={notes} tasks={tasks} invoices={invoices} bookings={bookings} crossJourney={crossJourney} />
               </TabErrorBoundary>
             </div>
           )}
-          {activatedTabs.current.has("notes") && (
+          {activatedTabs.has("notes") && (
             <div className={`space-y-3 pt-3 pb-6 ${activeTab === "notes" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="notes">
                 <NotesTabPanel contact={contact} notes={notes} onAddNote={onAddNote} onAddTask={onAddTask} onDeleteNote={onDeleteNote} onUpdateNote={onUpdateNote} />
               </TabErrorBoundary>
             </div>
           )}
-          {activatedTabs.current.has("tasks") && (
+          {activatedTabs.has("tasks") && (
             <div className={`space-y-3 pt-3 pb-6 ${activeTab === "tasks" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="tasks">
                 <TasksTabPanel contact={contact} tasks={tasks} onAddTask={onAddTask} onAddNote={onAddNote} onCompleteTask={onCompleteTask} onDeleteTask={onDeleteTask} onUpdateTask={onUpdateTask} />
               </TabErrorBoundary>
             </div>
           )}
-          {activatedTabs.current.has("timeline") && (
+          {activatedTabs.has("timeline") && (
             <div className={`space-y-3 pt-3 pb-6 ${activeTab === "timeline" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="timeline">
                 <TimelineTabPanel

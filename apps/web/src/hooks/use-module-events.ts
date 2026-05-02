@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { moduleEvents, type ModuleEventType, type ModuleEvent } from "@/lib/module-events";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 
 export function useModuleEvent<T = unknown>(
   eventType: ModuleEventType | "*",
   handler: (event: ModuleEvent<T>) => void,
 ) {
-  const handlerRef = useRef(handler);
-  handlerRef.current = handler;
+  const handlerRef = useLatestRef(handler);
 
   useEffect(() => {
     return moduleEvents.on(eventType, (e) => handlerRef.current(e as ModuleEvent<T>));
-  }, [eventType]);
+  }, [eventType, handlerRef]);
 }
 
 export function useModuleEmit() {

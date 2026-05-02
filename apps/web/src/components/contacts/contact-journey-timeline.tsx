@@ -360,6 +360,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
     if (crossJourney?.summary) {
       const s = crossJourney.summary;
       const lastTs = s.lastInteractionAt ? new Date(s.lastInteractionAt).getTime() : null;
+      // eslint-disable-next-line react-hooks/purity -- audited: time-relative days-since computation
       const daysSince = lastTs ? Math.floor((Date.now() - lastTs) / (1000 * 60 * 60 * 24)) : 999;
       return {
         totalRevenue: s.totalRevenue,
@@ -377,6 +378,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
     const allTimestamps = entries.map((e) => new Date(e.timestamp).getTime()).filter((t) => !Number.isNaN(t));
     const lastInteractionTs = allTimestamps.length > 0 ? Math.max(...allTimestamps) : null;
     const daysSinceLastInteraction = lastInteractionTs
+      // eslint-disable-next-line react-hooks/purity -- audited: time-relative days-since computation
       ? Math.floor((Date.now() - lastInteractionTs) / (1000 * 60 * 60 * 24))
       : 999;
     const momentum = computeMomentumScore(events.length, bookingsCount, paidInvoiceRevenue, daysSinceLastInteraction);

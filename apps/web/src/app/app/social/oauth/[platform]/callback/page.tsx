@@ -8,6 +8,85 @@ import { getStoredBusinessId } from "@/lib/workspace";
 
 type CallbackStatus = "processing" | "success" | "error";
 
+const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
+  FACEBOOK: "Facebook",
+  INSTAGRAM: "Instagram",
+  LINKEDIN: "LinkedIn",
+  TWITTER: "Twitter / X",
+  TIKTOK: "TikTok",
+};
+
+function platformDisplayName(p: string) {
+  return PLATFORM_DISPLAY_NAMES[p.toUpperCase()] || p;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
+function notifyOpener(data: Record<string, any>) {
+  try {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage(data, window.location.origin);
+      if (data.type === "social-oauth-success") {
+        setTimeout(() => window.close(), 1500);
+      }
+    } else {
+      if (data.type === "social-oauth-success") {
+        setTimeout(() => {
+          window.location.assign("/app/settings/connections");
+        }, 2000);
+      }
+    }
+  } catch {
+    if (data.type === "social-oauth-success") {
+      setTimeout(() => {
+        window.location.assign("/app/settings/connections");
+      }, 2000);
+    }
+  }
+}
+
+async function exchangeCode(
+  businessId: string,
+  platform: string,
+  code: string,
+  state: string,
+  setStatus: (s: CallbackStatus) => void,
+  setMessage: (m: string) => void,
+) {
+  try {
+    setMessage(`Connecting your ${platformDisplayName(platform)} account...`);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
+    const res = await apiPostSimple<{ success: boolean; error?: string; connection?: any }>(
+      `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/callback`,
+      { code, state },
+    );
+
+    if (res.error) {
+      setStatus("error");
+      setMessage(res.error);
+      notifyOpener({ type: "social-oauth-error", platform, error: res.error });
+      return;
+    }
+
+    if (res.data?.success) {
+      setStatus("success");
+      const name = res.data.connection?.accountName;
+      setMessage(name ? `Connected as ${name}` : `${platformDisplayName(platform)} connected successfully!`);
+      notifyOpener({ type: "social-oauth-success", platform, connection: res.data.connection });
+    } else {
+      setStatus("error");
+      const errMsg = res.data?.error || "Failed to complete connection";
+      setMessage(errMsg);
+      notifyOpener({ type: "social-oauth-error", platform, error: errMsg });
+    }
+  } catch (err: unknown) {
+    const errMessage = err instanceof Error ? err.message : "An unexpected error occurred";
+    setStatus("error");
+    setMessage(errMessage);
+    notifyOpener({ type: "social-oauth-error", platform, error: errMessage });
+  }
+}
+
 export default function SocialOAuthCallbackPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -54,129 +133,40 @@ export default function SocialOAuthCallbackPage() {
       return;
     }
 
-    exchangeCode(businessId, platform, code, state);
+    void exchangeCode(businessId, platform, code, state, setStatus, setMessage);
   }, [params.platform, searchParams]);
-
-  async function exchangeCode(businessId: string, platform: string, code: string, state: string) {
-    try {
-      setMessage(`Connecting your ${platformDisplayName(platform)} account...`);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-      const res = await apiPostSimple<{ success: boolean; error?: string; connection?: any }>(
-        `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/callback`,
-        { code, state },
-      );
-
-      if (res.error) {
-        setStatus("error");
-        setMessage(res.error);
-        notifyOpener({ type: "social-oauth-error", platform, error: res.error });
-        return;
-      }
-
-      if (res.data?.success) {
-        setStatus("success");
-        const name = res.data.connection?.accountName;
-        setMessage(name ? `Connected as ${name}` : `${platformDisplayName(platform)} connected successfully!`);
-        notifyOpener({ type: "social-oauth-success", platform, connection: res.data.connection });
-      } else {
-        setStatus("error");
-        const errMsg = res.data?.error || "Failed to complete connection";
-        setMessage(errMsg);
-        notifyOpener({ type: "social-oauth-error", platform, error: errMsg });
-      }
-    } catch (err: unknown) {
-      const errMessage = err instanceof Error ? err.message : "An unexpected error occurred";
-      setStatus("error");
-      setMessage(errMessage);
-      notifyOpener({ type: "social-oauth-error", platform, error: errMessage });
-    }
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-  function notifyOpener(data: Record<string, any>) {
-    try {
-      if (window.opener && !window.opener.closed) {
-        window.opener.postMessage(data, window.location.origin);
-        if (data.type === "social-oauth-success") {
-          setTimeout(() => window.close(), 1500);
-        }
-      } else {
-        if (data.type === "social-oauth-success") {
-          setTimeout(() => {
-            window.location.href = "/app/settings/connections";
-          }, 2000);
-        }
-      }
-    } catch {
-      if (data.type === "social-oauth-success") {
-        setTimeout(() => {
-          window.location.href = "/app/settings/connections";
-        }, 2000);
-      }
-    }
-  }
-
-  function platformDisplayName(p: string) {
-    const map: Record<string, string> = {
-      FACEBOOK: "Facebook",
-      INSTAGRAM: "Instagram",
-      LINKEDIN: "LinkedIn",
-      TWITTER: "Twitter / X",
-      TIKTOK: "TikTok",
-    };
-    return map[p.toUpperCase()] || p;
-  }
 
   return (
     <div className="h-full flex items-center justify-center bg-background p-4">
       <div className="max-w-sm w-full text-center space-y-4">
-        <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center"
-          style={{
-            background: status === "processing"
-              ? "hsl(var(--primary) / 0.1)"
-              : status === "success"
-              ? "hsl(150 60% 40% / 0.15)"
-              : "hsl(0 60% 40% / 0.15)",
-            border: `1px solid ${
-              status === "processing"
-                ? "hsl(var(--primary) / 0.2)"
-                : status === "success"
-                ? "hsl(150 60% 40% / 0.3)"
-                : "hsl(0 60% 40% / 0.3)"
-            }`,
-          }}
-        >
-          {status === "processing" && <Loader2 className="h-7 w-7 animate-spin text-primary" />}
-          {status === "success" && <CheckCircle2 className="h-7 w-7 text-emerald-400" />}
-          {status === "error" && <XCircle className="h-7 w-7 text-red-400" />}
-        </div>
-
-        <div>
-          <h2 className="text-lg font-semibold">
-            {status === "processing" && "Connecting..."}
-            {status === "success" && "Connected!"}
-            {status === "error" && "Connection Failed"}
-          </h2>
-          <p className="text-sm text-muted-foreground mt-1">{message}</p>
-        </div>
-
-        {status === "success" && (
-          <p className="text-xs text-muted-foreground">This window will close automatically...</p>
+        {status === "processing" && (
+          <>
+            <Loader2 className="w-10 h-10 animate-spin text-[hsl(var(--kf-accent1))] mx-auto" />
+            <h1 className="text-lg font-semibold text-foreground">Connecting...</h1>
+            <p className="text-sm text-muted-foreground">{message}</p>
+          </>
         )}
-
+        {status === "success" && (
+          <>
+            <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto" />
+            <h1 className="text-lg font-semibold text-foreground">Connected!</h1>
+            <p className="text-sm text-muted-foreground">{message}</p>
+            <p className="text-xs text-muted-foreground/60">This window will close automatically.</p>
+          </>
+        )}
         {status === "error" && (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              You can close this window and try again.
-            </p>
+          <>
+            <XCircle className="w-10 h-10 text-red-500 mx-auto" />
+            <h1 className="text-lg font-semibold text-foreground">Connection Failed</h1>
+            <p className="text-sm text-muted-foreground">{message}</p>
             <button
+              type="button"
               onClick={() => window.close()}
-              className="px-4 py-2 text-sm rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition"
+              className="text-xs text-[hsl(var(--kf-accent1))] hover:underline"
             >
-              Close Window
+              Close window
             </button>
-          </div>
+          </>
         )}
       </div>
     </div>

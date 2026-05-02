@@ -131,6 +131,7 @@ export function ExecutionLog({ businessId, onExecutionStatsChange }: ExecutionLo
     }
 
     if (timeFilter !== "all") {
+      // eslint-disable-next-line react-hooks/purity -- audited: time-relative filter, value should reflect current time at filter evaluation
       const now = Date.now();
       let cutoff = 0;
       if (timeFilter === "today") cutoff = now - 24 * 60 * 60 * 1000;

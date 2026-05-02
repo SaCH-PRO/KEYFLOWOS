@@ -321,6 +321,7 @@ export function ContactDetailHeader({
                 );
               })()}
               {contact.meta?.lastInteractionAt && (() => {
+                // eslint-disable-next-line react-hooks/purity -- audited: time-relative last-active label
                 const days = Math.floor((Date.now() - new Date(contact.meta.lastInteractionAt).getTime()) / 86400000);
                 const label = days === 0 ? "Today" : days === 1 ? "1 day ago" : `${days}d ago`;
                 const color = days > 30 ? "text-red-400" : days > 14 ? "text-amber-400" : "text-muted-foreground";

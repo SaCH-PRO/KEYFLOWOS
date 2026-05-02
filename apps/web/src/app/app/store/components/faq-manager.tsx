@@ -45,6 +45,7 @@ export function FaqManager({ config, onConfigChange, onSave, saving }: Props) {
   function addEntry() {
     if (!newQuestion.trim() || !newAnswer.trim()) return;
     const entry: FaqEntry = {
+      // eslint-disable-next-line react-hooks/purity -- audited: id generation in user-action handler
       id: `faq_${Date.now()}`,
       question: newQuestion.trim(),
       answer: newAnswer.trim(),

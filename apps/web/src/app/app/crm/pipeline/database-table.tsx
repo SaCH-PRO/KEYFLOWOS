@@ -227,7 +227,7 @@ function DatabaseTableInner({
       const rows = tbodyRef.current?.querySelectorAll<HTMLElement>("tr[tabindex]");
       if (rows && idx - 1 >= 0) rows[idx - 1].focus();
     }
-  }, [onSelectContact]);
+  }, [onSelectContact, onToggleSelect]);
 
   return (
     <div className="overflow-x-auto rounded-xl border border-border/40">

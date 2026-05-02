@@ -58,6 +58,7 @@ const ActionStrip = React.memo(function ActionStrip({
 
     const expiringQuotes = quotes.filter((q) => {
       if (q.status !== "SENT" || !q.expiryDate) return false;
+      // eslint-disable-next-line react-hooks/purity -- audited: time-relative quote-expiring filter
       const daysLeft = (new Date(q.expiryDate).getTime() - Date.now()) / 86_400_000;
       return daysLeft > 0 && daysLeft <= 7;
     });

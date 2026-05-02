@@ -62,16 +62,6 @@ export function Inbox({ businessId, openConversationWith, onClearOpenWith }: Inb
     void loadConversations();
   }, [loadConversations]);
 
-  useEffect(() => {
-    if (openConversationWith && businessId && conversations.length > 0) {
-      const existingConv = conversations.find((c) => c.otherBusiness.id === openConversationWith);
-      if (existingConv) {
-        openConversation(existingConv.id);
-      }
-      onClearOpenWith?.();
-    }
-  }, [openConversationWith, businessId, conversations]);
-
   const openConversation = useCallback(async (conversationId: string) => {
     if (!businessId) return;
     setActiveConversation(conversationId);
@@ -85,6 +75,16 @@ export function Inbox({ businessId, openConversationWith, onClearOpenWith }: Inb
     } catch {}
     setLoadingMessages(false);
   }, [businessId]);
+
+  useEffect(() => {
+    if (openConversationWith && businessId && conversations.length > 0) {
+      const existingConv = conversations.find((c) => c.otherBusiness.id === openConversationWith);
+      if (existingConv) {
+        openConversation(existingConv.id);
+      }
+      onClearOpenWith?.();
+    }
+  }, [openConversationWith, businessId, conversations, openConversation, onClearOpenWith]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
