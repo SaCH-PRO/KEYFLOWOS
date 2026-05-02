@@ -202,7 +202,7 @@ interface PrimaryNavItem {
 }
 
 const primaryNav: PrimaryNavItem[] = [
-  { id: "tower", label: "KEYFLOW COMMAND", icon: Radar, href: "/app/keyflow-command" },
+  { id: "tower", label: "KEYFLOW", icon: Radar, href: "/app/keyflow-command" },
   { id: "store", label: "Store", icon: Store, href: "/app/store" },
   { id: "workspaces", label: "Workspaces", icon: LayoutGrid },
   { id: "studio", label: "Studio", icon: Wrench },
@@ -273,7 +273,7 @@ function detectPrimarySection(pathname: string): PrimarySectionId {
 }
 
 const mobileBottomNav = [
-  { label: "Command", href: "/app/keyflow-command", icon: Radar },
+  { label: "KEYFLOW", href: "/app/keyflow-command", icon: Radar },
   { label: "Revenue", href: "/app/commerce", icon: CreditCard },
   { label: "Calendar", href: "/app/bookings", icon: Calendar },
   { label: "Clients", href: "/app/crm/pipeline", icon: Users },
@@ -360,13 +360,13 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         const isUuid = /^[0-9a-f-]{20,}$/i.test(last || "");
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
-          app: "KEYFLOW COMMAND", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
+          app: "KEYFLOW", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
           bookings: "Calendar", marketing: "Content", expenses: "Expenses",
           projects: "Projects", documents: "Documents", automations: "Automations", reports: "Reports",
           store: "Store", settings: "Studio", learn: "Learn",
           community: "Community", marketplace: "Marketplace",
-          "control-tower": "KEYFLOW COMMAND",
-          "keyflow-command": "KEYFLOW COMMAND",
+          "control-tower": "KEYFLOW",
+          "keyflow-command": "KEYFLOW",
         };
         const label = labelMap[labelSegment || ""] || (labelSegment ? labelSegment.charAt(0).toUpperCase() + labelSegment.slice(1) : "");
         if (label) {
@@ -980,7 +980,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 )}
               >
                 <Radar className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                <span>KEYFLOW COMMAND</span>
+                <span>KEYFLOW</span>
               </Link>
 
               {(["workspaces", "studio", "public"] as const).map((sectionId) => {
