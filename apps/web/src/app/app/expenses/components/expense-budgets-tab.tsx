@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Trash2, Target, AlertTriangle, X, TrendingUp, TrendingDown, Minus, Calendar } from "lucide-react";
+import { Plus, Trash2, Target, AlertTriangle, X, TrendingUp, TrendingDown, Calendar } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 import { ExpenseBudget, ExpenseCategory, ExpenseSummary, Expense, upsertExpenseBudget, deleteExpenseBudget } from "@/lib/client";
@@ -157,7 +157,7 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses, s
               <div className="p-5 space-y-4">
                 <div><label className="text-xs text-muted-foreground mb-1 block">Category</label><select value={budgetForm.categoryId} onChange={e => setBudgetForm({ ...budgetForm, categoryId: e.target.value })} className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"><option value="">All Categories (Total Budget)</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                 <div><label className="text-xs text-muted-foreground mb-1 block">Monthly Limit (TTD) *</label><input type="number" step="0.01" value={budgetForm.amount} onChange={e => setBudgetForm({ ...budgetForm, amount: e.target.value })} placeholder="5000.00" className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" /></div>
-                <div><label className="text-xs text-muted-foreground mb-1 block">Alert at (%)</label><input type="number" step="5" min="50" max="100" value={budgetForm.alertAt} onChange={e => setBudgetForm({ ...budgetForm, alertAt: e.target.value })} className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" /><p className="text-[10px] text-muted-foreground mt-1">You'll be warned when spending reaches this percentage.</p></div>
+                <div><label className="text-xs text-muted-foreground mb-1 block">Alert at (%)</label><input type="number" step="5" min="50" max="100" value={budgetForm.alertAt} onChange={e => setBudgetForm({ ...budgetForm, alertAt: e.target.value })} className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" /><p className="text-[10px] text-muted-foreground mt-1">You&apos;ll be warned when spending reaches this percentage.</p></div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={() => setShowBudgetModal(false)} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:bg-muted/30">Cancel</button>
                   <button onClick={handleSaveBudget} disabled={!budgetForm.amount} className="kf-btn-primary px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-40">Save Budget</button>

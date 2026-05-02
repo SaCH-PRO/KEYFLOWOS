@@ -465,6 +465,7 @@ export function useMarketingAiHub() {
         businessPulse: params.businessPulse,
       },
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'ai' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [ai.updateContext]);
 
   return {

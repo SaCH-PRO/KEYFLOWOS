@@ -5,7 +5,7 @@ import Link from "next/link";
 import { GeneratedReport } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency } from "./report-types";
-import { MetricCard, DataTable, NarrativeSection, StatusBadge, ProgressBar, CollapsibleSection } from "./shared-components";
+import { MetricCard, NarrativeSection, StatusBadge, ProgressBar, CollapsibleSection } from "./shared-components";
 
 function estimateChurnProbability(clientTotal: number, avgInvoice: number, totalClients: number, bookingRate: number): { pct: number; label: string; color: string } {
   let score = 50;

@@ -5,8 +5,8 @@ import { toast } from "sonner";
 import {
   Plus, Search, Copy, MessageCircle, Mail,
   ListTodo, StickyNote, Check, Clock,
-  Flag, Bell, Calendar, ArrowUpDown,
-  CheckCircle2, Circle, AlertTriangle,
+  Flag, Bell, Calendar,
+  CheckCircle2, AlertTriangle,
   Trash2, ChevronDown, Pencil, X,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";

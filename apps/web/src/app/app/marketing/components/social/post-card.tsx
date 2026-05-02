@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle, Music2, Image as ImageIcon, ImageOff } from "lucide-react";
 import type { SocialPost } from "@/lib/client";
+import Image from "next/image";
 
 type Props = {
   post: SocialPost;
@@ -52,12 +53,12 @@ function MediaThumb({ url, large }: { url: string; large?: boolean }) {
     );
   }
   return (
-    <img
+    <Image
       src={url}
       alt={large ? "Post media" : "Media attachment"}
       className={large ? "w-full h-full object-cover max-h-48" : "w-full h-full object-cover"}
       onError={() => setFailed(true)}
-    />
+     fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
   );
 }
 

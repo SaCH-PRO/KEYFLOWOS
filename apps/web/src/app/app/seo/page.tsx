@@ -14,7 +14,6 @@ import {
   Plus,
   CheckCircle2,
   Sparkles,
-  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";

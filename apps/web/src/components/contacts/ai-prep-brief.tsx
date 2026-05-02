@@ -226,7 +226,7 @@ export function AiPrepBriefPanel({ contactId }: { contactId: string }) {
                   </div>
                   <div className="space-y-1">
                     {brief.icebreakers.map((ib, i) => (
-                      <p key={i} className="text-xs text-foreground/80 pl-3 border-l-2 border-violet-500/30 py-0.5">"{ib}"</p>
+                      <p key={i} className="text-xs text-foreground/80 pl-3 border-l-2 border-violet-500/30 py-0.5">&quot;{ib}&quot;</p>
                     ))}
                   </div>
                 </div>

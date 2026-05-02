@@ -6,7 +6,6 @@ import {
   Calendar,
   Clock,
   CalendarDays,
-  Plus,
   Search,
   RefreshCw,
   Filter,

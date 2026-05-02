@@ -16,7 +16,6 @@ import {
   Store,
   ShoppingBag,
   Send,
-  Bookmark,
   ShieldCheck,
   Award,
   Star,
@@ -24,6 +23,7 @@ import {
 import { fetchCommunityProfile, fetchTrustSignals, type CommunityProfile, type TrustSignals } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 interface ProfileCardProps {
   businessId: string;
@@ -154,7 +154,7 @@ export function ProfileCard({ businessId, isOpen, onClose }: ProfileCardProps) {
                   <div className="flex items-end gap-4">
                     <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-2xl font-bold overflow-hidden border-4 border-background shadow-lg flex-shrink-0">
                       {resolvedLogo ? (
-                        <img src={resolvedLogo} alt={profile.name} className="w-full h-full object-cover" />
+                        <Image src={resolvedLogo} alt={profile.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                       ) : (
                         initials
                       )}

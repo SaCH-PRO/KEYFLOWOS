@@ -4,14 +4,13 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Layers, ArrowLeftRight, Building2, ShoppingBag,
-  AlertTriangle, DollarSign, TableProperties, Plus, Pencil, Trash2,
-  RefreshCw, Download, Upload, FileSpreadsheet, Link, Unlink,
-  CheckCircle2, XCircle, TrendingDown, Archive, ArrowUp, ArrowDown,
-  ArrowRight, Search, Filter, ChevronDown, ChevronUp, Package,
+  AlertTriangle, DollarSign, TableProperties, Plus, Pencil, Trash2, Download, Upload, FileSpreadsheet, Link, Unlink,
+  CheckCircle2, TrendingDown, Archive, ArrowUp, ArrowDown,
+  ArrowRight, Search, ChevronDown, ChevronUp, Package,
   ExternalLink, BarChart3, Activity, Loader2, X, FileDown, FileUp,
   Warehouse, Clock, Tag,
 } from "lucide-react";
-import { apiGet, apiPost, apiPatch, apiDelete, getAuthHeaders, API_BASE } from "@/lib/api";
+import { apiGet, apiPost, apiDelete, getAuthHeaders, API_BASE } from "@/lib/api";
 import { saveAs } from "@/lib/download";
 import { EmptyState, usePagination, PaginationBar, formatCurrency, formatDate } from "./marketplace-utils";
 
@@ -814,7 +813,7 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
                       className="grid grid-cols-12 px-4 py-3 items-center hover:bg-white/3 transition-colors cursor-pointer"
                       onClick={() => setExpandedRows((prev: Set<string>) => {
                         const n = new Set(prev);
-                        n.has(inv.id) ? n.delete(inv.id) : n.add(inv.id);
+                        if (n.has(inv.id)) { n.delete(inv.id); } else { n.add(inv.id); }
                         return n;
                       })}
                     >

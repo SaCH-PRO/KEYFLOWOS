@@ -298,7 +298,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onDevi
               exit={{ opacity: 0 }}
               className="p-4 pt-2"
             >
-              <p className="text-xs text-muted-foreground mb-3">Choose how you'd like to add contacts</p>
+              <p className="text-xs text-muted-foreground mb-3">Choose how you&apos;d like to add contacts</p>
               <div className="grid grid-cols-2 gap-2">
                 {MODES.map(({ key, label, sublabel, icon: Icon, color }) => (
                   <button
@@ -401,7 +401,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onDevi
                     </div>
                     <h3 className="font-semibold text-sm mb-1">Select Device Contacts</h3>
                     <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-                      Your device's contact picker will open — select the contacts you'd like to import
+                      Your device&apos;s contact picker will open — select the contacts you&apos;d like to import
                     </p>
                   </div>
 
@@ -509,7 +509,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onDevi
                     </div>
                     <h3 className="font-semibold text-sm mb-1">Scan a Business Card or Contact</h3>
                     <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-                      Take a photo or upload an image — we'll extract the contact info automatically
+                      Take a photo or upload an image — we&apos;ll extract the contact info automatically
                     </p>
                   </div>
 
@@ -556,6 +556,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onDevi
               ) : (
                 <div className="space-y-3">
                   <div className="relative rounded-xl overflow-hidden border border-border">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- user-supplied URL with unknown host (cannot pre-configure remotePatterns) */}
                     <img
                       src={scanPreview}
                       alt="Scan preview"

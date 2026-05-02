@@ -8,7 +8,6 @@ import {
   UserX,
   TrendingDown,
   Clock,
-  DollarSign,
   Loader2,
   Sparkles,
   ChevronDown,

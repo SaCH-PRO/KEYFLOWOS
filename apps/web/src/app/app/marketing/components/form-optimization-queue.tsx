@@ -3,11 +3,9 @@
 import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  AlertTriangle,
   Pencil,
   Sparkles,
   ToggleRight,
-  Plus,
   Zap,
   ChevronDown,
   ChevronRight,

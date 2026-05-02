@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
-import { Tab, InvoiceLineItem, generateItemId } from "../components/commerce-types";
+import { useState, useCallback, useMemo } from "react";
+import { Tab } from "../components/commerce-types";
 import type { Invoice } from "@/lib/client";
 import { formatCurrencyCompact } from "@/lib/currency";
 

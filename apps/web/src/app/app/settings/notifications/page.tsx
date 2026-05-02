@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import {
   Bell,
   Mail,
-  Calendar,
   FileText,
   CreditCard,
   RefreshCw,

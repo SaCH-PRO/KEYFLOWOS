@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import {
   Zap,
   Calendar,
-  DollarSign,
   Users,
   ArrowRight,
   Layers,
@@ -13,12 +12,8 @@ import {
   Bot,
   ShoppingBag,
   Mail,
-  Globe,
   Check,
-  ChevronRight,
   Play,
-  Shield,
-  Clock,
   TrendingUp,
   Sparkles,
 } from "lucide-react";

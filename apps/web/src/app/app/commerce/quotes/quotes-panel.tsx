@@ -42,9 +42,8 @@ import {
   Contact,
   Invoice,
 } from "@/lib/client";
-import { ContactSelect } from "@/components/contacts";
 
-import { formatAmount, formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary } from "../utils/commerce-utils";
+import { formatAmount } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
 import type { ReactNode } from "react";
 import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../components/date-range-filter";
@@ -55,11 +54,8 @@ import {
   BILLING_SORT_OPTIONS,
   BillingSortKey,
   InvoiceLineItem,
-  QuoteFormState,
-  getStatusBadge,
   generateItemId,
 } from "../components/commerce-types";
-import LineItemsEditor from "../components/line-items-editor";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
 import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/standardized-cards";
@@ -69,7 +65,7 @@ import { useBusinessPreview } from "../hooks/use-business-preview";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
-import { ArrowRightLeft, Eye, DollarSign, Ban, Bell } from "lucide-react";
+import { ArrowRightLeft, Eye } from "lucide-react";
 
 interface QuotesPanelProps {
   quotes: Quote[];

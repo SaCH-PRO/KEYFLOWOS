@@ -2,9 +2,9 @@
 
 import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
-import { formatPrice } from "@/lib/format";
-import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame, Sparkles, CalendarPlus, Clock, MapPin, X } from "lucide-react";
+import { Loader2, Globe, Shield, Flame, Sparkles, X } from "lucide-react";
 import { ItemDetailModal } from "./components/item-detail-modal";
 import { trackStoreEvent, StorefrontConfig, type StorefrontSectionKey } from "@/lib/client";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
@@ -1307,7 +1307,7 @@ function PublicBookingPageInner() {
                   >
                     {item.imageUrl && (
                       <div className="w-full h-24 rounded-lg overflow-hidden mb-2">
-                        <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                        <Image src={item.imageUrl} alt={item.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                       </div>
                     )}
                     <p className="text-xs font-semibold text-gray-800 truncate">{item.name}</p>
@@ -1337,7 +1337,7 @@ function PublicBookingPageInner() {
                   <div className="flex items-start gap-4 p-4">
                     {spotItem.imageUrl && (
                       <div className="w-20 h-20 rounded-xl overflow-hidden flex-shrink-0">
-                        <img src={spotItem.imageUrl} alt={spotItem.name} className="w-full h-full object-cover" />
+                        <Image src={spotItem.imageUrl} alt={spotItem.name} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                       </div>
                     )}
                     <div className="flex-1 min-w-0">

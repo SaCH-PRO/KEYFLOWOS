@@ -6,7 +6,6 @@ import {
   CreditCard,
   Calendar,
   AlertTriangle,
-  CheckCircle,
   Loader2,
   Sparkles,
   DollarSign,

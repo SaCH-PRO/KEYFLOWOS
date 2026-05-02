@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
 import { apiGet } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
 import {
@@ -17,10 +18,6 @@ import {
   Zap,
   ShoppingBag,
   MessageCircle,
-  Package,
-  ChevronLeft,
-  ChevronRight,
-  Sparkles,
   Truck,
 } from "lucide-react";
 import { trackStoreEvent, type StorefrontConfig } from "@/lib/client";
@@ -304,6 +301,7 @@ export default function ProductDetailPage() {
                 className={`relative cursor-zoom-in transition-all duration-300 ${imageZoomed ? "scale-150" : ""}`}
                 onClick={() => setImageZoomed((z) => !z)}
               >
+                {/* eslint-disable-next-line @next/next/no-img-element -- user-supplied URL with unknown host (cannot pre-configure remotePatterns) */}
                 <img
                   src={item.imageUrl}
                   alt={item.name}
@@ -446,7 +444,7 @@ export default function ProductDetailPage() {
                   >
                     {ri.imageUrl ? (
                       <div className="w-full h-28 overflow-hidden">
-                        <img src={ri.imageUrl} alt={ri.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                        <Image src={ri.imageUrl} alt={ri.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                       </div>
                     ) : (
                       <div

@@ -4,6 +4,7 @@ import { Heart, X, ShoppingBag, Trash2 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import type { WishlistItem } from "./use-wishlist";
 import type { CatalogItem } from "./types";
+import Image from "next/image";
 
 type Props = {
   open: boolean;
@@ -54,7 +55,7 @@ export function WishlistDrawer({ open, onClose, items, onRemove, onAddToCart, pr
                 className="flex gap-3 p-3 rounded-xl border border-gray-200 bg-white/[0.02] group hover:bg-gray-50 transition-colors"
               >
                 {item.imageUrl ? (
-                  <img src={item.imageUrl} alt={item.name} className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />
+                  <Image src={item.imageUrl} alt={item.name} className="w-16 h-16 rounded-lg object-cover flex-shrink-0"  width={64} height={64} unoptimized />
                 ) : (
                   <div
                     className="w-16 h-16 rounded-lg flex items-center justify-center text-lg font-bold flex-shrink-0"

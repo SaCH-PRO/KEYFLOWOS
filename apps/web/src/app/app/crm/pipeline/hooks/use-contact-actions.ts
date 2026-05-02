@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { ContactFormData } from "@/components/contacts/contact-form";
-import type { ContactDetailData } from "@/components/contacts/contact-detail";
 import type { QuickActionType } from "@/components/contacts";
 import type { Contact, ContactDetail as ContactDetailAPI } from "@/lib/client";
 import {

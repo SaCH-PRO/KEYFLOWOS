@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
-import { X, MessageCircle, Mail, Send, Users, Copy, Check, AlertCircle } from "lucide-react";
+import { X, MessageCircle, Mail, Send, Copy, Check, AlertCircle } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactCardData } from "./contact-card";
 

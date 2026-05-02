@@ -11,7 +11,6 @@ import {
   ShoppingBag,
   Package,
   Search,
-  ShoppingCart,
   Store,
   MessageCircle,
   Smartphone,
@@ -22,6 +21,7 @@ import { Service, Product, StorefrontConfig, StorefrontSection, FaqEntry, Storef
 import { formatPrice } from "@/lib/format";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
 import { DEFAULT_SECTIONS, FONT_PAIRINGS } from "./store-types";
+import Image from "next/image";
 
 type BusinessData = {
   name?: string;
@@ -221,6 +221,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
         }}
       >
         {item.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- user-supplied product image; height is a runtime template variable so Next/Image fill needs a sized parent we cannot guarantee here
           <img src={item.imageUrl} alt={item.name} className={`w-full ${ts.imageHeightSm} object-cover`} />
         ) : (
           <div
@@ -275,7 +276,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
         }}
       >
         {item.imageUrl ? (
-          <img src={item.imageUrl} alt={item.name} className={`w-12 h-12 ${ts.cardRadius} object-cover flex-shrink-0`} />
+          <Image src={item.imageUrl} alt={item.name} className={`w-12 h-12 ${ts.cardRadius} object-cover flex-shrink-0`}  width={48} height={48} unoptimized />
         ) : (
           <div
             className={`w-12 h-12 ${ts.cardRadius} flex items-center justify-center text-sm flex-shrink-0 ${ts.headerWeight} ${ts.fontClass}`}
@@ -692,7 +693,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
             <div className={`overflow-y-auto ${ts.fontClass}`} style={{ maxHeight: "600px", backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
               {hero.coverImageUrl && (
                 <div className="w-full h-20 overflow-hidden relative">
-                  <img src={hero.coverImageUrl} alt="" className="w-full h-full object-cover" />
+                  <Image src={hero.coverImageUrl} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                   <div className="absolute inset-0" style={{ background: `linear-gradient(to bottom, transparent, ${ts.pageBg})` }} />
                 </div>
               )}
@@ -708,11 +709,11 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
                   />
                   <div className="relative">
                     {businessData?.logoUrl ? (
-                      <img
+                      <Image
                         src={businessData.logoUrl}
                         alt="Logo"
                         className={`h-12 w-12 mx-auto object-cover border border-white/10 shadow-xl ${theme === "elegant" ? "rounded-full" : "rounded-xl"}`}
-                      />
+                       width={48} height={48} unoptimized />
                     ) : (
                       <div
                         className={`h-12 w-12 mx-auto flex items-center justify-center border border-white/10 shadow-xl text-lg ${ts.headerWeight} ${theme === "elegant" ? "rounded-full" : "rounded-xl"}`}

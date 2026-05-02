@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { RefreshCw, LayoutGrid, List } from "lucide-react";
+import { LayoutGrid, List } from "lucide-react";
 import type { SocialPost } from "@/lib/client";
 import { PostCard } from "./post-card";
 

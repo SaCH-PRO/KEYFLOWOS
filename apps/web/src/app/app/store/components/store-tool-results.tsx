@@ -3,9 +3,8 @@
 import {
   Lightbulb, AlertTriangle,
   ChevronDown, ChevronUp,
-  CheckCircle, XCircle, BarChart3,
-  Zap, Star, Search, DollarSign,
-  ShieldCheck, Tag,
+  CheckCircle, XCircle,
+  Zap, Search, DollarSign,
 } from "lucide-react";
 import { useState } from "react";
 

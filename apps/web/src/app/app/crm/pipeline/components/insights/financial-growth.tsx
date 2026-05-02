@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React from "react";
 import { motion } from "framer-motion";
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet, Clock,
-  ArrowUpRight, ArrowDownRight, ShieldAlert, Briefcase,
-  BarChart3, Users,
+  ArrowUpRight, ArrowDownRight, ShieldAlert, Briefcase, Users,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,

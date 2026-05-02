@@ -264,7 +264,7 @@ export default function DevelopersSettingsPage() {
                   </div>
                   <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
                     <p className="text-xs text-amber-400 mb-2">
-                      Copy this key now. You won't be able to see it again.
+                      Copy this key now. You won&apos;t be able to see it again.
                     </p>
                     <div className="flex items-center gap-2">
                       <code className="flex-1 text-xs font-mono bg-black/30 rounded p-2 break-all">

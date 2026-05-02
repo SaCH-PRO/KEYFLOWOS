@@ -21,7 +21,6 @@ import {
   GraduationCap,
   Users,
   Store,
-  Globe,
   ArrowUp,
   ArrowDown,
   CornerDownLeft,

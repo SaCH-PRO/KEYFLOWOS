@@ -104,7 +104,7 @@ export default function PricingPage() {
             Simple, transparent pricing
           </h1>
           <p className="text-lg text-gray-400 max-w-xl mx-auto mb-8">
-            Start free. Upgrade when you're ready. 1-day free trial on all paid plans.
+            Start free. Upgrade when you&apos;re ready. 1-day free trial on all paid plans.
           </p>
 
           <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">

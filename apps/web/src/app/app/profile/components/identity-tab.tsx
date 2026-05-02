@@ -3,9 +3,8 @@
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  Building2, User, Briefcase, Palette, Clock, Users,
-  TrendingUp, Sparkles, MapPin, Globe, CheckCircle2,
-  FileText, Zap, BarChart3, Target, ArrowRight,
+  Building2, User, Briefcase, Palette, Users,
+  TrendingUp, CheckCircle2, Zap,
 } from "lucide-react";
 import MyBusinessSection from "./my-business-section";
 import BrandIdentityTab from "./brand-identity-tab";

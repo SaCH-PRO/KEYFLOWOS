@@ -9,8 +9,6 @@ import {
   Clock,
   Calendar,
   Info,
-  Receipt,
-  CalendarCheck,
   History,
   BarChart3,
   ChevronRight,

@@ -26,6 +26,7 @@ import { getThemeStyles, getTabClasses, getButtonStyles, getItemAccent, type The
 import type { StorefrontConfig } from "@/lib/client";
 import { Heart } from "lucide-react";
 import { StarRatingDisplay } from "./review-display";
+import Image from "next/image";
 
 type Props = {
   catalogItems: CatalogItem[];
@@ -198,12 +199,12 @@ export function CatalogGrid({
           {item.imageUrl ? (
             <div className={`w-full ${ts.imageHeight} overflow-hidden`}
               style={{ borderTopLeftRadius: "inherit", borderTopRightRadius: "inherit" }}>
-              <img
+              <Image
                 src={item.imageUrl}
                 alt={item.name}
                 loading="lazy"
                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-              />
+               fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
               <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
             </div>
           ) : (
@@ -397,7 +398,7 @@ export function CatalogGrid({
 
         {item.imageUrl ? (
           <div className="w-24 h-24 flex-shrink-0 overflow-hidden relative" style={{ borderRadius: "inherit" }}>
-            <img src={item.imageUrl} alt={item.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+            <Image src={item.imageUrl} alt={item.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
           </div>
         ) : (
           <div

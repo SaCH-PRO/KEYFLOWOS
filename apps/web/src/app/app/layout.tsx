@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -24,8 +25,6 @@ import {
   Search,
   Zap,
   MessageCircle,
-  PanelLeftClose,
-  PanelLeft,
   Store,
   Menu,
   X,
@@ -838,11 +837,11 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                   aria-haspopup="true"
                 >
                   {avatarUrl ? (
-                    <img 
+                    <Image 
                       src={avatarUrl} 
                       alt={displayName || "User"} 
                       className="h-7 w-7 rounded-full object-cover"
-                    />
+                     width={28} height={28} unoptimized />
                   ) : (
                     <div 
                       className="h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-white"
@@ -951,7 +950,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 className="px-3 py-2.5 border-b border-border flex items-center gap-2.5 hover:bg-muted transition-colors min-h-[44px]"
               >
                 {avatarUrl ? (
-                  <img src={avatarUrl} alt="" className="h-7 w-7 rounded-full object-cover" />
+                  <Image src={avatarUrl} alt="" className="h-7 w-7 rounded-full object-cover"  width={28} height={28} unoptimized />
                 ) : (
                   <div 
                     className="h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-white flex-shrink-0"

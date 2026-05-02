@@ -13,8 +13,6 @@ import {
   BarChart3,
   Check,
   PartyPopper,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 
 const STORAGE_KEY = "kf_store_guide_state";
@@ -304,7 +302,7 @@ export function StoreGuide({ isOpen, onToggle, onTabChange }: StoreGuideProps) {
                 {allComplete ? (
                   <button onClick={handleReset} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none rounded px-1">Reset progress</button>
                 ) : (
-                  <button onClick={handleDismiss} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none rounded px-1">Don't show again</button>
+                  <button onClick={handleDismiss} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none rounded px-1">Don&apos;t show again</button>
                 )}
                 <button
                   onClick={closeAndRestore}

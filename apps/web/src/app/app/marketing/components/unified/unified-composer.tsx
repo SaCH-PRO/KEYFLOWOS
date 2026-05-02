@@ -5,9 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Clock, Save, Loader2, ImagePlus, X, Sparkles, Wand2,
   Target, Hash, MessageSquare, Eye, EyeOff,
-  Mail, PenSquare, Globe, Calendar, AlertCircle,
-  CheckCircle, ArrowRight, Layers, FileText, Image as ImageIcon,
-  Upload, AlertTriangle, Info, Minimize2, Maximize2, Zap, type LucideIcon,
+  Mail, PenSquare, Calendar, AlertCircle,
+  CheckCircle, ArrowRight, Layers, FileText, Image as ImageIcon, AlertTriangle, Info, Minimize2, Maximize2, Zap, type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -22,6 +21,7 @@ import { ChannelSelector } from "./channel-selector";
 import { ChannelVariantsPanel, type VariantData } from "./channel-variants-panel";
 import { ChannelPreviewPanel } from "./channel-preview-panel";
 import { AudienceSelector } from "./audience-selector";
+import Image from "next/image";
 
 type ContentTypeOption = "social" | "email" | "messaging" | "multi";
 type ComposerStep = "compose" | "distribute" | "review";
@@ -1027,7 +1027,7 @@ export function UnifiedComposer({
                   <div className="flex items-center gap-2 flex-wrap">
                     {mediaUrls.map((url, i) => (
                       <div key={i} className="relative group w-16 h-16 rounded-lg overflow-hidden border border-border/30">
-                        <img src={url} alt={`Media ${i + 1}`} className="w-full h-full object-cover" />
+                        <Image src={url} alt={`Media ${i + 1}`} className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                         <button
                           onClick={() => removeMedia(i)}
                           className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1220,7 +1220,7 @@ export function UnifiedComposer({
                       <span className="text-muted-foreground block text-[10px] mb-0.5">Media</span>
                       <div className="flex gap-1.5 mt-1">
                         {mediaUrls.map((url, i) => (
-                          <img key={i} src={url} alt="" className="w-10 h-10 rounded object-cover border border-border/20" />
+                          <Image key={i} src={url} alt="" className="w-10 h-10 rounded object-cover border border-border/20"  width={40} height={40} unoptimized />
                         ))}
                       </div>
                     </div>

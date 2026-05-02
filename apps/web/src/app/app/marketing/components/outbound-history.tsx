@@ -12,7 +12,7 @@ import {
   listOutboundContent, getDeliverySummary,
   retryAllFailedDeliveries,
 } from "@/lib/client";
-import type { OutboundContent, DeliverySummary, DeliverySummaryDelivery } from "@/lib/client";
+import type { OutboundContent, DeliverySummary } from "@/lib/client";
 import { DeliveryLog } from "./delivery-log";
 
 interface OutboundHistoryProps {

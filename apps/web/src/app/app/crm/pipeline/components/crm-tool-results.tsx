@@ -2,9 +2,9 @@
 
 import {
   Heart, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Minus,
-  Lightbulb, Target, Shield, MessageSquare, Tags, ShieldAlert,
-  ChevronDown, ChevronUp, Brain, Clock, FileText, Users,
-  Mail, Phone, Copy, DollarSign, RefreshCw, Send,
+  Lightbulb, Target, MessageSquare, Tags,
+  ChevronDown, ChevronUp, Clock, FileText, Users,
+  Mail, Copy, DollarSign, Send,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -176,7 +176,7 @@ function PrepBriefResult({ data }: { data: any }) {
         <Section title="Icebreakers">
           <ul className="space-y-1">
             {data.icebreakers.map((i: string, idx: number) => (
-              <li key={idx} className="text-[11px] text-muted-foreground/70">"{i}"</li>
+              <li key={idx} className="text-[11px] text-muted-foreground/70">&quot;{i}&quot;</li>
             ))}
           </ul>
         </Section>

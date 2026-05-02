@@ -1,14 +1,12 @@
 import {
-  MessageSquare, ListTodo, History,
+  MessageSquare, ListTodo,
   StickyNote, Copy, MessageCircle, Mail,
-  Pin, PinOff, ListPlus,
   Phone as PhoneIcon, Video, Handshake,
-  FileText, Lightbulb, AlertCircle,
-  Check, Clock, Flag, Bell, Calendar,
+  FileText, Lightbulb, AlertCircle, Flag, Bell, Calendar,
   ArrowUpDown, CheckCircle2, Circle,
   AlertTriangle, Sparkles, DollarSign,
-  TrendingUp, Users, Heart, Brain,
-  Zap, Target, RefreshCw, Star, Gift,
+  TrendingUp, Users,
+  Zap, RefreshCw, Star, Gift,
   Trash, UserX, Tags,
 } from "lucide-react";
 

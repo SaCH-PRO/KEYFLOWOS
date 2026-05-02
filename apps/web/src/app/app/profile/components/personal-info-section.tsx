@@ -7,6 +7,7 @@ import { Button, Input } from "@keyflow/ui";
 import { API_BASE, getAuthHeaders, apiPatch } from "@/lib/api";
 import { setCachedUser } from "@/lib/workspace";
 import { useProfileSection } from "@/hooks/use-profile-section";
+import Image from "next/image";
 
 interface PersonalInfoForm {
   email: string;
@@ -132,7 +133,7 @@ export default function PersonalInfoSection({
         <div className="relative group">
           <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-2xl font-bold overflow-hidden shadow-lg border-2 border-border/30">
             {resolvedAvatar ? (
-              <img src={resolvedAvatar} alt="Avatar" className="w-full h-full object-cover" />
+              <Image src={resolvedAvatar} alt="Avatar" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
             ) : (
               initials
             )}

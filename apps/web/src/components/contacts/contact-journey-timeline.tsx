@@ -179,7 +179,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
 
     for (const ev of events) {
       const config = EVENT_CONFIG[ev.type] || DEFAULT_CONFIG;
-      const module = classifyEvent(ev.type);
+      const moduleName = classifyEvent(ev.type);
       const data = ev.data as Record<string, unknown> | null | undefined;
 
       let description: string | undefined;
@@ -204,7 +204,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
 
       items.push({
         id: ev.id,
-        module,
+        module: moduleName,
         icon: config.icon,
         iconColor: config.color,
         iconBg: config.bg,

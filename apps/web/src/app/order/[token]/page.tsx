@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Image from "next/image";
 import { Package, Truck, CheckCircle2, Clock, XCircle, ExternalLink, Phone, Mail } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -124,12 +125,12 @@ export default function OrderStatusPage() {
           >
             <div className="flex items-center gap-3">
               {order.business.logoUrl && (
-                <img
+                <Image
                   src={order.business.logoUrl}
                   alt={order.business.name}
                   className="w-10 h-10 rounded-full object-cover"
                   style={{ border: "2px solid rgba(255,255,255,0.3)" }}
-                />
+                 width={40} height={40} unoptimized />
               )}
               <div>
                 <h1 className="text-lg font-semibold text-white">{order.business.name}</h1>

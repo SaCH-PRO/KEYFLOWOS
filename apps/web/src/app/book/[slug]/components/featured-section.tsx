@@ -4,6 +4,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { Star, Plus, CheckCircle2, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import type { CatalogItem } from "./types";
+import Image from "next/image";
 
 type Props = {
   items: CatalogItem[];
@@ -140,12 +141,12 @@ export function FeaturedSection({
                 />
                 {item.imageUrl ? (
                   <div className="w-full h-36 overflow-hidden relative">
-                    <img
+                    <Image
                       src={item.imageUrl}
                       alt={item.name}
                       loading="lazy"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    />
+                     fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                   </div>
                 ) : (

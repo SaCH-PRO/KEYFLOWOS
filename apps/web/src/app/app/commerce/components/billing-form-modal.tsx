@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState, useMemo, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  X, FileText, CreditCard, User, Calendar, ChevronDown,
+import { motion } from "framer-motion";
+import { FileText, CreditCard, User, Calendar, ChevronDown,
   Plus, Minus, MessageSquare, Percent, Tag, Loader2, Receipt,
 } from "lucide-react";
 import { SideSheet } from "./side-sheet";
@@ -15,8 +14,6 @@ import {
   InvoiceLineItem,
   PAYMENT_TERMS,
   CATEGORIES,
-  generateItemId,
-  getDueDateFromTerms,
 } from "./commerce-types";
 import { formatAmount } from "../utils/commerce-utils";
 

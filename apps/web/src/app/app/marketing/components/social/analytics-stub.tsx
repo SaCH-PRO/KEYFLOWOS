@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-  BarChart3, Calendar, Hash, Type, Clock, TrendingUp, FileText,
+  BarChart3, Calendar, Hash, Type, Clock, TrendingUp,
   Heart, MessageCircle, Share2, Eye, Users, Activity, RefreshCw,
   Facebook, Instagram, Linkedin, Twitter, Music2, Loader2,
 } from "lucide-react";

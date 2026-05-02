@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import Image from "next/image";
 import {
   X,
   Copy,
@@ -270,13 +271,13 @@ export function ShareLinkModal({
                       border: "1px solid hsl(var(--border))",
                     }}
                   >
-                    <img
+                    <Image
                       src={qrImageUrl}
                       alt="QR code for booking link"
                       width={180}
                       height={180}
                       className="kf-radius-sm"
-                    />
+                     unoptimized />
                     <p
                       className="kf-text-micro"
                       style={{ color: "hsl(var(--muted-foreground))" }}

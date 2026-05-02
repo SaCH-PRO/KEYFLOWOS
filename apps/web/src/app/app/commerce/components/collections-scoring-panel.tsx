@@ -4,19 +4,16 @@ import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Target,
-  TrendingUp,
   Clock,
   Mail,
   Phone,
   MessageSquare,
   Users,
   AlertTriangle,
-  CheckCircle,
   ChevronDown,
   ChevronUp,
   Loader2,
   Sparkles,
-  DollarSign,
 } from "lucide-react";
 import { commerceAiCollectionsScore, type CommerceCollectionsScore } from "@/lib/client";
 

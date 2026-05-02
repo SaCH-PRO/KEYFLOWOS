@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  AlertCircle, X, Search, Globe, Copy, ExternalLink, Check,
+  AlertCircle, X, Search, Globe,
   Rocket, Link2, Palette, Type, LayoutGrid, ShoppingBag, Star,
-  HelpCircle, FileText, Settings,
+  HelpCircle, Settings,
 } from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { StoreSettings } from "./store-settings";
@@ -20,6 +20,7 @@ import { PolicyEditor } from "./policy-editor";
 import { FontBrandingPanel } from "./font-branding-panel";
 import { StoreSettingsPanel } from "./store-settings-panel";
 import type { Service, Product, StorefrontConfig } from "@/lib/client";
+import Image from "next/image";
 
 type Props = {
   businessId: string;
@@ -169,7 +170,7 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
           <div className="rounded-xl overflow-hidden" style={{ border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
             <div className="w-full h-[80px] flex items-center justify-center" style={{ background: "hsl(var(--kf-muted) / 0.1)" }}>
               {ogImage ? (
-                <img src={ogImage} alt="Social preview" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                <Image src={ogImage} alt="Social preview" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
               ) : (
                 <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>No OG image</span>
               )}

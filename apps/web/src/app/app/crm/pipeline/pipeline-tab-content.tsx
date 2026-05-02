@@ -11,9 +11,7 @@ import {
   ContactForm,
   ContactImport,
   type ContactCardData,
-  type ContactFormData,
 } from "@/components/contacts";
-import type { QuickActionType } from "@/components/contacts";
 import { NextActionQueue } from "@/components/contacts";
 import { AutopilotActions } from "@/components/contacts";
 import type { NextAction } from "@/components/contacts/next-action-queue";

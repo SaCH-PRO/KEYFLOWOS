@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { motion } from "framer-motion";
-import {
-  Globe, Link as LinkIcon, Loader2, CheckCircle2, XCircle,
-  MessageCircle, ExternalLink, Copy, QrCode, Download,
+import { Link as LinkIcon, Loader2, CheckCircle2, XCircle,
+  MessageCircle, ExternalLink, Copy, Download,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import QRCode from "qrcode";
+import Image from "next/image";
 
 type Props = {
   businessId: string;
@@ -191,7 +190,7 @@ export function StoreSettings({
           {qrDataUrl && (
             <div className="flex flex-col items-center gap-1">
               <div className="rounded-lg p-1.5 bg-white" style={{ boxShadow: "0 2px 8px hsl(0 0% 0% / 0.15)" }}>
-                <img src={qrDataUrl} alt="Store QR Code" className="w-[72px] h-[72px]" />
+                <Image src={qrDataUrl} alt="Store QR Code" className="w-[72px] h-[72px]"  width={72} height={72} unoptimized />
               </div>
               <span className="text-[9px]" style={{ color: "hsl(var(--kf-muted-foreground) / 0.4)" }}>Scan to visit</span>
             </div>

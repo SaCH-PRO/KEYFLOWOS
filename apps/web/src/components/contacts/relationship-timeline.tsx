@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import {
   MessageSquare,
   Phone,
-  Mail,
   FileText,
   DollarSign,
   Calendar,

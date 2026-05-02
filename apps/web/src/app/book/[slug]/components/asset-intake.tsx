@@ -4,7 +4,7 @@ import { useState } from "react";
 import { apiPost } from "@/lib/api";
 import {
   Upload, CheckCircle2, Loader2, ArrowLeft, Palette,
-  FileText, Type, Image, Send,
+  FileText, Type, Image as ImageIcon, Send,
 } from "lucide-react";
 
 type IntakeField = {
@@ -74,7 +74,7 @@ export function AssetIntake({ journeyId, productName, primaryColor, secondaryCol
         </div>
         <h3 className="text-lg font-bold text-gray-900">Assets Submitted!</h3>
         <p className="text-sm text-gray-500 text-center max-w-sm">
-          Your brand assets have been received. We'll get started on your {productName} right away.
+          Your brand assets have been received. We&apos;ll get started on your {productName} right away.
         </p>
       </div>
     );
@@ -87,7 +87,7 @@ export function AssetIntake({ journeyId, productName, primaryColor, secondaryCol
           className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center"
           style={{ background: `${primaryColor}15` }}
         >
-          <Image className="w-6 h-6" style={{ color: primaryColor }} />
+          <ImageIcon className="w-6 h-6" style={{ color: primaryColor }} />
         </div>
         <h3 className="text-xl font-bold text-gray-900">Brand Assets & Details</h3>
         <p className="text-sm text-gray-500">

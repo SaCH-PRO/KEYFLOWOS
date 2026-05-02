@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import {
   MessageSquare, ListTodo, Phone, Mail, DollarSign,
-  Calendar, Settings, StickyNote, Check, Clock,
+  Calendar, Settings, StickyNote, Clock,
   Circle, Sparkles, Zap, FileText, AlertTriangle,
   CheckCircle2, Star, Copy, Bell, TrendingUp,
   Users, RefreshCw, Tags, UserX, MessageCircle,

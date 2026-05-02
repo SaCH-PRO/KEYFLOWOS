@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import {
   DollarSign,
   TrendingUp,
-  TrendingDown,
   ArrowUpRight,
   ArrowDownRight,
   Package,

@@ -10,6 +10,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import Image from "next/image";
 import {
   fetchConversations,
   fetchConversationMessages,
@@ -122,7 +123,7 @@ export function Inbox({ businessId, openConversationWith, onClearOpenWith }: Inb
           </button>
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0">
             {otherBusiness.logoUrl ? (
-              <img src={otherBusiness.logoUrl} alt="" className="w-full h-full object-cover" />
+              <Image src={otherBusiness.logoUrl} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
             ) : (
               otherBusiness.name.charAt(0).toUpperCase()
             )}
@@ -232,7 +233,7 @@ export function Inbox({ businessId, openConversationWith, onClearOpenWith }: Inb
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0">
                   {conv.otherBusiness.logoUrl ? (
-                    <img src={conv.otherBusiness.logoUrl} alt="" className="w-full h-full object-cover" />
+                    <Image src={conv.otherBusiness.logoUrl} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                   ) : (
                     conv.otherBusiness.name.charAt(0).toUpperCase()
                   )}

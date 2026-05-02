@@ -20,6 +20,7 @@ import {
 import { formatPrice } from "@/lib/format";
 import type { CartItem, PromoCode } from "./types";
 import { typeBadge, calculateDiscount } from "./utils";
+import Image from "next/image";
 
 type Props = {
   cart: CartItem[];
@@ -410,11 +411,11 @@ export function CartDrawer({
       >
         <div className="flex items-start gap-3">
           {item.imageUrl ? (
-            <img
+            <Image
               src={item.imageUrl}
               alt={item.name}
               className="w-12 h-12 rounded-xl object-cover flex-shrink-0 ring-1 ring-white/10"
-            />
+             width={48} height={48} unoptimized />
           ) : (
             <div
               className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"

@@ -3,7 +3,6 @@
 import { motion } from "framer-motion";
 import { Store, ShoppingBag, TrendingUp, AlertTriangle } from "lucide-react";
 import { MetricExplainer } from "@/components/ui/metric-explainer";
-import type { DriftedItem } from "./store-types";
 
 interface KpiCardData {
   label: string;

@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import {
-  FolderKanban, Calendar, User, AlertTriangle, Search,
+  FolderKanban, Calendar, User, Search,
   ChevronUp, ChevronDown, ExternalLink, DollarSign,
 } from "lucide-react";
 import { Project, fetchContacts, type Contact } from "@/lib/client";

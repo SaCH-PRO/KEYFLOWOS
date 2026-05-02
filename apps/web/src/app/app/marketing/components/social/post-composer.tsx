@@ -3,11 +3,11 @@
 import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  X, Clock, ImagePlus, Send, FileText, Hash, ChevronDown, Layers, Globe,
-  Trash2, Image as ImageIcon, Loader2, Eye, Calendar, Link2, Plus,
-  Sparkles, Wand2, MessageSquare, Target, Users, CheckCircle, AlertCircle,
+  X, Clock, ImagePlus, Send, FileText, Hash, ChevronDown, Layers, Globe, Image as ImageIcon, Loader2, Eye, Calendar, Link2, Plus,
+  Sparkles, Wand2, MessageSquare, Target, CheckCircle, AlertCircle,
 } from "lucide-react";
 import { SocialConnection } from "@/lib/client";
+import Image from "next/image";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -434,9 +434,9 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
                     style={{ borderColor: media.error ? "hsl(0 60% 50% / 0.5)" : "hsl(var(--kf-border))" }}
                   >
                     {media.preview ? (
-                      <img src={media.preview} alt="" className="w-full h-full object-cover" />
+                      <Image src={media.preview} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                     ) : media.url ? (
-                      <img src={media.url} alt="" className="w-full h-full object-cover" />
+                      <Image src={media.url} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center" style={{ background: "hsl(var(--kf-muted))" }}>
                         <ImageIcon className="w-5 h-5 text-muted-foreground" />
@@ -606,7 +606,7 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
                   </button>
                 </div>
                 <p className="text-[10px] text-muted-foreground leading-relaxed">
-                  Tip: For Google Drive, right-click your file → Share → set to "Anyone with the link" → copy the link
+                  Tip: For Google Drive, right-click your file → Share → set to &quot;Anyone with the link&quot; → copy the link
                 </p>
               </div>
             </motion.div>
@@ -729,7 +729,7 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
                 {mediaFiles.filter(m => !m.error && (m.preview || m.url)).length > 0 && (
                   <div className="flex gap-2 flex-wrap">
                     {mediaFiles.filter(m => !m.error && (m.preview || m.url)).map(m => (
-                      <img key={m.id} src={m.preview || m.url} alt="" className="w-24 h-24 object-cover rounded-lg" />
+                      <Image key={m.id} src={m.preview || m.url} alt="" className="w-24 h-24 object-cover rounded-lg"  width={96} height={96} unoptimized />
                     ))}
                   </div>
                 )}

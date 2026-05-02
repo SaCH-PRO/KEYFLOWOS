@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, Circle, Trash2, Plus, ListChecks, Calendar } from "lucide-react";
 import { ProjectTask } from "@/lib/client";
 

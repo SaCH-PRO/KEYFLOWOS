@@ -8,7 +8,6 @@ import {
   RefreshCw,
   Users,
   FileText,
-  Lightbulb,
   ArrowUp,
   Clock,
 } from "lucide-react";

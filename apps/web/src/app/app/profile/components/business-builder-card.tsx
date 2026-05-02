@@ -29,7 +29,6 @@ import {
   TIMELINE_OPTIONS, INTERACTION_MODE_OPTIONS, CANVAS_LABELS,
   PROGRESS_PHASES, INITIAL_INTAKE, safeArray, validateModel,
 } from "./business-builder-constants";
-import type { QuickLink } from "./business-builder-constants";
 
 interface ServerPlan {
   id: string;

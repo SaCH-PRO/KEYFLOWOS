@@ -210,7 +210,7 @@ export function InteractionHistorySection({ businessId, otherBusinessId, otherBu
                         disabled={busyId === r.id}
                         className="px-2 py-0.5 rounded-md bg-red-500/10 text-red-400 text-[10px] font-medium hover:bg-red-500/20 disabled:opacity-50 flex items-center gap-1"
                       >
-                        <XCircle className="w-3 h-3" /> Didn't pan out
+                        <XCircle className="w-3 h-3" /> Didn&apos;t pan out
                       </button>
                     </div>
                   )}

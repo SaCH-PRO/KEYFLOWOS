@@ -34,6 +34,7 @@ import {
 import type { Product } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { PRODUCT_CATEGORY_CONFIG, type ProductForm } from "../components/commerce-types";
+import Image from "next/image";
 
 const CATEGORY_ICONS = { SERVICE: Zap, PRODUCT: Package, PACKAGE: Layers } as const;
 
@@ -248,7 +249,7 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
           <div className="relative overflow-hidden shrink-0">
             {!editing && displayImage && !imgError ? (
               <div className="w-full h-36 sm:h-44 overflow-hidden relative">
-                <img src={displayImage} alt={product.name} className="w-full h-full object-cover" onError={() => setImgError(true)} />
+                <Image src={displayImage} alt={product.name} className="w-full h-full object-cover" onError={() => setImgError(true)}  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                 <div className="absolute inset-0 bg-gradient-to-t from-card via-card/30 to-transparent" />
               </div>
             ) : !editing ? (
@@ -390,6 +391,7 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
                     </div>
                     {imagePreview && form.imageUrl ? (
                       <div className="relative rounded-lg border border-border/50 overflow-hidden bg-muted/20 group/img">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- user-supplied URL with unknown host (cannot pre-configure remotePatterns) */}
                         <img src={imagePreview} alt="Preview" className="w-full h-28 object-cover" onError={() => { setImagePreview(null); }} />
                         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-2">
                           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors"><Upload className="w-3.5 h-3.5" /></button>

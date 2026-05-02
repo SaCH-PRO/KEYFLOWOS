@@ -117,7 +117,7 @@ export default function ResourcesPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {tab === "browse" && items.length === 0 && <p className="col-span-2 text-center py-12 text-sm text-muted-foreground">No resources found</p>}
           {tab === "browse" && items.map((r) => <ResourceCard key={r.id} r={r} onDownload={() => handleDownload(r)} />)}
-          {tab === "mine" && mine.length === 0 && <p className="col-span-2 text-center py-12 text-sm text-muted-foreground">You haven't published any resources yet</p>}
+          {tab === "mine" && mine.length === 0 && <p className="col-span-2 text-center py-12 text-sm text-muted-foreground">You haven&apos;t published any resources yet</p>}
           {tab === "mine" && mine.map((r) => <ResourceCard key={r.id} r={r} hideDownload />)}
           {tab === "downloaded" && downloads.length === 0 && <p className="col-span-2 text-center py-12 text-sm text-muted-foreground">No downloads yet</p>}
           {tab === "downloaded" && downloads.map((d) => (

@@ -11,12 +11,11 @@ import {
   Mail,
   Phone,
   User,
-  X,
   Loader2,
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchDuplicateContacts, mergeContacts, type Contact } from "@/lib/client";
+import { fetchDuplicateContacts, mergeContacts } from "@/lib/client";
 import { MergeContactsModal } from "@/components/contacts/merge-contacts-modal";
 
 interface DuplicateContact {

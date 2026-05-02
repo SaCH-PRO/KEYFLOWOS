@@ -13,7 +13,6 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
-  TrendingUp,
 } from "lucide-react";
 import { commerceAiQuoteFollowUp, type CommerceQuoteFollowUp } from "@/lib/client";
 
@@ -153,11 +152,11 @@ export function QuoteFollowUpPanel({ businessId, quoteId, quoteNumber, quoteAmou
         <div className="px-4 pb-3">
           <div className="p-3 rounded-lg bg-violet-500/5 border border-violet-500/20 space-y-2">
             <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Suggested Opening</p>
-            <p className="text-xs italic text-violet-300">"{data.messagingApproach.openingLine}"</p>
+            <p className="text-xs italic text-violet-300">&quot;{data.messagingApproach.openingLine}&quot;</p>
             {data.messagingApproach.closingLine && (
               <>
                 <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Suggested Close</p>
-                <p className="text-xs italic text-violet-300">"{data.messagingApproach.closingLine}"</p>
+                <p className="text-xs italic text-violet-300">&quot;{data.messagingApproach.closingLine}&quot;</p>
               </>
             )}
           </div>
@@ -192,7 +191,7 @@ export function QuoteFollowUpPanel({ businessId, quoteId, quoteNumber, quoteAmou
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-2">
               {data.objectionHandling.map((obj, i) => (
                 <div key={i} className="p-2.5 rounded-lg bg-muted/20 border border-border/30">
-                  <p className="text-xs font-medium text-amber-300 mb-1">"{obj.objection}"</p>
+                  <p className="text-xs font-medium text-amber-300 mb-1">&quot;{obj.objection}&quot;</p>
                   <p className="text-xs text-muted-foreground">{obj.response}</p>
                 </div>
               ))}

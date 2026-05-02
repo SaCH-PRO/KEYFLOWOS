@@ -12,7 +12,6 @@ import {
   XCircle,
   RotateCcw,
   ChevronRight,
-  X,
 } from "lucide-react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { SideSheet } from "@/components/ui/side-sheet";

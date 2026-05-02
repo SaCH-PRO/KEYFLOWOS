@@ -4,7 +4,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Sparkles, Filter, ArrowUpDown, History, CheckCircle2,
-  MessageSquare, FileText, Phone, Mail, DollarSign, Clock,
+  MessageSquare, FileText, Phone, Mail, DollarSign,
   Zap, Bot, ChevronDown, X, Timer, Target, TrendingUp,
   ArrowUpRight, Activity, AlertTriangle, ExternalLink,
 } from "lucide-react";
@@ -264,7 +264,7 @@ const ProgressCard = React.memo(function ProgressCard({
         <div className="flex-1 min-w-0 text-left">
           <div className="flex items-center gap-1.5">
             <Activity className="w-3 h-3 text-[hsl(var(--kf-accent1))]" />
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Today's Progress</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Today&apos;s Progress</span>
           </div>
           <div className="flex items-baseline gap-1.5 mt-0.5">
             <span className="text-base font-bold">{completedCount}<span className="text-muted-foreground/50 font-normal text-xs">/{total}</span></span>

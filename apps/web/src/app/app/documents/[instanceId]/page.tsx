@@ -12,7 +12,7 @@ import {
   Sparkles, Edit3, Save, Clock, Eye, ChevronDown, ChevronUp,
   Trash2, History, Copy, Cpu, Zap, Layers, DollarSign, Brain,
   Scale, Palette, Globe, BookOpen, Download, Printer, Mail,
-  HardDrive, ExternalLink, Check, Loader2,
+  HardDrive, ExternalLink, Loader2,
 } from "lucide-react";
 
 interface DocumentSection {

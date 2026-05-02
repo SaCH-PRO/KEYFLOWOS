@@ -6,9 +6,8 @@ import {
   Copy, MessageCircle, Mail,
   StickyNote, AlertCircle,
   Check, Clock, ChevronDown, ChevronUp, ChevronRight,
-  Circle, Sparkles, DollarSign,
-  TrendingUp, Users, Heart, Brain,
-  Zap, Target, RefreshCw, Star,
+  Circle, Sparkles, Heart, Brain,
+  Zap, Target, RefreshCw,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactEvent } from "./contact-detail";

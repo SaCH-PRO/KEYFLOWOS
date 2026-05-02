@@ -4,8 +4,7 @@ import { useState, useRef } from "react";
 import { Sparkles, ArrowRight, Loader2, X, Zap, CheckCircle } from "lucide-react";
 import { AiBadge } from "@/components/ui/ai-badge";
 import { aiGenerateFlow } from "@/lib/client";
-import {
-  TRIGGER_OPTIONS, ACTION_OPTIONS, AUTOMATION_TEMPLATES,
+import { AUTOMATION_TEMPLATES,
   getTriggerLabel, getActionLabel,
   type ActionStep,
 } from "./automation-constants";

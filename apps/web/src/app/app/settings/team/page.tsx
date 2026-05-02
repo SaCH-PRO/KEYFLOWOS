@@ -3,15 +3,16 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Users, UserPlus, Trash2, CheckCircle2, AlertCircle, Mail, Shield, Crown,
-  Activity, Settings2, ChevronDown, ChevronRight, Clock, Zap, Eye, Edit3,
+  Users, UserPlus, Trash2, CheckCircle2, Mail, Shield, Crown,
+  Activity, Settings2, ChevronRight, Zap, Eye, Edit3,
   Lock, Unlock, Filter,
 } from "lucide-react";
-import { Button, Input, Badge } from "@keyflow/ui";
+import { Button, Input } from "@keyflow/ui";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple as apiPost, apiDelete, apiPatch } from "@/lib/api";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import Image from "next/image";
 
 type TeamMember = {
   id: string;
@@ -142,11 +143,11 @@ function Avatar({ member }: { member: TeamMember }) {
 
   if (member.user.avatarUrl) {
     return (
-      <img
+      <Image
         src={member.user.avatarUrl}
         alt={name}
         className="h-10 w-10 rounded-xl object-cover shadow-sm"
-      />
+       width={40} height={40} unoptimized />
     );
   }
 

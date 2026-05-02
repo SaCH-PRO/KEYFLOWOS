@@ -3,8 +3,7 @@
 import {
   TrendingUp, TrendingDown, Minus,
   Lightbulb, Target, AlertTriangle,
-  ChevronDown, ChevronUp, Mail,
-  CheckCircle, Users, BarChart3,
+  ChevronDown, ChevronUp, Mail, Users,
   Zap, ClipboardList, Star,
 } from "lucide-react";
 import { useState } from "react";

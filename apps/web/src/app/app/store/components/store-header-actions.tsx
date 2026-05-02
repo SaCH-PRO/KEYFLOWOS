@@ -3,10 +3,11 @@
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Copy, ExternalLink, CheckCircle2, Share2,
-  MessageCircle, ChevronDown, Download, QrCode,
+  MessageCircle, ChevronDown, Download,
 } from "lucide-react";
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import QRCode from "qrcode";
+import Image from "next/image";
 
 type Props = {
   storeEnabled: boolean;
@@ -157,7 +158,7 @@ export function StoreHeaderActions({ storeEnabled, publicUrl, onToggleEnabled }:
                     className="rounded-xl p-3 bg-white"
                     style={{ boxShadow: "0 2px 12px hsl(0 0% 0% / 0.15)" }}
                   >
-                    <img src={qrDataUrl} alt="Store QR Code" className="w-[160px] h-[160px]" />
+                    <Image src={qrDataUrl} alt="Store QR Code" className="w-[160px] h-[160px]"  width={160} height={160} unoptimized />
                   </div>
                   <p className="text-[10px] text-center" style={{ color: "hsl(var(--kf-muted-foreground) / 0.5)" }}>
                     Scan to visit your store
