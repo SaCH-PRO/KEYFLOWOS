@@ -70,7 +70,7 @@ function ReadinessChecklist({
   const completed = checks.filter((c) => c.done).length;
   const total = checks.length;
   const pct = Math.round((completed / total) * 100);
-  const allDone = completed === total;
+  const _allDone = completed === total;
 
   const color =
     pct >= 80

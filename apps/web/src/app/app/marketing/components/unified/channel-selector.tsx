@@ -3,9 +3,23 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Check, ChevronDown, Facebook, Instagram, Mail, MessageCircle,
-  Globe, Wifi, WifiOff, Plus, RefreshCw, Loader2, AlertCircle,
-  Lock, Image as ImageIcon, FileText, MessageSquare,
+  Check,
+  ChevronDown,
+  Facebook,
+  Instagram,
+  Mail,
+  MessageCircle,
+  Globe,
+  Wifi,
+  WifiOff,
+  Plus,
+  RefreshCw,
+  Loader2,
+  AlertCircle,
+  Lock,
+  Image as ImageIcon,
+  FileText,
+  MessageSquare,
 } from "lucide-react";
 import { listChannelConnections, listChannelDestinations } from "@/lib/client";
 import type { ChannelConnection, ChannelDestination } from "@/lib/client";
@@ -53,7 +67,7 @@ function getDisabledReason(connection: ChannelConnection): string | null {
   return null;
 }
 
-export function ChannelSelector({ businessId, selectedDestinations, onSelectionChange, contentType, healthData }: ChannelSelectorProps) {
+export function ChannelSelector({ businessId, selectedDestinations, onSelectionChange, contentType: _contentType, healthData }: ChannelSelectorProps) {
   const [localConnections, setLocalConnections] = useState<ChannelConnection[]>([]);
   const [localActiveDestinations, setLocalActiveDestinations] = useState<ChannelDestination[]>([]);
   const [localAllDestinations, setLocalAllDestinations] = useState<ChannelDestination[]>([]);

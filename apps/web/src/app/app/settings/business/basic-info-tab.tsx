@@ -38,7 +38,7 @@ type Props = {
   validationErrors?: ValidationErrors;
 };
 
-export function BasicInfoTab({ form, setField, logoUrl, validationErrors = {} }: Props) {
+export function BasicInfoTab({ form, setField, logoUrl: _logoUrl, validationErrors = {} }: Props) {
   return (
     <div className="space-y-4">
 

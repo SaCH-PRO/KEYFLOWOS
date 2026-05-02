@@ -1,8 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Link as LinkIcon, Loader2, CheckCircle2, XCircle,
-  MessageCircle, ExternalLink, Copy, Download,
+import {
+  Link as LinkIcon,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  MessageCircle,
+  ExternalLink,
+  Copy,
+  Download,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import QRCode from "qrcode";
@@ -19,7 +26,7 @@ type Props = {
 };
 
 export function StoreSettings({
-  businessId,
+  businessId: _businessId,
   slug,
   currentSlug,
   publicUrl,

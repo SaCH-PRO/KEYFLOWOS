@@ -3,8 +3,14 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import {
-  Tags, RefreshCw, Plus, Check, ChevronDown, ChevronUp,
-  Sparkles, Info,
+  Tags,
+  RefreshCw,
+  Plus,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  Info,
 } from "lucide-react";
 import { aiSuggestTags, updateContact, type AiTagSuggestion } from "@/lib/client";
 

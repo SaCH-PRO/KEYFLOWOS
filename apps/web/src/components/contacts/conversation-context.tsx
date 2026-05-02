@@ -35,7 +35,7 @@ interface ConversationContextProps {
 
 export function ConversationContext({
   data,
-  contactName,
+  contactName: _contactName,
   onRefresh,
   isLoading,
 }: ConversationContextProps) {

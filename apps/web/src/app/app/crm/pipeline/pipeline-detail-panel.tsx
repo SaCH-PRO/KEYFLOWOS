@@ -63,7 +63,7 @@ function PipelineDetailPanelInner({
   detailError,
   onRetryDetail,
   isPinned,
-  contactName,
+  contactName: _contactName,
   healthMetrics,
   journeyMilestones,
   crossJourney,

@@ -2,7 +2,11 @@
 
 import { motion } from "framer-motion";
 import {
-  Facebook, Instagram, Twitter, Linkedin, Youtube,
+  Facebook,
+  Instagram,
+  Twitter,
+  Linkedin,
+  Youtube,
 } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { FormState } from "./use-business-settings";

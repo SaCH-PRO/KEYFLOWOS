@@ -23,7 +23,7 @@ export function useCommerceCopilot(deps: CopilotDeps) {
 
   const {
     businessId, tab, invoiceCount, quoteCount,
-    handleTabChange, prefillForContact,
+    handleTabChange,
   } = deps;
 
   useEffect(() => {

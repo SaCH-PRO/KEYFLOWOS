@@ -77,7 +77,7 @@ export function ReadinessChecklist({
   hasLogo,
   hasHeroImage,
   hoursConfigured,
-  hasTestimonials,
+  hasTestimonials: _hasTestimonials,
   hasSlug,
   servicesCount,
   productsCount,

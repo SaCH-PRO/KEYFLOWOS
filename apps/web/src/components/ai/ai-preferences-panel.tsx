@@ -2,9 +2,19 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Target, MessageSquare, ShieldAlert, Send, Clock,
-  Star, AlertCircle, BarChart3, Loader2, Plus, X,
-  RefreshCw, Trash2,
+  Target,
+  MessageSquare,
+  ShieldAlert,
+  Send,
+  Clock,
+  Star,
+  AlertCircle,
+  BarChart3,
+  Loader2,
+  Plus,
+  X,
+  RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";

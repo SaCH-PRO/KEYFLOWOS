@@ -189,19 +189,6 @@ export default function BookingForm({
     [staff, bookingStaffId]
   );
 
-  const summaryParts = useMemo(() => {
-    const parts: string[] = [];
-    if (bookingDate) {
-      parts.push(new Date(bookingDate + "T12:00:00").toLocaleDateString("en-TT", { weekday: "short", month: "short", day: "numeric" }));
-    }
-    if (bookingTime) {
-      const [h, m] = bookingTime.split(":").map(Number);
-      const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-      const ampm = h >= 12 ? "PM" : "AM";
-      parts.push(`${hour12}:${String(m).padStart(2, "0")} ${ampm}`);
-    }
-    return parts;
-  }, [bookingDate, bookingTime]);
 
   return (
     <div>

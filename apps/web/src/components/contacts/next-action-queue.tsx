@@ -3,9 +3,20 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Zap, MessageSquare, FileText, Phone, Mail, DollarSign,
-  CheckCircle2, ChevronRight, ChevronDown, Sparkles, Timer, ArrowRight,
-  AlertCircle, Copy,
+  Zap,
+  MessageSquare,
+  FileText,
+  Phone,
+  Mail,
+  DollarSign,
+  CheckCircle2,
+  ChevronRight,
+  ChevronDown,
+  Sparkles,
+  Timer,
+  ArrowRight,
+  AlertCircle,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 

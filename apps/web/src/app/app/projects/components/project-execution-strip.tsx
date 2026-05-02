@@ -1,9 +1,18 @@
 "use client";
 
 import {
-  FolderKanban, CalendarClock, AlertTriangle, Clock, CheckCircle,
-  UserX, Sparkles, HeartPulse, TrendingUp, Target,
-  BarChart3, Flag,
+  FolderKanban,
+  CalendarClock,
+  AlertTriangle,
+  Clock,
+  CheckCircle,
+  UserX,
+  Sparkles,
+  HeartPulse,
+  TrendingUp,
+  Target,
+  BarChart3,
+  Flag,
 } from "lucide-react";
 import { Project } from "@/lib/client";
 import { normalizeStatus, isOverdue, isDueSoon, getProjectRisk, getProjectProgress } from "./project-constants";

@@ -169,7 +169,7 @@ export default function Home() {
           </motion.div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-            {MODULES.map(({ icon: Icon, title, desc, color, iconColor }, i) => (
+            {MODULES.map(({ icon: Icon, title, desc, color, iconColor }, _i) => (
               <motion.div
                 key={title}
                 variants={fadeUp}

@@ -4,11 +4,33 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Brain, X, Send, Loader2, Sparkles, ArrowRight,
-  Activity, Shield, CheckCircle2,
-  ChevronRight, Settings, TrendingUp, Calendar, AlertCircle,
-  AlertTriangle, Zap, Info, Check, XIcon, Edit3, Package, Users, DollarSign, FileText,
-  BarChart3, Target, Layers,
+  Brain,
+  X,
+  Send,
+  Loader2,
+  Sparkles,
+  ArrowRight,
+  Activity,
+  Shield,
+  CheckCircle2,
+  ChevronRight,
+  Settings,
+  TrendingUp,
+  Calendar,
+  AlertCircle,
+  AlertTriangle,
+  Zap,
+  Info,
+  Check,
+  XIcon,
+  Edit3,
+  Package,
+  Users,
+  DollarSign,
+  FileText,
+  BarChart3,
+  Target,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";

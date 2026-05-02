@@ -53,7 +53,7 @@ export function CartDrawer({
   secondaryColor,
   accentColor,
   promoCode,
-  slug,
+  slug: _slug,
   taxRate,
   onClose,
   onOpen,

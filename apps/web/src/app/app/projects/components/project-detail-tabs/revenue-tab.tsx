@@ -2,8 +2,16 @@
 
 import { useEffect, useState } from "react";
 import {
-  DollarSign, FileText, ExternalLink, CreditCard, TrendingDown,
-  Wallet, AlertCircle, CheckCircle, Clock, Receipt,
+  DollarSign,
+  FileText,
+  ExternalLink,
+  CreditCard,
+  TrendingDown,
+  Wallet,
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  Receipt,
 } from "lucide-react";
 import { fetchInvoices, fetchExpensesByProject, type Expense, type Invoice } from "@/lib/client";
 

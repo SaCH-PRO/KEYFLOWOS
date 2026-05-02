@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   GripVertical,
@@ -42,7 +42,6 @@ const SECTION_ICONS: Record<StorefrontSectionType, React.ElementType> = {
 
 export function SectionLayoutManager({ config, onConfigChange, onSave, saving }: Props) {
   const sections: StorefrontSection[] = config.sections?.length ? config.sections : DEFAULT_SECTIONS;
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
 
   const toggleSection = useCallback(
     (idx: number) => {

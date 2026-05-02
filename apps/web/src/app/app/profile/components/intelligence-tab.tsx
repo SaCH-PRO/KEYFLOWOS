@@ -3,9 +3,16 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  Brain, Sparkles, Target, Users, Zap, CheckCircle2,
-  AlertCircle, Shield,
-  TrendingUp, Lightbulb,
+  Brain,
+  Sparkles,
+  Target,
+  Users,
+  Zap,
+  CheckCircle2,
+  AlertCircle,
+  Shield,
+  TrendingUp,
+  Lightbulb,
 } from "lucide-react";
 import { ContextDepthCard } from "./context-depth-card";
 import { ProgressivePrompts } from "./progressive-prompts";

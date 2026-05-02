@@ -5,8 +5,11 @@ import { motion } from "framer-motion";
 import { X, Upload, Image as ImageIcon, Repeat, DollarSign, FileText, Store, Tag, Calendar, CreditCard, FolderKanban, Users, Briefcase } from "lucide-react";
 import { toast } from "sonner";
 import {
-  Expense, ExpenseCategory, PAYMENT_METHODS,
-  createExpense, updateExpense,
+  Expense,
+  ExpenseCategory,
+  PAYMENT_METHODS,
+  createExpense,
+  updateExpense,
 } from "@/lib/client";
 import { API_BASE, getAuthHeaders } from "@/lib/api";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
@@ -65,7 +68,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       toast.success("Expense saved");
       onSaved();
       onClose();
-    } catch (err) { toast.error("Failed to save expense"); }
+    } catch (_err) { toast.error("Failed to save expense"); }
   };
 
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -84,7 +87,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
         setFormData(prev => ({ ...prev, receiptUrl: data.publicUrl || data.uploadUrl.split("?")[0] }));
         toast.success("Receipt uploaded");
       }
-    } catch (err) { toast.error("Failed to upload receipt"); }
+    } catch (_err) { toast.error("Failed to upload receipt"); }
     setUploading(false);
   };
 

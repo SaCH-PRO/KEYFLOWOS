@@ -3,8 +3,15 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  X, Bot, MessageSquare, Gift, DollarSign, Bell, Clock,
-  Loader2, Moon,
+  X,
+  Bot,
+  MessageSquare,
+  Gift,
+  DollarSign,
+  Bell,
+  Clock,
+  Loader2,
+  Moon,
 } from "lucide-react";
 import { fetchAutopilotSettings, updateAutopilotSettings } from "@/lib/client";
 import type { AutopilotSettings } from "@/lib/client";

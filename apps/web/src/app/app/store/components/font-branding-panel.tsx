@@ -22,7 +22,7 @@ const GOOGLE_FONTS_URL =
 
 export function FontBrandingPanel({ config, onConfigChange, onSave, saving, businessData }: Props) {
   const currentPairing = config.appearance?.fontPairing ?? "inter-inter";
-  const [fontsLoaded, setFontsLoaded] = useState(false);
+  const [, setFontsLoaded] = useState(false);
 
   useEffect(() => {
     if (document.querySelector('link[data-font-pairings]')) {

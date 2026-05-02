@@ -159,7 +159,7 @@ export function HoursEditor({ hours, onChange, onSave, saving }: Props) {
       </div>
 
       <div className="p-3 space-y-1.5">
-        {DAYS.map(({ key, label, short }, idx) => {
+        {DAYS.map(({ key, label, short: _short }, idx) => {
           const h = hours[key];
           const isWeekday = WEEKDAY_KEYS.includes(key);
           return (

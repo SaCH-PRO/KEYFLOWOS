@@ -9,12 +9,38 @@ import { fetchAiUsageHistory, type AiUsageHistoryResponse } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PlanComparison as PlanComparisonGrid } from "./plan-comparison";
 import {
-  Crown, Zap, Check, Sparkles, ArrowUpRight, Clock,
-  AlertTriangle, CreditCard, Shield, Star, Brain,
-  TrendingUp, BarChart3, Activity, ChevronDown, ChevronUp,
-  Receipt, Lock, Users, Calendar, Globe, Megaphone,
-  FolderKanban, X, Eye, EyeOff, Wallet, Banknote,
-  Loader2, CheckCircle2, DollarSign, FileText,
+  Crown,
+  Zap,
+  Check,
+  Sparkles,
+  ArrowUpRight,
+  Clock,
+  AlertTriangle,
+  CreditCard,
+  Shield,
+  Star,
+  Brain,
+  TrendingUp,
+  BarChart3,
+  Activity,
+  ChevronDown,
+  ChevronUp,
+  Receipt,
+  Lock,
+  Users,
+  Calendar,
+  Globe,
+  Megaphone,
+  FolderKanban,
+  X,
+  Eye,
+  EyeOff,
+  Wallet,
+  Banknote,
+  Loader2,
+  CheckCircle2,
+  DollarSign,
+  FileText,
 } from "lucide-react";
 
 interface BillingDashboard {
@@ -269,24 +295,6 @@ export function BillingTab() {
     setUpgrading(false);
   };
 
-  const handleActivate = async (plan: string) => {
-    if (!businessId) return;
-    setUpgrading(true);
-    setMessage(null);
-    const res = await apiPost<unknown>({
-      path: `/subscriptions/businesses/${businessId}/activate`,
-      body: { plan, currency: selectedCurrency, gateway: "manual" },
-    });
-    if (res.error) {
-      setMessage({ type: "error", text: res.error });
-      toast.error(res.error);
-    } else {
-      setMessage({ type: "success", text: `${plan} plan activated!` });
-      toast.success(`${plan} plan activated!`);
-      await loadAll();
-    }
-    setUpgrading(false);
-  };
 
   const handleCancel = async () => {
     if (!businessId) return;

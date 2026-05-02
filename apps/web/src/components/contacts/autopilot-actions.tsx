@@ -3,10 +3,29 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Bot, CheckCircle2, Clock, Eye, Pause, Play,
-  Settings, MessageSquare, Gift, DollarSign, Bell,
-  Sparkles, X, Copy, Mail, Phone,
-  Loader2, ChevronDown, ChevronUp, Star, Users, Heart, RotateCcw,
+  Bot,
+  CheckCircle2,
+  Clock,
+  Eye,
+  Pause,
+  Play,
+  Settings,
+  MessageSquare,
+  Gift,
+  DollarSign,
+  Bell,
+  Sparkles,
+  X,
+  Copy,
+  Mail,
+  Phone,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  Star,
+  Users,
+  Heart,
+  RotateCcw,
 } from "lucide-react";
 import { generateAutopilotDraft, executeAutopilotAction } from "@/lib/client";
 import type { AutopilotDraft } from "@/lib/client";
@@ -151,7 +170,7 @@ function DraftPreview({ draft, onSendWhatsApp, onSendEmail, onMarkDone, onCopy, 
 }
 
 const ApprovalCard = React.memo(function ApprovalCard({
-  action, approving, drafts, draftLoading, businessId,
+  action, approving, drafts, draftLoading, businessId: _businessId,
   onApprove, onDeny, onViewContact, onGenerateDraft, onExecute,
 }: {
   action: AutopilotAction;
@@ -171,7 +190,7 @@ const ApprovalCard = React.memo(function ApprovalCard({
   const isLoadingDraft = draftLoading[action.id];
   const [expanded, setExpanded] = useState(false);
   const [sending, setSending] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [, setCopied] = useState(false);
   const [done, setDone] = useState(false);
 
   const handleGenerateDraft = useCallback(() => {

@@ -63,7 +63,7 @@ export default function PaymentsTab({
   invoices,
   currency,
   businessId,
-  contacts,
+  contacts: _contacts,
   setInvoices,
   onNavigateToInvoices,
 }: PaymentsTabProps) {

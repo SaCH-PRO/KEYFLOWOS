@@ -4,13 +4,21 @@ import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import {
-  BarChart3, DollarSign, Clock, TrendingUp, AlertTriangle,
-  CheckCircle2, FileText, ArrowUpRight,
+  BarChart3,
+  DollarSign,
+  Clock,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle2,
+  FileText,
+  ArrowUpRight,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   fetchCommerceStats,
-  type CommerceStats, type Invoice, type Quote,
+  type CommerceStats,
+  type Invoice,
+  type Quote,
 } from "@/lib/client";
 import { formatCurrencyCompact } from "@/lib/currency";
 
@@ -33,7 +41,7 @@ function InsightsSkeleton() {
 }
 
 const ActionStrip = React.memo(function ActionStrip({
-  stats, invoices, quotes, currency,
+  stats, invoices: _invoices, quotes, currency,
 }: {
   stats: CommerceStats;
   invoices: Invoice[];

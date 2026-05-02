@@ -95,7 +95,7 @@ function mapAchievementToMission(
   achievements: { id: string; achieved: boolean }[],
   challenges: { id: string; progress: number; target: number }[],
   streakDays: number,
-  totalXp: number,
+  _totalXp: number,
 ): number {
   const ach = achievements.find((a) => a.id === missionId);
   if (ach) return ach.achieved ? 1 : 0;

@@ -74,7 +74,7 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELLED: "Cancelled",
 };
 
-export default function BookingsInsightsTab({ bookings, services, stats, scheduleHealth }: BookingsInsightsTabProps) {
+export default function BookingsInsightsTab({ bookings, services: _services, stats, scheduleHealth }: BookingsInsightsTabProps) {
   const dailyVolume = useMemo(() => {
     const map = new Map<string, number>();
     const now = new Date();

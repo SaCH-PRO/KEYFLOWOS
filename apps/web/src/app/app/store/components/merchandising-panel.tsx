@@ -3,9 +3,32 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Star, Plus, X, ChevronUp, ChevronDown, Megaphone, Tag, Award,
-  Sparkles, Flame, Clock, Save, Loader2, Search, Shield, Truck,
-  CheckCircle2, Headphones, Zap, Briefcase, LayoutGrid, Gift, Users, BadgeCheck, Boxes, Layers,
+  Star,
+  Plus,
+  X,
+  ChevronUp,
+  ChevronDown,
+  Megaphone,
+  Tag,
+  Award,
+  Sparkles,
+  Flame,
+  Clock,
+  Save,
+  Loader2,
+  Search,
+  Shield,
+  Truck,
+  CheckCircle2,
+  Headphones,
+  Zap,
+  Briefcase,
+  LayoutGrid,
+  Gift,
+  Users,
+  BadgeCheck,
+  Boxes,
+  Layers,
 } from "lucide-react";
 import type { StorefrontConfig, Product, Service, BadgeType, TrustRailItem } from "@/lib/client";
 

@@ -52,7 +52,7 @@ export function RevenueProjectionChart({
   currentRevenue = 0,
   periodStart,
   periodEnd,
-  invoiceCount,
+  invoiceCount: _invoiceCount,
 }: RevenueProjectionChartProps) {
   const [forecast, setForecast] = useState<CashFlowForecast | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,7 +73,7 @@ export function RevenueProjectionChart({
 
   useEffect(() => { load(); }, [load]);
 
-  const { chartData, milestones, confidence, historicalDays } = useMemo(() => {
+  const { chartData, milestones, confidence } = useMemo(() => {
     if (!forecast) return { chartData: [] as ChartPoint[], milestones: [] as { label: string; value: number }[], confidence: null, historicalDays: 0 };
 
     const dailyRate = forecast.dailyRevenueRate ?? 0;

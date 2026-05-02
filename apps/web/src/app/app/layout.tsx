@@ -345,7 +345,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [displayName, setDisplayName] = useState("");
   const [initials, setInitials] = useState("KF");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [, setOnboardingChecked] = useState(false);
   const [isAdminUser, setIsAdminUser] = useState(false);
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
@@ -385,7 +385,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     const init = async () => {
       await refreshWorkspace();
       const user = getCachedUser();
-      const business = getCachedBusiness();
+      const _business = getCachedBusiness();
       
       if (user) {
         setDisplayName(getUserDisplayName());

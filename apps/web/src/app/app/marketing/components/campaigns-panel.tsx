@@ -83,7 +83,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   availableTags,
   onCampaignCreated,
   onCampaignSent,
-  onViewContact,
+  onViewContact: _onViewContact,
   onAiWrite,
   searchQuery: externalSearch,
   onSearchChange: externalSearchChange,

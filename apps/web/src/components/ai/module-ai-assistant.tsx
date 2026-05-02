@@ -3,9 +3,18 @@
 import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Sparkles, X, RefreshCw, Loader2, AlertTriangle,
-  Lightbulb, TrendingUp, Zap, ChevronRight, Brain,
-  Shield, Clock,
+  Sparkles,
+  X,
+  RefreshCw,
+  Loader2,
+  AlertTriangle,
+  Lightbulb,
+  TrendingUp,
+  Zap,
+  ChevronRight,
+  Brain,
+  Shield,
+  Clock,
 } from "lucide-react";
 import type { UseModuleAiReturn, AiSuggestion } from "@/hooks/use-module-ai";
 

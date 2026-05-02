@@ -3,12 +3,42 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  LayoutDashboard, Layers, ArrowLeftRight, Building2, ShoppingBag,
-  AlertTriangle, DollarSign, TableProperties, Plus, Pencil, Trash2, Download, Upload, FileSpreadsheet, Link, Unlink,
-  CheckCircle2, TrendingDown, Archive, ArrowUp, ArrowDown,
-  ArrowRight, Search, ChevronDown, ChevronUp, Package,
-  ExternalLink, BarChart3, Activity, Loader2, X, FileDown, FileUp,
-  Warehouse, Clock, Tag,
+  LayoutDashboard,
+  Layers,
+  ArrowLeftRight,
+  Building2,
+  ShoppingBag,
+  AlertTriangle,
+  DollarSign,
+  TableProperties,
+  Plus,
+  Pencil,
+  Trash2,
+  Download,
+  Upload,
+  FileSpreadsheet,
+  Link,
+  Unlink,
+  CheckCircle2,
+  TrendingDown,
+  Archive,
+  ArrowUp,
+  ArrowDown,
+  ArrowRight,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  Package,
+  ExternalLink,
+  BarChart3,
+  Activity,
+  Loader2,
+  X,
+  FileDown,
+  FileUp,
+  Warehouse,
+  Clock,
+  Tag,
 } from "lucide-react";
 import { apiGet, apiPost, apiDelete, getAuthHeaders, API_BASE } from "@/lib/api";
 import { saveAs } from "@/lib/download";
@@ -649,7 +679,7 @@ export function InventoryCommandCenter({
   );
 }
 
-function OverviewTab({ summary, loading, inventory, warehouses, products, productsById, onAddInventory, onCreateWarehouse }: any) {
+function OverviewTab({ summary, loading, inventory, warehouses, products: _products, productsById: _productsById, onAddInventory, onCreateWarehouse }: any) {
   if (loading && !summary) return (
     <div className="flex items-center justify-center py-16">
       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -887,7 +917,7 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
   );
 }
 
-function MovementsTab({ movements, loading, inventory, warehouses, productsById, warehousesById, basePath, onAdjust, onShowTransfer }: any) {
+function MovementsTab({ movements, loading, inventory, warehouses: _warehouses, productsById, warehousesById, basePath: _basePath, onAdjust, onShowTransfer }: any) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -1062,7 +1092,7 @@ const PO_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   SHIPPED: { label: "Shipped", color: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20" },
 };
 
-function PurchaseOrdersTab({ purchaseOrders, products, onCreatePO, onEditPO, onAdvancePO }: any) {
+function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, onEditPO, onAdvancePO }: any) {
   const NEXT_STATUS: Record<string, string> = {
     DRAFT: "SUBMITTED",
     SUBMITTED: "ACKNOWLEDGED",
@@ -1293,7 +1323,7 @@ function ValuationTab({ summary, inventory, productsById, loading }: any) {
   );
 }
 
-function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, sheetDiff, conflictResolutions, setConflictResolutions, importResult, xlsxImporting, xlsxWizard, setXlsxWizard, expectedColumns, onApplyXlsxMapping, fileInputRef, inventory, businessId, onPush, onPull, onApply, onGenerateDiff, onApplyResolved, onCreateSheet, onUnlink, onExportExcel, onDownloadTemplate, onXlsxImport, onConnectDrive, onLinkSheet }: any) {
+function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, sheetDiff, conflictResolutions, setConflictResolutions, importResult, xlsxImporting, xlsxWizard, setXlsxWizard, expectedColumns, onApplyXlsxMapping, fileInputRef, inventory: _inventory, businessId: _businessId, onPush, onPull, onApply, onGenerateDiff, onApplyResolved, onCreateSheet, onUnlink, onExportExcel, onDownloadTemplate, onXlsxImport, onConnectDrive, onLinkSheet }: any) {
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
 

@@ -1,10 +1,15 @@
 "use client";
 
 import {
-  Lightbulb, AlertTriangle,
-  ChevronDown, ChevronUp,
-  CheckCircle, XCircle,
-  Zap, Search, DollarSign,
+  Lightbulb,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle,
+  XCircle,
+  Zap,
+  Search,
+  DollarSign,
 } from "lucide-react";
 import { useState } from "react";
 

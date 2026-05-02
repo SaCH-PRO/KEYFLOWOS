@@ -1,8 +1,12 @@
 "use client";
 
 import {
-  CheckCircle2, AlertTriangle, AlertCircle, Info,
-  X, ChevronRight,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  Info,
+  X,
+  ChevronRight,
 } from "lucide-react";
 
 type Severity = "info" | "success" | "warning" | "critical";

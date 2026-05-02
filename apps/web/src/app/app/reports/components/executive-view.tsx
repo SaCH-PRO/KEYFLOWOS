@@ -2,9 +2,18 @@
 
 import { Card } from "@keyflow/ui";
 import {
-  DollarSign, TrendingUp, Users, Calendar, Wallet,
-  AlertTriangle, Briefcase, Target, Sparkles, ArrowRight,
-  ChevronDown, ChevronRight,
+  DollarSign,
+  TrendingUp,
+  Users,
+  Calendar,
+  Wallet,
+  AlertTriangle,
+  Briefcase,
+  Target,
+  Sparkles,
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";

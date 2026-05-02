@@ -2,12 +2,35 @@
 
 import { useState, useMemo } from "react";
 import {
-  MessageSquare, ListTodo, Phone, Mail, DollarSign,
-  Calendar, Settings, StickyNote, Clock,
-  Circle, Sparkles, Zap, FileText, AlertTriangle,
-  CheckCircle2, Star, Copy, Bell, TrendingUp,
-  Users, RefreshCw, Tags, UserX, MessageCircle,
-  Handshake, Video, ChevronDown, ChevronUp, Filter,
+  MessageSquare,
+  ListTodo,
+  Phone,
+  Mail,
+  DollarSign,
+  Calendar,
+  Settings,
+  StickyNote,
+  Clock,
+  Circle,
+  Sparkles,
+  Zap,
+  FileText,
+  AlertTriangle,
+  CheckCircle2,
+  Star,
+  Copy,
+  Bell,
+  TrendingUp,
+  Users,
+  RefreshCw,
+  Tags,
+  UserX,
+  MessageCircle,
+  Handshake,
+  Video,
+  ChevronDown,
+  ChevronUp,
+  Filter,
 } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 
@@ -119,7 +142,7 @@ interface ActivityTimelineProps {
   tasks: ContactTask[];
 }
 
-export function ActivityTimeline({ contact, events, notes, tasks }: ActivityTimelineProps) {
+export function ActivityTimeline({ contact: _contact, events, notes, tasks }: ActivityTimelineProps) {
   const [filter, setFilter] = useState<FilterType>("all");
   const [limit, setLimit] = useState(25);
 

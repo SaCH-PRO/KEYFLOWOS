@@ -3,9 +3,21 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Shield, ShieldAlert, ShieldCheck, AlertTriangle,
-  CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp,
-  Loader2, Info, Pencil, Layers, TrendingUp, AlertCircle,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Info,
+  Pencil,
+  Layers,
+  TrendingUp,
+  AlertCircle,
 } from "lucide-react";
 import type { AiApprovalItem } from "@/lib/client";
 

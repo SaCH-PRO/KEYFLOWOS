@@ -51,7 +51,7 @@ const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
 
 function PublicBookingPageInner() {
   const params = useParams();
-  const router = useRouter();
+  const _router = useRouter();
   const searchParams = useSearchParams();
   const slug = params.slug as string;
 
@@ -119,9 +119,8 @@ function PublicBookingPageInner() {
   const densityPadding = appearance?.density === "compact" ? "px-4 py-4" : "px-4 sm:px-8 py-8";
   const fontPairingId = appearance?.fontPairing ?? "inter-inter";
   const fontPairing = FONT_PAIRINGS.find((p) => p.id === fontPairingId);
-  const headingFontStyle = fontPairing ? `'${fontPairing.heading}', sans-serif` : undefined;
+  const _headingFontStyle = fontPairing ? `'${fontPairing.heading}', sans-serif` : undefined;
   const bodyFontStyle = fontPairing ? `'${fontPairing.body}', sans-serif` : undefined;
-  const fontFamilyClass = "";
 
   const updateCart = useCallback(
     (newCart: CartItem[]) => {
@@ -554,7 +553,7 @@ function PublicBookingPageInner() {
   }, [sectionOrder]);
 
   const pageUrl = typeof window !== "undefined" ? window.location.href : "";
-  const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+  const _baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   const submitStoreOrder = async (payload: {
     items: { productId: string; quantity: number }[];

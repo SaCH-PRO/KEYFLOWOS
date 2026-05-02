@@ -28,7 +28,7 @@ export function CashFlowSummary({
 }: CashFlowSummaryProps) {
   const netFlow = useMemo(() => totalReceived - totalPending - totalOverdue, [totalReceived, totalPending, totalOverdue]);
   const isPositive = netFlow >= 0;
-  const collectible = totalPending + totalOverdue;
+  const _collectible = totalPending + totalOverdue;
 
   const healthMessage = useMemo(() => {
     if (totalOverdue > 0 && overdueCount > 0) {

@@ -266,7 +266,6 @@ export function StoreGuide({ isOpen, onToggle, onTabChange }: StoreGuideProps) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5" role="group" aria-label="Store guide steps">
                 {GUIDE_STEPS.map((item, idx) => {
-                  const Icon = item.icon;
                   const isComplete = guideState.completedSteps.includes(item.id);
                   return (
                     <button

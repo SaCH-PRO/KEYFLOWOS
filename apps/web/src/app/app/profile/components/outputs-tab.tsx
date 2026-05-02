@@ -3,10 +3,15 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  FileText, Sparkles,
-  Shield, DollarSign,
-  BarChart3, CheckCircle2, AlertCircle,
-  Lock, Package,
+  FileText,
+  Sparkles,
+  Shield,
+  DollarSign,
+  BarChart3,
+  CheckCircle2,
+  AlertCircle,
+  Lock,
+  Package,
 } from "lucide-react";
 import DocumentsTab from "./documents-tab";
 import { ProfileSectionErrorBoundary } from "./profile-section-error-boundary";
@@ -65,7 +70,7 @@ interface OutputsTabProps {
   profileCompleteness: number;
 }
 
-export function OutputsTab({ businessId, businessData, profileCompleteness }: OutputsTabProps) {
+export function OutputsTab({ businessId, businessData, profileCompleteness: _profileCompleteness }: OutputsTabProps) {
   const readinessChecks = useMemo(() => {
     const checks = [
       { label: "Business Name", filled: !!businessData?.name, required: true },

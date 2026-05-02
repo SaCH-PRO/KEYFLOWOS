@@ -12,7 +12,7 @@ type Props = {
   slug: string;
 };
 
-export function CategoryNav({ catalogItems, activeCategory, onCategoryChange, primaryColor, slug }: Props) {
+export function CategoryNav({ catalogItems, activeCategory, onCategoryChange, primaryColor, slug: _slug }: Props) {
   const categories = useMemo<CategoryInfo[]>(() => {
     const map = new Map<string, number>();
     for (const item of catalogItems) {

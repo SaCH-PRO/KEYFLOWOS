@@ -22,14 +22,6 @@ interface ReminderStep {
   template: string;
 }
 
-interface ReminderCadence {
-  id: string;
-  name: string;
-  steps: ReminderStep[];
-  promiseToPayDate: string;
-  bestTimeScore: number;
-  notes: string;
-}
 
 interface ReminderCadencePanelProps {
   businessId: string | null;
@@ -50,7 +42,7 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   urgent: "{name}, your payment of {amount} for invoice #{invoice} is significantly overdue. Please settle this immediately to avoid any service interruptions.",
 };
 
-export function ReminderCadencePanel({ businessId, invoiceId, contactName, onClose }: ReminderCadencePanelProps) {
+export function ReminderCadencePanel({ businessId: _businessId, invoiceId: _invoiceId, contactName, onClose }: ReminderCadencePanelProps) {
   const [steps, setSteps] = useState<ReminderStep[]>([
     { id: generateItemId(), channel: "email", delayDays: 3, tone: "gentle", template: DEFAULT_TEMPLATES.gentle },
     { id: generateItemId(), channel: "email", delayDays: 7, tone: "firm", template: DEFAULT_TEMPLATES.firm },

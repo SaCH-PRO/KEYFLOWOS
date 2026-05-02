@@ -150,7 +150,7 @@ export function LaunchAdvisor({
   readinessScores,
   onTabChange,
   slug,
-  storeName,
+  storeName: _storeName,
 }: Props) {
   const items: UnifiedItem[] = readinessItems ? mapApiItems(readinessItems) : [];
   const dims = buildDimensionScores(items, readinessScores);

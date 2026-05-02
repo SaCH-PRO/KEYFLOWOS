@@ -38,7 +38,7 @@ async function fetchProduct(slug: string, productId: string) {
 
 export async function generateMetadata(
   { params }: Props,
-  parent: ResolvingMetadata
+  _parent: ResolvingMetadata
 ): Promise<Metadata> {
   const { slug, productId } = await params;
   const [biz, productData] = await Promise.all([

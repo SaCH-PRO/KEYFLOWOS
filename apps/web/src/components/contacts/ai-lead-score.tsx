@@ -3,8 +3,14 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import {
-  Brain, RefreshCw, TrendingUp, TrendingDown, Minus,
-  ChevronDown, ChevronUp, Lightbulb,
+  Brain,
+  RefreshCw,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  ChevronDown,
+  ChevronUp,
+  Lightbulb,
 } from "lucide-react";
 import { aiLeadScore, type AiLeadScore } from "@/lib/client";
 

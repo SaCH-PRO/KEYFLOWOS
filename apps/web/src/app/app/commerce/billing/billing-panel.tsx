@@ -11,29 +11,20 @@ import {
   AlertTriangle,
   TrendingUp,
   Mail,
-  Send,
   CheckCircle2,
-  Loader2,
-  Bot,
-  Copy,
-  X,
   Sparkles,
   Settings,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
-import { toast } from "sonner";
 import { useModuleEmit } from "@/hooks/use-module-events";
-import { Skeleton } from "@/components/ui/skeleton";
 import type { Invoice, Quote, Contact, Product } from "@/lib/client";
 import {
-  fetchCommerceStats, fetchRecurringInvoices, type CommerceStats,
-  markInvoicePaid, updateInvoiceStatus, updateQuoteStatus,
-  convertQuoteToInvoice, commerceAiInvoiceReminder,
-  type CommerceInvoiceReminder,
+  fetchCommerceStats,
+  fetchRecurringInvoices,
+  type CommerceStats,
 } from "@/lib/client";
-import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
-import { getStatusBadge } from "../components/commerce-types";
+import { formatCurrencyCompact } from "@/lib/currency";
 import { useBillingStats } from "../hooks/use-billing-stats";
 import type { BillingSlots } from "../utils/commerce-slots";
 import { SAVED_VIEWS, type SavedViewKey } from "../utils/smart-cta";
@@ -43,406 +34,14 @@ import RecurringPanel from "../recurring/recurring-panel";
 import CollectionsPanel from "./collections-panel";
 import Link from "next/link";
 
-function getDaysOverdue(dueDate: string | null | undefined): number {
-  if (!dueDate) return 0;
-  const due = new Date(dueDate);
-  const now = new Date();
-  const diff = Math.ceil((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
-  return Math.max(0, diff);
-}
 
-function getDaysUntilDue(dueDate: string | null | undefined): number {
-  if (!dueDate) return 999;
-  const due = new Date(dueDate);
-  const now = new Date();
-  return Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-}
 
-function getContactName(contact: { firstName?: string | null; lastName?: string | null } | null | undefined): string {
-  if (!contact) return "Unknown";
-  return `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unknown";
-}
 
-const PaymentFollowUpQueue = React.memo(function PaymentFollowUpQueue({
-  invoices,
-  currency,
-  businessId,
-  setInvoices,
-  onSendReminder,
-}: {
-  invoices: Invoice[];
-  currency: string;
-  businessId: string | null;
-  setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
-  onSendReminder: (invoiceId: string) => void;
-}) {
-  const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
-  const [showAll, setShowAll] = useState(false);
 
-  const actionableInvoices = useMemo(() => {
-    return invoices
-      .filter((inv) => inv.status === "OVERDUE" || inv.status === "SENT" || inv.status === "PARTIALLY_PAID")
-      .sort((a, b) => {
-        if (a.status === "OVERDUE" && b.status !== "OVERDUE") return -1;
-        if (b.status === "OVERDUE" && a.status !== "OVERDUE") return 1;
-        return getDaysOverdue(b.dueDate) - getDaysOverdue(a.dueDate);
-      });
-  }, [invoices]);
 
-  const visible = showAll ? actionableInvoices : actionableInvoices.slice(0, 5);
-
-  async function handleMarkPaid(invoiceId: string) {
-    if (actionLoading[invoiceId]) return;
-    setActionLoading((prev) => ({ ...prev, [invoiceId]: "paid" }));
-    try {
-      const { data, error } = await markInvoicePaid(invoiceId);
-      if (!error && data) {
-        setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: data.status ?? "PAID" } : i)));
-        toast.success("Invoice marked as paid");
-      } else {
-        toast.error(error ?? "Failed to mark paid");
-      }
-    } finally {
-      setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
-    }
-  }
-
-  async function handleSendInvoice(invoiceId: string) {
-    if (actionLoading[invoiceId]) return;
-    setActionLoading((prev) => ({ ...prev, [invoiceId]: "send" }));
-    try {
-      const { data, error } = await updateInvoiceStatus(invoiceId, "SENT");
-      if (!error && data) {
-        setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: "SENT" } : i)));
-        toast.success("Invoice sent");
-      } else {
-        toast.error(error ?? "Failed to send invoice");
-      }
-    } finally {
-      setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
-    }
-  }
-
-  if (actionableInvoices.length === 0) return null;
-
-  return (
-    <div className="rounded-xl border border-border/50 bg-card p-3">
-      <div className="flex items-center gap-2 mb-2">
-        <DollarSign className="w-3.5 h-3.5 text-muted-foreground/50" />
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Payment Follow-Up</span>
-        <span className="ml-auto text-[10px] text-muted-foreground/50 font-medium">{actionableInvoices.length} pending</span>
-      </div>
-      <div className="space-y-1">
-        {visible.map((inv) => {
-          const daysOver = getDaysOverdue(inv.dueDate);
-          const isOverdue = inv.status === "OVERDUE";
-          const isLoading = actionLoading[inv.id];
-          return (
-            <div
-              key={inv.id}
-              className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${
-                isOverdue ? "bg-red-500/[0.04] hover:bg-red-500/[0.08]" : "bg-white/[0.02] hover:bg-white/[0.04]"
-              }`}
-            >
-              <div className={`p-1.5 rounded-lg shrink-0 ${isOverdue ? "bg-red-500/15" : "bg-amber-500/15"}`}>
-                {isOverdue ? <AlertTriangle className="w-3.5 h-3.5 text-red-400" /> : <Clock className="w-3.5 h-3.5 text-amber-400" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium truncate">{inv.invoiceNumber ?? inv.id.slice(0, 8)}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${getStatusBadge(inv.status)}`}>{inv.status}</span>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] text-muted-foreground/60 truncate">{getContactName(inv.contact)}</span>
-                  {isOverdue && daysOver > 0 && <span className="text-[10px] font-medium text-red-400">{daysOver}d overdue</span>}
-                </div>
-              </div>
-              <span className="text-xs font-bold shrink-0">{formatCurrency(Number(inv.total), currency)}</span>
-              <div className="flex items-center gap-1 shrink-0">
-                <button onClick={() => onSendReminder(inv.id)} disabled={!!isLoading} className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors disabled:opacity-50" title="Send Reminder">
-                  {isLoading === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                </button>
-                <button onClick={() => handleMarkPaid(inv.id)} disabled={!!isLoading} className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50" title="Mark Paid">
-                  {isLoading === "paid" ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {actionableInvoices.length > 5 && (
-        <button onClick={() => setShowAll(!showAll)} className="w-full mt-2 py-1.5 text-[10px] font-medium text-muted-foreground/50 hover:text-foreground transition-colors rounded-lg hover:bg-white/[0.02]">
-          {showAll ? "Show less" : `Show ${actionableInvoices.length - 5} more`}
-        </button>
-      )}
-    </div>
-  );
-});
-
-const QuoteActionQueue = React.memo(function QuoteActionQueue({
-  quotes,
-  currency,
-  businessId,
-  setQuotes,
-  setInvoices,
-  onSwitchToInvoices,
-}: {
-  quotes: Quote[];
-  currency: string;
-  businessId: string | null;
-  setQuotes: React.Dispatch<React.SetStateAction<Quote[]>>;
-  setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
-  onSwitchToInvoices: () => void;
-}) {
-  const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
-  const [showAll, setShowAll] = useState(false);
-
-  const pendingQuotes = useMemo(() => {
-    return quotes
-      .filter((q) => q.status === "DRAFT" || q.status === "SENT" || q.status === "ACCEPTED")
-      .sort((a, b) => {
-        const order: Record<string, number> = { ACCEPTED: 0, SENT: 1, DRAFT: 2 };
-        return (order[a.status] ?? 3) - (order[b.status] ?? 3);
-      });
-  }, [quotes]);
-
-  const visible = showAll ? pendingQuotes : pendingQuotes.slice(0, 5);
-
-  async function handleAccept(quoteId: string) {
-    if (actionLoading[quoteId]) return;
-    setActionLoading((prev) => ({ ...prev, [quoteId]: "accept" }));
-    try {
-      const res = await updateQuoteStatus(quoteId, "ACCEPTED");
-      if (res.data) {
-        setQuotes((q) => q.map((item) => (item.id === quoteId ? res.data! : item)));
-        toast.success("Quote accepted");
-      } else {
-        toast.error(res.error ?? "Failed to accept quote");
-      }
-    } finally {
-      setActionLoading((prev) => { const next = { ...prev }; delete next[quoteId]; return next; });
-    }
-  }
-
-  async function handleSend(quoteId: string) {
-    if (actionLoading[quoteId]) return;
-    setActionLoading((prev) => ({ ...prev, [quoteId]: "send" }));
-    try {
-      const res = await updateQuoteStatus(quoteId, "SENT");
-      if (res.data) {
-        setQuotes((q) => q.map((item) => (item.id === quoteId ? res.data! : item)));
-        toast.success("Quote sent");
-      } else {
-        toast.error(res.error ?? "Failed to send quote");
-      }
-    } finally {
-      setActionLoading((prev) => { const next = { ...prev }; delete next[quoteId]; return next; });
-    }
-  }
-
-  async function handleConvert(quote: Quote) {
-    if (!businessId || actionLoading[quote.id]) return;
-    setActionLoading((prev) => ({ ...prev, [quote.id]: "convert" }));
-    try {
-      const res = await convertQuoteToInvoice({
-        businessId,
-        quoteId: quote.id,
-        taxRate: Number(quote.taxRate) || 0,
-      });
-      if (res.data) {
-        setInvoices((inv) => [res.data!, ...inv]);
-        setQuotes((q) => q.map((item) => (item.id === quote.id ? { ...item, invoiceId: res.data!.id } : item)));
-        toast.success("Quote converted to invoice");
-        onSwitchToInvoices();
-      } else {
-        toast.error(res.error ?? "Failed to convert quote");
-      }
-    } finally {
-      setActionLoading((prev) => { const next = { ...prev }; delete next[quote.id]; return next; });
-    }
-  }
-
-  function isExpiringSoon(quote: Quote): boolean {
-    if (!quote.expiryDate) return false;
-    const days = getDaysUntilDue(quote.expiryDate);
-    return days >= 0 && days <= 7;
-  }
-
-  if (pendingQuotes.length === 0) return null;
-
-  return (
-    <div className="rounded-xl border border-border/50 bg-card p-3">
-      <div className="flex items-center gap-2 mb-2">
-        <FileText className="w-3.5 h-3.5 text-muted-foreground/50" />
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Quote Actions</span>
-        <span className="ml-auto text-[10px] text-muted-foreground/50 font-medium">{pendingQuotes.length} pending</span>
-      </div>
-      <div className="space-y-1">
-        {visible.map((quote) => {
-          const isLoading = actionLoading[quote.id];
-          const expiringSoon = isExpiringSoon(quote);
-          return (
-            <div
-              key={quote.id}
-              className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${
-                expiringSoon ? "bg-amber-500/[0.04] hover:bg-amber-500/[0.08]" : "bg-white/[0.02] hover:bg-white/[0.04]"
-              }`}
-            >
-              <div className={`p-1.5 rounded-lg shrink-0 ${
-                quote.status === "ACCEPTED" ? "bg-emerald-500/15" : quote.status === "SENT" ? "bg-blue-500/15" : "bg-slate-500/15"
-              }`}>
-                <FileText className={`w-3.5 h-3.5 ${
-                  quote.status === "ACCEPTED" ? "text-emerald-400" : quote.status === "SENT" ? "text-blue-400" : "text-slate-400"
-                }`} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium truncate">{quote.quoteNumber}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${getStatusBadge(quote.status)}`}>{quote.status}</span>
-                  {expiringSoon && <span className="text-[10px] font-medium text-amber-400">Expiring soon</span>}
-                </div>
-                <span className="text-[10px] text-muted-foreground/60 truncate block mt-0.5">{getContactName(quote.contact)}</span>
-              </div>
-              <span className="text-xs font-bold shrink-0">{formatCurrency(Number(quote.total), currency)}</span>
-              <div className="flex items-center gap-1 shrink-0">
-                {quote.status === "DRAFT" && (
-                  <button onClick={() => handleSend(quote.id)} disabled={!!isLoading} className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors disabled:opacity-50" title="Send Quote">
-                    {isLoading === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                  </button>
-                )}
-                {quote.status === "SENT" && (
-                  <button onClick={() => handleAccept(quote.id)} disabled={!!isLoading} className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50" title="Accept Quote">
-                    {isLoading === "accept" ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                  </button>
-                )}
-                {quote.status === "ACCEPTED" && !quote.invoiceId && (
-                  <button onClick={() => handleConvert(quote)} disabled={!!isLoading} className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors disabled:opacity-50" title="Convert to Invoice">
-                    {isLoading === "convert" ? <Loader2 className="w-3 h-3 animate-spin" /> : <TrendingUp className="w-3 h-3" />}
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {pendingQuotes.length > 5 && (
-        <button onClick={() => setShowAll(!showAll)} className="w-full mt-2 py-1.5 text-[10px] font-medium text-muted-foreground/50 hover:text-foreground transition-colors rounded-lg hover:bg-white/[0.02]">
-          {showAll ? "Show less" : `Show ${pendingQuotes.length - 5} more`}
-        </button>
-      )}
-    </div>
-  );
-});
-
-const AiSmartReminders = React.memo(function AiSmartReminders({
-  invoiceId,
-  businessId,
-  onClose,
-}: {
-  invoiceId: string;
-  businessId: string | null;
-  onClose: () => void;
-}) {
-  const [reminder, setReminder] = useState<CommerceInvoiceReminder | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!businessId || !invoiceId) return;
-    let cancelled = false;
-    setLoading(true);
-    commerceAiInvoiceReminder(invoiceId, businessId).then((res) => {
-      if (!cancelled) {
-        setReminder(res.data);
-        setLoading(false);
-      }
-    }).catch(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [invoiceId, businessId]);
-
-  async function handleCopy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      toast.success("Reminder copied to clipboard");
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("Failed to copy");
-    }
-  }
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: "auto" }}
-      exit={{ opacity: 0, height: 0 }}
-      className="rounded-xl border border-[hsl(var(--kf-accent1))]/30 bg-card/80 backdrop-blur-sm p-4 overflow-hidden"
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Bot className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-          <span className="text-xs font-semibold">AI Payment Reminder</span>
-        </div>
-        <button onClick={onClose} className="p-1 rounded-lg hover:bg-muted transition-colors">
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
-      {loading ? (
-        <div className="space-y-2">
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-4 w-1/2" />
-        </div>
-      ) : reminder ? (
-        <div className="space-y-3">
-          <div>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Subject</span>
-            <p className="text-sm font-medium mt-0.5">{reminder.subject}</p>
-          </div>
-          <div>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Message ({reminder.tone})</span>
-            <p className="text-xs text-muted-foreground/80 mt-1 p-3 rounded-xl bg-white/[0.03] border border-border/30 whitespace-pre-wrap">{reminder.message}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => handleCopy(reminder.message)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors">
-              {copied ? <CheckCircle2 className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          {reminder.alternativeMessages?.length > 0 && (
-            <details className="mt-2">
-              <summary className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 cursor-pointer hover:text-muted-foreground transition-colors">
-                Alternative versions ({reminder.alternativeMessages.length})
-              </summary>
-              <div className="space-y-2 mt-2">
-                {reminder.alternativeMessages.map((alt, i) => (
-                  <div key={i} className="p-2 rounded-lg bg-white/[0.02] border border-border/20">
-                    <span className="text-[10px] font-medium text-muted-foreground/50 capitalize">{alt.tone}</span>
-                    <p className="text-xs text-muted-foreground/70 mt-1">{alt.message}</p>
-                    <button onClick={() => handleCopy(alt.message)} className="text-[10px] text-[hsl(var(--kf-accent1))] hover:underline mt-1">Copy</button>
-                  </div>
-                ))}
-              </div>
-            </details>
-          )}
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground/60">Could not generate reminder. Try again later.</p>
-      )}
-    </motion.div>
-  );
-});
 
 export type BillingSegment = "quotes" | "invoices" | "schedules" | "collections";
 
-const SEGMENTS: { key: BillingSegment; label: string; icon: React.ElementType; accent: string; accentMuted: string }[] = [
-  { key: "quotes", label: "Quotes", icon: FileText, accent: "hsl(var(--kf-accent1))", accentMuted: "hsl(var(--kf-accent1) / 0.15)" },
-  { key: "invoices", label: "Invoices", icon: CreditCard, accent: "hsl(var(--kf-success))", accentMuted: "hsl(var(--kf-success) / 0.15)" },
-  { key: "schedules", label: "Recurring", icon: RefreshCw, accent: "hsl(var(--kf-info))", accentMuted: "hsl(var(--kf-info) / 0.15)" },
-  { key: "collections", label: "Collections", icon: AlertTriangle, accent: "hsl(var(--kf-error))", accentMuted: "hsl(var(--kf-error) / 0.15)" },
-];
 interface BillingPanelProps {
   businessId: string | null;
   contacts: Contact[];
@@ -635,17 +234,7 @@ export function BillingPanel({
     }
   }, [handleSegmentChange]);
 
-  const collectionsCount = useMemo(() =>
-    invoices.filter((inv) => inv.status === "OVERDUE" || (inv.status === "SENT" && inv.dueDate && new Date(inv.dueDate) < new Date())).length,
-    [invoices],
-  );
 
-  const segmentCounts = useMemo(() => ({
-    quotes: quotes.length,
-    invoices: invoices.length,
-    schedules: schedulesCount,
-    collections: collectionsCount,
-  }), [quotes.length, invoices.length, schedulesCount, collectionsCount]);
 
   const activeViewDef = SAVED_VIEWS.find((v) => v.key === savedView);
   const statusFilterFromView = activeViewDef?.statusFilter;
@@ -656,8 +245,6 @@ export function BillingPanel({
     return totalSent > 0 ? Math.round((paidCount / totalSent) * 100) : 0;
   }, [invoices]);
 
-  const pendingQuotesCount = useMemo(() =>
-    quotes.filter((q) => q.status === "DRAFT" || q.status === "SENT").length, [quotes]);
 
   return (
     <div className="flex flex-col h-full">

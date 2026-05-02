@@ -15,7 +15,7 @@ export function ShareButtons({ url, title, description, primaryColor = "#F97316"
   const [copied, setCopied] = useState(false);
 
   const encodedUrl = encodeURIComponent(url);
-  const encodedTitle = encodeURIComponent(title);
+  const _encodedTitle = encodeURIComponent(title);
   const encodedDesc = encodeURIComponent(description || title);
 
   const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(`${title} - ${description || ""}\n${url}`)}`;

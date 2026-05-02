@@ -3,13 +3,26 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Send, Clock, AlertCircle, CheckCircle, XCircle,
-  RefreshCw, Loader2, ChevronDown, ChevronRight,
-  Mail, MessageSquare, Globe, Layers, RotateCcw, Eye,
+  Send,
+  Clock,
+  AlertCircle,
+  CheckCircle,
+  XCircle,
+  RefreshCw,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  Mail,
+  MessageSquare,
+  Globe,
+  Layers,
+  RotateCcw,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  listOutboundContent, getDeliverySummary,
+  listOutboundContent,
+  getDeliverySummary,
   retryAllFailedDeliveries,
 } from "@/lib/client";
 import type { OutboundContent, DeliverySummary } from "@/lib/client";

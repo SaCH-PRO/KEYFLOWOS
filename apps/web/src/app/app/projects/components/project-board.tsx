@@ -3,23 +3,48 @@
 import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus, MoreHorizontal, Calendar, Trash2, FolderKanban,
-  ChevronDown, ChevronRight, Archive, Eye, EyeOff, Search,
-  AlertTriangle, User, ExternalLink, DollarSign,
+  Plus,
+  MoreHorizontal,
+  Calendar,
+  Trash2,
+  FolderKanban,
+  ChevronDown,
+  ChevronRight,
+  Archive,
+  Eye,
+  EyeOff,
+  Search,
+  AlertTriangle,
+  User,
+  ExternalLink,
+  DollarSign,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KanbanSkeleton } from "@/components/ui/skeleton";
 import {
-  createProject, updateProject, deleteProject,
-  createProjectTask, updateProjectTask, deleteProjectTask,
+  createProject,
+  updateProject,
+  deleteProject,
+  createProjectTask,
+  updateProjectTask,
+  deleteProjectTask,
   fetchContacts,
-  Project, ProjectTask, type Contact,
+  Project,
+  ProjectTask,
+  type Contact,
 } from "@/lib/client";
 import {
-  PROJECT_STAGES, ALL_PROJECT_STAGES, PROJECT_COLORS,
-  normalizeStatus, getStageInfo, getProjectProgress, getProjectRisk,
-  RISK_STYLES, isOverdue, formatDate,
+  PROJECT_STAGES,
+  ALL_PROJECT_STAGES,
+  PROJECT_COLORS,
+  normalizeStatus,
+  getStageInfo,
+  getProjectProgress,
+  getProjectRisk,
+  RISK_STYLES,
+  isOverdue,
+  formatDate,
 } from "./project-constants";
 import { TaskList } from "./task-list";
 
@@ -33,7 +58,7 @@ interface ProjectBoardProps {
 }
 
 export function ProjectBoard({
-  businessId, projects, loading, onProjectsChange, onOpenProject, onReload,
+  businessId, projects, loading, onProjectsChange, onOpenProject, onReload: _onReload,
 }: ProjectBoardProps) {
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");

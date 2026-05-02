@@ -2,8 +2,19 @@
 
 import React, { useState, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
-import { FileText, CreditCard, User, Calendar, ChevronDown,
-  Plus, Minus, MessageSquare, Percent, Tag, Loader2, Receipt,
+import {
+  FileText,
+  CreditCard,
+  User,
+  Calendar,
+  ChevronDown,
+  Plus,
+  Minus,
+  MessageSquare,
+  Percent,
+  Tag,
+  Loader2,
+  Receipt,
 } from "lucide-react";
 import { SideSheet } from "./side-sheet";
 import { ContactSelect } from "@/components/contacts";

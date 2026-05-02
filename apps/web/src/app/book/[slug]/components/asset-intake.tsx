@@ -3,8 +3,15 @@
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
 import {
-  Upload, CheckCircle2, Loader2, ArrowLeft, Palette,
-  FileText, Type, Image as ImageIcon, Send,
+  Upload,
+  CheckCircle2,
+  Loader2,
+  ArrowLeft,
+  Palette,
+  FileText,
+  Type,
+  Image as ImageIcon,
+  Send,
 } from "lucide-react";
 
 type IntakeField = {

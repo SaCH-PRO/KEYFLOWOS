@@ -3,8 +3,16 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  Building2, Users, Clock, FileText, Palette, Globe, Zap,
-  CheckCircle2, BarChart3, Target,
+  Building2,
+  Users,
+  Clock,
+  FileText,
+  Palette,
+  Globe,
+  Zap,
+  CheckCircle2,
+  BarChart3,
+  Target,
 } from "lucide-react";
 import MyBusinessSection from "./my-business-section";
 import BrandIdentityTab from "./brand-identity-tab";

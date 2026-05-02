@@ -428,7 +428,7 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
 }
 
 function StepBlock({
-  number,
+  number: _number,
   label,
   sublabel,
   color,

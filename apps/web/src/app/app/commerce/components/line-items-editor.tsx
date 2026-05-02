@@ -78,7 +78,7 @@ export default function LineItemsEditor({
       </div>
 
       <div className="space-y-3">
-        {items.map((lineItem, idx) => (
+        {items.map((lineItem, _idx) => (
           <div
             key={lineItem.id}
             className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-4 space-y-3"

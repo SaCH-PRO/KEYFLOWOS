@@ -1,10 +1,25 @@
 "use client";
 
 import {
-  TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Minus,
-  Lightbulb, Target, DollarSign, Clock, Mail,
-  ChevronDown, ChevronUp, BarChart3, Shield, ArrowRight,
-  MessageSquare, Package, Receipt, Search,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  CheckCircle,
+  Minus,
+  Lightbulb,
+  Target,
+  DollarSign,
+  Clock,
+  Mail,
+  ChevronDown,
+  ChevronUp,
+  BarChart3,
+  Shield,
+  ArrowRight,
+  MessageSquare,
+  Package,
+  Receipt,
+  Search,
 } from "lucide-react";
 import { useState } from "react";
 import { formatCurrencyShort } from "@/lib/currency";

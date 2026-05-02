@@ -3,11 +3,29 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Calendar, DollarSign, FileText, Mail, Star,
-  CheckCircle2, AlertTriangle, Sparkles, Clock,
-  Users, Zap, MessageCircle, ChevronDown, ChevronUp,
-  Circle, Package, Megaphone, UserPlus, StickyNote,
-  ListTodo, ExternalLink, TrendingUp, Activity,
+  Calendar,
+  DollarSign,
+  FileText,
+  Mail,
+  Star,
+  CheckCircle2,
+  AlertTriangle,
+  Sparkles,
+  Clock,
+  Users,
+  Zap,
+  MessageCircle,
+  ChevronDown,
+  ChevronUp,
+  Circle,
+  Package,
+  Megaphone,
+  UserPlus,
+  StickyNote,
+  ListTodo,
+  ExternalLink,
+  TrendingUp,
+  Activity,
 } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { CrossJourneyResponse } from "@/lib/client";

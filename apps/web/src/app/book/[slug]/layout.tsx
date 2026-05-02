@@ -40,7 +40,7 @@ async function fetchStorefrontConfig(slug: string) {
 
 export async function generateMetadata(
   { params }: Props,
-  parent: ResolvingMetadata
+  _parent: ResolvingMetadata
 ): Promise<Metadata> {
   const { slug } = await params;
   const biz = await fetchBusiness(slug);

@@ -638,7 +638,7 @@ export default function InvoicesPanel({
           } else {
             toast.error(error || "Failed to delete invoice");
           }
-        } catch (e) {
+        } catch (_e) {
           toast.error("Failed to delete invoice");
         } finally {
           setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });

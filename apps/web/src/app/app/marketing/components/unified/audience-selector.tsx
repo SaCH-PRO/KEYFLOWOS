@@ -2,8 +2,16 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Users, Tag, Search, ChevronDown, ChevronUp, AlertTriangle,
-  CheckCircle, ShieldOff, Mail, RefreshCw,
+  Users,
+  Tag,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  CheckCircle,
+  ShieldOff,
+  Mail,
+  RefreshCw,
 } from "lucide-react";
 import { expandAudience, validateEmailSend } from "@/lib/client";
 import type { EmailValidationResult, AudienceExpandResult } from "@/lib/client";

@@ -3,10 +3,19 @@
 import { useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import {
-  Sparkles, Search, X, Loader2,
-  Brain, Zap, ArrowRight,
-  Mail, ClipboardList, BarChart3,
-  CheckCircle2, AlertTriangle, Play,
+  Sparkles,
+  Search,
+  X,
+  Loader2,
+  Brain,
+  Zap,
+  ArrowRight,
+  Mail,
+  ClipboardList,
+  BarChart3,
+  CheckCircle2,
+  AlertTriangle,
+  Play,
 } from "lucide-react";
 import { marketingAiSearch, type MarketingAiSearchResult } from "@/lib/client";
 

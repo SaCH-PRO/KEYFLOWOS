@@ -3,9 +3,27 @@
 import { useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  X, User, Mail, Phone, Building2, Tag, Briefcase, MessageSquare,
-  FileText, MapPin, ChevronDown, Globe, Shield, ToggleLeft,
-  Linkedin, Instagram, Twitter, Link2, CalendarClock, Plus, Trash2
+  X,
+  User,
+  Mail,
+  Phone,
+  Building2,
+  Tag,
+  Briefcase,
+  MessageSquare,
+  FileText,
+  MapPin,
+  ChevronDown,
+  Globe,
+  Shield,
+  ToggleLeft,
+  Linkedin,
+  Instagram,
+  Twitter,
+  Link2,
+  CalendarClock,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { validateEmail, validatePhone } from "@/lib/validators";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";

@@ -281,7 +281,7 @@ export function MarketingBriefPanel({ businessId, isOpen, onClose }: MarketingBr
   }, [businessId, brief, isValid]);
 
   const handleReset = useCallback(() => {
-    setBrief(prev => ({
+    setBrief(_prev => ({
       ...INITIAL_BRIEF,
       businessName: snapshot?.businessName || "",
       tagline: snapshot?.tagline || "",

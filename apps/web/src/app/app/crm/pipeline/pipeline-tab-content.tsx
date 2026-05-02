@@ -110,7 +110,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     editingContact, setEditingContact,
     showMobileDetail, setShowMobileDetail,
     isPending,
-    activeListId, setActiveListId, activeListContactIds, setActiveListContactIds,
+    activeListId, setActiveListId,  setActiveListContactIds,
     searchInput, setSearchInput,
     statusFilter, setStatusFilter,
     sortBy, setSortBy,

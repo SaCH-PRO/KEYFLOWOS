@@ -3,7 +3,14 @@
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
-  Users, CreditCard, Calendar, Receipt, FolderKanban, Megaphone, Zap, Store,
+  Users,
+  CreditCard,
+  Calendar,
+  Receipt,
+  FolderKanban,
+  Megaphone,
+  Zap,
+  Store,
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import type { ControlTowerModules, StrategicDashboard } from "@/lib/client";

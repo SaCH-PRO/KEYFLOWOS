@@ -3,14 +3,26 @@
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import {
-  Plus, Search, Copy, MessageCircle, Mail,
-  Pin, PinOff, ListPlus, StickyNote,
-  Check, Trash2, ChevronDown, Pencil, X,
+  Plus,
+  Search,
+  Copy,
+  MessageCircle,
+  Mail,
+  Pin,
+  PinOff,
+  ListPlus,
+  StickyNote,
+  Check,
+  Trash2,
+  ChevronDown,
+  Pencil,
+  X,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactNote } from "./contact-detail";
 import {
-  NOTE_CATEGORIES, NOTE_TEMPLATES,
+  NOTE_CATEGORIES,
+  NOTE_TEMPLATES,
   getCategoryConfig,
   type NoteCategory,
 } from "./tab-constants";

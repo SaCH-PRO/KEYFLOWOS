@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Brain, Zap, Clock, Power, PowerOff, Settings2 } from "lucide-react";
 import {
-  CrossModuleWorkflow, fetchCrossModuleWorkflows, updateCrossModuleWorkflow,
+  CrossModuleWorkflow,
+  fetchCrossModuleWorkflows,
+  updateCrossModuleWorkflow,
 } from "@/lib/client";
 import { ExplainerButton } from "./explainer-button";
 

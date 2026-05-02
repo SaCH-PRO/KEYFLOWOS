@@ -3,8 +3,17 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import {
-  Sparkles, RefreshCw, Heart, TrendingUp, TrendingDown,
-  AlertTriangle, CheckCircle, Minus, Lightbulb, ChevronDown, ChevronUp,
+  Sparkles,
+  RefreshCw,
+  Heart,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  CheckCircle,
+  Minus,
+  Lightbulb,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { aiContactSummary, type AiContactSummary as AiContactSummaryType } from "@/lib/client";
 

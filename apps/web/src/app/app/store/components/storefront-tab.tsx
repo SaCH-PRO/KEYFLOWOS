@@ -3,9 +3,19 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  AlertCircle, X, Search, Globe,
-  Rocket, Link2, Palette, Type, LayoutGrid, ShoppingBag, Star,
-  HelpCircle, Settings,
+  AlertCircle,
+  X,
+  Search,
+  Globe,
+  Rocket,
+  Link2,
+  Palette,
+  Type,
+  LayoutGrid,
+  ShoppingBag,
+  Star,
+  HelpCircle,
+  Settings,
 } from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { StoreSettings } from "./store-settings";

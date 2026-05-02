@@ -141,7 +141,7 @@ function deriveGraphPriorities(snap: BusinessGraphSnapshot): ControlTowerPriorit
   return derived;
 }
 
-function buildActionSet(p: ControlTowerPriority, snap: BusinessGraphSnapshot | null): PriorityAction[] {
+function buildActionSet(p: ControlTowerPriority, _snap: BusinessGraphSnapshot | null): PriorityAction[] {
   const acts: PriorityAction[] = [];
 
   if (p.type === "approval") {

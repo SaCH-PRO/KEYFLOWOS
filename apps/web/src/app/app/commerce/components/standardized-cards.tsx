@@ -182,7 +182,7 @@ interface RecordRowCardProps {
 }
 
 export function RecordRowCard({
-  type,
+  type: _type,
   number,
   status,
   contact,

@@ -3,9 +3,21 @@
 import React, { useMemo, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-  BarChart3, Zap, AlertTriangle, DollarSign, Clock,
-  CheckCircle2, ListChecks, Target, Filter, Tag,
-  ChevronDown, Download, RefreshCw, Calendar, ArrowRight,
+  BarChart3,
+  Zap,
+  AlertTriangle,
+  DollarSign,
+  Clock,
+  CheckCircle2,
+  ListChecks,
+  Target,
+  Filter,
+  Tag,
+  ChevronDown,
+  Download,
+  RefreshCw,
+  Calendar,
+  ArrowRight,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligence";

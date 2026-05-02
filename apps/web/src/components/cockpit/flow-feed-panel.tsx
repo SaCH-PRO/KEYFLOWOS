@@ -51,7 +51,7 @@ function getAccent(type: FeedItem["type"]) {
 export function FlowFeedPanel({
   items = defaultFeed,
   onAsk,
-  onAction,
+  onAction: _onAction,
 }: {
   items?: FeedItem[];
   onAsk?: (item: FeedItem) => void | Promise<void>;

@@ -2,16 +2,33 @@
 
 import { useEffect, useState, useMemo } from "react";
 import {
-  Calendar, CheckCircle, Clock, AlertTriangle, User,
-  DollarSign, Zap, Target, TrendingUp,
-  ExternalLink, HeartPulse, Flag, ShieldAlert,
-  MessageSquare, FileText,
+  Calendar,
+  CheckCircle,
+  Clock,
+  AlertTriangle,
+  User,
+  DollarSign,
+  Zap,
+  Target,
+  TrendingUp,
+  ExternalLink,
+  HeartPulse,
+  Flag,
+  ShieldAlert,
+  MessageSquare,
+  FileText,
 } from "lucide-react";
 import { Project, fetchContactDetail, fetchExpensesByProject, type Expense } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
-  getStageInfo, getProjectProgress, getProjectRisk, RISK_STYLES,
-  normalizeStatus, isOverdue, formatDate, isDueSoon,
+  getStageInfo,
+  getProjectProgress,
+  getProjectRisk,
+  RISK_STYLES,
+  normalizeStatus,
+  isOverdue,
+  formatDate,
+  isDueSoon,
 } from "../project-constants";
 import type { Milestone } from "./milestones-tab";
 import type { Deliverable } from "./deliverables-tab";
@@ -23,7 +40,7 @@ interface OverviewTabProps {
   deliverables?: Deliverable[];
 }
 
-export function OverviewTab({ project, onStageChange, milestones = [], deliverables = [] }: OverviewTabProps) {
+export function OverviewTab({ project, onStageChange: _onStageChange, milestones = [], deliverables = [] }: OverviewTabProps) {
   const [clientName, setClientName] = useState<string | null>(null);
   const [clientEmail, setClientEmail] = useState<string | null>(null);
   const [projectExpenses, setProjectExpenses] = useState<Expense[]>([]);

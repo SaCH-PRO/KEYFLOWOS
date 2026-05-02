@@ -3,8 +3,27 @@
 import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  X, Clock, ImagePlus, Send, FileText, Hash, ChevronDown, Layers, Globe, Image as ImageIcon, Loader2, Eye, Calendar, Link2, Plus,
-  Sparkles, Wand2, MessageSquare, Target, CheckCircle, AlertCircle,
+  X,
+  Clock,
+  ImagePlus,
+  Send,
+  FileText,
+  Hash,
+  ChevronDown,
+  Layers,
+  Globe,
+  Image as ImageIcon,
+  Loader2,
+  Eye,
+  Calendar,
+  Link2,
+  Plus,
+  Sparkles,
+  Wand2,
+  MessageSquare,
+  Target,
+  CheckCircle,
+  AlertCircle,
 } from "lucide-react";
 import { SocialConnection } from "@/lib/client";
 import Image from "next/image";

@@ -44,6 +44,22 @@ const eslintConfig = defineConfig([
       // Auto-fixable removal of unused imports. Unused locals are still
       // flagged by @typescript-eslint/no-unused-vars (warning).
       "unused-imports/no-unused-imports": "warn",
+      // Honor the leading-underscore convention for intentionally unused
+      // identifiers (params, destructured siblings, caught errors). This
+      // matches the cleanup convention used across the codebase after the
+      // React 19 / Next 16 upgrade dead-code sweep.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          args: "after-used",
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrors: "all",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+        },
+      ],
     },
   },
   // Override default ignores of eslint-config-next.
