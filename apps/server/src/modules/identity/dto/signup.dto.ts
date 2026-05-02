@@ -1,0 +1,43 @@
+import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+
+export class SignupDto {
+  @IsEmail({}, { message: 'email must be a valid email address' })
+  @MaxLength(255)
+  email!: string;
+
+  @IsString()
+  @MinLength(8, { message: 'password must be at least 8 characters' })
+  @MaxLength(128)
+  password!: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  firstName?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  lastName?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  username?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  company?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(30)
+  phone?: string;
+}
+
+export class ResendVerificationDto {
+  @IsEmail({}, { message: 'email must be a valid email address' })
+  @MaxLength(255)
+  email!: string;
+}

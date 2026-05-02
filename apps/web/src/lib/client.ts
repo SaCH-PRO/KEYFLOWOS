@@ -1533,6 +1533,64 @@ export async function bootstrapIdentity(input: {
   });
 }
 
+export type SignupResponse =
+  | {
+      status: "authenticated";
+      userId: string;
+      email: string;
+      accessToken: string;
+      refreshToken: string;
+      verificationRequired: false;
+    }
+  | {
+      status: "verification_sent";
+      userId: string;
+      email: string;
+      verificationRequired: true;
+    };
+
+export type SignupErrorCode =
+  | "email_taken"
+  | "weak_password"
+  | "invalid_email"
+  | "email_send_failed"
+  | "server_misconfigured"
+  | "signup_failed"
+  | "signin_failed"
+  | "signin_unavailable";
+
+export type SignupRawError = {
+  code?: SignupErrorCode | string;
+  message?: string;
+  statusCode?: number;
+};
+
+export async function identitySignup(input: {
+  email: string;
+  password: string;
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+  company?: string;
+  phone?: string;
+}) {
+  return apiPost<SignupResponse>({
+    path: `/identity/signup`,
+    body: input,
+  });
+}
+
+export async function identityResendVerification(email: string) {
+  return apiPost<{
+    status: "ok";
+    verificationRequired: boolean;
+    cooldownRemainingMs?: number;
+  }>({
+    path: `/identity/resend-verification`,
+    body: { email },
+  });
+}
+
 export async function fetchMe() {
   return apiGetSimple<{ id: string; email: string; name?: string | null; firstName?: string | null; lastName?: string | null; phone?: string | null; avatarUrl?: string | null; role: string }>(`/identity/me`);
 }

@@ -20,7 +20,7 @@ import {
   ShieldCheck,
   Loader2,
 } from "lucide-react";
-import { bootstrapIdentity } from "@/lib/client";
+import { bootstrapIdentity, identityResendVerification } from "@/lib/client";
 import { applyDevBypassToLocalStorage, isDevAuthBypassEnabled } from "@/lib/keyflow-dev-auth";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -77,6 +77,9 @@ function AuthLoginInner() {
   const [showPassword, setShowPassword] = useState(false);
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [resetSent, setResetSent] = useState(false);
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendNote, setResendNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (isDevAuthBypassEnabled()) {
@@ -89,6 +92,8 @@ function AuthLoginInner() {
     e.preventDefault();
     setError(null);
     setBanner(null);
+    setNeedsVerification(false);
+    setResendNote(null);
     if (mode === "forgot") {
       if (!email.trim()) { setError("Enter your email address."); return; }
       setLoading(true);
@@ -115,8 +120,35 @@ function AuthLoginInner() {
       else { throw new Error("Could not create workspace. Please try again."); }
       router.push("/app");
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "Login failed");
+      const message = error instanceof Error ? error.message : "Login failed";
+      // Supabase returns "Email not confirmed" when the user exists but hasn't
+      // verified yet — surface a Resend affordance inline instead of a dead-end error.
+      const lower = message.toLowerCase();
+      if (lower.includes("email not confirmed") || lower.includes("not been confirmed") || lower.includes("not confirmed")) {
+        setNeedsVerification(true);
+        setError("Please verify your email before signing in.");
+      } else {
+        setError(message);
+      }
     } finally { setLoading(false); }
+  };
+
+  const handleResendVerification = async () => {
+    if (!email.trim()) { setError("Enter your email address first."); return; }
+    setResendNote(null); setResending(true);
+    try {
+      const res = await identityResendVerification(email.trim());
+      if (res.error) {
+        setResendNote(res.error);
+      } else if (res.data?.cooldownRemainingMs && res.data.cooldownRemainingMs > 0) {
+        const seconds = Math.ceil(res.data.cooldownRemainingMs / 1000);
+        setResendNote(`Please wait ${seconds}s before requesting another email.`);
+      } else {
+        setResendNote("Verification email sent. Check your inbox.");
+      }
+    } catch (err: unknown) {
+      setResendNote(err instanceof Error ? err.message : "Resend failed");
+    } finally { setResending(false); }
   };
 
   return (
@@ -234,9 +266,26 @@ function AuthLoginInner() {
                   )}
                   {error && (
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                      className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-sm bg-red-500/10 text-red-400 border border-red-500/20">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                      {error}
+                      className="flex flex-col gap-2 px-3.5 py-2.5 rounded-xl text-sm bg-red-500/10 text-red-400 border border-red-500/20">
+                      <div className="flex items-center gap-2.5">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        <span className="flex-1">{error}</span>
+                      </div>
+                      {needsVerification && (
+                        <div className="flex flex-col gap-1 pl-6.5">
+                          <button
+                            type="button"
+                            onClick={handleResendVerification}
+                            disabled={resending}
+                            className="self-start text-xs font-medium text-[hsl(24_95%_63%)] hover:text-[hsl(24_95%_73%)] disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                          >
+                            {resending ? <><Loader2 className="w-3 h-3 animate-spin" /> Sending...</> : "Resend verification email"}
+                          </button>
+                          {resendNote && (
+                            <span className="text-xs text-[hsl(30_10%_60%)]">{resendNote}</span>
+                          )}
+                        </div>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>

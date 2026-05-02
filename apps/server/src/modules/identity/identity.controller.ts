@@ -4,15 +4,20 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Inject,
   Param,
   Patch,
   Post,
   Query,
+  Req,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { IdentityService } from './identity.service';
+import { IdentitySignupService, isEmailVerificationRequired } from './identity-signup.service';
+import { SignupDto, ResendVerificationDto } from './dto/signup.dto';
 import { BusinessContextService } from './business-context.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -35,7 +40,83 @@ export class IdentityController {
     @Inject(IdentityService) private readonly identity: IdentityService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(BusinessContextService) private readonly bizContext: BusinessContextService,
+    @Inject(IdentitySignupService) private readonly signupSvc: IdentitySignupService,
   ) {}
+
+  /**
+   * Server-driven signup. Creates the user via Supabase Admin API and either
+   * auto-confirms (dev / verification disabled) returning a session, or sends
+   * the confirmation email through Resend and tells the client to show the
+   * "check your email" screen.
+   */
+  @Post('signup')
+  async signup(
+    @Body() body: SignupDto,
+    @Req() req: Request,
+    @Headers('origin') originHeader?: string,
+  ) {
+    const origin = originHeader || this.deriveOriginFromRequest(req);
+    const outcome = await this.signupSvc.signup({
+      email: body.email,
+      password: body.password,
+      firstName: body.firstName,
+      lastName: body.lastName,
+      username: body.username,
+      company: body.company,
+      phone: body.phone,
+      requestOrigin: origin,
+    });
+    if (outcome.mode === 'session') {
+      return {
+        status: 'authenticated',
+        userId: outcome.userId,
+        email: outcome.email,
+        accessToken: outcome.accessToken,
+        refreshToken: outcome.refreshToken,
+        verificationRequired: false,
+      };
+    }
+    return {
+      status: 'verification_sent',
+      userId: outcome.userId,
+      email: outcome.email,
+      verificationRequired: true,
+    };
+  }
+
+  /**
+   * Re-send the verification email for an unconfirmed account. Always
+   * returns success (regardless of whether the email exists / is already
+   * confirmed) to avoid leaking account existence; throttled per-email.
+   */
+  @Post('resend-verification')
+  async resendVerification(
+    @Body() body: ResendVerificationDto,
+    @Req() req: Request,
+    @Headers('origin') originHeader?: string,
+  ) {
+    const origin = originHeader || this.deriveOriginFromRequest(req);
+    const result = await this.signupSvc.resendVerification({
+      email: body.email,
+      requestOrigin: origin,
+    });
+    return {
+      status: 'ok',
+      verificationRequired: isEmailVerificationRequired(),
+      cooldownRemainingMs: result.cooldownRemainingMs,
+    };
+  }
+
+  private deriveOriginFromRequest(req: Request): string | null {
+    try {
+      const proto = (req.headers['x-forwarded-proto'] as string) || (req.protocol ?? 'https');
+      const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
+      if (!host) return null;
+      return `${proto}://${host}`;
+    } catch {
+      return null;
+    }
+  }
 
   @UseGuards(AuthGuard)
   @Get('me')
