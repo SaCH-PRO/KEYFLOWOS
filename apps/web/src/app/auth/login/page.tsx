@@ -21,7 +21,6 @@ import {
   Loader2,
 } from "lucide-react";
 import { bootstrapIdentity, identityResendVerification } from "@/lib/client";
-import { applyDevBypassToLocalStorage, isDevAuthBypassEnabled } from "@/lib/keyflow-dev-auth";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -80,13 +79,6 @@ function AuthLoginInner() {
   const [needsVerification, setNeedsVerification] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendNote, setResendNote] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (isDevAuthBypassEnabled()) {
-      applyDevBypassToLocalStorage();
-      router.replace("/app");
-    }
-  }, [router]);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
