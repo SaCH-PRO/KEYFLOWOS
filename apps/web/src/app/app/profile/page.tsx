@@ -198,6 +198,7 @@ export default function ProfileSettingsPage() {
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (bid) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets/mirrors prop or modal-open state into local form state
       setBusinessId(bid);
       setBusinessLoading(true);
       apiGet<unknown[]>(`/documents/businesses/${bid}/instances`)

@@ -104,6 +104,7 @@ export default function SocialOAuthCallbackPage() {
     const errorDesc = searchParams.get("error_description") || searchParams.get("error_reason");
 
     if (errorParam) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setStatus("error");
       setMessage(errorDesc || `Authorization was denied or cancelled for ${platform}.`);
       notifyOpener({ type: "social-oauth-error", platform, error: errorDesc || errorParam });

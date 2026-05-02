@@ -32,6 +32,7 @@ export function CrossModuleEntityLinks({ businessId, entityType, entityId, class
 
   useEffect(() => {
     if (!businessId || !entityId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag tied to async data fetch lifecycle
     setLoading(true);
     fetchCrossModuleLinks(businessId, entityType, entityId)
       .then((res) => { if (res.data) setLinks(res.data); })

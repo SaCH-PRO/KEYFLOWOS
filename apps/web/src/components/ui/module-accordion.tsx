@@ -31,6 +31,7 @@ export function ModuleAccordion({ sections, defaultOpen, openKeys: controlledKey
 
   useEffect(() => {
     if (isControlled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setInternalKeys(new Set(controlledKeys));
     }
   }, [isControlled, controlledKeys]);

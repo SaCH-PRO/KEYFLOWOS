@@ -64,12 +64,14 @@ export function ContactPickerDrawer({ isOpen, onClose }: ContactPickerDrawerProp
 
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       loadContacts();
     }
   }, [isOpen, loadContacts]);
 
   useEffect(() => {
     if (!isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setSelectedIds(new Set());
       setSearch("");
       setStatusFilter("ALL");

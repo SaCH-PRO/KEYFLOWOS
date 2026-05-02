@@ -369,6 +369,7 @@ export default function DocumentDetailPage() {
     setLoading(false);
   }, [instanceId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { loadDoc(); }, [loadDoc]);
 
   useEffect(() => {

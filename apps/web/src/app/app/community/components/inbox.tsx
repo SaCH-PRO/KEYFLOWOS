@@ -59,6 +59,7 @@ export function Inbox({ businessId, openConversationWith, onClearOpenWith }: Inb
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrates async/server data into local state
     void loadConversations();
   }, [loadConversations]);
 
@@ -80,6 +81,7 @@ export function Inbox({ businessId, openConversationWith, onClearOpenWith }: Inb
     if (openConversationWith && businessId && conversations.length > 0) {
       const existingConv = conversations.find((c) => c.otherBusiness.id === openConversationWith);
       if (existingConv) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
         openConversation(existingConv.id);
       }
       onClearOpenWith?.();

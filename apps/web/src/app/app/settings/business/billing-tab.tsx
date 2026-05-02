@@ -228,6 +228,7 @@ export function BillingTab() {
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { loadAll(); }, [loadAll]);
 
   const loadHistory = async () => {

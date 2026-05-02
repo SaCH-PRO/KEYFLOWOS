@@ -91,6 +91,7 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
     }
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void load(); }, [load]);
 
   const handleCreate = async () => {

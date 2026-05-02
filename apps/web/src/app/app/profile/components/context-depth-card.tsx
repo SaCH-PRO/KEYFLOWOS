@@ -78,6 +78,7 @@ export function ContextDepthCard({ businessId }: { businessId: string | null }) 
   const [expandedTier, setExpandedTier] = useState<string | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
 

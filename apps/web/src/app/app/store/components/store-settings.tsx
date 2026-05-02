@@ -41,6 +41,7 @@ export function StoreSettings({
 
   useEffect(() => {
     if (!slug.trim()) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setSlugStatus("idle");
       return;
     }

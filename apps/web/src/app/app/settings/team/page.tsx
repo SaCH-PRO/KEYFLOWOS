@@ -526,13 +526,16 @@ export default function TeamSettingsPage() {
     if (res.data) setActivityItems(res.data.items);
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (activeTab === "activity") loadActivity(moduleFilter || undefined);
   }, [activeTab, moduleFilter, loadActivity]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setInviteScopes(DEFAULT_SCOPES[inviteRole] || DEFAULT_SCOPES.STAFF);
     setInviteTier(DEFAULT_TIERS[inviteRole] ?? 0);
   }, [inviteRole]);

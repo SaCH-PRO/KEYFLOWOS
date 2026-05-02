@@ -98,6 +98,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     void loadPosts();
     void loadConnections();
     void loadCalendarData();

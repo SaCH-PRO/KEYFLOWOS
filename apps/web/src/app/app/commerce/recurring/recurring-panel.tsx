@@ -112,6 +112,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
 
   useEffect(() => {
     if (triggerNew && triggerNew > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       resetForm();
       setShowBuilder(true);
     }

@@ -23,6 +23,7 @@ export function ProgressivePrompts({ businessId = null, moduleFilter }: { busine
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
 

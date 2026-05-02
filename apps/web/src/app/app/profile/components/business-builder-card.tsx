@@ -93,6 +93,7 @@ function useBusinessProgress(businessId: string | null) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (!businessId) { setLoading(false); return; }
     const settle = <T,>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> =>
       p.then((v) => ({ ok: true as const, value: v })).catch(() => ({ ok: false as const }));

@@ -87,6 +87,7 @@ export function useConnections() {
 
   useEffect(() => {
     mounted.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     load();
     return () => { mounted.current = false; };
   }, [load]);

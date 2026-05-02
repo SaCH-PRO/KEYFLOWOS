@@ -591,6 +591,7 @@ export function Directory({ onViewProfile }: DirectoryProps) {
 
   useEffect(() => {
     const bid = getStoredBusinessId();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (bid) setBusinessId(bid);
   }, []);
 
@@ -615,6 +616,7 @@ export function Directory({ onViewProfile }: DirectoryProps) {
 
   useEffect(() => {
     if (businessId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       void loadFunnel();
     }
   }, [businessId, loadFunnel]);
@@ -638,6 +640,7 @@ export function Directory({ onViewProfile }: DirectoryProps) {
 
   useEffect(() => {
     if (businessId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       void loadRecommendations();
     }
   }, [businessId, loadRecommendations]);
@@ -699,6 +702,7 @@ export function Directory({ onViewProfile }: DirectoryProps) {
   }, [search, filters, page]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrates async/server data into local state
     void loadDirectory();
   }, [loadDirectory]);
 

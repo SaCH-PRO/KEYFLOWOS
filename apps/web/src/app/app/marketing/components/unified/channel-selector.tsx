@@ -88,6 +88,7 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
     setLocalLoading(false);
   }, [businessId, healthData]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
 
   const connections = healthData ? healthData.connections : localConnections;

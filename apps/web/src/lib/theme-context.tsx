@@ -82,6 +82,7 @@ export function ThemeColorsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initialColors = getInitialColors();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setColors(initialColors);
     applyColorsToDOM(initialColors);
   }, []);

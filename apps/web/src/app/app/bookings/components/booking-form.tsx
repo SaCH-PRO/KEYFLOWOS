@@ -108,22 +108,26 @@ export default function BookingForm({
   const timeGridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets/mirrors prop or modal-open state into local form state
     setBookingDate(defaultDate ?? "");
     if (defaultDate) setWeekBase(new Date(defaultDate + "T12:00:00"));
   }, [defaultDate]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets/mirrors prop or modal-open state into local form state
     setBookingTime(defaultTime ?? "");
   }, [defaultTime]);
 
   useEffect(() => {
     if (services.length === 1 && !bookingServiceId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets/mirrors prop or modal-open state into local form state
       setBookingServiceId(services[0].id);
     }
   }, [services, bookingServiceId]);
 
   useEffect(() => {
     if (staff.length === 1 && !bookingStaffId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets/mirrors prop or modal-open state into local form state
       setBookingStaffId(staff[0].id);
     }
   }, [staff, bookingStaffId]);

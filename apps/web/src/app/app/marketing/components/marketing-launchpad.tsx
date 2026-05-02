@@ -199,6 +199,7 @@ export function MarketingLaunchpad({
 
   useEffect(() => {
     if (autoCompleted.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setState((prev) => {
         const newCompleted = [...new Set([...prev.completedMissions, ...autoCompleted])];
         if (newCompleted.length !== prev.completedMissions.length) {

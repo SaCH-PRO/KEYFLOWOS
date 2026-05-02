@@ -56,6 +56,7 @@ export function KeyflowNotesDrawer({ businessId, open, target, onClose }: Props)
 
   useEffect(() => {
     if (!open || !target) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     setDraft("");
     void load();
   }, [open, target, load]);

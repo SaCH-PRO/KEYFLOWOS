@@ -116,6 +116,7 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
     setLoading(false);
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { loadSequences(); }, [loadSequences]);
 
   const handleViewSequence = useCallback(async (id: string) => {

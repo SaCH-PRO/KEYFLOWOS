@@ -316,6 +316,7 @@ export function TemplateCustomizer({
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setSelectedTemplate(activeTemplate);
       setBranding({
         primaryColor: data.business.primaryColor,

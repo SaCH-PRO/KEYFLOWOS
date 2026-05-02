@@ -75,6 +75,7 @@ export function ProductEditorModal({
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setActiveTab("general");
       setVariants((product.variants as ProductVariantDraft[] | undefined) ?? []);
     }

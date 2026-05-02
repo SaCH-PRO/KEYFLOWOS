@@ -195,6 +195,7 @@ export function NavigationContextProvider({ children }: { children: React.ReactN
     const isNewTab = currentTab !== prevTabRef.current;
 
     if (!isNewRoute && !isNewTab) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setStack((prev) => {
         if (prev.length === 0) return prev;
         const updated = [...prev];

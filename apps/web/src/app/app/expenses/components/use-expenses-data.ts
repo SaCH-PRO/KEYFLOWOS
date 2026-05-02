@@ -51,6 +51,7 @@ export function useExpensesData() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- client-side hydration of stored value after mount
   useEffect(() => { const bid = getStoredBusinessId(); if (bid) setBusinessId(bid); }, []);
 
   useEffect(() => {
@@ -59,6 +60,7 @@ export function useExpensesData() {
     return () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); };
   }, [searchQuery]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { setPage(1); }, [period, filterCategory, filterPayment, debouncedSearch]);
 
   useEffect(() => {
@@ -111,6 +113,7 @@ export function useExpensesData() {
     setLoading(false);
   }, [businessId, period, debouncedSearch, filterCategory, filterPayment, customStart, customEnd, page, pageSize]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
 
   const overBudgetCount = budgets.filter(b => b.isOverBudget).length;

@@ -64,6 +64,7 @@ export function CollabRequests({ businessId }: CollabRequestsProps) {
   }, [businessId, direction]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrates async/server data into local state
     void loadRequests();
   }, [loadRequests]);
 
