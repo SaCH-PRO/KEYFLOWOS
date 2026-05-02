@@ -4,6 +4,7 @@ import { CustomerJourneyService } from './customer-journey.service';
 import { AttributionService } from './attribution.service';
 import { GrowthIntelligenceService } from './growth-intelligence.service';
 import { JourneyListenerService } from './journey-listener.service';
+import { GrowthIntelligenceSchedulerService } from './growth-intelligence-scheduler.service';
 import { AiModule } from '../ai/ai.module';
 
 @Module({
@@ -14,11 +15,13 @@ import { AiModule } from '../ai/ai.module';
     AttributionService,
     GrowthIntelligenceService,
     JourneyListenerService,
+    GrowthIntelligenceSchedulerService,
   ],
   exports: [
     CustomerJourneyService,
     AttributionService,
     GrowthIntelligenceService,
+    GrowthIntelligenceSchedulerService,
   ],
 })
 export class GrowthIntelligenceModule {}

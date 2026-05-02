@@ -208,6 +208,32 @@ export class CustomerJourneyService {
     });
   }
 
+  /**
+   * Recomputes every journey for a business. Used by the nightly scheduler so
+   * health scores / risk levels stay fresh even when no new touchpoints fire
+   * (e.g. risk levels are time-based and degrade as `lastTouchAt` ages).
+   */
+  async recomputeAllForBusiness(businessId: string): Promise<{ total: number; processed: number; failed: number }> {
+    const journeys = await this.db.customerJourney.findMany({
+      where: { businessId },
+      select: { id: true },
+    });
+    let processed = 0;
+    let failed = 0;
+    for (const j of journeys) {
+      try {
+        await this.recomputeJourney(j.id);
+        processed += 1;
+      } catch (err) {
+        failed += 1;
+        this.logger.warn(
+          `Recompute failed for journey ${j.id} (business ${businessId}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return { total: journeys.length, processed, failed };
+  }
+
   async getJourney(businessId: string, contactId: string) {
     const journey = await this.db.customerJourney.findFirst({
       where: { businessId, contactId },
