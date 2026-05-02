@@ -120,50 +120,108 @@ export class DiagnosticsService {
 
   async checkObjectStorage(): Promise<CheckResult> {
     const start = Date.now();
-    const privateDir = process.env.PRIVATE_OBJECT_DIR;
-    const publicPaths = process.env.PUBLIC_OBJECT_SEARCH_PATHS;
+    const checkedAt = () => new Date().toISOString();
+    const elapsed = () => Date.now() - start;
 
-    if (!privateDir || !publicPaths) {
-      return {
-        name: 'Object Storage',
-        status: 'warn',
-        latencyMs: Date.now() - start,
-        checkedAt: new Date().toISOString(),
-        message: 'Object Storage not fully configured',
-        detail: `Missing: ${!privateDir ? 'PRIVATE_OBJECT_DIR ' : ''}${!publicPaths ? 'PUBLIC_OBJECT_SEARCH_PATHS' : ''}`,
-      };
-    }
+    const s3Bucket = process.env.S3_BUCKET?.trim();
+    const s3Endpoint = process.env.S3_ENDPOINT?.trim();
+    const s3Region = process.env.S3_REGION?.trim() || 'us-east-1';
+    const s3AccessKey =
+      process.env.S3_ACCESS_KEY_ID?.trim() ||
+      process.env.AWS_ACCESS_KEY_ID?.trim();
+    const s3SecretKey =
+      process.env.S3_SECRET_ACCESS_KEY?.trim() ||
+      process.env.AWS_SECRET_ACCESS_KEY?.trim();
 
-    try {
-      const res = await fetch('http://127.0.0.1:1106/credential', {
-        signal: AbortSignal.timeout(3000),
-      });
-      if (res.ok) {
+    // Preferred path: generic S3-compatible storage (AWS, R2, MinIO,
+    // Supabase Storage, Wasabi, etc.). Verifies real connectivity.
+    if (s3Bucket) {
+      try {
+        const { S3Client, HeadBucketCommand } = await import(
+          '@aws-sdk/client-s3'
+        );
+        const client = new S3Client({
+          region: s3Region,
+          endpoint: s3Endpoint,
+          forcePathStyle:
+            (process.env.S3_FORCE_PATH_STYLE || '').toLowerCase() === 'true' ||
+            Boolean(s3Endpoint && !s3Endpoint.includes('amazonaws.com')),
+          credentials:
+            s3AccessKey && s3SecretKey
+              ? { accessKeyId: s3AccessKey, secretAccessKey: s3SecretKey }
+              : undefined,
+        });
+        await client.send(new HeadBucketCommand({ Bucket: s3Bucket }));
         return {
           name: 'Object Storage',
           status: 'pass',
-          latencyMs: Date.now() - start,
-          checkedAt: new Date().toISOString(),
-          message: 'Object Storage sidecar reachable',
+          latencyMs: elapsed(),
+          checkedAt: checkedAt(),
+          message: `S3 bucket "${s3Bucket}" reachable`,
+        };
+      } catch (err: any) {
+        return {
+          name: 'Object Storage',
+          status: 'fail',
+          latencyMs: elapsed(),
+          checkedAt: checkedAt(),
+          message: `S3 bucket "${s3Bucket}" not reachable`,
+          detail: err?.message ?? String(err),
         };
       }
-      return {
-        name: 'Object Storage',
-        status: 'warn',
-        latencyMs: Date.now() - start,
-        checkedAt: new Date().toISOString(),
-        message: `Object Storage sidecar returned HTTP ${res.status}`,
-      };
-    } catch (err: any) {
-      return {
-        name: 'Object Storage',
-        status: 'warn',
-        latencyMs: Date.now() - start,
-        checkedAt: new Date().toISOString(),
-        message: 'Object Storage sidecar not reachable (may be normal outside Replit)',
-        detail: err.message,
-      };
     }
+
+    // Legacy path: Replit object-storage sidecar. Only attempted when we
+    // actually appear to be running on Replit, so external hosts don't
+    // log noisy warnings about a sidecar that isn't supposed to exist.
+    const onReplit = Boolean(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
+    const privateDir = process.env.PRIVATE_OBJECT_DIR;
+    const publicPaths = process.env.PUBLIC_OBJECT_SEARCH_PATHS;
+
+    if (onReplit && privateDir && publicPaths) {
+      try {
+        const res = await fetch('http://127.0.0.1:1106/credential', {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) {
+          return {
+            name: 'Object Storage',
+            status: 'pass',
+            latencyMs: elapsed(),
+            checkedAt: checkedAt(),
+            message: 'Replit Object Storage sidecar reachable',
+          };
+        }
+        return {
+          name: 'Object Storage',
+          status: 'warn',
+          latencyMs: elapsed(),
+          checkedAt: checkedAt(),
+          message: `Replit Object Storage sidecar returned HTTP ${res.status}`,
+        };
+      } catch (err: any) {
+        return {
+          name: 'Object Storage',
+          status: 'warn',
+          latencyMs: elapsed(),
+          checkedAt: checkedAt(),
+          message: 'Replit Object Storage sidecar not reachable',
+          detail: err?.message ?? String(err),
+        };
+      }
+    }
+
+    // Nothing configured. Surface this as a warning so operators know
+    // file uploads will fail until they wire up a backend.
+    return {
+      name: 'Object Storage',
+      status: 'warn',
+      latencyMs: elapsed(),
+      checkedAt: checkedAt(),
+      message: 'Object Storage not configured',
+      detail:
+        'Set S3_BUCKET (+ S3_ENDPOINT / S3_REGION / credentials) for any S3-compatible backend, or run on Replit with PRIVATE_OBJECT_DIR + PUBLIC_OBJECT_SEARCH_PATHS for the built-in sidecar.',
+    };
   }
 
   async checkServerUptime(): Promise<CheckResult> {
