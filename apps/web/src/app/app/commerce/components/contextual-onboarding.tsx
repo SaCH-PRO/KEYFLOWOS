@@ -46,8 +46,8 @@ const CHECKLIST_ITEMS = [
   { id: "first-product", label: "Add your first product", icon: Package, color: "text-teal-400", check: (data: { productCount: number }) => data.productCount > 0 },
   { id: "first-invoice", label: "Create an invoice", icon: CreditCard, color: "text-emerald-400", check: (data: { invoiceCount: number }) => data.invoiceCount > 0 },
   { id: "first-quote", label: "Send a quote", icon: FileText, color: "text-violet-400", check: (data: { quoteCount: number }) => data.quoteCount > 0 },
-  { id: "first-recurring", label: "Set up recurring billing", icon: RefreshCw, color: "text-cyan-400", check: (_data: { productCount: number; invoiceCount: number; quoteCount: number }) => false },
-  { id: "explore-ai", label: "Try AI-powered insights", icon: Brain, color: "text-amber-400", check: (_data: { productCount: number; invoiceCount: number; quoteCount: number }) => false },
+  { id: "first-recurring", label: "Set up recurring billing", icon: RefreshCw, color: "text-cyan-400", check: (_data: unknown) => false },
+  { id: "explore-ai", label: "Try AI-powered insights", icon: Brain, color: "text-amber-400", check: (_data: unknown) => false },
 ] as const;
 
 interface SmartChecklistProps {

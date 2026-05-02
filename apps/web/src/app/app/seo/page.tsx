@@ -55,15 +55,12 @@ interface SeoDashboard {
   }>;
   recentIssues: Array<{
     id: string;
-    issueType: string;
     severity: string;
-    category: string;
     title: string;
-    description?: string;
-    pageUrl?: string;
     recommendation?: string;
-    status: string;
-    detectedAt: string;
+    type?: string;
+    pageUrl?: string;
+    detectedAt?: string;
   }>;
 }
 
@@ -92,8 +89,7 @@ interface ContentBrief {
   id: string; title: string; targetKeyword: string; secondaryKeywords: string[];
   contentType: string; status: string; priority: string; approvalStatus: string;
   searchIntent?: string; recommendedWordCount?: number;
-  outline?: Array<{ heading?: string; talkingPoints?: string[] }>;
-  suggestedMetaTitle?: string; suggestedMetaDescription?: string;
+  outline?: Array<{ heading: string; talkingPoints?: string[] }>; suggestedMetaTitle?: string; suggestedMetaDescription?: string;
   callToAction?: string; competitorAngle?: string; createdAt: string;
 }
 
@@ -455,7 +451,7 @@ function OverviewTab({ dashboard }: { dashboard: SeoDashboard | null }) {
           <div className="space-y-2">
             {recentIssues.slice(0, 5).map(issue => (
               <div key={issue.id} className="flex items-start gap-3 text-sm">
-                <span className={`px-2 py-0.5 rounded text-xs uppercase shrink-0 ${SEVERITY_COLORS[issue.severity] ?? SEVERITY_COLORS.low}`}>
+                <span className={`px-2 py-0.5 rounded text-xs uppercase shrink-0 ${SEVERITY_COLORS[issue.severity ?? "low"] ?? SEVERITY_COLORS.low}`}>
                   {issue.severity}
                 </span>
                 <div className="flex-1 truncate">
@@ -788,8 +784,8 @@ function RevenueTab({ revenue }: { revenue: RevenueAttribution | null }) {
 }
 
 interface ConnectorsTabProps {
-  gscStatus: { connected: boolean; siteUrl: string | null; lastSync: string | null } | null;
-  ga4Status: { connected: boolean; propertyId: string | null; lastSync: string | null } | null;
+  gscStatus: { connected?: boolean; siteUrl?: string | null; lastSync?: string | null } | null;
+  ga4Status: { connected?: boolean; propertyId?: string | null; lastSync?: string | null } | null;
   showGsc: boolean;
   setShowGsc: (v: boolean) => void;
   showGa4: boolean;

@@ -202,7 +202,7 @@ export default function PublicProfilePage() {
         if (profileRes.data) setProfile(profileRes.data);
         if (postsRes.data) {
           const raw = postsRes.data as CommunityPost[] | { data?: CommunityPost[] };
-          const arr: CommunityPost[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+          const arr: CommunityPost[] = Array.isArray(raw) ? raw : raw?.data ?? [];
           setPosts(arr.filter((p) => p.businessId === businessId));
         }
         if (trustRes.data) setTrustSignals(trustRes.data);
@@ -335,15 +335,7 @@ export default function PublicProfilePage() {
     setSavingEdit(false);
   }, [myBusinessId, editingEndorsement, editMessage, savingEdit]);
 
-  const handleQuoteSubmit = useCallback(async (data: {
-    title: string;
-    description: string;
-    budgetMin?: number;
-    budgetMax?: number;
-    currency?: string;
-    timeline?: string;
-    aiSuggestionScore?: number;
-  }) => {
+  const handleQuoteSubmit = useCallback(async (data: { title: string; description: string; budgetMin?: number; budgetMax?: number; currency?: string; timeline?: string; aiSuggestionScore?: number }) => {
     if (!myBusinessId) return;
     await createCommunityQuoteRequest(myBusinessId, {
       toBusinessId: businessId,
@@ -352,24 +344,12 @@ export default function PublicProfilePage() {
     });
   }, [myBusinessId, businessId]);
 
-  const handleReferralSubmit = useCallback(async (data: {
-    referredToName: string;
-    referredToEmail?: string;
-    referredToPhone?: string;
-    opportunity: string;
-    context?: string;
-  }) => {
+  const handleReferralSubmit = useCallback(async (data: { referredToName: string; referredToEmail?: string; referredToPhone?: string; opportunity: string; context?: string }) => {
     if (!myBusinessId) return;
     await createCommunityReferral(myBusinessId, { toBusinessId: businessId, ...data });
   }, [myBusinessId, businessId]);
 
-  const handleCollabSubmit = useCallback(async (data: {
-    type?: string;
-    title: string;
-    scope: string;
-    proposedTerms?: string;
-    timeline?: string;
-  }) => {
+  const handleCollabSubmit = useCallback(async (data: { type?: string; title: string; scope: string; proposedTerms?: string; timeline?: string }) => {
     if (!myBusinessId) return;
     await createCommunityCollaboration(myBusinessId, { toBusinessId: businessId, ...data });
   }, [myBusinessId, businessId]);

@@ -366,7 +366,7 @@ export function useMarketing(): UseMarketingReturn {
   useModuleEvent(
     "contact:imported",
     useCallback(
-      (event: { data?: { count?: number } } | undefined) => {
+      (event: { data?: { count?: number | string } }) => {
         const count = event?.data?.count ?? "multiple";
         addSignal({
           type: "contacts_imported",

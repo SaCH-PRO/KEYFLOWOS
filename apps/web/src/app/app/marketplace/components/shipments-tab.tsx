@@ -3,15 +3,10 @@
 import { motion } from "framer-motion";
 import { Truck, Pencil } from "lucide-react";
 import { formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { Shipment } from "@/lib/marketplace-types";
 
-export function ShipmentsTab({
-  shipments,
-  onEdit,
-}: {
-  shipments: Shipment[];
-  onEdit: (item: Shipment) => void;
-}) {
+import type { ShipmentDto } from "@/lib/types/marketplace";
+
+export function ShipmentsTab({ shipments, onEdit }: { shipments: ShipmentDto[]; onEdit: (item: ShipmentDto) => void }) {
   const timeline = ["PREPARING", "PICKED_UP", "IN_TRANSIT", "CUSTOMS", "DELIVERED"];
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(shipments);
 

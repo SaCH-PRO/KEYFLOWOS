@@ -3,20 +3,10 @@
 import { motion } from "framer-motion";
 import { ClipboardList, Mail, Calendar, Pencil } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { PurchaseOrder } from "@/lib/marketplace-types";
 
-type PurchaseOrderRow = PurchaseOrder & {
-  quantity?: number | string;
-  unitCost?: number | string;
-};
+import type { PurchaseOrderDto } from "@/lib/types/marketplace";
 
-export function PurchaseOrdersTab({
-  purchaseOrders,
-  onEdit,
-}: {
-  purchaseOrders: PurchaseOrderRow[];
-  onEdit: (item: PurchaseOrderRow) => void;
-}) {
+export function PurchaseOrdersTab({ purchaseOrders, onEdit }: { purchaseOrders: PurchaseOrderDto[]; onEdit: (item: PurchaseOrderDto) => void }) {
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(purchaseOrders);
   if (purchaseOrders.length === 0) {
     return <EmptyState icon={ClipboardList} title="No Purchase Orders" description="Create purchase orders to track supplier orders, deliveries, and costs." />;

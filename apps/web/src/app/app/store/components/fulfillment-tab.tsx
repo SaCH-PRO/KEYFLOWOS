@@ -7,6 +7,23 @@ import { DeliveryConfigPanel } from "./delivery-config-panel";
 import { ShippingZonesPanel } from "./shipping-zones-panel";
 import { FulfillmentPanel } from "./fulfillment-panel";
 
+interface OrderShipment {
+  id: string;
+  trackingNumber?: string | null;
+  carrier?: string | null;
+  status?: string | null;
+  shippedAt?: string | null;
+  deliveredAt?: string | null;
+  [key: string]: unknown;
+}
+
+interface OrderStatusEvent {
+  status: string;
+  changedAt: string;
+  note?: string | null;
+  [key: string]: unknown;
+}
+
 type Order = {
   id: string;
   orderNumber: string;
@@ -17,8 +34,8 @@ type Order = {
   currency: string;
   createdAt: string;
   items: { id: string; name: string; quantity: number; unitPrice: number; total: number }[];
-  shipments: unknown[];
-  statusTimeline: unknown[];
+  shipments: OrderShipment[];
+  statusTimeline: OrderStatusEvent[];
 };
 
 export function FulfillmentTab({ businessId }: { businessId: string }) {

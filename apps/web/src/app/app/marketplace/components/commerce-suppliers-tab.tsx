@@ -16,11 +16,15 @@ import {
   Link2,
 } from "lucide-react";
 import { formatDate, EmptyState } from "./marketplace-utils";
-import type { PurchaseOrder, Product as ProductDTO } from "@/lib/marketplace-types";
-
-type SupplierPO = PurchaseOrder & { quantity?: string | number };
+import type { PurchaseOrderDto, ProductDto } from "@/lib/types/marketplace";
 
 type SupplierSection = "connections" | "catalog" | "mapping";
+
+type PurchaseOrderExt = PurchaseOrderDto & {
+  supplierEmail?: string | null;
+  quantity?: number | string;
+  updatedAt?: string;
+};
 
 function SupplierHealthBadge({ status }: { status: string }) {
   const map: Record<string, { color: string; bg: string; border: string; icon: React.ElementType }> = {
@@ -45,14 +49,14 @@ export function CommerceSuppliersTab({
   onCreatePO,
   onEditPO,
 }: {
-  purchaseOrders: SupplierPO[];
-  products: ProductDTO[];
+  purchaseOrders: PurchaseOrderExt[];
+  products: ProductDto[];
   onCreatePO: () => void;
-  onEditPO: (item: SupplierPO) => void;
+  onEditPO: (item: PurchaseOrderExt) => void;
 }) {
   const [section, setSection] = useState<SupplierSection>("connections");
 
-  const supplierMap: Record<string, { name: string; email?: string | null; pos: SupplierPO[] }> = {};
+  const supplierMap: Record<string, { name: string; email?: string | null; pos: PurchaseOrderExt[] }> = {};
   for (const po of purchaseOrders) {
     const key = po.supplierName || "Unknown Supplier";
     if (!supplierMap[key]) supplierMap[key] = { name: key, email: po.supplierEmail, pos: [] };
@@ -109,8 +113,8 @@ export function CommerceSuppliersTab({
               description="Create purchase orders to establish supplier connections and track health status."
             />
           ) : (
-            suppliers.map((supplier, _i) => {
-              const activePOs = supplier.pos.filter((p) => !["CANCELLED", "RECEIVED"].includes(p.status));
+            suppliers.map((supplier) => {
+              const activePOs = supplier.pos.filter((p) => !["CANCELLED", "RECEIVED"].includes(p.status || ""));
               const lastSync = supplier.pos[0]?.updatedAt || supplier.pos[0]?.createdAt;
               const health = activePOs.length > 0 ? "ACTIVE" : "INACTIVE";
 
@@ -157,7 +161,7 @@ export function CommerceSuppliersTab({
                             key={po.id}
                             className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20"
                           >
-                            {po.status} — {po.quantity || "?"} units
+                            {po.status} — {po.quantity ?? "?"} units
                           </span>
                         ))}
                         {activePOs.length > 4 && (
@@ -190,7 +194,7 @@ export function CommerceSuppliersTab({
                 <div>
                   <p className="text-sm font-medium">{po.supplierName || "Supplier"}</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    {po.quantity || "?"} units · {po.status}
+                    {po.quantity ?? "?"} units · {po.status}
                   </p>
                 </div>
                 <button
@@ -231,11 +235,11 @@ export function CommerceSuppliersTab({
                 {productsWithSource.map((product) => (
                   <div key={product.id} className="grid grid-cols-3 px-4 py-3 items-center gap-2">
                     <p className="text-xs font-medium truncate">{product.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{product.supplierName || "—"}</p>
+                    <p className="text-xs text-muted-foreground truncate">{String(product.supplierName ?? "—")}</p>
                     <div>
                       {product.sourceUrl ? (
                         <a
-                          href={product.sourceUrl}
+                          href={String(product.sourceUrl)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-[10px] text-blue-400 hover:underline flex items-center gap-1"

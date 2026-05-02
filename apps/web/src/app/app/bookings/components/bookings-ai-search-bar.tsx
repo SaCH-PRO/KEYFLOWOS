@@ -145,7 +145,12 @@ export default function BookingsAiSearchBar({ businessId, onResults }: BookingsA
             </div>
             {result.results && result.results.length > 0 && (
               <div className="space-y-1 max-h-48 overflow-y-auto">
-                {(result.results as Array<{ contact?: { firstName?: string; lastName?: string }; service?: { name?: string }; name?: string; status?: string }>).slice(0, 10).map((r, i: number) => {
+                {(result.results as Array<{
+                  contact?: { firstName?: string; lastName?: string };
+                  service?: { name?: string };
+                  name?: string;
+                  status?: string;
+                }>).slice(0, 10).map((r, i) => {
                   const contactName = r.contact
                     ? [r.contact.firstName, r.contact.lastName].filter(Boolean).join(" ") || "Walk-in"
                     : r.name || "Unknown";

@@ -3,12 +3,7 @@
 import { motion } from "framer-motion";
 import { Warehouse, Building2, Pencil, Trash2, AlertCircle, Layers } from "lucide-react";
 import { EmptyState } from "./marketplace-utils";
-import type { Warehouse as WarehouseDTO, InventoryStock } from "@/lib/marketplace-types";
-
-type InventoryRow = InventoryStock & {
-  reorderLevel?: number | null;
-  productName?: string | null;
-};
+import type { WarehouseDto, InventoryStockDto } from "@/lib/types/marketplace";
 
 export function WarehousingTab({
   warehouses,
@@ -17,9 +12,9 @@ export function WarehousingTab({
   onDelete,
   onAddInventory,
 }: {
-  warehouses: WarehouseDTO[];
-  inventory: InventoryRow[];
-  onEdit: (item: WarehouseDTO) => void;
+  warehouses: WarehouseDto[];
+  inventory: InventoryStockDto[];
+  onEdit: (item: WarehouseDto) => void;
   onDelete: (id: string) => void;
   onAddInventory: () => void;
 }) {
@@ -63,11 +58,10 @@ export function WarehousingTab({
                   <div className="px-4 py-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Inventory</div>
                   <div className="divide-y divide-white/5">
                     {whInventory.map((inv) => {
-                      const reorder = inv.reorderLevel ?? inv.reorderAt;
-                      const isLow = reorder != null && inv.quantity <= reorder;
+                      const isLow = !!inv.reorderLevel && inv.quantity <= inv.reorderLevel;
                       return (
                         <div key={inv.id} className="px-4 py-2 flex items-center justify-between">
-                          <span className="text-xs">{inv.product?.name || inv.productName || "Product"}</span>
+                          <span className="text-xs">{inv.product?.name || (inv as { productName?: string }).productName || "Product"}</span>
                           <div className="flex items-center gap-3">
                             <span className={`text-xs font-medium ${isLow ? "text-red-400" : ""}`}>
                               {inv.quantity} units

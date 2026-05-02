@@ -118,9 +118,9 @@ export function DesignMode({
             storeName={businessData?.name}
             businessDescription={businessData?.description ?? undefined}
             businessTagline={businessData?.tagline ?? undefined}
-            currentHeadline={storefrontConfig.hero?.headline}
-            currentSubheadline={storefrontConfig.hero?.subheadline}
-            currentCta={storefrontConfig.hero?.ctaLabel}
+            currentHeadline={(storefrontConfig.hero as { headline?: string } | undefined)?.headline}
+            currentSubheadline={(storefrontConfig.hero as { subheadline?: string } | undefined)?.subheadline}
+            currentCta={(storefrontConfig.hero as { ctaLabel?: string } | undefined)?.ctaLabel}
             productsCount={commerceProducts.length}
             servicesCount={services.length}
             onApply={handleApplyHeroCopy}

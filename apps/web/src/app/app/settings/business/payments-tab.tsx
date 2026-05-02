@@ -327,37 +327,25 @@ export function PaymentsTab() {
     const load = async () => {
       const businessId = getStoredBusinessId();
       if (!businessId) return;
-      type BusinessMeta = {
-        wipayApiKey?: string;
-        wipayAccountNumber?: string;
-        paypalClientId?: string;
-        paypalClientSecret?: string;
-        bankTransferEnabled?: boolean;
-        bankName?: string;
-        bankAccountNumber?: string;
-        bankRoutingNumber?: string;
-        bankBranch?: string;
-        bankInstructions?: string;
-        cashEnabled?: boolean;
-        address?: string;
-      };
-      const res = await apiGet<{ metaData: BusinessMeta; address?: string }>(`/identity/businesses/${businessId}`);
+      const res = await apiGet<{ metaData: Record<string, unknown>; address?: string }>(`/identity/businesses/${businessId}`);
       if (res.data) {
-        const meta: BusinessMeta = res.data.metaData || {};
+        const meta = (res.data.metaData || {}) as Record<string, unknown>;
+        const str = (k: string) => (typeof meta[k] === "string" ? (meta[k] as string) : "");
+        const bool = (k: string) => meta[k] === true;
         setSettings({
-          wipayApiKey: meta.wipayApiKey || "",
-          wipayAccountNumber: meta.wipayAccountNumber || "",
-          paypalClientId: meta.paypalClientId || "",
-          paypalClientSecret: meta.paypalClientSecret || "",
-          bankTransferEnabled: meta.bankTransferEnabled || false,
-          bankName: meta.bankName || "",
-          bankAccountNumber: meta.bankAccountNumber || "",
-          bankRoutingNumber: meta.bankRoutingNumber || "",
-          bankBranch: meta.bankBranch || "",
-          bankInstructions: meta.bankInstructions || "",
-          cashEnabled: meta.cashEnabled || false,
+          wipayApiKey: str("wipayApiKey"),
+          wipayAccountNumber: str("wipayAccountNumber"),
+          paypalClientId: str("paypalClientId"),
+          paypalClientSecret: str("paypalClientSecret"),
+          bankTransferEnabled: bool("bankTransferEnabled"),
+          bankName: str("bankName"),
+          bankAccountNumber: str("bankAccountNumber"),
+          bankRoutingNumber: str("bankRoutingNumber"),
+          bankBranch: str("bankBranch"),
+          bankInstructions: str("bankInstructions"),
+          cashEnabled: bool("cashEnabled"),
         });
-        setBusinessAddress(res.data.address || meta.address || "");
+        setBusinessAddress(res.data.address || str("address"));
       }
     };
     load();

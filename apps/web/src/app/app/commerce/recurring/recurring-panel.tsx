@@ -170,7 +170,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
       taxRate: String(rec.taxRate ?? 0),
       discountType: (rec.discountType as "PERCENT" | "FIXED") || "PERCENT",
       discountValue: rec.discountValue ? String(rec.discountValue) : "",
-      items: (rec.lineItems ?? []).map((item) => ({
+      items: (rec.lineItems ?? []).map((item: { description: string; quantity: number | string; unitPrice: number | string }) => ({
         id: generateItemId(),
         productId: "",
         description: item.description,
@@ -189,7 +189,18 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
     if (!form.contactId) { setError("Contact is required"); return; }
     if (validItems.length === 0) { setError("At least one line item is required"); return; }
 
-    const payload: Partial<RecurringInvoice> = {
+    const payload: {
+      name: string;
+      contactId: string;
+      frequency: typeof form.frequency;
+      nextRunDate?: string;
+      endDate?: string;
+      notes?: string;
+      taxRate: number;
+      discountType?: "PERCENT" | "FIXED";
+      discountValue?: number;
+      lineItems: Array<{ description: string; quantity: number; unitPrice: number; total: number }>;
+    } = {
       name: form.name,
       contactId: form.contactId,
       frequency: form.frequency,
@@ -202,12 +213,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
       lineItems: validItems.map((i) => {
         const quantity = parseInt(i.quantity) || 1;
         const unitPrice = parseFloat(i.unitPrice);
-        return {
-          description: i.description,
-          quantity,
-          unitPrice,
-          total: quantity * unitPrice,
-        };
+        return { description: i.description, quantity, unitPrice, total: quantity * unitPrice };
       }),
     };
 

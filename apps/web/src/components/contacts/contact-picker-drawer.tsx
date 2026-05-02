@@ -52,7 +52,7 @@ export function ContactPickerDrawer({ isOpen, onClose }: ContactPickerDrawerProp
       if (res.data?.contacts) {
         setContacts(res.data.contacts as ContactCardData[]);
         const tags = new Set<string>();
-        (res.data.contacts as Array<{ tags?: string[] }>).forEach((c) => c.tags?.forEach((t) => tags.add(t)));
+        res.data.contacts.forEach((c: { tags?: string[] }) => c.tags?.forEach((t: string) => tags.add(t)));
         setAvailableTags((prev) => {
           const merged = new Set([...prev, ...tags]);
           return Array.from(merged).sort();

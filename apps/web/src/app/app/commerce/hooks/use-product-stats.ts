@@ -4,15 +4,7 @@ import { useMemo } from "react";
 
 interface ProductStatsInput {
   productId: string | null;
-  invoices: Array<{
-    items?: Array<{
-      productId?: string | null;
-      total?: number | string | null;
-      unitPrice?: number | string | null;
-      quantity?: number | string | null;
-    }>;
-    status?: string;
-  }>;
+  invoices: Array<{ items?: Array<{ productId?: string | null }>; status?: string }>;
   quotes: Array<{ items?: Array<{ productId?: string | null }> }>;
 }
 
@@ -33,8 +25,8 @@ export function useProductStats({ productId, invoices, quotes }: ProductStatsInp
       .reduce((sum, inv) => {
         const matching = inv.items?.filter(item => item.productId === pid) ?? [];
         return sum + matching.reduce((s, item) => {
-          if (item.total != null) return s + Number(item.total);
-          return s + Number(item.unitPrice ?? 0) * Number(item.quantity ?? 1);
+          const it = item as { total?: number; unitPrice?: number | string; quantity?: number | string };
+          return s + (it.total ?? (Number(it.unitPrice ?? 0) * Number(it.quantity ?? 1)));
         }, 0);
       }, 0);
     return { invoiceCount, quoteCount, totalRevenue };

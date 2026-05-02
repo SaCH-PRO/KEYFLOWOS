@@ -22,7 +22,7 @@ const STATUS_DOT: Record<string, string> = {
   LOST: "bg-red-500",
 };
 
-export interface ContactOption {
+export interface ContactSelectItem {
   id: string;
   firstName?: string | null;
   lastName?: string | null;
@@ -34,8 +34,8 @@ export interface ContactOption {
 
 interface ContactSelectProps {
   value: string;
-  onChange: (contactId: string, contact?: ContactOption) => void;
-  contacts?: ContactOption[];
+  onChange: (contactId: string, contact?: ContactSelectItem) => void;
+  contacts?: ContactSelectItem[];
   placeholder?: string;
   label?: string;
   required?: boolean;
@@ -76,9 +76,9 @@ export function ContactSelect({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const selectedContact = useMemo(() => {
+  const selectedContact = useMemo<ContactSelectItem | null>(() => {
     if (!value) return null;
-    const all = externalContacts ?? results;
+    const all = (externalContacts ?? results) as ContactSelectItem[];
     return all.find((c) => c.id === value) ?? null;
   }, [value, externalContacts, results]);
 
@@ -98,7 +98,7 @@ export function ContactSelect({
   }, [search, results]);
 
   const handleSelect = useCallback(
-    (contact: ContactOption) => {
+    (contact: ContactSelectItem) => {
       onChange(contact.id, contact);
       setOpen(false);
       setSearch("");
@@ -162,7 +162,7 @@ export function ContactSelect({
         phone: quickAddForm.phone.trim() || undefined,
       });
       if (res.data) {
-        handleSelect(res.data);
+        handleSelect(res.data as ContactSelectItem);
         setQuickAddForm({ firstName: "", lastName: "", email: "", phone: "" });
         moduleEvents.emit("contact:quick_created", "contact-select", {
           id: res.data.id,
@@ -266,7 +266,7 @@ export function ContactSelect({
               role="listbox"
               className="max-h-48 overflow-y-auto py-1"
             >
-              {results.map((contact, idx) => {
+              {(results as ContactSelectItem[]).map((contact, idx) => {
                 const name =
                   [contact.firstName, contact.lastName].filter(Boolean).join(" ") ||
                   contact.email ||

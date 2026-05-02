@@ -27,18 +27,24 @@ import { CommerceFulfillmentTab } from "./components/commerce-fulfillment-tab";
 import { InventoryCommandCenter } from "./components/inventory-command-center";
 import { CommerceSuppliersTab } from "./components/commerce-suppliers-tab";
 import { CommerceInsightsTab } from "./components/commerce-insights-tab";
-import { ProductEditorModal, type ProductFormDraft } from "./components/product-editor-modal";
+import { ProductEditorModal } from "./components/product-editor-modal";
 import type {
-  Product,
-  MarketplaceListing,
-  MarketplaceOrder,
-  Shipment,
-  PurchaseOrder,
-  Warehouse as WarehouseType,
-  InventoryStock,
-} from "@/lib/marketplace-types";
+  ProductDto,
+  ListingDto,
+  OrderDto,
+  ShipmentDto,
+  PurchaseOrderDto,
+  WarehouseDto,
+  InventoryStockDto,
+} from "@/lib/types/marketplace";
 
 type Tab = "catalog" | "listings" | "orders" | "fulfillment" | "inventory" | "suppliers" | "insights";
+
+type FormState = Record<string, unknown>;
+
+interface ApiListResponse<T> {
+  data?: T[];
+}
 
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "catalog", label: "Catalog", icon: Package },
@@ -50,28 +56,34 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "insights", label: "Insights", icon: TrendingUp },
 ];
 
+function unwrapList<T>(data: T[] | ApiListResponse<T> | undefined): T[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  return data.data ?? [];
+}
+
 export default function MarketplacePage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("catalog");
   const [loading, setLoading] = useState(true);
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [listings, setListings] = useState<MarketplaceListing[]>([]);
-  const [orders, setOrders] = useState<MarketplaceOrder[]>([]);
-  const [shipments, setShipments] = useState<Shipment[]>([]);
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [warehouses, setWarehouses] = useState<WarehouseType[]>([]);
-  const [inventory, setInventory] = useState<InventoryStock[]>([]);
+  const [products, setProducts] = useState<ProductDto[]>([]);
+  const [listings, setListings] = useState<ListingDto[]>([]);
+  const [orders, setOrders] = useState<OrderDto[]>([]);
+  const [shipments, setShipments] = useState<ShipmentDto[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderDto[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
+  const [inventory, setInventory] = useState<InventoryStockDto[]>([]);
 
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<string>("");
-  const [editingItem, setEditingItem] = useState<{ id?: string; [k: string]: unknown } | null>(null);
-  const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const [editingItem, setEditingItem] = useState<{ id?: string } & FormState | null>(null);
+  const [formData, setFormData] = useState<FormState>({});
   const [saving, setSaving] = useState(false);
 
   const [showProductEditor, setShowProductEditor] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [productForm, setProductForm] = useState<ProductFormDraft>({});
+  const [editingProduct, setEditingProduct] = useState<({ id?: string } & FormState) | null>(null);
+  const [productForm, setProductForm] = useState<FormState>({});
   const [productSaving, setProductSaving] = useState(false);
 
   const [showGuide, setShowGuide] = useState(false);
@@ -96,72 +108,72 @@ export default function MarketplacePage() {
         switch (tab) {
           case "catalog": {
             const [prodRes, listRes] = await Promise.all([
-              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
-              apiGet<{ data?: MarketplaceListing[] } | MarketplaceListing[]>(`${basePath}/listings`),
+              apiGet<ApiListResponse<ProductDto> | ProductDto[]>(`${commercePath}/products`),
+              apiGet<ApiListResponse<ListingDto> | ListingDto[]>(`${basePath}/listings`),
             ]);
-            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
-            if (listRes.data) setListings((Array.isArray(listRes.data) ? listRes.data : listRes.data.data) ?? []);
+            if (prodRes.data) setProducts(unwrapList(prodRes.data));
+            if (listRes.data) setListings(unwrapList(listRes.data));
             break;
           }
           case "listings": {
             const [listRes, prodRes] = await Promise.all([
-              apiGet<{ data?: MarketplaceListing[] } | MarketplaceListing[]>(`${basePath}/listings`),
-              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
+              apiGet<ApiListResponse<ListingDto> | ListingDto[]>(`${basePath}/listings`),
+              apiGet<ApiListResponse<ProductDto> | ProductDto[]>(`${commercePath}/products`),
             ]);
-            if (listRes.data) setListings((Array.isArray(listRes.data) ? listRes.data : listRes.data.data) ?? []);
-            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
+            if (listRes.data) setListings(unwrapList(listRes.data));
+            if (prodRes.data) setProducts(unwrapList(prodRes.data));
             break;
           }
           case "orders": {
             const [ordRes, prodRes] = await Promise.all([
-              apiGet<{ data?: MarketplaceOrder[] } | MarketplaceOrder[]>(`${basePath}/orders`),
-              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
+              apiGet<ApiListResponse<OrderDto> | OrderDto[]>(`${basePath}/orders`),
+              apiGet<ApiListResponse<ProductDto> | ProductDto[]>(`${commercePath}/products`),
             ]);
-            if (ordRes.data) setOrders((Array.isArray(ordRes.data) ? ordRes.data : ordRes.data.data) ?? []);
-            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
+            if (ordRes.data) setOrders(unwrapList(ordRes.data));
+            if (prodRes.data) setProducts(unwrapList(prodRes.data));
             break;
           }
           case "fulfillment": {
             const [shipRes, poRes, prodRes] = await Promise.all([
-              apiGet<{ data?: Shipment[] } | Shipment[]>(`${basePath}/shipments`),
-              apiGet<{ data?: PurchaseOrder[] } | PurchaseOrder[]>(`${basePath}/purchase-orders`),
-              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
+              apiGet<ApiListResponse<ShipmentDto> | ShipmentDto[]>(`${basePath}/shipments`),
+              apiGet<ApiListResponse<PurchaseOrderDto> | PurchaseOrderDto[]>(`${basePath}/purchase-orders`),
+              apiGet<ApiListResponse<ProductDto> | ProductDto[]>(`${commercePath}/products`),
             ]);
-            if (shipRes.data) setShipments((Array.isArray(shipRes.data) ? shipRes.data : shipRes.data.data) ?? []);
-            if (poRes.data) setPurchaseOrders((Array.isArray(poRes.data) ? poRes.data : poRes.data.data) ?? []);
-            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
+            if (shipRes.data) setShipments(unwrapList(shipRes.data));
+            if (poRes.data) setPurchaseOrders(unwrapList(poRes.data));
+            if (prodRes.data) setProducts(unwrapList(prodRes.data));
             break;
           }
           case "inventory": {
             const [whRes, invRes, prodRes] = await Promise.all([
-              apiGet<WarehouseType[]>(`${basePath}/warehouses`),
-              apiGet<InventoryStock[]>(`${basePath}/inventory`),
-              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
+              apiGet<WarehouseDto[]>(`${basePath}/warehouses`),
+              apiGet<InventoryStockDto[]>(`${basePath}/inventory`),
+              apiGet<ApiListResponse<ProductDto> | ProductDto[]>(`${commercePath}/products`),
             ]);
             if (whRes.data) setWarehouses(whRes.data);
             if (invRes.data) setInventory(invRes.data);
-            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
+            if (prodRes.data) setProducts(unwrapList(prodRes.data));
             break;
           }
           case "suppliers": {
             const [poRes, prodRes] = await Promise.all([
-              apiGet<{ data?: PurchaseOrder[] } | PurchaseOrder[]>(`${basePath}/purchase-orders`),
-              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
+              apiGet<ApiListResponse<PurchaseOrderDto> | PurchaseOrderDto[]>(`${basePath}/purchase-orders`),
+              apiGet<ApiListResponse<ProductDto> | ProductDto[]>(`${commercePath}/products`),
             ]);
-            if (poRes.data) setPurchaseOrders((Array.isArray(poRes.data) ? poRes.data : poRes.data.data) ?? []);
-            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
+            if (poRes.data) setPurchaseOrders(unwrapList(poRes.data));
+            if (prodRes.data) setProducts(unwrapList(prodRes.data));
             break;
           }
           case "insights": {
             const [prodRes, listRes, ordRes, invRes] = await Promise.all([
-              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
-              apiGet<{ data?: MarketplaceListing[] } | MarketplaceListing[]>(`${basePath}/listings`),
-              apiGet<{ data?: MarketplaceOrder[] } | MarketplaceOrder[]>(`${basePath}/orders`),
-              apiGet<InventoryStock[]>(`${basePath}/inventory`),
+              apiGet<ApiListResponse<ProductDto> | ProductDto[]>(`${commercePath}/products`),
+              apiGet<ApiListResponse<ListingDto> | ListingDto[]>(`${basePath}/listings`),
+              apiGet<ApiListResponse<OrderDto> | OrderDto[]>(`${basePath}/orders`),
+              apiGet<InventoryStockDto[]>(`${basePath}/inventory`),
             ]);
-            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
-            if (listRes.data) setListings((Array.isArray(listRes.data) ? listRes.data : listRes.data.data) ?? []);
-            if (ordRes.data) setOrders((Array.isArray(ordRes.data) ? ordRes.data : ordRes.data.data) ?? []);
+            if (prodRes.data) setProducts(unwrapList(prodRes.data));
+            if (listRes.data) setListings(unwrapList(listRes.data));
+            if (ordRes.data) setOrders(unwrapList(ordRes.data));
             if (invRes.data) setInventory(invRes.data);
             break;
           }
@@ -177,21 +189,21 @@ export default function MarketplacePage() {
     void loadTab(activeTab);
   }, [activeTab, loadTab]);
 
-  const openCreate = (type: string, defaults: Record<string, unknown> = {}) => {
+  const openCreate = (type: string, defaults: FormState = {}) => {
     setModalType(type);
     setEditingItem(null);
     setFormData(defaults);
     setShowModal(true);
   };
 
-  const openEdit = <T extends { id?: string }>(type: string, item: T) => {
+  const openEdit = (type: string, item: { id?: string } & FormState) => {
     setModalType(type);
-    setEditingItem(item as { id?: string; [k: string]: unknown });
-    setFormData({ ...(item as Record<string, unknown>) });
+    setEditingItem(item);
+    setFormData({ ...item });
     setShowModal(true);
   };
 
-  const openProductEditor = (product: Product | null = null) => {
+  const openProductEditor = (product: (({ id?: string } & FormState) | null) = null) => {
     setEditingProduct(product);
     setProductForm(product ? { ...product } : {});
     setShowProductEditor(true);
@@ -288,7 +300,7 @@ export default function MarketplacePage() {
     } catch {}
   };
 
-  const handleUpdateListing = async (id: string, data: Partial<MarketplaceListing>) => {
+  const handleUpdateListing = async (id: string, data: Record<string, unknown>) => {
     if (!businessId) return;
     try {
       await apiPatch(`${basePath}/listings/${id}`, data);
@@ -296,7 +308,13 @@ export default function MarketplacePage() {
     } catch {}
   };
 
-  const updateForm = (key: string, value: unknown) => setFormData((prev) => ({ ...prev, [key]: value }));
+  const updateForm = (key: string, value: unknown) =>
+    setFormData((prev) => ({ ...prev, [key]: value }));
+
+  const fdString = (key: string): string => {
+    const v = formData[key];
+    return v == null ? "" : String(v);
+  };
 
   if (loading && activeTab === "catalog" && products.length === 0) return <DashboardSkeleton />;
 
@@ -388,7 +406,7 @@ export default function MarketplacePage() {
                 products={products}
                 listings={listings}
                 onCreateProduct={() => openProductEditor(null)}
-                onEditProduct={(p) => openProductEditor(p)}
+                onEditProduct={(p) => openProductEditor(p as ({ id?: string } & FormState))}
               />
             )}
             {activeTab === "listings" && (
@@ -537,7 +555,7 @@ export default function MarketplacePage() {
           <>
             <FormField label="Product">
               <select
-                value={String(formData.productId ?? "")}
+                value={fdString("productId")}
                 onChange={(e) => updateForm("productId", e.target.value)}
                 className={selectClass}
               >
@@ -549,7 +567,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Title (optional override)">
               <input
-                value={String(formData.title ?? "")}
+                value={fdString("title")}
                 onChange={(e) => updateForm("title", e.target.value)}
                 className={inputClass}
                 placeholder="Custom listing title"
@@ -557,7 +575,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Fulfillment Strategy">
               <select
-                value={String(formData.fulfillmentStrategy ?? "")}
+                value={fdString("fulfillmentStrategy")}
                 onChange={(e) => updateForm("fulfillmentStrategy", e.target.value)}
                 className={selectClass}
               >
@@ -573,7 +591,7 @@ export default function MarketplacePage() {
               <FormField label="Price">
                 <input
                   type="number"
-                  value={String(formData.price ?? "")}
+                  value={fdString("price")}
                   onChange={(e) => updateForm("price", e.target.value)}
                   className={inputClass}
                   placeholder="25.00"
@@ -582,7 +600,7 @@ export default function MarketplacePage() {
               <FormField label="Compare-at Price">
                 <input
                   type="number"
-                  value={String(formData.compareAtPrice ?? "")}
+                  value={fdString("compareAtPrice")}
                   onChange={(e) => updateForm("compareAtPrice", e.target.value)}
                   className={inputClass}
                   placeholder="30.00"
@@ -591,7 +609,7 @@ export default function MarketplacePage() {
             </div>
             <FormField label="Market Reach">
               <select
-                value={typeof formData.marketReach === "string" && formData.marketReach ? formData.marketReach : "LOCAL"}
+                value={fdString("marketReach") || "LOCAL"}
                 onChange={(e) => updateForm("marketReach", e.target.value)}
                 className={selectClass}
               >
@@ -602,7 +620,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Status">
               <select
-                value={typeof formData.status === "string" && formData.status ? formData.status : "ACTIVE"}
+                value={fdString("status") || "ACTIVE"}
                 onChange={(e) => updateForm("status", e.target.value)}
                 className={selectClass}
               >
@@ -612,7 +630,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Countries (comma-separated)">
               <input
-                value={String(formData.countries ?? "")}
+                value={fdString("countries")}
                 onChange={(e) => updateForm("countries", e.target.value)}
                 className={inputClass}
                 placeholder="TT, JM, BB..."
@@ -620,7 +638,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="HS Code">
               <input
-                value={String(formData.hsCode ?? "")}
+                value={fdString("hsCode")}
                 onChange={(e) => updateForm("hsCode", e.target.value)}
                 className={inputClass}
                 placeholder="8471.30"
@@ -633,7 +651,7 @@ export default function MarketplacePage() {
           <>
             <FormField label="Order ID">
               <input
-                value={String(formData.orderId ?? "")}
+                value={fdString("orderId")}
                 onChange={(e) => updateForm("orderId", e.target.value)}
                 className={inputClass}
                 placeholder="Order ID"
@@ -641,7 +659,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Carrier">
               <input
-                value={String(formData.carrier ?? "")}
+                value={fdString("carrier")}
                 onChange={(e) => updateForm("carrier", e.target.value)}
                 className={inputClass}
                 placeholder="FedEx, DHL, UPS..."
@@ -649,7 +667,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Tracking Number">
               <input
-                value={String(formData.trackingNumber ?? "")}
+                value={fdString("trackingNumber")}
                 onChange={(e) => updateForm("trackingNumber", e.target.value)}
                 className={inputClass}
                 placeholder="1Z999AA10123456784"
@@ -657,7 +675,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Status">
               <select
-                value={typeof formData.status === "string" && formData.status ? formData.status : "PREPARING"}
+                value={fdString("status") || "PREPARING"}
                 onChange={(e) => updateForm("status", e.target.value)}
                 className={selectClass}
               >
@@ -669,7 +687,7 @@ export default function MarketplacePage() {
             <FormField label="Estimated Delivery">
               <input
                 type="date"
-                value={String(formData.estimatedDelivery ?? "")}
+                value={fdString("estimatedDelivery")}
                 onChange={(e) => updateForm("estimatedDelivery", e.target.value)}
                 className={inputClass}
               />
@@ -681,7 +699,7 @@ export default function MarketplacePage() {
           <>
             <FormField label="Supplier Name">
               <input
-                value={String(formData.supplierName ?? "")}
+                value={fdString("supplierName")}
                 onChange={(e) => updateForm("supplierName", e.target.value)}
                 className={inputClass}
                 placeholder="Supplier Co."
@@ -689,7 +707,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Supplier Email">
               <input
-                value={String(formData.supplierEmail ?? "")}
+                value={fdString("supplierEmail")}
                 onChange={(e) => updateForm("supplierEmail", e.target.value)}
                 className={inputClass}
                 placeholder="supplier@co.com"
@@ -697,7 +715,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Product">
               <select
-                value={String(formData.productId ?? "")}
+                value={fdString("productId")}
                 onChange={(e) => updateForm("productId", e.target.value)}
                 className={selectClass}
               >
@@ -711,7 +729,7 @@ export default function MarketplacePage() {
               <FormField label="Quantity">
                 <input
                   type="number"
-                  value={String(formData.quantity ?? "")}
+                  value={fdString("quantity")}
                   onChange={(e) => updateForm("quantity", e.target.value)}
                   className={inputClass}
                   placeholder="100"
@@ -720,7 +738,7 @@ export default function MarketplacePage() {
               <FormField label="Unit Cost">
                 <input
                   type="number"
-                  value={String(formData.unitCost ?? "")}
+                  value={fdString("unitCost")}
                   onChange={(e) => updateForm("unitCost", e.target.value)}
                   className={inputClass}
                   placeholder="25.00"
@@ -730,14 +748,14 @@ export default function MarketplacePage() {
             <FormField label="Expected Delivery">
               <input
                 type="date"
-                value={String(formData.expectedDelivery ?? "")}
+                value={fdString("expectedDelivery")}
                 onChange={(e) => updateForm("expectedDelivery", e.target.value)}
                 className={inputClass}
               />
             </FormField>
             <FormField label="Status">
               <select
-                value={typeof formData.status === "string" && formData.status ? formData.status : "DRAFT"}
+                value={fdString("status") || "DRAFT"}
                 onChange={(e) => updateForm("status", e.target.value)}
                 className={selectClass}
               >
@@ -753,7 +771,7 @@ export default function MarketplacePage() {
           <>
             <FormField label="Warehouse Name">
               <input
-                value={String(formData.name ?? "")}
+                value={fdString("name")}
                 onChange={(e) => updateForm("name", e.target.value)}
                 className={inputClass}
                 placeholder="Main Warehouse"
@@ -761,7 +779,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Address">
               <input
-                value={String(formData.address ?? "")}
+                value={fdString("address")}
                 onChange={(e) => updateForm("address", e.target.value)}
                 className={inputClass}
                 placeholder="123 Industrial Dr"
@@ -770,7 +788,7 @@ export default function MarketplacePage() {
             <div className="grid grid-cols-2 gap-3">
               <FormField label="City">
                 <input
-                  value={String(formData.city ?? "")}
+                  value={fdString("city")}
                   onChange={(e) => updateForm("city", e.target.value)}
                   className={inputClass}
                   placeholder="Port of Spain"
@@ -778,7 +796,7 @@ export default function MarketplacePage() {
               </FormField>
               <FormField label="Country">
                 <input
-                  value={String(formData.country ?? "")}
+                  value={fdString("country")}
                   onChange={(e) => updateForm("country", e.target.value)}
                   className={inputClass}
                   placeholder="Trinidad & Tobago"
@@ -788,7 +806,7 @@ export default function MarketplacePage() {
             <FormField label="Capacity">
               <input
                 type="number"
-                value={String(formData.capacity ?? "")}
+                value={fdString("capacity")}
                 onChange={(e) => updateForm("capacity", e.target.value)}
                 className={inputClass}
                 placeholder="1000"
@@ -801,7 +819,7 @@ export default function MarketplacePage() {
           <>
             <FormField label="Warehouse">
               <select
-                value={String(formData.warehouseId ?? "")}
+                value={fdString("warehouseId")}
                 onChange={(e) => updateForm("warehouseId", e.target.value)}
                 className={selectClass}
               >
@@ -813,7 +831,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Product">
               <select
-                value={String(formData.productId ?? "")}
+                value={fdString("productId")}
                 onChange={(e) => updateForm("productId", e.target.value)}
                 className={selectClass}
               >
@@ -827,7 +845,7 @@ export default function MarketplacePage() {
               <FormField label="Quantity">
                 <input
                   type="number"
-                  value={String(formData.quantity ?? "")}
+                  value={fdString("quantity")}
                   onChange={(e) => updateForm("quantity", e.target.value)}
                   className={inputClass}
                   placeholder="100"
@@ -836,7 +854,7 @@ export default function MarketplacePage() {
               <FormField label="Reserved">
                 <input
                   type="number"
-                  value={String(formData.reserved ?? "")}
+                  value={fdString("reserved")}
                   onChange={(e) => updateForm("reserved", e.target.value)}
                   className={inputClass}
                   placeholder="0"
@@ -845,7 +863,7 @@ export default function MarketplacePage() {
               <FormField label="Reorder Level">
                 <input
                   type="number"
-                  value={String(formData.reorderLevel ?? "")}
+                  value={fdString("reorderLevel")}
                   onChange={(e) => updateForm("reorderLevel", e.target.value)}
                   className={inputClass}
                   placeholder="10"

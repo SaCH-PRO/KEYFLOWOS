@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type Dispatch, type SetStateAction, type RefObject } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -44,45 +44,37 @@ import { apiGet, apiPost, apiDelete, getAuthHeaders, API_BASE } from "@/lib/api"
 import { saveAs } from "@/lib/download";
 import { EmptyState, usePagination, PaginationBar, formatCurrency, formatDate } from "./marketplace-utils";
 import type {
-  Warehouse as WarehouseDTO,
-  InventoryStock,
-  Product as ProductDTO,
-  PurchaseOrder,
-  PurchaseOrderItem,
-  StockMovement,
-  InventorySummary,
-  InventoryAlert,
-  InventorySheetStatus,
-  InventorySheetDiff,
-  InventorySheetConflict,
-  InventorySheetPullPreview,
-  InventoryImportResult,
-} from "@/lib/marketplace-types";
-
-interface XlsxWizardState {
-  file: File;
-  headers: string[];
-  previewRows: unknown[][];
-  columnMap: Record<string, string>;
-}
-
-interface ExtendedAlert extends InventoryAlert {
-  productSku?: string | null;
-  reserved?: number;
-  available?: number;
-  salesVelocity30d?: number;
-  suggestedReorderQty?: number;
-  avgDailySales?: number;
-  daysOfStockLeft?: number | null;
-}
-
-interface ValuationItem extends InventoryStock {
-  product?: ProductDTO | null;
-  cost: number;
-  totalValue: number;
-}
+  ProductDto,
+  WarehouseDto,
+  InventoryStockDto,
+  InventoryMovementDto,
+  InventoryAlertDto,
+  InventorySummaryDto,
+  PurchaseOrderDto,
+  PurchaseOrderItemDto,
+  InventorySheetStatusDto,
+  InventorySheetDiffDto,
+  InventorySheetDiffConflict,
+  InventorySheetPullPreviewDto,
+  InventoryImportResultDto,
+  XlsxImportWizardState,
+} from "@/lib/types/marketplace";
 
 type ICCTab = "overview" | "stock" | "movements" | "warehouses" | "orders" | "alerts" | "valuation" | "spreadsheets";
+
+interface AdjustFormState {
+  quantityChange: number;
+  reasonCode: string;
+  note: string;
+}
+
+interface TransferFormState {
+  productId: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  quantity: number;
+  note: string;
+}
 
 const ICC_TABS: { key: ICCTab; label: string; icon: React.ElementType }[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
@@ -209,26 +201,26 @@ export function InventoryCommandCenter({
 }: {
   businessId: string;
   basePath: string;
-  warehouses: WarehouseDTO[];
-  inventory: InventoryStock[];
-  products: ProductDTO[];
-  purchaseOrders: PurchaseOrder[];
+  warehouses: WarehouseDto[];
+  inventory: InventoryStockDto[];
+  products: ProductDto[];
+  purchaseOrders: PurchaseOrderDto[];
   onCreateWarehouse: () => void;
-  onEditWarehouse: (wh: WarehouseDTO) => void;
+  onEditWarehouse: (wh: WarehouseDto) => void;
   onDeleteWarehouse: (id: string) => void;
   onAddInventory: () => void;
   onCreatePO: () => void;
-  onEditPO: (po: PurchaseOrder) => void;
+  onEditPO: (po: PurchaseOrderDto) => void;
   onRefresh: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<ICCTab>("overview");
-  const [warehouses, setWarehouses] = useState(initialWarehouses);
-  const [inventory, setInventory] = useState(initialInventory);
-  const [purchaseOrders, setPurchaseOrders] = useState(initialPOs);
+  const [warehouses, setWarehouses] = useState<WarehouseDto[]>(initialWarehouses);
+  const [inventory, setInventory] = useState<InventoryStockDto[]>(initialInventory);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderDto[]>(initialPOs);
 
-  const [summary, setSummary] = useState<InventorySummary | null>(null);
-  const [movements, setMovements] = useState<StockMovement[]>([]);
-  const [alerts, setAlerts] = useState<ExtendedAlert[]>([]);
+  const [summary, setSummary] = useState<InventorySummaryDto | null>(null);
+  const [movements, setMovements] = useState<InventoryMovementDto[]>([]);
+  const [alerts, setAlerts] = useState<InventoryAlertDto[]>([]);
   const [loadingData, setLoadingData] = useState(false);
 
   const [stockSearch, setStockSearch] = useState("");
@@ -237,29 +229,29 @@ export function InventoryCommandCenter({
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const [showAdjustModal, setShowAdjustModal] = useState(false);
-  const [adjustTarget, setAdjustTarget] = useState<InventoryStock | null>(null);
-  const [adjustData, setAdjustData] = useState({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" });
+  const [adjustTarget, setAdjustTarget] = useState<InventoryStockDto | null>(null);
+  const [adjustData, setAdjustData] = useState<AdjustFormState>({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" });
   const [adjustSaving, setAdjustSaving] = useState(false);
 
   const [showTransferModal, setShowTransferModal] = useState(false);
-  const [transferData, setTransferData] = useState({ productId: "", fromWarehouseId: "", toWarehouseId: "", quantity: 1, note: "" });
+  const [transferData, setTransferData] = useState<TransferFormState>({ productId: "", fromWarehouseId: "", toWarehouseId: "", quantity: 1, note: "" });
   const [transferSaving, setTransferSaving] = useState(false);
 
-  const [sheetStatus, setSheetStatus] = useState<InventorySheetStatus | null>(null);
+  const [sheetStatus, setSheetStatus] = useState<InventorySheetStatusDto | null>(null);
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetAction, setSheetAction] = useState<string | null>(null);
-  const [pullPreview, setPullPreview] = useState<InventorySheetPullPreview | null>(null);
-  const [sheetDiff, setSheetDiff] = useState<InventorySheetDiff | null>(null);
+  const [pullPreview, setPullPreview] = useState<InventorySheetPullPreviewDto | null>(null);
+  const [sheetDiff, setSheetDiff] = useState<InventorySheetDiffDto | null>(null);
   const [conflictResolutions, setConflictResolutions] = useState<Record<number, "system" | "sheet">>({});
-  const [importResult, setImportResult] = useState<InventoryImportResult | null>(null);
+  const [importResult, setImportResult] = useState<InventoryImportResultDto | null>(null);
   const [xlsxImporting, setXlsxImporting] = useState(false);
-  const [xlsxWizard, setXlsxWizard] = useState<XlsxWizardState | null>(null);
+  const [xlsxWizard, setXlsxWizard] = useState<XlsxImportWizardState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const EXPECTED_COLUMNS = ["SKU", "Product Name", "Warehouse", "Quantity On Hand", "Reserved", "Reorder Level", "Cost Per Unit", "Currency"];
 
-  const productsById: Record<string, ProductDTO> = Object.fromEntries(products.map((p) => [p.id, p]));
-  const warehousesById: Record<string, WarehouseDTO> = Object.fromEntries(warehouses.map((w) => [w.id, w]));
+  const productsById: Record<string, ProductDto> = Object.fromEntries(products.map((p) => [p.id, p]));
+  const warehousesById: Record<string, WarehouseDto> = Object.fromEntries(warehouses.map((w) => [w.id, w]));
 
   useEffect(() => { setWarehouses(initialWarehouses); }, [initialWarehouses]);
   useEffect(() => { setInventory(initialInventory); }, [initialInventory]);
@@ -270,23 +262,23 @@ export function InventoryCommandCenter({
     setLoadingData(true);
     try {
       if (tab === "overview" || tab === "valuation") {
-        const res = await apiGet<InventorySummary>(`${basePath}/inventory/summary`);
+        const res = await apiGet<InventorySummaryDto>(`${basePath}/inventory/summary`);
         if (res.data) setSummary(res.data);
       }
       if (tab === "movements") {
-        const res = await apiGet<StockMovement[]>(`${basePath}/inventory/movements`);
+        const res = await apiGet<InventoryMovementDto[]>(`${basePath}/inventory/movements`);
         if (res.data) setMovements(res.data);
       }
       if (tab === "alerts") {
-        const res = await apiGet<ExtendedAlert[]>(`${basePath}/inventory/alerts`);
+        const res = await apiGet<InventoryAlertDto[]>(`${basePath}/inventory/alerts`);
         if (res.data) setAlerts(Array.isArray(res.data) ? res.data : []);
       }
       if (tab === "orders") {
-        const res = await apiGet<PurchaseOrder[] | { data: PurchaseOrder[] }>(`${basePath}/purchase-orders`);
+        const res = await apiGet<PurchaseOrderDto[] | { data: PurchaseOrderDto[] }>(`${basePath}/purchase-orders`);
         if (res.data) setPurchaseOrders(Array.isArray(res.data) ? res.data : (res.data.data ?? []));
       }
       if (tab === "spreadsheets") {
-        const res = await apiGet<InventorySheetStatus>(`/drive/businesses/${businessId}/inventory-sheet/status`);
+        const res = await apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`);
         if (res.data) setSheetStatus(res.data);
       }
     } catch {}
@@ -315,9 +307,9 @@ export function InventoryCommandCenter({
       await apiPost({ path: `${basePath}/inventory/adjust`, body: { stockId: adjustTarget.id, ...adjustData } });
       setShowAdjustModal(false);
       setAdjustTarget(null);
-      const res = await apiGet<InventoryStock[]>(`${basePath}/inventory`);
+      const res = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
       if (res.data) setInventory(res.data);
-      const movRes = await apiGet<StockMovement[]>(`${basePath}/inventory/movements`);
+      const movRes = await apiGet<InventoryMovementDto[]>(`${basePath}/inventory/movements`);
       if (movRes.data) setMovements(movRes.data);
     } catch {}
     setAdjustSaving(false);
@@ -328,9 +320,9 @@ export function InventoryCommandCenter({
     try {
       await apiPost({ path: `${basePath}/inventory/transfer`, body: transferData });
       setShowTransferModal(false);
-      const res = await apiGet<InventoryStock[]>(`${basePath}/inventory`);
+      const res = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
       if (res.data) setInventory(res.data);
-      const movRes = await apiGet<StockMovement[]>(`${basePath}/inventory/movements`);
+      const movRes = await apiGet<InventoryMovementDto[]>(`${basePath}/inventory/movements`);
       if (movRes.data) setMovements(movRes.data);
     } catch {}
     setTransferSaving(false);
@@ -361,7 +353,7 @@ export function InventoryCommandCenter({
     try {
       const data = await readXlsxAsRows(file);
       if (!data.length) return;
-      const headers = (data[0] || []).map((h: unknown) => String(h ?? "").trim());
+      const headers = (data[0] || []).map((h) => String(h ?? "").trim());
       const previewRows = data.slice(1, 6);
       const autoMap: Record<string, string> = {};
       for (const expected of EXPECTED_COLUMNS) {
@@ -382,9 +374,9 @@ export function InventoryCommandCenter({
       const rawRows = await readXlsxAsRows(xlsxWizard.file);
       const headers = rawRows[0] || [];
       const headerIdx: Record<string, number> = {};
-      (headers as unknown[]).forEach((h: unknown, i: number) => { headerIdx[String(h ?? "").trim()] = i; });
+      headers.forEach((h, i) => { headerIdx[String(h ?? "").trim()] = i; });
 
-      const mappedRows: Record<string, string>[] = rawRows.slice(1).map((row: unknown[]) => {
+      const mappedRows = rawRows.slice(1).map((row) => {
         const obj: Record<string, string> = {};
         for (const [expected, sourceCol] of Object.entries(xlsxWizard.columnMap)) {
           if (sourceCol) obj[expected] = String(row[headerIdx[sourceCol]] ?? "");
@@ -405,10 +397,10 @@ export function InventoryCommandCenter({
       const form = new FormData();
       form.append("file", blob, "inventory.xlsx");
       const res = await fetch(`${API_BASE}${basePath}/inventory/import-excel`, { method: "POST", body: form, headers: getAuthHeaders() });
-      const data = await res.json();
+      const data = await res.json() as InventoryImportResultDto;
       setImportResult(data);
       setXlsxWizard(null);
-      const invRes = await apiGet<InventoryStock[]>(`${basePath}/inventory`);
+      const invRes = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
       if (invRes.data) setInventory(invRes.data);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Import failed";
@@ -422,7 +414,7 @@ export function InventoryCommandCenter({
     setSheetAction("push");
     try {
       await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/push`, body: {} });
-      const res = await apiGet<InventorySheetStatus>(`/drive/businesses/${businessId}/inventory-sheet/status`);
+      const res = await apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`);
       if (res.data) setSheetStatus(res.data);
     } catch {}
     setSheetLoading(false);
@@ -433,20 +425,20 @@ export function InventoryCommandCenter({
     setSheetLoading(true);
     setSheetAction("pull");
     try {
-      const res = await apiGet<InventorySheetPullPreview>(`/drive/businesses/${businessId}/inventory-sheet/pull`);
+      const res = await apiGet<InventorySheetPullPreviewDto>(`/drive/businesses/${businessId}/inventory-sheet/pull`);
       if (res.data) setPullPreview(res.data);
     } catch {}
     setSheetLoading(false);
     setSheetAction(null);
   };
 
-  const handleApplyPulledInventory = async (rows: Record<string, unknown>[]) => {
+  const handleApplyPulledInventory = async (rows: Record<string, string>[]) => {
     setSheetLoading(true);
     setSheetAction("apply");
     try {
       const res = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/apply`, body: { rows } });
-      if (res.data) setImportResult(res.data);
-      const invRes = await apiGet<InventoryStock[]>(`${basePath}/inventory`);
+      if (res.data) setImportResult(res.data as InventoryImportResultDto);
+      const invRes = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
       if (invRes.data) setInventory(invRes.data);
       setPullPreview(null);
       setSheetDiff(null);
@@ -460,11 +452,11 @@ export function InventoryCommandCenter({
     setSheetLoading(true);
     setSheetAction("diff");
     try {
-      const res = await apiGet<InventorySheetDiff>(`/drive/businesses/${businessId}/inventory-sheet/diff`);
+      const res = await apiGet<InventorySheetDiffDto>(`/drive/businesses/${businessId}/inventory-sheet/diff`);
       if (res.data) {
         setSheetDiff(res.data);
         const defaultResolutions: Record<number, "system" | "sheet"> = {};
-        (res.data.conflicts || []).forEach((_: InventorySheetConflict, i: number) => { defaultResolutions[i] = "sheet"; });
+        (res.data.conflicts || []).forEach((_, i) => { defaultResolutions[i] = "sheet"; });
         setConflictResolutions(defaultResolutions);
       }
     } catch {}
@@ -474,14 +466,14 @@ export function InventoryCommandCenter({
 
   const handleApplyResolved = async () => {
     if (!sheetDiff?.conflicts) return;
-    const rowsToApply: Record<string, string>[] = sheetDiff.conflicts
-      .filter((_: InventorySheetConflict, i: number) => conflictResolutions[i] === "sheet")
-      .map((c: InventorySheetConflict) => ({
+    const rowsToApply = sheetDiff.conflicts
+      .filter((_, i) => conflictResolutions[i] === "sheet")
+      .map((c) => ({
         'SKU': c.sku ?? '',
         'Product Name': c.productName ?? '',
         'Warehouse': c.warehouseName ?? '',
         'Quantity On Hand': String(c.sheetQty ?? ''),
-        'Reorder Level': c.sheetReorderAt != null ? String(c.sheetReorderAt) : '',
+        'Reorder Level': c.sheetReorderAt !== null && c.sheetReorderAt !== undefined ? String(c.sheetReorderAt) : '',
       }));
     await handleApplyPulledInventory(rowsToApply);
   };
@@ -508,7 +500,7 @@ export function InventoryCommandCenter({
   const handleAdvancePO = async (poId: string, status: string) => {
     try {
       await apiPost({ path: `${basePath}/purchase-orders/${poId}/advance`, body: { status } });
-      const res = await apiGet<PurchaseOrder[] | { data: PurchaseOrder[] }>(`${basePath}/purchase-orders`);
+      const res = await apiGet<PurchaseOrderDto[] | { data: PurchaseOrderDto[] }>(`${basePath}/purchase-orders`);
       if (res.data) setPurchaseOrders(Array.isArray(res.data) ? res.data : (res.data.data ?? []));
       onRefresh();
     } catch {}
@@ -556,8 +548,6 @@ export function InventoryCommandCenter({
               loading={loadingData}
               inventory={inventory}
               warehouses={warehouses}
-              products={products}
-              productsById={productsById}
               onAddInventory={onAddInventory}
               onCreateWarehouse={onCreateWarehouse}
             />
@@ -583,8 +573,7 @@ export function InventoryCommandCenter({
               setStockStatusFilter={setStockStatusFilter}
               expandedRows={expandedRows}
               setExpandedRows={setExpandedRows}
-
-              onAdjust={(inv: InventoryStock) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
+              onAdjust={(inv) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
               onAddInventory={onAddInventory}
             />
           )}
@@ -594,12 +583,9 @@ export function InventoryCommandCenter({
               movements={movements}
               loading={loadingData}
               inventory={inventory}
-              warehouses={warehouses}
               productsById={productsById}
               warehousesById={warehousesById}
-              basePath={basePath}
-
-              onAdjust={(inv: InventoryStock) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
+              onAdjust={(inv) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
               onShowTransfer={() => setShowTransferModal(true)}
             />
           )}
@@ -619,7 +605,6 @@ export function InventoryCommandCenter({
           {activeTab === "orders" && (
             <PurchaseOrdersTab
               purchaseOrders={purchaseOrders}
-              products={products}
               onCreatePO={onCreatePO}
               onEditPO={onEditPO}
               onAdvancePO={handleAdvancePO}
@@ -659,8 +644,6 @@ export function InventoryCommandCenter({
               expectedColumns={EXPECTED_COLUMNS}
               onApplyXlsxMapping={handleApplyXlsxMapping}
               fileInputRef={fileInputRef}
-              inventory={inventory}
-              businessId={businessId}
               onPush={handlePushToSheet}
               onPull={handlePullFromSheet}
               onApply={handleApplyPulledInventory}
@@ -679,7 +662,7 @@ export function InventoryCommandCenter({
               }}
               onLinkSheet={(sheetId: string, sheetName: string) =>
                 apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/link`, body: { sheetId, sheetName } })
-                  .then(() => apiGet<InventorySheetStatus>(`/drive/businesses/${businessId}/inventory-sheet/status`))
+                  .then(() => apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`))
                   .then(r => { if (r.data) setSheetStatus(r.data); })
               }
             />
@@ -717,16 +700,15 @@ export function InventoryCommandCenter({
 }
 
 interface OverviewTabProps {
-  summary: InventorySummary | null;
+  summary: InventorySummaryDto | null;
   loading: boolean;
-  inventory: InventoryStock[];
-  warehouses: WarehouseDTO[];
-  products: ProductDTO[];
-  productsById: Record<string, ProductDTO>;
+  inventory: InventoryStockDto[];
+  warehouses: WarehouseDto[];
   onAddInventory: () => void;
   onCreateWarehouse: () => void;
 }
-function OverviewTab({ summary, loading, inventory, warehouses, products: _products, productsById: _productsById, onAddInventory, onCreateWarehouse }: OverviewTabProps) {
+
+function OverviewTab({ summary, loading, inventory, warehouses, onAddInventory, onCreateWarehouse }: OverviewTabProps) {
   if (loading && !summary) return (
     <div className="flex items-center justify-center py-16">
       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -754,9 +736,14 @@ function OverviewTab({ summary, loading, inventory, warehouses, products: _produ
   const healthScore = summary?.healthScore ?? 100;
   const warehouseBreakdown = summary?.warehouseBreakdown ?? warehouses.map((wh) => {
     const whInv = inventory.filter((i) => i.warehouseId === wh.id);
-    const totalUnits = whInv.reduce((sum, i) => sum + i.quantity, 0);
-    const capacityUtilization = wh.capacity ? Math.min(Math.round((totalUnits / wh.capacity) * 100), 100) : null;
-    return { id: wh.id, name: wh.name, skuCount: whInv.length, totalUnits, capacity: wh.capacity, capacityUtilization };
+    return {
+      id: wh.id,
+      name: wh.name,
+      skuCount: whInv.length,
+      totalUnits: whInv.reduce((s, i) => s + i.quantity, 0),
+      capacity: wh.capacity ?? null,
+      capacityUtilization: wh.capacityUtilization ?? null,
+    };
   });
 
   return (
@@ -830,27 +817,28 @@ function OverviewTab({ summary, loading, inventory, warehouses, products: _produ
 }
 
 interface StockGridTabProps {
-  inventory: InventoryStock[];
-  paginated: InventoryStock[];
+  inventory: InventoryStockDto[];
+  paginated: InventoryStockDto[];
   page: number;
   pageSize: number;
   totalPages: number;
-  setPage: React.Dispatch<React.SetStateAction<number>>;
-  setPageSize: React.Dispatch<React.SetStateAction<number>>;
-  warehouses: WarehouseDTO[];
-  productsById: Record<string, ProductDTO>;
-  warehousesById: Record<string, WarehouseDTO>;
+  setPage: Dispatch<SetStateAction<number>>;
+  setPageSize: Dispatch<SetStateAction<number>>;
+  warehouses: WarehouseDto[];
+  productsById: Record<string, ProductDto>;
+  warehousesById: Record<string, WarehouseDto>;
   stockSearch: string;
-  setStockSearch: (v: string) => void;
+  setStockSearch: Dispatch<SetStateAction<string>>;
   stockWarehouseFilter: string;
-  setStockWarehouseFilter: (v: string) => void;
+  setStockWarehouseFilter: Dispatch<SetStateAction<string>>;
   stockStatusFilter: string;
-  setStockStatusFilter: (v: string) => void;
+  setStockStatusFilter: Dispatch<SetStateAction<string>>;
   expandedRows: Set<string>;
-  setExpandedRows: React.Dispatch<React.SetStateAction<Set<string>>>;
-  onAdjust: (inv: InventoryStock) => void;
+  setExpandedRows: Dispatch<SetStateAction<Set<string>>>;
+  onAdjust: (inv: InventoryStockDto) => void;
   onAddInventory: () => void;
 }
+
 function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPage, setPageSize, warehouses, productsById, warehousesById, stockSearch, setStockSearch, stockWarehouseFilter, setStockWarehouseFilter, stockStatusFilter, setStockStatusFilter, expandedRows, setExpandedRows, onAdjust, onAddInventory }: StockGridTabProps) {
   return (
     <div className="space-y-3">
@@ -905,8 +893,8 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
             <div className="divide-y divide-white/5">
               {paginated.map((inv) => {
                 const product = productsById[inv.productId] || inv.product;
-                const warehouse = warehousesById[inv.warehouseId] || inv.warehouse;
-                const available = inv.quantity - inv.reserved;
+                const warehouse = (inv.warehouseId ? warehousesById[inv.warehouseId] : undefined) || inv.warehouse;
+                const available = inv.quantity - (inv.reserved ?? 0);
                 const isExpanded = expandedRows.has(inv.id);
                 return (
                   <div key={inv.id}>
@@ -927,7 +915,7 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
                             {inv.lastMovement && (
                               <p className="text-[10px] text-muted-foreground/60 flex items-center gap-0.5">
                                 <Clock className="w-2.5 h-2.5" />
-                                {formatDate(inv.lastMovement.createdAt)}
+                                {formatDate(inv.lastMovement.createdAt ?? "")}
                               </p>
                             )}
                           </div>
@@ -935,7 +923,7 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
                       </div>
                       <p className="col-span-2 text-xs text-muted-foreground truncate">{warehouse?.name || "—"}</p>
                       <p className={`col-span-1 text-sm font-semibold text-right ${inv.quantity <= 0 ? "text-red-400" : ""}`}>{inv.quantity.toLocaleString()}</p>
-                      <p className="col-span-1 text-xs text-muted-foreground text-right">{inv.reserved}</p>
+                      <p className="col-span-1 text-xs text-muted-foreground text-right">{inv.reserved ?? 0}</p>
                       <p className={`col-span-1 text-xs font-medium text-right ${available <= 0 ? "text-red-400" : ""}`}>{available}</p>
                       <p className="col-span-1 text-xs text-muted-foreground text-center">{inv.reorderAt ?? "—"}</p>
                       <div className="col-span-1 flex justify-center">
@@ -965,7 +953,7 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
                             <p className="text-muted-foreground mb-0.5">Last Movement</p>
                             <p className="font-medium">
                               {inv.lastMovement
-                                ? `${inv.lastMovement.type} (${inv.lastMovement.quantityChange > 0 ? "+" : ""}${inv.lastMovement.quantityChange}) · ${formatDate(inv.lastMovement.createdAt)}`
+                                ? `${inv.lastMovement.type} (${(inv.lastMovement.quantityChange ?? 0) > 0 ? "+" : ""}${inv.lastMovement.quantityChange}) · ${formatDate(inv.lastMovement.createdAt ?? "")}`
                                 : "No movements recorded"}
                             </p>
                           </div>
@@ -989,17 +977,16 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
 }
 
 interface MovementsTabProps {
-  movements: StockMovement[];
+  movements: InventoryMovementDto[];
   loading: boolean;
-  inventory: InventoryStock[];
-  warehouses: WarehouseDTO[];
-  productsById: Record<string, ProductDTO>;
-  warehousesById: Record<string, WarehouseDTO>;
-  basePath: string;
-  onAdjust: (inv: InventoryStock) => void;
+  inventory: InventoryStockDto[];
+  productsById: Record<string, ProductDto>;
+  warehousesById: Record<string, WarehouseDto>;
+  onAdjust: (inv: InventoryStockDto) => void;
   onShowTransfer: () => void;
 }
-function MovementsTab({ movements, loading, inventory, warehouses: _warehouses, productsById, warehousesById, basePath: _basePath, onAdjust, onShowTransfer }: MovementsTabProps) {
+
+function MovementsTab({ movements, loading, inventory, productsById, warehousesById, onAdjust, onShowTransfer }: MovementsTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -1031,14 +1018,15 @@ function MovementsTab({ movements, loading, inventory, warehouses: _warehouses, 
       ) : (
         <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
           <div className="divide-y divide-white/5">
-            {movements.map((m: StockMovement & { product?: ProductDTO | null; warehouse?: WarehouseDTO | null }) => {
+            {movements.map((m) => {
               const product = m.product || (m.productId ? productsById[m.productId] : null);
               const warehouse = m.warehouse || (m.warehouseId ? warehousesById[m.warehouseId] : null);
+              const qChange = m.quantityChange ?? 0;
               return (
                 <div key={m.id} className="px-4 py-3 flex items-center justify-between hover:bg-white/3 transition-colors">
                   <div className="flex items-start gap-3">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${m.quantityChange >= 0 ? "bg-emerald-500/10" : "bg-red-500/10"}`}>
-                      {m.quantityChange >= 0 ? (
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${qChange >= 0 ? "bg-emerald-500/10" : "bg-red-500/10"}`}>
+                      {qChange >= 0 ? (
                         <ArrowUp className="w-4 h-4 text-emerald-400" />
                       ) : (
                         <ArrowDown className="w-4 h-4 text-red-400" />
@@ -1055,10 +1043,10 @@ function MovementsTab({ movements, loading, inventory, warehouses: _warehouses, 
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className={`text-sm font-bold ${m.quantityChange >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {m.quantityChange >= 0 ? "+" : ""}{m.quantityChange}
+                    <p className={`text-sm font-bold ${qChange >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {qChange >= 0 ? "+" : ""}{qChange}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">{formatDate(m.createdAt)}</p>
+                    <p className="text-[10px] text-muted-foreground">{formatDate(m.createdAt ?? "")}</p>
                   </div>
                 </div>
               );
@@ -1071,14 +1059,15 @@ function MovementsTab({ movements, loading, inventory, warehouses: _warehouses, 
 }
 
 interface WarehousesTabProps {
-  warehouses: WarehouseDTO[];
-  inventory: InventoryStock[];
-  productsById: Record<string, ProductDTO>;
+  warehouses: WarehouseDto[];
+  inventory: InventoryStockDto[];
+  productsById: Record<string, ProductDto>;
   onCreateWarehouse: () => void;
-  onEditWarehouse: (wh: WarehouseDTO) => void;
+  onEditWarehouse: (wh: WarehouseDto) => void;
   onDeleteWarehouse: (id: string) => void;
   onShowTransfer: () => void;
 }
+
 function WarehousesTab({ warehouses, inventory, productsById, onCreateWarehouse, onEditWarehouse, onDeleteWarehouse, onShowTransfer }: WarehousesTabProps) {
   return (
     <div className="space-y-4">
@@ -1100,7 +1089,7 @@ function WarehousesTab({ warehouses, inventory, productsById, onCreateWarehouse,
         <div className="space-y-3">
           {warehouses.map((wh) => {
             const whInv = inventory.filter((inv) => inv.warehouseId === wh.id);
-            const totalUnits = whInv.reduce((sum, i) => sum + i.quantity, 0);
+            const totalUnits = whInv.reduce((s, i) => s + i.quantity, 0);
             const capacityPct = wh.capacity ? Math.min(Math.round((totalUnits / wh.capacity) * 100), 100) : null;
 
             return (
@@ -1152,7 +1141,7 @@ function WarehousesTab({ warehouses, inventory, productsById, onCreateWarehouse,
                               {product?.sku && <p className="text-[10px] text-muted-foreground">{product.sku}</p>}
                             </div>
                             <div className="flex items-center gap-3">
-                              {inv.reserved > 0 && <span className="text-[10px] text-muted-foreground">{inv.reserved} reserved</span>}
+                              {(inv.reserved ?? 0) > 0 && <span className="text-[10px] text-muted-foreground">{inv.reserved} reserved</span>}
                               <span className="text-sm font-semibold">{inv.quantity.toLocaleString()}</span>
                               <StockBadge quantity={inv.quantity} reorderLevel={inv.reorderAt} />
                             </div>
@@ -1184,13 +1173,13 @@ const PO_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 interface PurchaseOrdersTabProps {
-  purchaseOrders: PurchaseOrder[];
-  products: ProductDTO[];
+  purchaseOrders: PurchaseOrderDto[];
   onCreatePO: () => void;
-  onEditPO: (po: PurchaseOrder) => void;
+  onEditPO: (po: PurchaseOrderDto) => void;
   onAdvancePO: (poId: string, status: string) => void;
 }
-function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, onEditPO, onAdvancePO }: PurchaseOrdersTabProps) {
+
+function PurchaseOrdersTab({ purchaseOrders, onCreatePO, onEditPO, onAdvancePO }: PurchaseOrdersTabProps) {
   const NEXT_STATUS: Record<string, string> = {
     DRAFT: "SUBMITTED",
     SUBMITTED: "ACKNOWLEDGED",
@@ -1212,8 +1201,10 @@ function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, on
       ) : (
         <div className="space-y-3">
           {purchaseOrders.map((po) => {
-            const statusCfg = PO_STATUS_CONFIG[po.status] || { label: po.status, color: "bg-white/5 text-white/60 border-white/10" };
-            const nextStatus = NEXT_STATUS[po.status];
+            const statusKey = po.status ?? "DRAFT";
+            const statusCfg = PO_STATUS_CONFIG[statusKey] || { label: statusKey, color: "bg-white/5 text-white/60 border-white/10" };
+            const nextStatus = NEXT_STATUS[statusKey];
+            const items: PurchaseOrderItemDto[] = Array.isArray(po.items) ? po.items : [];
             return (
               <motion.div key={po.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="bg-white/5 border border-white/10 rounded-2xl p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -1224,19 +1215,19 @@ function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, on
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">Supplier: {po.supplierName || "—"}</p>
                     {po.expectedDelivery && <p className="text-[10px] text-muted-foreground">Expected: {formatDate(po.expectedDelivery)}</p>}
-                    {po.items && Array.isArray(po.items) && (
+                    {items.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1">
-                        {(po.items as PurchaseOrderItem[]).slice(0, 3).map((item, idx: number) => (
+                        {items.slice(0, 3).map((item, idx) => (
                           <span key={idx} className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-muted-foreground">
-                            {item.name || `Item ${idx + 1}`} × {item.quantity}
+                            {item.productName || `Item ${idx + 1}`} × {item.quantity}
                           </span>
                         ))}
-                        {(po.items as PurchaseOrderItem[]).length > 3 && <span className="text-[10px] text-muted-foreground">+{(po.items as PurchaseOrderItem[]).length - 3} more</span>}
+                        {items.length > 3 && <span className="text-[10px] text-muted-foreground">+{items.length - 3} more</span>}
                       </div>
                     )}
                   </div>
                   <div className="text-right flex flex-col items-end gap-2 shrink-0">
-                    <p className="text-sm font-bold">{formatCurrency(po.total ?? 0)}</p>
+                    <p className="text-sm font-bold">{formatCurrency(Number(po.total ?? 0))}</p>
                     <div className="flex gap-1">
                       <button onClick={() => onEditPO(po)} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors">
                         <Pencil className="w-3.5 h-3.5" />
@@ -1262,7 +1253,13 @@ function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, on
   );
 }
 
-function AlertsTab({ alertItems, loading, onCreatePO }: { alertItems: ExtendedAlert[]; loading: boolean; onCreatePO: () => void }) {
+interface AlertsTabProps {
+  alertItems: InventoryAlertDto[];
+  loading: boolean;
+  onCreatePO: () => void;
+}
+
+function AlertsTab({ alertItems, loading, onCreatePO }: AlertsTabProps) {
   if (loading && alertItems.length === 0) return (
     <div className="flex items-center justify-center py-12">
       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -1296,7 +1293,7 @@ function AlertsTab({ alertItems, loading, onCreatePO }: { alertItems: ExtendedAl
       </div>
 
       <div className="space-y-3">
-        {alertItems.map((alert, i: number) => {
+        {alertItems.map((alert, i) => {
           const isOut = alert.type === "OUT_OF_STOCK";
           return (
             <motion.div key={`${alert.productId}-${alert.warehouseId}-${i}`} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="bg-white/5 border border-white/10 rounded-2xl p-4">
@@ -1358,11 +1355,17 @@ function AlertsTab({ alertItems, loading, onCreatePO }: { alertItems: ExtendedAl
 }
 
 interface ValuationTabProps {
-  summary: InventorySummary | null;
-  inventory: InventoryStock[];
-  productsById: Record<string, ProductDTO>;
+  summary: InventorySummaryDto | null;
+  inventory: InventoryStockDto[];
+  productsById: Record<string, ProductDto>;
   loading: boolean;
 }
+
+interface ValuedItem extends InventoryStockDto {
+  cost: number;
+  totalValue: number;
+}
+
 function ValuationTab({ summary, inventory, productsById, loading }: ValuationTabProps) {
   if (loading && !summary) return (
     <div className="flex items-center justify-center py-12">
@@ -1372,13 +1375,13 @@ function ValuationTab({ summary, inventory, productsById, loading }: ValuationTa
 
   const totalValue = summary?.totalStockValue ?? inventory.reduce((sum, inv) => {
     const product = productsById[inv.productId] || inv.product;
-    const cost = inv.costPerUnit ?? product?.costProfile?.landedCostEstimate ?? 0;
+    const cost = Number(inv.costPerUnit ?? product?.costProfile?.landedCostEstimate ?? 0);
     return sum + (inv.quantity * cost);
   }, 0);
 
-  const valuedItems: ValuationItem[] = inventory.map((inv) => {
+  const valuedItems: ValuedItem[] = inventory.map((inv) => {
     const product = productsById[inv.productId] || inv.product;
-    const cost = inv.costPerUnit ?? product?.costProfile?.landedCostEstimate ?? 0;
+    const cost = Number(inv.costPerUnit ?? product?.costProfile?.landedCostEstimate ?? 0);
     return { ...inv, product, cost, totalValue: inv.quantity * cost };
   }).sort((a, b) => b.totalValue - a.totalValue);
 
@@ -1428,25 +1431,23 @@ function ValuationTab({ summary, inventory, productsById, loading }: ValuationTa
 }
 
 interface SpreadsheetsTabProps {
-  sheetStatus: (InventorySheetStatus & { connected?: boolean }) | null;
+  sheetStatus: InventorySheetStatusDto | null;
   sheetLoading: boolean;
   sheetAction: string | null;
-  pullPreview: InventorySheetPullPreview | null;
-  sheetDiff: (InventorySheetDiff & { unchanged?: number }) | null;
+  pullPreview: InventorySheetPullPreviewDto | null;
+  sheetDiff: InventorySheetDiffDto | null;
   conflictResolutions: Record<number, "system" | "sheet">;
-  setConflictResolutions: React.Dispatch<React.SetStateAction<Record<number, "system" | "sheet">>>;
-  importResult: InventoryImportResult | null;
+  setConflictResolutions: Dispatch<SetStateAction<Record<number, "system" | "sheet">>>;
+  importResult: InventoryImportResultDto | null;
   xlsxImporting: boolean;
-  xlsxWizard: XlsxWizardState | null;
-  setXlsxWizard: React.Dispatch<React.SetStateAction<XlsxWizardState | null>>;
+  xlsxWizard: XlsxImportWizardState | null;
+  setXlsxWizard: Dispatch<SetStateAction<XlsxImportWizardState | null>>;
   expectedColumns: string[];
   onApplyXlsxMapping: () => void;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
-  inventory: InventoryStock[];
-  businessId: string;
+  fileInputRef: RefObject<HTMLInputElement | null>;
   onPush: () => void;
   onPull: () => void;
-  onApply: (rows: Record<string, unknown>[]) => void;
+  onApply: (rows: Record<string, string>[]) => void;
   onGenerateDiff: () => void;
   onApplyResolved: () => void;
   onCreateSheet: () => void;
@@ -1457,7 +1458,8 @@ interface SpreadsheetsTabProps {
   onConnectDrive: () => void;
   onLinkSheet: (sheetId: string, sheetName: string) => void;
 }
-function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, sheetDiff, conflictResolutions, setConflictResolutions, importResult, xlsxImporting, xlsxWizard, setXlsxWizard, expectedColumns, onApplyXlsxMapping, fileInputRef, inventory: _inventory, businessId: _businessId, onPush, onPull, onApply, onGenerateDiff, onApplyResolved, onCreateSheet, onUnlink, onExportExcel, onDownloadTemplate, onXlsxImport, onConnectDrive, onLinkSheet }: SpreadsheetsTabProps) {
+
+function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, sheetDiff, conflictResolutions, setConflictResolutions, importResult, xlsxImporting, xlsxWizard, setXlsxWizard, expectedColumns, onApplyXlsxMapping, fileInputRef, onPush, onPull, onApply, onGenerateDiff, onApplyResolved, onCreateSheet, onUnlink, onExportExcel, onDownloadTemplate, onXlsxImport, onConnectDrive, onLinkSheet }: SpreadsheetsTabProps) {
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
 
@@ -1596,7 +1598,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
               <button
                 onClick={() => {
                   const all: Record<number, "system" | "sheet"> = {};
-                  (sheetDiff.conflicts || []).forEach((_: InventorySheetConflict, i: number) => { all[i] = "system"; });
+                  (sheetDiff.conflicts || []).forEach((_, i) => { all[i] = "system"; });
                   setConflictResolutions(all);
                 }}
                 className="text-[10px] px-2 py-1 rounded-lg bg-white/5 text-muted-foreground hover:text-white transition-colors"
@@ -1606,7 +1608,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
               <button
                 onClick={() => {
                   const all: Record<number, "system" | "sheet"> = {};
-                  (sheetDiff.conflicts || []).forEach((_: InventorySheetConflict, i: number) => { all[i] = "sheet"; });
+                  (sheetDiff.conflicts || []).forEach((_, i) => { all[i] = "sheet"; });
                   setConflictResolutions(all);
                 }}
                 className="text-[10px] px-2 py-1 rounded-lg bg-white/5 text-muted-foreground hover:text-white transition-colors"
@@ -1631,7 +1633,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
             </div>
           ) : (
             <div className="divide-y divide-white/5 max-h-80 overflow-y-auto">
-              {(sheetDiff.conflicts || []).map((conflict, i: number) => {
+              {(sheetDiff.conflicts || []).map((conflict: InventorySheetDiffConflict, i: number) => {
                 const resolution = conflictResolutions[i] ?? "sheet";
                 return (
                   <div key={i} className={`px-4 py-3 transition-colors ${resolution === "system" ? "bg-blue-500/5" : "bg-emerald-500/5"}`}>
@@ -1640,7 +1642,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-xs font-medium">{conflict.productName}</p>
                           {conflict.sku && <span className="text-[10px] text-muted-foreground">{conflict.sku}</span>}
-                          {(conflict as InventorySheetConflict & { isNew?: boolean }).isNew && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400">New Row</span>}
+                          {conflict.isNew && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400">New Row</span>}
                         </div>
                         <p className="text-[11px] text-muted-foreground">{conflict.warehouseName}</p>
                         <div className="flex items-center gap-3 mt-1 text-[11px]">
@@ -1705,10 +1707,10 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {(pullPreview.rows || []).slice(0, 15).map((row: Record<string, unknown>, i: number) => (
+                {(pullPreview.rows || []).slice(0, 15).map((row, i) => (
                   <tr key={i} className="hover:bg-white/3">
                     {(pullPreview.headers || []).map((h: string, j: number) => (
-                      <td key={j} className="px-3 py-2 text-muted-foreground whitespace-nowrap">{String(row[h] ?? "—")}</td>
+                      <td key={j} className="px-3 py-2 text-muted-foreground whitespace-nowrap">{row[h] || "—"}</td>
                     ))}
                   </tr>
                 ))}
@@ -1795,10 +1797,10 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {xlsxWizard.previewRows.map((row, i: number) => (
+                    {xlsxWizard.previewRows.map((row: string[], i: number) => (
                       <tr key={i}>
                         {xlsxWizard.headers.map((_: string, j: number) => (
-                          <td key={j} className="px-2 py-1 text-muted-foreground whitespace-nowrap">{String(row[j] ?? "—")}</td>
+                          <td key={j} className="px-2 py-1 text-muted-foreground whitespace-nowrap">{row[j] ?? "—"}</td>
                         ))}
                       </tr>
                     ))}
@@ -1823,9 +1825,9 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
         {importResult && (
           <div className={`mt-3 p-3 rounded-xl border text-xs ${(importResult.imported ?? 0) > 0 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-red-500/10 border-red-500/20 text-red-400"}`}>
             <p className="font-medium">Import complete: {importResult.imported} imported, {importResult.skipped} skipped</p>
-            {(importResult.errors?.length ?? 0) > 0 && (
+            {importResult.errors && importResult.errors.length > 0 && (
               <ul className="mt-1 space-y-0.5">
-                {(importResult.errors ?? []).slice(0, 5).map((err: string, i: number) => <li key={i} className="text-muted-foreground">• {err}</li>)}
+                {importResult.errors.slice(0, 5).map((err: string, i: number) => <li key={i} className="text-muted-foreground">• {err}</li>)}
               </ul>
             )}
           </div>
@@ -1841,18 +1843,19 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
 }
 
 interface AdjustModalProps {
-  target: InventoryStock | null;
-  data: { quantityChange: number; reasonCode: string; note: string };
-  setData: React.Dispatch<React.SetStateAction<{ quantityChange: number; reasonCode: string; note: string }>>;
+  target: InventoryStockDto | null;
+  data: AdjustFormState;
+  setData: Dispatch<SetStateAction<AdjustFormState>>;
   saving: boolean;
-  productsById: Record<string, ProductDTO>;
-  warehousesById: Record<string, WarehouseDTO>;
+  productsById: Record<string, ProductDto>;
+  warehousesById: Record<string, WarehouseDto>;
   onSave: () => void;
   onClose: () => void;
 }
+
 function AdjustModal({ target, data, setData, saving, productsById, warehousesById, onSave, onClose }: AdjustModalProps) {
   const product = target ? (productsById[target.productId] || target.product) : null;
-  const warehouse = target ? (warehousesById[target.warehouseId] || target.warehouse) : null;
+  const warehouse = target ? ((target.warehouseId ? warehousesById[target.warehouseId] : undefined) || target.warehouse) : null;
 
   const REASON_CODES = [
     { value: "COUNT_CORRECTION", label: "Physical Count Correction" },
@@ -1943,17 +1946,18 @@ function AdjustModal({ target, data, setData, saving, productsById, warehousesBy
 }
 
 interface TransferModalProps {
-  data: { productId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; note: string };
-  setData: React.Dispatch<React.SetStateAction<{ productId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; note: string }>>;
+  data: TransferFormState;
+  setData: Dispatch<SetStateAction<TransferFormState>>;
   saving: boolean;
-  inventory: InventoryStock[];
-  warehouses: WarehouseDTO[];
-  productsById: Record<string, ProductDTO>;
+  inventory: InventoryStockDto[];
+  warehouses: WarehouseDto[];
+  productsById: Record<string, ProductDto>;
   onSave: () => void;
   onClose: () => void;
 }
+
 function TransferModal({ data, setData, saving, inventory, warehouses, productsById, onSave, onClose }: TransferModalProps) {
-  const products = [...new Map(inventory.map((inv) => [inv.productId, productsById[inv.productId] || inv.product])).values()].filter((p): p is ProductDTO => Boolean(p));
+  const products = [...new Map(inventory.map((inv) => [inv.productId, productsById[inv.productId] || inv.product])).values()].filter((p): p is ProductDto => Boolean(p));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

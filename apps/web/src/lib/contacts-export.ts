@@ -1,20 +1,5 @@
 import type { LocalContact } from "./contacts-db";
 
-type AutoTableOptions = {
-  head?: (string | number)[][];
-  body?: (string | number)[][];
-  startY?: number;
-  styles?: Record<string, unknown>;
-  headStyles?: Record<string, unknown>;
-  alternateRowStyles?: Record<string, unknown>;
-  margin?: { left?: number; right?: number; top?: number; bottom?: number };
-};
-
-type AutoTableJsPDF = {
-  autoTable: (options: AutoTableOptions) => void;
-  lastAutoTable?: { finalY?: number };
-};
-
 const EXPORT_COLUMNS = [
   { key: "firstName", label: "First Name" },
   { key: "lastName", label: "Last Name" },
@@ -50,12 +35,13 @@ const EXPORT_COLUMNS = [
 
 function contactToRow(c: LocalContact): Record<string, string> {
   const row: Record<string, string> = {};
+  const record = c as unknown as Record<string, unknown>;
   for (const col of EXPORT_COLUMNS) {
-    const val: unknown = c[col.key as keyof LocalContact];
+    const val = record[col.key];
     if (col.key === "tags") {
       row[col.label] = Array.isArray(val) ? val.join(", ") : "";
     } else if (col.key === "createdAt" && val) {
-      row[col.label] = new Date(val as string).toLocaleDateString("en-TT", {
+      row[col.label] = new Date(val as string | number | Date).toLocaleDateString("en-TT", {
         year: "numeric", month: "short", day: "numeric",
       });
     } else if (col.key === "marketingOptIn" || col.key === "doNotContact") {
@@ -156,10 +142,10 @@ export async function exportToVCard(contacts: LocalContact[], filename = "contac
 }
 
 export async function exportToPDF(contacts: LocalContact[], filename = "contacts.pdf") {
-  const { default: jsPDF } = await import("jspdf");
+  const { default: JsPDFCtor } = await import("jspdf");
   await import("jspdf-autotable");
 
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const doc = new JsPDFCtor({ orientation: "landscape", unit: "mm", format: "a4" });
 
   doc.setFontSize(16);
   doc.setTextColor(40);
@@ -185,7 +171,11 @@ export async function exportToPDF(contacts: LocalContact[], filename = "contacts
     Array.isArray(c.tags) ? c.tags.join(", ") : "—",
   ]);
 
-  (doc as unknown as AutoTableJsPDF).autoTable({
+  type AutoTableDoc = InstanceType<typeof JsPDFCtor> & {
+    autoTable: (opts: Record<string, unknown>) => void;
+    lastAutoTable?: { finalY?: number };
+  };
+  (doc as AutoTableDoc).autoTable({
     head: [columns],
     body: rows,
     startY: 28,
@@ -281,10 +271,10 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
     return;
   }
 
-  const { default: jsPDF } = await import("jspdf");
+  const { default: JsPDFCtor } = await import("jspdf");
   await import("jspdf-autotable");
 
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const doc = new JsPDFCtor({ orientation: "portrait", unit: "mm", format: "a4" });
 
   doc.setFontSize(18);
   doc.setTextColor(40);
@@ -308,7 +298,11 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
     ["New This Week", metrics.newThisWeek.toString()],
   ];
 
-  (doc as unknown as AutoTableJsPDF).autoTable({
+  type AutoTableDoc = InstanceType<typeof JsPDFCtor> & {
+    autoTable: (opts: Record<string, unknown>) => void;
+    lastAutoTable?: { finalY?: number };
+  };
+  (doc as AutoTableDoc).autoTable({
     head: [["Metric", "Value"]],
     body: summaryData,
     startY: 34,
@@ -324,7 +318,7 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
     .slice(0, 10);
 
   if (topRevenue.length > 0) {
-    const finalY = (doc as unknown as AutoTableJsPDF).lastAutoTable?.finalY ?? 80;
+    const finalY = (doc as AutoTableDoc).lastAutoTable?.finalY ?? 80;
     doc.setFontSize(12);
     doc.setTextColor(40);
     doc.text("Top Revenue Clients", 14, finalY + 10);
@@ -335,7 +329,7 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
       formatTTDExport(c.meta?.totalRevenue ?? 0),
     ]);
 
-    (doc as unknown as AutoTableJsPDF).autoTable({
+    (doc as AutoTableDoc).autoTable({
       head: [["#", "Client", "Revenue"]],
       body: revenueRows,
       startY: finalY + 14,

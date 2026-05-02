@@ -3982,31 +3982,6 @@ export async function fetchCashFlowForecast(businessId: string, days = 30): Prom
 // ---
 // FLOW AI BOT
 // ---
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string;
-  name?: string;
-  toolCallId?: string;
-}
-
-export interface FlowSessionSummary {
-  id: string;
-  businessId: string;
-  title?: string | null;
-  lastMessageAt?: string | null;
-  messageCount?: number;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface BusinessSummary {
-  id: string;
-  name: string;
-  logoUrl?: string;
-  headline?: string;
-  industry?: string;
-}
-
 export interface FlowToolCall {
   id: string;
   name: string;
@@ -4051,7 +4026,7 @@ export interface FlowChatResponse {
 export async function sendFlowChat(
   businessId: string,
   message: string,
-  history?: ChatMessage[],
+  history?: unknown[],
   pendingConfirmation?: {
     toolCallId: string;
     confirmed: boolean;
@@ -4079,8 +4054,8 @@ export async function confirmFlowAction(
   });
 }
 
-export async function fetchFlowSessions(businessId: string): Promise<ApiResult<FlowSessionSummary[]>> {
-  return apiGetSimple<FlowSessionSummary[]>(`/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions`);
+export async function fetchFlowSessions(businessId: string): Promise<ApiResult<unknown[]>> {
+  return apiGetSimple<unknown[]>(`/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions`);
 }
 
 export async function clearFlowSession(businessId: string, sessionId: string): Promise<ApiResult<{ success: boolean }>> {
@@ -6126,8 +6101,8 @@ export async function sendBusinessMessage(
 export async function fetchMessageThreads(businessId: string): Promise<ApiResult<MessageThread[]>> {
   return apiGetSimple<MessageThread[]>(`/businesses/${encodeURIComponent(businessId)}/community/messages/threads`);
 }
-export async function fetchMessageThread(businessId: string, otherBusinessId: string): Promise<ApiResult<{ messages: BusinessMessageItem[]; otherBusiness: BusinessSummary }>> {
-  return apiGetSimple<{ messages: BusinessMessageItem[]; otherBusiness: BusinessSummary }>(`/businesses/${encodeURIComponent(businessId)}/community/messages/thread/${encodeURIComponent(otherBusinessId)}`);
+export async function fetchMessageThread(businessId: string, otherBusinessId: string): Promise<ApiResult<{ messages: BusinessMessageItem[]; otherBusiness: unknown }>> {
+  return apiGetSimple<{ messages: BusinessMessageItem[]; otherBusiness: unknown }>(`/businesses/${encodeURIComponent(businessId)}/community/messages/thread/${encodeURIComponent(otherBusinessId)}`);
 }
 export async function saveBusinessToShortlist(businessId: string, savedBusinessId: string, note?: string): Promise<ApiResult<SavedBusinessItem>> {
   return apiPost<SavedBusinessItem>({ path: `/businesses/${encodeURIComponent(businessId)}/community/saved`, body: { savedBusinessId, note } });
@@ -7384,7 +7359,7 @@ export async function updateCrossModuleWorkflow(input: {
   workflowKey: string;
   enabled?: boolean;
   config?: Record<string, unknown>;
-}): Promise<ApiResult<Record<string, unknown>>> {
+}): Promise<ApiResult<unknown>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   try {
     const res = await fetch(`${API_BASE}/flow/businesses/${encodeURIComponent(businessId)}/cross-module-workflows/${encodeURIComponent(input.workflowKey)}`, {
@@ -8255,8 +8230,8 @@ export async function fetchQualificationAnalytics(businessId: string): Promise<A
   return apiGetSimple<QualificationJourneyAnalytics>(`/site/businesses/${encodeURIComponent(businessId)}/qualification-analytics`);
 }
 
-export async function quoteFromConversation(businessId: string, conversationText: string): Promise<ApiResult<Record<string, unknown>>> {
-  return apiPost<Record<string, unknown>>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/ai-quote-from-conversation`, body: { conversationText } });
+export async function quoteFromConversation(businessId: string, conversationText: string): Promise<ApiResult<unknown>> {
+  return apiPost<unknown>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/ai-quote-from-conversation`, body: { conversationText } });
 }
 
 export { DEFAULT_BUSINESS_ID };
@@ -8624,7 +8599,7 @@ export async function listMyResources(businessId: string) {
   return apiGetSimple<ResourceListing[]>(`/businesses/${encodeURIComponent(businessId)}/community/resources/mine`);
 }
 export async function recordResourceDownload(businessId: string, id: string, source?: string) {
-  return apiPost<{ download: { id?: string; createdAt?: string; downloadUrl?: string }; downloadUrl: string; licenseTerms?: string | null }>({
+  return apiPost<{ download: unknown; downloadUrl: string; licenseTerms?: string | null }>({
     path: `/businesses/${encodeURIComponent(businessId)}/community/resources/${encodeURIComponent(id)}/download`,
     body: { source },
   });

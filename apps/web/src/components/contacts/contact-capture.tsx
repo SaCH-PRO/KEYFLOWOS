@@ -65,10 +65,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onDevi
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setDeviceSupported(
-      "contacts" in navigator
-      && typeof (navigator as Navigator & { contacts?: { select?: unknown } }).contacts?.select === "function",
-    );
+    setDeviceSupported("contacts" in navigator && typeof (navigator as Navigator & { contacts?: { select?: unknown } }).contacts?.select === "function");
   }, []);
 
   const handleGoogleConnect = async () => {

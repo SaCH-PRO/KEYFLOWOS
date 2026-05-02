@@ -225,11 +225,8 @@ function ContentIntelligenceStrip({
     const scheduledCampaigns = campaigns.filter((c) => c.status === "SCHEDULED" && c.scheduledAt);
     const scheduledPosts = socialPosts.filter((p) => p.status === "SCHEDULED" && p.scheduledFor);
     const upcomingCount = [...scheduledCampaigns, ...scheduledPosts].filter((item) => {
-      const candidate =
-        (item as { scheduledAt?: string | null }).scheduledAt ??
-        (item as { scheduledFor?: string | null }).scheduledFor ??
-        "";
-      const d = new Date(candidate);
+      const it = item as { scheduledAt?: string | null; scheduledFor?: string | null };
+      const d = new Date(it.scheduledAt || it.scheduledFor || "");
       return d >= now && d <= fiveDaysFromNow;
     }).length;
 

@@ -3,15 +3,10 @@
 import { motion } from "framer-motion";
 import { ShoppingCart, Mail, Phone, Calendar, Navigation } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { MarketplaceOrder } from "@/lib/marketplace-types";
 
-export function OrdersTab({
-  orders,
-  onStatusUpdate,
-}: {
-  orders: MarketplaceOrder[];
-  onStatusUpdate: (id: string, status: string) => void;
-}) {
+import type { OrderDto } from "@/lib/types/marketplace";
+
+export function OrdersTab({ orders, onStatusUpdate }: { orders: OrderDto[]; onStatusUpdate: (id: string, status: string) => void }) {
   const statuses = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"];
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(orders);
 
@@ -44,13 +39,12 @@ export function OrdersTab({
               </div>
               {order.shippingAddress && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Navigation className="w-3 h-3" />
-                  {typeof order.shippingAddress === "string" ? order.shippingAddress : JSON.stringify(order.shippingAddress)}
+                  <Navigation className="w-3 h-3" />{order.shippingAddress}
                 </p>
               )}
             </div>
             <div className="flex flex-col items-end gap-2 flex-shrink-0">
-              <p className="text-lg font-bold">{formatCurrency(order.total ?? 0)}</p>
+              <p className="text-lg font-bold">{formatCurrency(Number(order.total ?? 0))}</p>
               <select
                 value={order.status || "PENDING"}
                 onChange={(e) => onStatusUpdate(order.id, e.target.value)}

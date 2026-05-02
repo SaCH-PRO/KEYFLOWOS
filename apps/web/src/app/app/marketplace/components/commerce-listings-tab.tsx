@@ -20,9 +20,7 @@ import {
   Hand,
 } from "lucide-react";
 import { EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { MarketplaceListing, Product as ProductDTO } from "@/lib/marketplace-types";
-
-type ListingExt = MarketplaceListing & { active?: boolean; title?: string; price?: string | number | null; compareAtPrice?: string | number | null; imageUrl?: string | null; fulfillmentStrategy?: string | null; status?: string };
+import type { ListingDto, ProductDto } from "@/lib/types/marketplace";
 
 const FULFILLMENT_STRATEGIES = [
   { key: "local_stock", label: "Local Stock", icon: ShoppingBag, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
@@ -65,9 +63,9 @@ export function CommerceListingsTab({
   onUpdateListing,
   onCreateListing,
 }: {
-  listings: ListingExt[];
-  products: ProductDTO[];
-  onEdit: (item: ListingExt) => void;
+  listings: ListingDto[];
+  products: ProductDto[];
+  onEdit: (item: ListingDto) => void;
   onDelete: (id: string) => void;
   onUpdateListing: (id: string, data: Record<string, unknown>) => void;
   onCreateListing: () => void;
@@ -76,7 +74,7 @@ export function CommerceListingsTab({
   const [filterStrategy, setFilterStrategy] = useState("all");
 
   const productsById = useMemo(() => {
-    const map: Record<string, ProductDTO> = {};
+    const map: Record<string, ProductDto> = {};
     for (const p of products) map[p.id] = p;
     return map;
   }, [products]);
@@ -86,15 +84,15 @@ export function CommerceListingsTab({
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((l) => {
-        const product = productsById[l.productId];
+        const product = l.productId ? productsById[l.productId] : undefined;
         return (
           product?.name?.toLowerCase().includes(q) ||
-          l.title?.toLowerCase().includes(q)
+          (l as { title?: string }).title?.toLowerCase().includes(q)
         );
       });
     }
     if (filterStrategy !== "all") {
-      result = result.filter((l) => l.fulfillmentStrategy === filterStrategy);
+      result = result.filter((l) => (l as { fulfillmentStrategy?: string }).fulfillmentStrategy === filterStrategy);
     }
     return result;
   }, [listings, search, filterStrategy, productsById]);
@@ -158,18 +156,28 @@ export function CommerceListingsTab({
 
       <div className="space-y-2">
         {paginated.map((listing) => {
-          const product = productsById[listing.productId];
-          const isActive = listing.status === "ACTIVE" || listing.active === true;
-          const hasFulfillment = !!listing.fulfillmentStrategy;
-          const hasMargin = !!listing.price || !!product?.price;
-          const hasMedia = !!product?.imageUrl || !!listing.imageUrl;
+          const l = listing as ListingDto & {
+            title?: string;
+            status?: string;
+            active?: boolean;
+            fulfillmentStrategy?: string;
+            price?: number | string;
+            compareAtPrice?: number | string;
+            marketReach?: string;
+            imageUrl?: string;
+          };
+          const product = l.productId ? productsById[l.productId] : undefined;
+          const isActive = l.status === "ACTIVE" || l.active === true;
+          const hasFulfillment = !!l.fulfillmentStrategy;
+          const hasMargin = !!l.price || !!product?.price;
+          const hasMedia = !!product?.imageUrl || !!l.imageUrl;
           const hasSource = !!product?.sourceUrl || !!product?.supplierName;
 
           const readinessCount = [hasFulfillment, hasMargin, hasMedia, hasSource].filter(Boolean).length;
 
           return (
             <motion.div
-              key={listing.id}
+              key={l.id}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               className={`bg-white/5 border rounded-2xl p-4 transition-colors ${
@@ -184,24 +192,24 @@ export function CommerceListingsTab({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold truncate">
-                        {listing.title || product?.name || "Listing"}
+                        {l.title || product?.name || "Listing"}
                       </p>
-                      {listing.marketReach && (
+                      {l.marketReach && (
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-muted-foreground">
-                          {listing.marketReach}
+                          {l.marketReach}
                         </span>
                       )}
                     </div>
 
                     <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      {hasFulfillment && listing.fulfillmentStrategy && <FulfillmentBadge strategy={listing.fulfillmentStrategy} />}
-                      {listing.price && (
+                      {hasFulfillment && l.fulfillmentStrategy && <FulfillmentBadge strategy={l.fulfillmentStrategy} />}
+                      {l.price && (
                         <span className="flex items-center gap-1 text-[11px] text-emerald-400">
                           <TrendingUp className="w-3 h-3" />
-                          ${parseFloat(String(listing.price)).toFixed(2)}
-                          {listing.compareAtPrice && (
+                          ${parseFloat(String(l.price)).toFixed(2)}
+                          {l.compareAtPrice && (
                             <span className="line-through text-muted-foreground/50 ml-1">
-                              ${parseFloat(String(listing.compareAtPrice)).toFixed(2)}
+                              ${parseFloat(String(l.compareAtPrice)).toFixed(2)}
                             </span>
                           )}
                         </span>
@@ -220,7 +228,7 @@ export function CommerceListingsTab({
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
-                    onClick={() => onUpdateListing(listing.id, { status: isActive ? "INACTIVE" : "ACTIVE" })}
+                    onClick={() => onUpdateListing(l.id, { status: isActive ? "INACTIVE" : "ACTIVE" })}
                     className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
                       isActive
                         ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20"
@@ -232,13 +240,13 @@ export function CommerceListingsTab({
                     {isActive ? "Live" : "Hidden"}
                   </button>
                   <button
-                    onClick={() => onEdit(listing)}
+                    onClick={() => onEdit(l)}
                     className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={() => onDelete(listing.id)}
+                    onClick={() => onDelete(l.id)}
                     className="p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />

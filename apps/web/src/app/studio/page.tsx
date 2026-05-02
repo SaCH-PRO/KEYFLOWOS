@@ -163,10 +163,7 @@ export default function StudioPage() {
           hasServices: (svcRes.data?.length ?? 0) > 0,
           hasContacts: (contactRes.data?.contacts?.length ?? 0) > 0,
           hasProducts: (prodRes.data?.length ?? 0) > 0,
-          hasHours: !!(() => {
-            const hours = (biz as { businessHours?: Record<string, { enabled?: boolean }> } | null | undefined)?.businessHours;
-            return hours && Object.values(hours).some((h) => h?.enabled);
-          })(),
+          hasHours: !!((biz as { businessHours?: Record<string, { enabled?: boolean }> })?.businessHours && Object.values((biz as { businessHours: Record<string, { enabled?: boolean }> }).businessHours).some((h) => h?.enabled)),
           hasComplianceChecked: !!biz?.complianceStatus,
         });
       } catch {

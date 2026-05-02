@@ -137,19 +137,21 @@ export function useStoreData() {
         fetchStoreGraph(businessId).catch(() => ({ data: null, error: null })),
       ]);
       const loadedServices = servicesRes.data ?? [];
-      const loadedProducts: Product[] = (productsRes?.data ?? []) as Product[];
+      const productsResExt = productsRes as { data?: Product[] | null; error?: string | null };
+      const loadedProducts = productsResExt?.data ?? [];
       setServices(loadedServices);
       setStaff(staffRes.data ?? []);
       setCommerceProducts(loadedProducts);
-      if (loadedProducts.length > 0 || !productsRes?.error) {
+      if (loadedProducts.length > 0 || !productsResExt?.error) {
         markProductsFetched();
       }
       if (bizRes.data) {
+        const biz = bizRes.data as typeof bizRes.data & { storeEnabled?: boolean; businessHours?: Partial<BusinessHoursMap> };
         setBusinessData(bizRes.data);
         setStoreSlug(bizRes.data.slug ?? "");
-        setStoreEnabled((bizRes.data as { storeEnabled?: boolean }).storeEnabled ?? true);
-        if ((bizRes.data as { businessHours?: BusinessHoursMap }).businessHours) {
-          setBusinessHours({ ...DEFAULT_HOURS, ...(bizRes.data as { businessHours?: BusinessHoursMap }).businessHours });
+        setStoreEnabled(biz.storeEnabled ?? true);
+        if (biz.businessHours) {
+          setBusinessHours({ ...DEFAULT_HOURS, ...biz.businessHours });
         }
       }
 
@@ -385,14 +387,15 @@ export function useStoreData() {
 
   const ARRAY_CONFIG_KEYS = new Set(['sections', 'faqEntries']);
 
-  function handleConfigChange(section: string, updates: Record<string, unknown> | unknown[]) {
+  function handleConfigChange(section: string, updates: Record<string, unknown>) {
     setStorefrontConfig((prev) => {
       if (ARRAY_CONFIG_KEYS.has(section)) {
         return { ...prev, [section]: updates };
       }
+      const prevSection = (prev as unknown as Record<string, Record<string, unknown> | undefined>)[section] ?? {};
       return {
         ...prev,
-        [section]: { ...((prev as unknown as Record<string, Record<string, unknown>>)[section]), ...(updates as Record<string, unknown>) },
+        [section]: { ...prevSection, ...updates },
       };
     });
   }

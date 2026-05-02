@@ -17,7 +17,7 @@ import {
   Circle,
 } from "lucide-react";
 import { EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { Product as ProductDTO, ProductVariant, MarketplaceListing } from "@/lib/marketplace-types";
+import type { ProductDto, ProductVariantDto, ListingDto } from "@/lib/types/marketplace";
 
 function ReadinessDot({ ok, label }: { ok: boolean; label: string }) {
   return (
@@ -32,7 +32,7 @@ function ReadinessDot({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-function VariantPill({ variant }: { variant: ProductVariant }) {
+function VariantPill({ variant }: { variant: ProductVariantDto }) {
   return (
     <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10">
       {variant.name || variant.sku || "Variant"}
@@ -47,17 +47,17 @@ export function CommerceCatalogTab({
   onCreateProduct,
   onEditProduct,
 }: {
-  products: ProductDTO[];
-  listings: MarketplaceListing[];
+  products: ProductDto[];
+  listings: ListingDto[];
   onCreateProduct: () => void;
-  onEditProduct: (product: ProductDTO) => void;
+  onEditProduct: (product: ProductDto) => void;
 }) {
   const [search, setSearch] = useState("");
   const [filterModel, setFilterModel] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const listingsByProduct = useMemo(() => {
-    const map: Record<string, MarketplaceListing[]> = {};
+    const map: Record<string, ListingDto[]> = {};
     for (const l of listings) {
       if (l.productId) {
         if (!map[l.productId]) map[l.productId] = [];
@@ -147,7 +147,7 @@ export function CommerceCatalogTab({
       <div className="space-y-2">
         {paginated.map((product) => {
           const productListings = listingsByProduct[product.id] || [];
-          const variants = product.variants ?? [];
+          const variants: ProductVariantDto[] = product.variants ?? [];
           const hasVariants = variants.length > 0;
           const hasSource = !!product.sourceUrl || !!product.supplierName;
           const hasCost = !!product.costPrice || !!product.price;
@@ -179,11 +179,11 @@ export function CommerceCatalogTab({
                             {product.sku}
                           </span>
                         )}
-                        {product.fulfillmentModel && (
+                        {product.fulfillmentModel ? (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                            {product.fulfillmentModel}
+                            {String(product.fulfillmentModel)}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                       {product.description && (
                         <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">{product.description}</p>
@@ -228,7 +228,7 @@ export function CommerceCatalogTab({
                         <Layers className="w-3 h-3" /> Variants
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {variants.map((v: ProductVariant, i: number) => (
+                        {variants.map((v, i) => (
                           <VariantPill key={i} variant={v} />
                         ))}
                       </div>
@@ -240,12 +240,12 @@ export function CommerceCatalogTab({
                         <Link2 className="w-3 h-3" /> Source
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {product.supplierName && <span>{product.supplierName} — </span>}
-                        {product.sourceUrl && (
-                          <a href={product.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline truncate">
-                            {product.sourceUrl}
+                        {product.supplierName ? <span>{String(product.supplierName)} — </span> : null}
+                        {product.sourceUrl ? (
+                          <a href={String(product.sourceUrl)} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline truncate">
+                            {String(product.sourceUrl)}
                           </a>
-                        )}
+                        ) : null}
                       </p>
                     </div>
                   )}
@@ -259,7 +259,7 @@ export function CommerceCatalogTab({
                         <div key={item.label} className="bg-white/3 rounded-xl p-2.5 text-center" style={{ background: "rgba(255,255,255,0.03)" }}>
                           <p className="text-[10px] text-muted-foreground">{item.label}</p>
                           <p className="text-sm font-semibold mt-0.5">
-                            {item.value != null && item.value !== "" ? (item.label === "Margin" ? item.value : `$${parseFloat(String(item.value)).toFixed(2)}`) : "—"}
+                            {item.value != null && item.value !== "" ? (item.label === "Margin" ? String(item.value) : `$${parseFloat(String(item.value)).toFixed(2)}`) : "—"}
                           </p>
                         </div>
                       ))}
@@ -273,7 +273,7 @@ export function CommerceCatalogTab({
                       <div className="flex flex-wrap gap-1.5">
                         {productListings.map((l) => (
                           <span key={l.id} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            {l.marketReach || "LOCAL"}
+                            {(l as { marketReach?: string }).marketReach || "LOCAL"}
                           </span>
                         ))}
                       </div>

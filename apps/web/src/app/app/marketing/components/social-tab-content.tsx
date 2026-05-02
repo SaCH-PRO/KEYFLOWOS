@@ -138,10 +138,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
           moduleEvents.emit("marketing:social_post_published", "marketing", { postId: post.id });
           toast.success("Post published");
         }
-        const wrapper = pubData as { post?: SocialPost } | SocialPost | null | undefined;
-        const published: SocialPost = pubData
-          ? ((wrapper as { post?: SocialPost })?.post ?? (pubData as SocialPost))
-          : post;
+        const published = pubData ? ((pubData as { post?: typeof post }).post || pubData) : post;
         setPosts((prev) => [published, ...prev]);
       } else {
         moduleEvents.emit("marketing:social_post_created", "marketing", { postId: post.id });
@@ -185,10 +182,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
           moduleEvents.emit("marketing:social_post_published", "marketing", { postId: updated.id });
           toast.success("Post published");
         }
-        const wrapper = pubData as { post?: SocialPost } | SocialPost | null | undefined;
-        const published: SocialPost = pubData
-          ? ((wrapper as { post?: SocialPost })?.post ?? (pubData as SocialPost))
-          : updated;
+        const published = pubData ? ((pubData as { post?: typeof updated }).post || pubData) : updated;
         setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? published : p)));
       } else {
         setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? updated : p)));
@@ -206,8 +200,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
     const { data, error } = await publishPost(postId, channelIds, businessId ?? undefined);
     if (error) toast.error(error);
     if (data) {
-      const wrapper = data as { post?: SocialPost } | SocialPost;
-      const updated: SocialPost = (wrapper as { post?: SocialPost }).post ?? (data as SocialPost);
+      const updated = (data as { post?: typeof data }).post || data;
       setPosts((prev) => prev.map((p) => (p.id === postId ? updated : p)));
       moduleEvents.emit("marketing:social_post_published", "marketing", { postId });
       toast.success("Post published");

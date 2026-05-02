@@ -68,35 +68,6 @@ const MARKETING_CHANNELS = [
   "SMS Marketing",
 ];
 
-type StrategyAction = { title?: string; description?: string; timeline?: string };
-type ChannelStrategy = { channel?: string; priority?: string; recommendations?: string[] };
-type BudgetAllocation = { category?: string; percentage?: number; justification?: string; amount?: string | number };
-type KpiTarget = { metric?: string; target30Days?: string | number; target90Days?: string | number; target12Months?: string | number };
-type FinancialPeriod = { investment?: string | number; expectedRevenue?: string | number; netImpact?: string | number };
-type CompetitiveAdvantage = { advantage?: string; howToLeverage?: string };
-type RiskItem = { risk?: string; likelihood?: string; mitigation?: string };
-interface MarketingStrategyResult {
-  executiveSummary?: string;
-  shortTermPlan?: { actions?: StrategyAction[] };
-  longTermPlan?: { actions?: StrategyAction[] };
-  channelStrategy?: ChannelStrategy[];
-  budgetModel?: { totalRecommendedBudget?: string | number; allocation?: BudgetAllocation[]; expectedROI?: string | number };
-  kpiTargets?: KpiTarget[];
-  financialProjections?: Record<string, FinancialPeriod>;
-  competitiveAdvantages?: CompetitiveAdvantage[];
-  risks?: RiskItem[];
-}
-interface BusinessSnapshot {
-  industry?: string;
-  archetype?: string;
-  totalRevenue?: number;
-  currency?: string;
-  totalContacts?: number;
-  totalProducts?: number;
-  totalBookings?: number;
-  totalCampaigns?: number;
-}
-
 interface StrategyMetrics {
   industry: string;
   monthlyRevenue: string;
@@ -146,6 +117,16 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
   const [copied, setCopied] = useState(false);
   const resultRef = useRef<HTMLDivElement>(null);
 
+  interface BusinessSnapshot {
+    industry?: string;
+    archetype?: string;
+    currency?: string;
+    totalRevenue?: number;
+    totalContacts?: number;
+    totalProducts?: number;
+    totalBookings?: number;
+    totalCampaigns?: number;
+  }
   const [snapshot, setSnapshot] = useState<BusinessSnapshot | null>(null);
   const snapshotLoaded = useRef(false);
 
@@ -197,34 +178,52 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
         toast.error(res.error);
         return;
       }
-      const data = res.data as MarketingStrategyResult;
+      interface PlanAction { title?: string; description?: string; timeline?: string }
+      interface ChannelStrategy { channel?: string; priority?: string; recommendations?: string[] }
+      interface BudgetAllocation { category?: string; percentage?: number; justification?: string; amount?: string }
+      interface KpiTarget { metric?: string; target30Days?: string; target90Days?: string; target12Months?: string }
+      interface FinancialProjection { investment?: string; expectedRevenue?: string; netImpact?: string }
+      interface CompetitiveAdvantage { advantage?: string; howToLeverage?: string }
+      interface RiskItem { risk?: string; likelihood?: string; mitigation?: string }
+      interface StrategyData {
+        executiveSummary?: string;
+        shortTermPlan?: { actions?: PlanAction[] };
+        longTermPlan?: { actions?: PlanAction[] };
+        channelStrategy?: ChannelStrategy[];
+        budgetModel?: { totalRecommendedBudget?: string; allocation?: BudgetAllocation[]; expectedROI?: string };
+        kpiTargets?: KpiTarget[];
+        financialProjections?: Record<string, FinancialProjection>;
+        competitiveAdvantages?: CompetitiveAdvantage[];
+        risks?: RiskItem[];
+      }
+      const data = res.data as StrategyData;
 
       const shortTermItems = Array.isArray(data?.shortTermPlan?.actions)
-        ? data.shortTermPlan!.actions!.map((a: StrategyAction) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
+        ? data.shortTermPlan.actions.map((a) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
         : ["Focus on quick wins with your existing audience", "Audit current marketing channels", "Set up tracking and analytics"];
 
       const longTermItems = Array.isArray(data?.longTermPlan?.actions)
-        ? data.longTermPlan!.actions!.map((a: StrategyAction) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
+        ? data.longTermPlan.actions.map((a) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
         : ["Build sustainable content marketing pipeline", "Develop brand authority in your niche", "Scale successful channels"];
 
       const channelItems = Array.isArray(data?.channelStrategy)
-        ? data.channelStrategy!.map((c: ChannelStrategy) => `${c.channel} (${c.priority}): ${(c.recommendations ?? []).join("; ")}`)
+        ? data.channelStrategy.map((c) => `${c.channel} (${c.priority}): ${(c.recommendations ?? []).join("; ")}`)
         : ["Prioritize channels where your target audience is most active", "Test new channels with small budget allocations"];
 
       const budgetItems = Array.isArray(data?.budgetModel?.allocation)
         ? [
             ...(data.budgetModel.totalRecommendedBudget ? [`Total recommended: ${data.budgetModel.totalRecommendedBudget}`] : []),
-            ...data.budgetModel!.allocation!.map((a: BudgetAllocation) => `${a.category}: ${a.percentage}% — ${a.justification ?? a.amount ?? ""}`),
+            ...data.budgetModel.allocation.map((a) => `${a.category}: ${a.percentage}% — ${a.justification ?? a.amount ?? ""}`),
             ...(data.budgetModel.expectedROI ? [`Expected ROI: ${data.budgetModel.expectedROI}`] : []),
           ]
         : ["Allocate 60% to proven channels", "Reserve 20% for testing", "Keep 20% for content and tools"];
 
       const kpiItems = Array.isArray(data?.kpiTargets)
-        ? data.kpiTargets!.map((k: KpiTarget) => `${k.metric}: ${k.target30Days ?? "—"} (30d) → ${k.target90Days ?? "—"} (90d) → ${k.target12Months ?? "—"} (12mo)`)
+        ? data.kpiTargets.map((k) => `${k.metric}: ${k.target30Days ?? "—"} (30d) → ${k.target90Days ?? "—"} (90d) → ${k.target12Months ?? "—"} (12mo)`)
         : ["Define clear conversion metrics", "Set monthly growth targets", "Track CAC and LTV"];
 
       const financialItems = data?.financialProjections
-        ? Object.entries(data.financialProjections!).map(([period, vals]: [string, FinancialPeriod]) =>
+        ? Object.entries(data.financialProjections).map(([period, vals]) =>
             `${period}: Investment ${vals?.investment ?? "—"}, Revenue ${vals?.expectedRevenue ?? "—"}, Net ${vals?.netImpact ?? "—"}`)
         : ["Project ROI for each channel", "Estimate revenue impact", "Plan for seasonal fluctuations"];
 
@@ -242,7 +241,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
           title: "Competitive Advantages",
           icon: Sparkles,
           color: "#f97316",
-          items: data.competitiveAdvantages!.map((a: CompetitiveAdvantage) => `${a.advantage}: ${a.howToLeverage}`),
+          items: data.competitiveAdvantages.map((a) => `${a.advantage}: ${a.howToLeverage}`),
         });
       }
 
@@ -251,7 +250,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
           title: "Risks & Mitigations",
           icon: BarChart3,
           color: "#ef4444",
-          items: data.risks!.map((r: RiskItem) => `${r.risk} (${r.likelihood}): ${r.mitigation}`),
+          items: data.risks.map((r) => `${r.risk} (${r.likelihood}): ${r.mitigation}`),
         });
       }
 
@@ -375,11 +374,11 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-[11px]">
                   {[
-                    ["Contacts", snapshot?.totalContacts],
-                    ["Products", snapshot?.totalProducts],
-                    ["Revenue", `${snapshot?.currency} ${Number(snapshot?.totalRevenue || 0).toLocaleString()}`],
-                    ["Bookings", snapshot?.totalBookings],
-                    ["Campaigns", snapshot?.totalCampaigns],
+                    ["Contacts", snapshot.totalContacts],
+                    ["Products", snapshot.totalProducts],
+                    ["Revenue", `${snapshot.currency} ${Number(snapshot.totalRevenue || 0).toLocaleString()}`],
+                    ["Bookings", snapshot.totalBookings],
+                    ["Campaigns", snapshot.totalCampaigns],
                   ].map(([label, val]) => (
                     <div key={String(label)} className="bg-muted/30 rounded-lg p-1.5 text-center">
                       <div className="font-semibold text-xs">{val}</div>

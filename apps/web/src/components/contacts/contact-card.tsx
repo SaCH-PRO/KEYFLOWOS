@@ -88,7 +88,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
   const isHighValue = (totalRevenue != null && totalRevenue > 500) || (contact.meta?.invoiceCount != null && contact.meta.invoiceCount > 3);
   const hasBookings = contact.meta?.bookingCount != null && contact.meta.bookingCount > 0;
   const stageBadge = STAGE_BADGE_STYLES[contact.status ?? ""] ?? STAGE_BADGE_STYLES.LEAD;
-  const nextDueTask = (contact.meta as { nextDueTaskAt?: string | null } | undefined)?.nextDueTaskAt;
+  const nextDueTask = (contact.meta as { nextDueTaskAt?: string } | undefined)?.nextDueTaskAt;
   const hasOverdueTask = nextDueTask ? new Date(nextDueTask) < new Date() : false;
 
   const waPhone = getContactPhone(contact);

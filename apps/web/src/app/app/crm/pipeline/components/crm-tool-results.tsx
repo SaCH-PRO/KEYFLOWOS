@@ -22,6 +22,19 @@ import {
   Send,
 } from "lucide-react";
 import { useState } from "react";
+import type {
+  CrmSummaryResult,
+  CrmLeadScoreResult,
+  CrmPrepBriefResult,
+  CrmTagSuggestionsResult,
+  CrmChurnDetectionResult,
+  CrmAnalysisResult,
+  CrmDataQualityResult,
+  CrmDuplicateFinderResult,
+  CrmReengagementResult,
+  CrmRevenueOpportunitiesResult,
+  CrmFollowUpDraftResult,
+} from "@/lib/types/tool-results";
 
 const SENTIMENT_ICONS: Record<string, typeof Heart> = {
   positive: CheckCircle,
@@ -53,60 +66,6 @@ const SCORE_CONFIG: Record<string, { color: string; bg: string }> = {
   Cold: { color: "text-slate-400", bg: "bg-slate-500/10" },
 };
 
-
-interface SummaryData {
-  sentiment?: string; relationshipHealth?: string; summary?: string;
-  keyInsights?: string[]; recommendedAction?: string;
-}
-type ScoreFactor = { factor?: string; impact?: string; weight?: number };
-interface LeadScoreData {
-  score?: number; label?: string; reasoning?: string; factors?: ScoreFactor[];
-}
-interface PrepBriefData {
-  relationshipHealth?: string; keyInfo?: string[]; talkingPoints?: string[];
-  icebreakers?: string[]; thingsToAvoid?: string[];
-}
-type TagSuggestion = { tag?: string; reason?: string; confidence?: number };
-interface TagSuggestionsData { suggestedTags?: TagSuggestion[] }
-type AtRiskContact = { name?: string; riskLevel?: string; probability?: number; reasons?: string[] };
-interface ChurnDetectionData {
-  summary?: string; estimatedRevenueLoss?: number | string;
-  atRiskContacts?: AtRiskContact[];
-}
-type SuggestedAction = { title?: string; description?: string };
-interface AnalysisData {
-  analysis?: string; suggestedActions?: SuggestedAction[]; guidelines?: string[];
-}
-type FieldBreakdown = { field?: string; missing?: number; percentage?: number };
-type TopIssueItem = { contactName?: string; completeness?: number; missingFields?: string[] };
-interface DataQualityData {
-  averageCompleteness?: number; totalContacts?: number; contactsWithIssues?: number;
-  fieldBreakdown?: FieldBreakdown[]; topIssues?: TopIssueItem[];
-}
-type DuplicateContact = { name?: string; email?: string };
-type DuplicateCluster = { reason?: string; confidence?: number; contacts?: DuplicateContact[] };
-interface DuplicateFinderData {
-  duplicateClusters?: DuplicateCluster[]; estimatedDuplicates?: number;
-}
-type ReengagementSuggestion = {
-  contactName?: string; urgency?: string; daysSinceLastInteraction?: number;
-  recommendedAction?: string; suggestedSequence?: string;
-};
-interface ReengagementData { totalStale?: number; suggestions?: ReengagementSuggestion[] }
-type RevenueOpportunity = {
-  contactName?: string; estimatedValue?: number | string; opportunityType?: string;
-  company?: string; totalRevenue?: number | string;
-};
-interface RevenueOpportunitiesData {
-  totalEstimatedRevenue?: number | string; contactsAnalyzed?: number;
-  opportunities?: RevenueOpportunity[];
-}
-type FollowUpMessage = { channel?: string; tone?: string; subject?: string; body?: string };
-interface FollowUpDraftData {
-  contactName?: string; context?: string; messages?: FollowUpMessage[]; bestTime?: string;
-}
-
-
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
@@ -123,29 +82,30 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function SummaryResult({ data }: { data: SummaryData | null }) {
+function SummaryResult({ data }: { data: CrmSummaryResult | null | undefined }) {
   if (!data) return null;
-  const SentIcon = SENTIMENT_ICONS[data.sentiment ?? ""] || Minus;
+  const sentimentKey = data.sentiment ?? "";
+  const SentIcon = SENTIMENT_ICONS[sentimentKey] || Minus;
   return (
     <div className="space-y-2.5">
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1.5">
-          <SentIcon className={`w-3.5 h-3.5 ${SENTIMENT_COLORS[data.sentiment ?? ""] || "text-muted-foreground"}`} />
-          <span className={`text-xs font-medium ${SENTIMENT_COLORS[data.sentiment ?? ""] || "text-muted-foreground"}`}>
+          <SentIcon className={`w-3.5 h-3.5 ${SENTIMENT_COLORS[sentimentKey] || "text-muted-foreground"}`} />
+          <span className={`text-xs font-medium ${SENTIMENT_COLORS[sentimentKey] || "text-muted-foreground"}`}>
             {data.sentiment?.replace("_", " ")}
           </span>
         </div>
         {data.relationshipHealth && (
-          <span className={`text-xs ${HEALTH_COLORS[data.relationshipHealth ?? ""] || "text-muted-foreground"}`}>
+          <span className={`text-xs ${HEALTH_COLORS[data.relationshipHealth] || "text-muted-foreground"}`}>
             Health: {data.relationshipHealth}
           </span>
         )}
       </div>
       <p className="text-[11px] text-muted-foreground/70 leading-relaxed">{data.summary}</p>
-      {Array.isArray(data.keyInsights) && data.keyInsights.length > 0 && (
+      {data.keyInsights && data.keyInsights.length > 0 && (
         <Section title="Key Insights">
           <ul className="space-y-1">
-            {data.keyInsights.map((i: string, idx: number) => (
+            {data.keyInsights.map((i, idx) => (
               <li key={idx} className="flex items-start gap-1.5">
                 <Lightbulb className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
                 <span className="text-[11px] text-muted-foreground/70">{i}</span>
@@ -163,9 +123,9 @@ function SummaryResult({ data }: { data: SummaryData | null }) {
   );
 }
 
-function LeadScoreResult({ data }: { data: LeadScoreData | null }) {
+function LeadScoreResult({ data }: { data: CrmLeadScoreResult | null | undefined }) {
   if (!data) return null;
-  const cfg = SCORE_CONFIG[data.label ?? ""] || SCORE_CONFIG.Neutral;
+  const cfg = SCORE_CONFIG[data.label] || SCORE_CONFIG.Neutral;
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-4">
@@ -173,7 +133,7 @@ function LeadScoreResult({ data }: { data: LeadScoreData | null }) {
           <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
             <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" className="text-white/5" strokeWidth="4" />
             <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" className={cfg.color} strokeWidth="4"
-              strokeDasharray={`${((data.score ?? 0) / 100) * 176} 176`} strokeLinecap="round" />
+              strokeDasharray={`${(data.score / 100) * 176} 176`} strokeLinecap="round" />
           </svg>
           <span className={`absolute inset-0 flex items-center justify-center text-lg font-bold ${cfg.color}`}>
             {data.score}
@@ -184,10 +144,10 @@ function LeadScoreResult({ data }: { data: LeadScoreData | null }) {
           <p className="text-[11px] text-muted-foreground/60 mt-0.5">{data.reasoning}</p>
         </div>
       </div>
-      {Array.isArray(data.factors) && data.factors.length > 0 && (
+      {data.factors && data.factors.length > 0 && (
         <Section title="Score Factors">
           <div className="space-y-1.5">
-            {data.factors.map((f: ScoreFactor, i: number) => (
+            {data.factors.map((f, i) => (
               <div key={i} className="flex items-center justify-between">
                 <span className="text-[11px] text-muted-foreground/70">{f.factor}</span>
                 <div className="flex items-center gap-1.5">
@@ -205,22 +165,22 @@ function LeadScoreResult({ data }: { data: LeadScoreData | null }) {
   );
 }
 
-function PrepBriefResult({ data }: { data: PrepBriefData | null }) {
+function PrepBriefResult({ data }: { data: CrmPrepBriefResult | null | undefined }) {
   if (!data) return null;
   return (
     <div className="space-y-2.5">
       {data.relationshipHealth && (
         <div className="flex items-center gap-2 mb-2">
-          <Heart className={`w-3.5 h-3.5 ${HEALTH_COLORS[data.relationshipHealth ?? ""] || "text-muted-foreground"}`} />
-          <span className={`text-xs font-medium ${HEALTH_COLORS[data.relationshipHealth ?? ""] || "text-muted-foreground"}`}>
+          <Heart className={`w-3.5 h-3.5 ${HEALTH_COLORS[data.relationshipHealth] || "text-muted-foreground"}`} />
+          <span className={`text-xs font-medium ${HEALTH_COLORS[data.relationshipHealth] || "text-muted-foreground"}`}>
             {data.relationshipHealth} relationship
           </span>
         </div>
       )}
-      {Array.isArray(data.keyInfo) && data.keyInfo.length > 0 && (
+      {data.keyInfo && data.keyInfo.length > 0 && (
         <Section title="Key Info">
           <ul className="space-y-1">
-            {data.keyInfo.map((i: string, idx: number) => (
+            {data.keyInfo.map((i, idx) => (
               <li key={idx} className="text-[11px] text-muted-foreground/70 flex items-start gap-1.5">
                 <FileText className="w-3 h-3 text-blue-400 shrink-0 mt-0.5" />
                 {i}
@@ -229,10 +189,10 @@ function PrepBriefResult({ data }: { data: PrepBriefData | null }) {
           </ul>
         </Section>
       )}
-      {Array.isArray(data.talkingPoints) && data.talkingPoints.length > 0 && (
+      {data.talkingPoints && data.talkingPoints.length > 0 && (
         <Section title="Talking Points">
           <ul className="space-y-1">
-            {data.talkingPoints.map((p: string, idx: number) => (
+            {data.talkingPoints.map((p, idx) => (
               <li key={idx} className="text-[11px] text-muted-foreground/70 flex items-start gap-1.5">
                 <MessageSquare className="w-3 h-3 text-[hsl(var(--kf-accent1))] shrink-0 mt-0.5" />
                 {p}
@@ -241,19 +201,19 @@ function PrepBriefResult({ data }: { data: PrepBriefData | null }) {
           </ul>
         </Section>
       )}
-      {Array.isArray(data.icebreakers) && data.icebreakers.length > 0 && (
+      {data.icebreakers && data.icebreakers.length > 0 && (
         <Section title="Icebreakers">
           <ul className="space-y-1">
-            {data.icebreakers.map((i: string, idx: number) => (
+            {data.icebreakers.map((i, idx) => (
               <li key={idx} className="text-[11px] text-muted-foreground/70">&quot;{i}&quot;</li>
             ))}
           </ul>
         </Section>
       )}
-      {Array.isArray(data.thingsToAvoid) && data.thingsToAvoid.length > 0 && (
+      {data.thingsToAvoid && data.thingsToAvoid.length > 0 && (
         <Section title="Avoid">
           <ul className="space-y-1">
-            {data.thingsToAvoid.map((a: string, idx: number) => (
+            {data.thingsToAvoid.map((a, idx) => (
               <li key={idx} className="text-[11px] text-red-400/70 flex items-start gap-1.5">
                 <AlertTriangle className="w-3 h-3 text-red-400 shrink-0 mt-0.5" />
                 {a}
@@ -266,11 +226,11 @@ function PrepBriefResult({ data }: { data: PrepBriefData | null }) {
   );
 }
 
-function TagSuggestionsResult({ data }: { data: TagSuggestionsData | null }) {
+function TagSuggestionsResult({ data }: { data: CrmTagSuggestionsResult | null | undefined }) {
   if (!data?.suggestedTags) return null;
   return (
     <div className="space-y-2">
-      {data.suggestedTags.map((tag: TagSuggestion, i: number) => (
+      {data.suggestedTags.map((tag, i) => (
         <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-border/30">
           <div className="flex items-center gap-2">
             <Tags className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
@@ -278,8 +238,8 @@ function TagSuggestionsResult({ data }: { data: TagSuggestionsData | null }) {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-muted-foreground/50">{tag.reason}</span>
-            <span className={`text-[10px] font-medium ${(tag.confidence ?? 0) >= 0.8 ? "text-emerald-400" : (tag.confidence ?? 0) >= 0.6 ? "text-blue-400" : "text-amber-400"}`}>
-              {Math.round((tag.confidence ?? 0) * 100)}%
+            <span className={`text-[10px] font-medium ${tag.confidence >= 0.8 ? "text-emerald-400" : tag.confidence >= 0.6 ? "text-blue-400" : "text-amber-400"}`}>
+              {Math.round(tag.confidence * 100)}%
             </span>
           </div>
         </div>
@@ -288,7 +248,7 @@ function TagSuggestionsResult({ data }: { data: TagSuggestionsData | null }) {
   );
 }
 
-function ChurnDetectionResult({ data }: { data: ChurnDetectionData | null }) {
+function ChurnDetectionResult({ data }: { data: CrmChurnDetectionResult | null | undefined }) {
   if (!data) return null;
   const RISK_COLORS: Record<string, string> = {
     critical: "text-red-400",
@@ -305,10 +265,10 @@ function ChurnDetectionResult({ data }: { data: ChurnDetectionData | null }) {
           <span className="text-xs text-red-400">Estimated revenue at risk: ${data.estimatedRevenueLoss}</span>
         </div>
       )}
-      {Array.isArray(data.atRiskContacts) && data.atRiskContacts.length > 0 && (
+      {data.atRiskContacts && data.atRiskContacts.length > 0 && (
         <Section title={`At-Risk Contacts (${data.atRiskContacts.length})`}>
           <div className="space-y-2">
-            {data.atRiskContacts.map((c: AtRiskContact, i: number) => (
+            {data.atRiskContacts.map((c, i) => (
               <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium text-foreground/80">{c.name}</span>
@@ -316,9 +276,9 @@ function ChurnDetectionResult({ data }: { data: ChurnDetectionData | null }) {
                     {c.probability}% risk
                   </span>
                 </div>
-                {Array.isArray(c.reasons) && c.reasons.length > 0 && (
+                {c.reasons && c.reasons.length > 0 && (
                   <ul className="space-y-0.5">
-                    {c.reasons.slice(0, 3).map((r: string, ri: number) => (
+                    {c.reasons.slice(0, 3).map((r, ri) => (
                       <li key={ri} className="text-[10px] text-muted-foreground/60">• {r}</li>
                     ))}
                   </ul>
@@ -332,17 +292,17 @@ function ChurnDetectionResult({ data }: { data: ChurnDetectionData | null }) {
   );
 }
 
-function AnalysisResult({ data }: { data: AnalysisData | null }) {
+function AnalysisResult({ data }: { data: CrmAnalysisResult | null | undefined }) {
   if (!data) return null;
   return (
     <div className="space-y-2.5">
       {data.analysis && (
         <p className="text-[11px] text-muted-foreground/70 leading-relaxed">{data.analysis}</p>
       )}
-      {Array.isArray(data.suggestedActions) && data.suggestedActions.length > 0 && (
+      {data.suggestedActions && data.suggestedActions.length > 0 && (
         <Section title="Recommended Actions">
           <div className="space-y-1.5">
-            {data.suggestedActions.map((a: SuggestedAction, i: number) => (
+            {data.suggestedActions.map((a, i) => (
               <div key={i} className="flex items-start gap-1.5">
                 <Target className="w-3 h-3 text-[hsl(var(--kf-accent1))] shrink-0 mt-0.5" />
                 <div>
@@ -356,10 +316,10 @@ function AnalysisResult({ data }: { data: AnalysisData | null }) {
           </div>
         </Section>
       )}
-      {Array.isArray(data.guidelines) && data.guidelines.length > 0 && (
+      {data.guidelines && data.guidelines.length > 0 && (
         <Section title="Guidelines">
           <ul className="space-y-1">
-            {data.guidelines.map((g: string, i: number) => (
+            {data.guidelines.map((g, i) => (
               <li key={i} className="text-[11px] text-muted-foreground/70 flex items-start gap-1.5">
                 <Lightbulb className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
                 {g}
@@ -372,7 +332,7 @@ function AnalysisResult({ data }: { data: AnalysisData | null }) {
   );
 }
 
-function DataQualityResult({ data }: { data: DataQualityData | null }) {
+function DataQualityResult({ data }: { data: CrmDataQualityResult | null | undefined }) {
   if (!data) return null;
   const score = data.averageCompleteness ?? 0;
   const scoreColor = score >= 80 ? "text-emerald-400" : score >= 60 ? "text-amber-400" : "text-red-400";
@@ -396,15 +356,15 @@ function DataQualityResult({ data }: { data: DataQualityData | null }) {
           </p>
         </div>
       </div>
-      {Array.isArray(data.fieldBreakdown) && data.fieldBreakdown.length > 0 && (
+      {data.fieldBreakdown && data.fieldBreakdown.length > 0 && (
         <Section title="Field Breakdown">
           <div className="space-y-1.5">
-            {data.fieldBreakdown.map((fb: FieldBreakdown, i: number) => (
+            {data.fieldBreakdown.map((fb, i) => (
               <div key={i} className="flex items-center justify-between">
                 <span className="text-[11px] text-muted-foreground/70 capitalize">{fb.field}</span>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-muted-foreground/50">{fb.missing} missing</span>
-                  <span className={`text-[10px] font-medium ${(fb.percentage ?? 0) > 30 ? "text-red-400" : (fb.percentage ?? 0) > 15 ? "text-amber-400" : "text-emerald-400"}`}>
+                  <span className={`text-[10px] font-medium ${fb.percentage > 30 ? "text-red-400" : fb.percentage > 15 ? "text-amber-400" : "text-emerald-400"}`}>
                     {fb.percentage}%
                   </span>
                 </div>
@@ -413,18 +373,18 @@ function DataQualityResult({ data }: { data: DataQualityData | null }) {
           </div>
         </Section>
       )}
-      {Array.isArray(data.topIssues) && data.topIssues.length > 0 && (
+      {data.topIssues && data.topIssues.length > 0 && (
         <Section title={`Contacts with Issues (${data.topIssues.length})`}>
           <div className="space-y-1.5">
-            {data.topIssues.slice(0, 10).map((issue: TopIssueItem, i: number) => (
+            {data.topIssues.slice(0, 10).map((issue, i) => (
               <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-white/[0.02] border border-border/30">
-                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${(issue.completeness ?? 0) < 40 ? "text-red-400" : (issue.completeness ?? 0) < 70 ? "text-amber-400" : "text-blue-400"}`} />
+                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${issue.completeness < 40 ? "text-red-400" : issue.completeness < 70 ? "text-amber-400" : "text-blue-400"}`} />
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-medium text-foreground/80">{issue.contactName}</span>
                     <span className="text-[10px] text-muted-foreground/50">{issue.completeness}%</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground/60">Missing: {(issue.missingFields ?? []).join(', ')}</p>
+                  <p className="text-[10px] text-muted-foreground/60">Missing: {issue.missingFields.join(', ')}</p>
                 </div>
               </div>
             ))}
@@ -435,7 +395,7 @@ function DataQualityResult({ data }: { data: DataQualityData | null }) {
   );
 }
 
-function DuplicateFinderResult({ data }: { data: DuplicateFinderData | null }) {
+function DuplicateFinderResult({ data }: { data: CrmDuplicateFinderResult | null | undefined }) {
   if (!data) return null;
   const clusters = data.duplicateClusters ?? [];
   return (
@@ -446,9 +406,9 @@ function DuplicateFinderResult({ data }: { data: DuplicateFinderData | null }) {
           {clusters.length} potential duplicate groups · {data.estimatedDuplicates ?? 0} duplicates
         </span>
       </div>
-      {Array.isArray(clusters) && clusters.length > 0 && (
+      {clusters.length > 0 && (
         <div className="space-y-2">
-          {clusters.slice(0, 10).map((cluster: DuplicateCluster, i: number) => (
+          {clusters.slice(0, 10).map((cluster, i) => (
             <div key={i} className="p-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[11px] font-medium text-amber-400">
@@ -456,7 +416,7 @@ function DuplicateFinderResult({ data }: { data: DuplicateFinderData | null }) {
                 </span>
               </div>
               <div className="space-y-1">
-                {cluster.contacts?.map((c: DuplicateContact, ci: number) => (
+                {cluster.contacts?.map((c, ci) => (
                   <div key={ci} className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
                     <Users className="w-3 h-3 shrink-0" />
                     <span>{c.name}</span>
@@ -479,7 +439,7 @@ function DuplicateFinderResult({ data }: { data: DuplicateFinderData | null }) {
   );
 }
 
-function ReengagementResult({ data }: { data: ReengagementData | null }) {
+function ReengagementResult({ data }: { data: CrmReengagementResult | null | undefined }) {
   if (!data) return null;
   const suggestions = data.suggestions ?? [];
   const URGENCY_COLORS: Record<string, string> = { high: "text-red-400", medium: "text-amber-400", low: "text-blue-400" };
@@ -491,7 +451,7 @@ function ReengagementResult({ data }: { data: ReengagementData | null }) {
       {suggestions.length > 0 && (
         <Section title={`Re-engagement Suggestions (${suggestions.length})`}>
           <div className="space-y-2">
-            {suggestions.slice(0, 8).map((s: ReengagementSuggestion, i: number) => (
+            {suggestions.slice(0, 8).map((s, i) => (
               <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium text-foreground/80">{s.contactName}</span>
@@ -520,7 +480,7 @@ function ReengagementResult({ data }: { data: ReengagementData | null }) {
   );
 }
 
-function RevenueOpportunitiesResult({ data }: { data: RevenueOpportunitiesData | null }) {
+function RevenueOpportunitiesResult({ data }: { data: CrmRevenueOpportunitiesResult | null | undefined }) {
   if (!data) return null;
   return (
     <div className="space-y-2.5">
@@ -535,10 +495,10 @@ function RevenueOpportunitiesResult({ data }: { data: RevenueOpportunitiesData |
         )}
         <span className="text-[10px] text-muted-foreground/50 ml-2">{data.contactsAnalyzed} analyzed</span>
       </div>
-      {Array.isArray(data.opportunities) && data.opportunities.length > 0 && (
+      {data.opportunities && data.opportunities.length > 0 && (
         <Section title={`Opportunities (${data.opportunities.length})`}>
           <div className="space-y-2">
-            {data.opportunities.slice(0, 8).map((opp: RevenueOpportunity, i: number) => (
+            {data.opportunities.slice(0, 8).map((opp, i) => (
               <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium text-foreground/80">{opp.contactName}</span>
@@ -557,7 +517,7 @@ function RevenueOpportunitiesResult({ data }: { data: RevenueOpportunitiesData |
   );
 }
 
-function FollowUpDraftResult({ data }: { data: FollowUpDraftData | null }) {
+function FollowUpDraftResult({ data }: { data: CrmFollowUpDraftResult | null | undefined }) {
   if (!data) return null;
   const messages = data.messages ?? [];
   return (
@@ -573,7 +533,7 @@ function FollowUpDraftResult({ data }: { data: FollowUpDraftData | null }) {
       {data.context && (
         <p className="text-[11px] text-muted-foreground/70 italic">{data.context}</p>
       )}
-      {messages.map((msg: FollowUpMessage, i: number) => (
+      {messages.map((msg, i) => (
         <div key={i} className="rounded-lg border border-border/30 overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-white/[0.03] border-b border-border/20">
             {msg.channel === "email" ? <Mail className="w-3 h-3 text-blue-400" /> :
@@ -604,27 +564,27 @@ function FollowUpDraftResult({ data }: { data: FollowUpDraftData | null }) {
 export function renderCrmToolResult(toolId: string, result: unknown): React.ReactNode {
   switch (toolId) {
     case "contact-summary":
-      return <SummaryResult data={result as SummaryData | null} />;
+      return <SummaryResult data={result as CrmSummaryResult | null} />;
     case "lead-score":
-      return <LeadScoreResult data={result as LeadScoreData | null} />;
+      return <LeadScoreResult data={result as CrmLeadScoreResult | null} />;
     case "prep-brief":
-      return <PrepBriefResult data={result as PrepBriefData | null} />;
+      return <PrepBriefResult data={result as CrmPrepBriefResult | null} />;
     case "tag-suggestions":
-      return <TagSuggestionsResult data={result as TagSuggestionsData | null} />;
+      return <TagSuggestionsResult data={result as CrmTagSuggestionsResult | null} />;
     case "churn-detection":
-      return <ChurnDetectionResult data={result as ChurnDetectionData | null} />;
+      return <ChurnDetectionResult data={result as CrmChurnDetectionResult | null} />;
     case "crm-analysis":
-      return <AnalysisResult data={result as AnalysisData | null} />;
+      return <AnalysisResult data={result as CrmAnalysisResult | null} />;
     case "data-quality":
-      return <DataQualityResult data={result as DataQualityData | null} />;
+      return <DataQualityResult data={result as CrmDataQualityResult | null} />;
     case "duplicate-finder":
-      return <DuplicateFinderResult data={result as DuplicateFinderData | null} />;
+      return <DuplicateFinderResult data={result as CrmDuplicateFinderResult | null} />;
     case "reengagement":
-      return <ReengagementResult data={result as ReengagementData | null} />;
+      return <ReengagementResult data={result as CrmReengagementResult | null} />;
     case "revenue-opportunities":
-      return <RevenueOpportunitiesResult data={result as RevenueOpportunitiesData | null} />;
+      return <RevenueOpportunitiesResult data={result as CrmRevenueOpportunitiesResult | null} />;
     case "follow-up-drafter":
-      return <FollowUpDraftResult data={result as FollowUpDraftData | null} />;
+      return <FollowUpDraftResult data={result as CrmFollowUpDraftResult | null} />;
     default:
       return (
         <div className="rounded-xl border border-border/40 p-3 bg-white/[0.02]">

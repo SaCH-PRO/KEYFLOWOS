@@ -3,22 +3,10 @@
 import { motion } from "framer-motion";
 import { Package, MapPin, Hash, Pencil, Trash2 } from "lucide-react";
 import { ReachBadge, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { MarketplaceListing } from "@/lib/marketplace-types";
 
-type ListingRow = MarketplaceListing & {
-  productName?: string;
-  status?: string;
-};
+import type { ListingDto } from "@/lib/types/marketplace";
 
-export function CatalogTab({
-  listings,
-  onEdit,
-  onDelete,
-}: {
-  listings: ListingRow[];
-  onEdit: (item: ListingRow) => void;
-  onDelete: (id: string) => void;
-}) {
+export function CatalogTab({ listings, onEdit, onDelete }: { listings: ListingDto[]; onEdit: (item: ListingDto) => void; onDelete: (id: string) => void }) {
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(listings);
   if (listings.length === 0) {
     return <EmptyState icon={Package} title="No Listings Yet" description="Create your first marketplace listing to start selling products globally." />;
@@ -44,7 +32,7 @@ export function CatalogTab({
                   {listing.countries && (
                     <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                       <MapPin className="w-3 h-3" />
-                      {Array.isArray(listing.countries) ? listing.countries.join(", ") : String(listing.countries)}
+                      {listing.countries}
                     </span>
                   )}
                   {listing.hsCode && (

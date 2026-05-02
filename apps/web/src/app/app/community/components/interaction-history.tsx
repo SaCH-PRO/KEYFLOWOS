@@ -56,12 +56,8 @@ export function InteractionHistorySection({ businessId, otherBusinessId, otherBu
   const loadAll = useCallback(async () => {
     if (!businessId || !otherBusinessId) return;
     const [h, r] = await Promise.all([
-      fetchInteractionHistory(businessId, otherBusinessId).catch(
-        () => ({ data: null }) as { data: IH | null },
-      ),
-      fetchReviewableTransactions(businessId, otherBusinessId).catch(
-        () => ({ data: [] }) as { data: ReviewableTransaction[] },
-      ),
+      fetchInteractionHistory(businessId, otherBusinessId).catch(() => ({ data: null as IH | null })),
+      fetchReviewableTransactions(businessId, otherBusinessId).catch(() => ({ data: [] as ReviewableTransaction[] })),
     ]);
     if (h?.data) setHistory(h.data);
     setReviewable(r?.data ?? []);

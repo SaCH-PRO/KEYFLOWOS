@@ -16,13 +16,23 @@ import {
   Search,
 } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
-import type { MarketplaceOrder, MarketplaceOrderItem, Shipment } from "@/lib/marketplace-types";
+import type { OrderDto, ShipmentDto } from "@/lib/types/marketplace";
 
-type OrderRow = MarketplaceOrder & {
+interface OrderItemLike {
+  productName?: string;
+  name?: string;
+  quantity?: number;
+  total?: number | string;
+  price?: number | string;
+}
+
+type OrderExt = OrderDto & {
+  paymentStatus?: string;
   paymentState?: string;
-  fulfillmentRoute?: string | null;
+  fulfillmentRoute?: string;
+  shipments?: ShipmentDto[];
+  items?: OrderItemLike[];
 };
-type OrderItemRow = MarketplaceOrderItem & { productName?: string; price?: number };
 
 const ORDER_STATUSES = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"];
 
@@ -81,7 +91,7 @@ export function CommerceOrdersTab({
   orders,
   onStatusUpdate,
 }: {
-  orders: OrderRow[];
+  orders: OrderExt[];
   onStatusUpdate: (id: string, status: string) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -144,7 +154,7 @@ export function CommerceOrdersTab({
       <div className="space-y-2">
         {paginated.map((order) => {
           const isExpanded = expanded === order.id;
-          const shipments: Shipment[] = order.shipments ?? [];
+          const shipments: ShipmentDto[] = order.shipments ?? [];
           const paymentState = order.paymentStatus || order.paymentState || "PENDING";
 
           return (
@@ -182,7 +192,7 @@ export function CommerceOrdersTab({
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
-                    <p className="text-base font-bold">{formatCurrency(order.total ?? 0)}</p>
+                    <p className="text-base font-bold">{formatCurrency(Number(order.total ?? 0))}</p>
                     <div className="flex items-center gap-1.5">
                       <select
                         value={order.status || "PENDING"}
@@ -218,7 +228,7 @@ export function CommerceOrdersTab({
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1 flex items-center gap-1">
                             <Navigation className="w-3 h-3" /> Shipping Address
                           </p>
-                          <p className="text-xs text-muted-foreground">{typeof order.shippingAddress === "string" ? order.shippingAddress : JSON.stringify(order.shippingAddress)}</p>
+                          <p className="text-xs text-muted-foreground">{order.shippingAddress}</p>
                         </div>
                       )}
 
@@ -253,10 +263,10 @@ export function CommerceOrdersTab({
                         <div>
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">Order Items</p>
                           <div className="space-y-1">
-                            {order.items.map((item: OrderItemRow, i: number) => (
+                            {order.items.map((item, i) => (
                               <div key={i} className="flex items-center justify-between text-xs">
                                 <span>{item.productName || item.name || "Item"} × {item.quantity || 1}</span>
-                                <span className="font-medium">{formatCurrency(item.total ?? item.price ?? 0)}</span>
+                                <span className="font-medium">{formatCurrency(Number(item.total ?? item.price ?? 0))}</span>
                               </div>
                             ))}
                           </div>
