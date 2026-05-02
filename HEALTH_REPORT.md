@@ -118,12 +118,13 @@ This is enforced by Next.js 16's stricter prerender rules.
 | `apps/server` | `multer` | `<2.0` → `^2.1.1` | Critical: multipart DoS / path traversal |
 | `apps/server` | `express-rate-limit` | older → `^8.4.1` | High: bypass via header normalization |
 | `apps/server` | `@google-cloud/storage` | (removed) | Unused; only referenced in a comment |
+| `apps/server` | `xlsx` → `exceljs@^4.4.0` | (replaced) | High: prototype pollution / ReDoS, no upstream fix. Migrated CRM import + marketplace import/export to maintained `exceljs`. |
 
 ### Final
 `pnpm audit` summary: **0 critical, 23 high, 26 moderate, 1 low.**
 
 The remaining 23 high-severity advisories are **transitive** and have no upstream patch yet, or are in dev-only tooling. Specifically:
-- `xlsx` — no patched version published; risk-managed (used only on trusted, server-side spreadsheet input). Recommend swapping to `exceljs` in a follow-up.
+- `xlsx` — server-side usage migrated to `exceljs` (`apps/server`). The `apps/web` workspace still imports `xlsx` dynamically in two places; tracked as a follow-up to migrate the browser bundle.
 - Transitive deps inside `@paypal/*` SDKs, `prisma` engine downloader, `storybook`, `vitest`, `google-auth-library` — all pending upstream releases.
 
 These are listed in `.local/audit/audit-high.json` for follow-up.
@@ -177,7 +178,7 @@ This is documented here so future Next minor-version bumps remember to wipe `.ne
 ## 10. Deferred Work (Recommended Follow-ups)
 
 1. **Web lint cleanup (~1500 issues).** Bulk-driven by React 19 hook rules and the new `@typescript-eslint` defaults flagging existing `any` usage. Tackle in a dedicated PR with codemods (`@typescript-eslint/no-explicit-any` → typed unknowns, `react-hooks/exhaustive-deps` → audit-then-suppress per call site).
-2. **Replace `xlsx`.** No upstream fix. Migrate to `exceljs` for the same feature surface.
+2. **Replace `xlsx` in `apps/web`.** Server-side usage has been migrated to `exceljs`. The web app still imports `xlsx` dynamically in `apps/web/src/lib/contacts-export.ts` and `apps/web/src/app/app/marketplace/components/inventory-command-center.tsx`; migrate those call sites to `exceljs` to fully retire the dependency.
 3. **Transitive high-severity advisories** (PayPal SDK, Prisma engine downloader, Storybook/Vitest dev deps, google-auth-library): track upstream releases and bump when available.
 4. **`<img>` → `<Image />`.** 84 occurrences flagged by `@next/next/no-img-element`. Wins on LCP/CLS; mechanical change but needs visual QA.
 5. **Branch handoff (`replit-work`).** This environment's rules of engagement forbid running `git` commands directly. The intended branch operation is:
