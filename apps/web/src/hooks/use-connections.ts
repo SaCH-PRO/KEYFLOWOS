@@ -52,18 +52,27 @@ export function useConnections() {
       const cal = calRes.status === "fulfilled" ? calRes.value : null;
       const gmail = gmailRes.status === "fulfilled" ? gmailRes.value : null;
       const socialRaw = socialRes.status === "fulfilled" ? socialRes.value : [];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
-      const social: SocialConnection[] = Array.isArray(socialRaw) ? socialRaw : Array.isArray((socialRaw as any)?.data) ? (socialRaw as any).data : [];
+      const socialWrapped = socialRaw as SocialConnection[] | { data?: SocialConnection[] } | null | undefined;
+      const social: SocialConnection[] = Array.isArray(socialWrapped)
+        ? socialWrapped
+        : Array.isArray(socialWrapped?.data)
+          ? socialWrapped.data
+          : [];
+
+      const calData = (cal && typeof cal === "object" && "data" in cal ? cal.data : cal) as
+        | { connected?: boolean; email?: string | null }
+        | null
+        | undefined;
+      const gmailData = (gmail && typeof gmail === "object" && "data" in gmail ? gmail.data : gmail) as
+        | { connected?: boolean; email?: string | null }
+        | null
+        | undefined;
 
       const data: ConnectionsState = {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
-        calendarConnected: !!(cal as any)?.connected,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
-        calendarEmail: (cal as any)?.email ?? null,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
-        gmailConnected: !!(gmail as any)?.connected,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
-        gmailEmail: (gmail as any)?.email ?? null,
+        calendarConnected: !!calData?.connected,
+        calendarEmail: calData?.email ?? null,
+        gmailConnected: !!gmailData?.connected,
+        gmailEmail: gmailData?.email ?? null,
         socialConnections: social,
         loading: false,
       };

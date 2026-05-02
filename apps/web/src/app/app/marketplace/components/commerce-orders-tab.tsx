@@ -16,6 +16,13 @@ import {
   Search,
 } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
+import type { MarketplaceOrder, MarketplaceOrderItem, Shipment } from "@/lib/marketplace-types";
+
+type OrderRow = MarketplaceOrder & {
+  paymentState?: string;
+  fulfillmentRoute?: string | null;
+};
+type OrderItemRow = MarketplaceOrderItem & { productName?: string; price?: number };
 
 const ORDER_STATUSES = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"];
 
@@ -74,8 +81,7 @@ export function CommerceOrdersTab({
   orders,
   onStatusUpdate,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  orders: any[];
+  orders: OrderRow[];
   onStatusUpdate: (id: string, status: string) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -136,10 +142,9 @@ export function CommerceOrdersTab({
       </div>
 
       <div className="space-y-2">
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-        {paginated.map((order: any) => {
+        {paginated.map((order) => {
           const isExpanded = expanded === order.id;
-          const shipments = order.shipments ?? [];
+          const shipments: Shipment[] = order.shipments ?? [];
           const paymentState = order.paymentStatus || order.paymentState || "PENDING";
 
           return (
@@ -171,7 +176,7 @@ export function CommerceOrdersTab({
                         {order.customerPhone && (
                           <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{order.customerPhone}</span>
                         )}
-                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(order.createdAt)}</span>
+                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(order.createdAt ?? "")}</span>
                       </div>
                       <OrderPipeline status={order.status || "PENDING"} />
                     </div>
@@ -213,7 +218,7 @@ export function CommerceOrdersTab({
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1 flex items-center gap-1">
                             <Navigation className="w-3 h-3" /> Shipping Address
                           </p>
-                          <p className="text-xs text-muted-foreground">{order.shippingAddress}</p>
+                          <p className="text-xs text-muted-foreground">{typeof order.shippingAddress === "string" ? order.shippingAddress : JSON.stringify(order.shippingAddress)}</p>
                         </div>
                       )}
 
@@ -234,8 +239,7 @@ export function CommerceOrdersTab({
                             <Truck className="w-3 h-3" /> Linked Shipments ({shipments.length})
                           </p>
                           <div className="space-y-1.5">
-                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                            {shipments.map((s: any) => (
+                            {shipments.map((s) => (
                               <div key={s.id} className="flex items-center justify-between text-xs bg-white/3 rounded-xl px-3 py-2" style={{ background: "rgba(255,255,255,0.03)" }}>
                                 <span className="text-muted-foreground">{s.carrier || "Carrier"} — {s.trackingNumber || "No tracking"}</span>
                                 <StatusBadge status={s.status || "PREPARING"} />
@@ -249,8 +253,7 @@ export function CommerceOrdersTab({
                         <div>
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">Order Items</p>
                           <div className="space-y-1">
-                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                            {order.items.map((item: any, i: number) => (
+                            {order.items.map((item: OrderItemRow, i: number) => (
                               <div key={i} className="flex items-center justify-between text-xs">
                                 <span>{item.productName || item.name || "Item"} × {item.quantity || 1}</span>
                                 <span className="font-medium">{formatCurrency(item.total ?? item.price ?? 0)}</span>

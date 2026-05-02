@@ -25,7 +25,8 @@ import { CatalogMode } from "./components/catalog-mode";
 import { OperationsMode } from "./components/operations-mode";
 import { LaunchMode } from "./components/launch-mode";
 
-type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string; subheadline?: string; ctaText?: string };
+type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string; subheadline?: string; ctaText?: string; ctaLabel?: string };
+type PolicyEntry = { enabled?: boolean };
 type SocialProofSection = { testimonials?: unknown[] };
 type BusinessHourEntry = { enabled?: boolean };
 type AppearanceSection = { primaryColor?: string; secondaryColor?: string; accentColor?: string };
@@ -78,8 +79,7 @@ export default function StorePage() {
       storeEnabled: s.storeEnabled,
       hasHeroImage: !!(_hero?.imageUrl || _hero?.coverImageUrl),
       hasHeroHeadline: !!(_hero?.headline && _hero.headline.trim().length > 0),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      hasHeroCta: !!((_hero as any)?.ctaLabel && (_hero as any).ctaLabel.trim().length > 0),
+      hasHeroCta: !!(_hero?.ctaLabel && _hero.ctaLabel.trim().length > 0),
       hasLogo: !!s.businessData?.logoUrl,
       hoursConfigured: Object.values(s.businessHours).some((h) => (h as BusinessHourEntry)?.enabled),
       storeName: s.businessData?.name,
@@ -87,8 +87,7 @@ export default function StorePage() {
       businessTagline: s.businessData?.tagline ?? undefined,
       hasMetaTitle: !!(_seo?.metaTitle && _seo.metaTitle.trim().length > 0),
       hasMetaDescription: !!(_seo?.metaDescription && _seo.metaDescription.trim().length > 0),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      hasPolicies: Object.values(_policies).some((p: any) => p?.enabled),
+      hasPolicies: Object.values(_policies as Record<string, PolicyEntry>).some((p) => p?.enabled),
       hasFaq: Array.isArray(_faqEntries) && _faqEntries.length > 0,
       activeDeliveryCount: deliveryCount,
       readinessScores: s.readiness?.scores,

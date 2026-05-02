@@ -23,8 +23,7 @@ type Props = {
   services: Service[];
   commerceProducts: Product[];
   storefrontConfig: StorefrontConfig;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onConfigChange: (section: string, updates: Record<string, any>) => void;
+  onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => Promise<void>;
   configSaving: boolean;
   slug: string;
@@ -119,12 +118,9 @@ export function DesignMode({
             storeName={businessData?.name}
             businessDescription={businessData?.description ?? undefined}
             businessTagline={businessData?.tagline ?? undefined}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-            currentHeadline={(storefrontConfig.hero as any)?.headline}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-            currentSubheadline={(storefrontConfig.hero as any)?.subheadline}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-            currentCta={(storefrontConfig.hero as any)?.ctaLabel}
+            currentHeadline={storefrontConfig.hero?.headline}
+            currentSubheadline={storefrontConfig.hero?.subheadline}
+            currentCta={storefrontConfig.hero?.ctaLabel}
             productsCount={commerceProducts.length}
             servicesCount={services.length}
             onApply={handleApplyHeroCopy}

@@ -117,20 +117,34 @@ const RESULT_TYPE_COLORS: Record<string, string> = {
   quote: "bg-purple-500/10 text-purple-400",
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function mapSearchResult(type: string, r: Record<string, any>): { id: string; type: string; name: string; status?: string; total?: number; date?: string } {
+type SearchResultRow = {
+  id?: string;
+  name?: string;
+  isActive?: boolean;
+  price?: number | string;
+  invoiceNumber?: string;
+  quoteNumber?: string;
+  status?: string;
+  total?: number | string;
+  createdAt?: string;
+  contact?: { firstName?: string; lastName?: string } | null;
+};
+
+function mapSearchResult(type: string, r: Record<string, unknown>): { id: string; type: string; name: string; status?: string; total?: number; date?: string } {
+  const row = r as SearchResultRow;
+  const id = String(row.id ?? "");
   if (type === "products") {
-    return { id: r.id, type: "product", name: r.name || "Untitled", status: r.isActive ? "ACTIVE" : "INACTIVE", total: r.price ? Number(r.price) : undefined };
+    return { id, type: "product", name: row.name || "Untitled", status: row.isActive ? "ACTIVE" : "INACTIVE", total: row.price ? Number(row.price) : undefined };
   }
   if (type === "invoices") {
-    const cn = r.contact ? `${r.contact.firstName ?? ""} ${r.contact.lastName ?? ""}`.trim() : "";
-    return { id: r.id, type: "invoice", name: r.invoiceNumber ? `${r.invoiceNumber}${cn ? ` — ${cn}` : ""}` : cn || "Invoice", status: r.status, total: r.total ? Number(r.total) : undefined, date: r.createdAt };
+    const cn = row.contact ? `${row.contact.firstName ?? ""} ${row.contact.lastName ?? ""}`.trim() : "";
+    return { id, type: "invoice", name: row.invoiceNumber ? `${row.invoiceNumber}${cn ? ` — ${cn}` : ""}` : cn || "Invoice", status: row.status, total: row.total ? Number(row.total) : undefined, date: row.createdAt };
   }
   if (type === "quotes") {
-    const cn = r.contact ? `${r.contact.firstName ?? ""} ${r.contact.lastName ?? ""}`.trim() : "";
-    return { id: r.id, type: "quote", name: r.quoteNumber ? `${r.quoteNumber}${cn ? ` — ${cn}` : ""}` : cn || "Quote", status: r.status, total: r.total ? Number(r.total) : undefined, date: r.createdAt };
+    const cn = row.contact ? `${row.contact.firstName ?? ""} ${row.contact.lastName ?? ""}`.trim() : "";
+    return { id, type: "quote", name: row.quoteNumber ? `${row.quoteNumber}${cn ? ` — ${cn}` : ""}` : cn || "Quote", status: row.status, total: row.total ? Number(row.total) : undefined, date: row.createdAt };
   }
-  return { id: r.id, type, name: r.name || r.invoiceNumber || r.quoteNumber || "Item" };
+  return { id, type, name: row.name || row.invoiceNumber || row.quoteNumber || "Item" };
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -378,8 +392,7 @@ export function CommerceAiSearchBar({ onExecuteCommand, onSelectResult, onApplyF
       )}
 
       {searchData && (() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-        const mappedResults = (searchData.results || []).map((r: Record<string, any>) => mapSearchResult(searchData.type, r));
+        const mappedResults = (searchData.results || []).map((r: Record<string, unknown>) => mapSearchResult(searchData.type, r));
         return (
         <div className="absolute top-full left-0 right-0 mt-1 rounded-xl border border-border/50 bg-card shadow-xl z-50 max-h-[400px] overflow-hidden flex flex-col">
           <div className="px-3 py-2 border-b border-border/30 shrink-0">

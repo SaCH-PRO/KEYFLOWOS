@@ -4,7 +4,15 @@ import { useMemo } from "react";
 
 interface ProductStatsInput {
   productId: string | null;
-  invoices: Array<{ items?: Array<{ productId?: string | null }>; status?: string }>;
+  invoices: Array<{
+    items?: Array<{
+      productId?: string | null;
+      total?: number | string | null;
+      unitPrice?: number | string | null;
+      quantity?: number | string | null;
+    }>;
+    status?: string;
+  }>;
   quotes: Array<{ items?: Array<{ productId?: string | null }> }>;
 }
 
@@ -21,12 +29,13 @@ export function useProductStats({ productId, invoices, quotes }: ProductStatsInp
     const invoiceCount = invoices.filter(inv => inv.items?.some(item => item.productId === pid)).length;
     const quoteCount = quotes.filter(q => q.items?.some(item => item.productId === pid)).length;
     const totalRevenue = invoices
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      .filter(inv => (inv as any).status === "PAID")
+      .filter(inv => inv.status === "PAID")
       .reduce((sum, inv) => {
         const matching = inv.items?.filter(item => item.productId === pid) ?? [];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        return sum + matching.reduce((s, item) => s + ((item as any).total ?? (Number((item as any).unitPrice ?? 0) * Number((item as any).quantity ?? 1))), 0);
+        return sum + matching.reduce((s, item) => {
+          if (item.total != null) return s + Number(item.total);
+          return s + Number(item.unitPrice ?? 0) * Number(item.quantity ?? 1);
+        }, 0);
       }, 0);
     return { invoiceCount, quoteCount, totalRevenue };
   }, [productId, invoices, quotes]);

@@ -15,11 +15,23 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
+import type { Shipment, PurchaseOrder, Product as ProductDTO } from "@/lib/marketplace-types";
+
+interface RouteData {
+  id?: string;
+  name?: string;
+  origin?: string;
+  destination?: string;
+  status?: string;
+  carrier?: string | null;
+  trackingNumber?: string | null;
+  risk?: string;
+  delayDays?: number;
+}
 
 type FulfillmentSection = "routes" | "purchase-orders" | "shipments";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function ShipmentTracker({ shipment }: { shipment: any }) {
+function ShipmentTracker({ shipment }: { shipment: Shipment }) {
   const timeline = ["PREPARING", "PICKED_UP", "IN_TRANSIT", "CUSTOMS", "DELIVERED"];
   const currentIdx = timeline.indexOf(shipment.status || "PREPARING");
   const isDelayed = shipment.estimatedDelivery && new Date(shipment.estimatedDelivery) < new Date() && shipment.status !== "DELIVERED";
@@ -73,9 +85,8 @@ function ShipmentTracker({ shipment }: { shipment: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function RouteCard({ route }: { route: any }) {
-  const isRisky = route.risk === "high" || route.delayDays > 3;
+function RouteCard({ route }: { route: RouteData }) {
+  const isRisky = route.risk === "high" || (route.delayDays ?? 0) > 3;
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -85,7 +96,7 @@ function RouteCard({ route }: { route: any }) {
       {isRisky && (
         <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[11px]">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span>{route.delayDays ? `${route.delayDays}-day delay risk` : "High risk route"}</span>
+          <span>{(route.delayDays ?? 0) > 0 ? `${route.delayDays}-day delay risk` : "High risk route"}</span>
         </div>
       )}
       <div className="flex items-center justify-between">
@@ -115,17 +126,12 @@ export function CommerceFulfillmentTab({
   onEditPO,
   onCreatePO,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  shipments: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  purchaseOrders: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  products: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onEditShipment: (item: any) => void;
+  shipments: Shipment[];
+  purchaseOrders: PurchaseOrder[];
+  products: ProductDTO[];
+  onEditShipment: (item: Shipment) => void;
   onCreateShipment: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onEditPO: (item: any) => void;
+  onEditPO: (item: PurchaseOrder) => void;
   onCreatePO: () => void;
 }) {
   const [section, setSection] = useState<FulfillmentSection>("shipments");
@@ -134,8 +140,7 @@ export function CommerceFulfillmentTab({
   const { page: poPage, pageSize: poPageSize, setPage: setPoPage, setPageSize: setPoPageSize, totalPages: poTotal, paginated: paginatedPOs } = usePagination(purchaseOrders);
 
   const routeGroups = useMemo(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    const groups: Record<string, any[]> = {};
+    const groups: Record<string, Shipment[]> = {};
     for (const s of shipments) {
       const key = s.status || "PREPARING";
       if (!groups[key]) groups[key] = [];
@@ -202,8 +207,7 @@ export function CommerceFulfillmentTab({
             <EmptyState icon={Truck} title="No Shipments" description="Track shipments with carrier and tracking info here." />
           ) : (
             <>
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-              {paginatedShipments.map((s: any) => (
+              {paginatedShipments.map((s) => (
                 <div key={s.id} className="relative">
                   <ShipmentTracker shipment={s} />
                   <button
@@ -236,8 +240,7 @@ export function CommerceFulfillmentTab({
           ) : (
             <>
               <div className="space-y-2">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                {paginatedPOs.map((po: any) => (
+                {(paginatedPOs as Array<PurchaseOrder & { quantity?: string | number; unitCost?: string | number }>).map((po) => (
                   <motion.div
                     key={po.id}
                     initial={{ opacity: 0, y: 6 }}
@@ -267,7 +270,7 @@ export function CommerceFulfillmentTab({
                           <div className="text-right">
                             <p className="text-xs text-muted-foreground">Total</p>
                             <p className="text-sm font-semibold">
-                              {formatCurrency((parseFloat(po.unitCost) || 0) * (parseInt(po.quantity) || 0))}
+                              {formatCurrency((parseFloat(String(po.unitCost)) || 0) * (parseInt(String(po.quantity)) || 0))}
                             </p>
                           </div>
                         )}
@@ -297,8 +300,7 @@ export function CommerceFulfillmentTab({
               <div key={status}>
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">{status.replace(/_/g, " ")} ({group.length})</p>
                 <div className="space-y-2">
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                  {group.map((route: any) => (
+                  {group.map((route) => (
                     <RouteCard key={route.id} route={{ ...route, name: `${route.carrier || "Shipment"} — ${route.trackingNumber || route.id?.slice(0, 8)}` }} />
                   ))}
                 </div>

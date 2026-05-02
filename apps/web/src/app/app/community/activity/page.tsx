@@ -23,8 +23,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-const TYPE_ICONS: Record<NetworkActivityType, any> = {
+const TYPE_ICONS: Record<NetworkActivityType, React.ElementType> = {
   OPPORTUNITY_POSTED: Briefcase,
   OPPORTUNITY_AWARDED: CheckCircle2,
   PARTNERSHIP_FORMED: Link2,

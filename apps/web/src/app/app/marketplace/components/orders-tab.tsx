@@ -3,9 +3,15 @@
 import { motion } from "framer-motion";
 import { ShoppingCart, Mail, Phone, Calendar, Navigation } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
+import type { MarketplaceOrder } from "@/lib/marketplace-types";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-export function OrdersTab({ orders, onStatusUpdate }: { orders: any[]; onStatusUpdate: (id: string, status: string) => void }) {
+export function OrdersTab({
+  orders,
+  onStatusUpdate,
+}: {
+  orders: MarketplaceOrder[];
+  onStatusUpdate: (id: string, status: string) => void;
+}) {
   const statuses = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"];
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(orders);
 
@@ -14,8 +20,7 @@ export function OrdersTab({ orders, onStatusUpdate }: { orders: any[]; onStatusU
   }
   return (
     <div className="space-y-3">
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-      {paginated.map((order: any) => (
+      {paginated.map((order) => (
         <motion.div
           key={order.id}
           initial={{ opacity: 0, y: 8 }}
@@ -35,11 +40,12 @@ export function OrdersTab({ orders, onStatusUpdate }: { orders: any[]; onStatusU
                 {order.customerPhone && (
                   <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{order.customerPhone}</span>
                 )}
-                <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(order.createdAt)}</span>
+                <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(order.createdAt ?? "")}</span>
               </div>
               {order.shippingAddress && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Navigation className="w-3 h-3" />{order.shippingAddress}
+                  <Navigation className="w-3 h-3" />
+                  {typeof order.shippingAddress === "string" ? order.shippingAddress : JSON.stringify(order.shippingAddress)}
                 </p>
               )}
             </div>

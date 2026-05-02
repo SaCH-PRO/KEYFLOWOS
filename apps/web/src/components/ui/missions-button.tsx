@@ -206,8 +206,15 @@ export function MissionsButton() {
   useEffect(() => {
     fetchGamificationStats()
       .then((result) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-        if (result && result.data) setStats(result.data as any);
+        if (result && result.data) setStats(result.data as {
+          totalXp: number;
+          level: number;
+          currentXp: number;
+          xpToNextLevel: number;
+          streakDays: number;
+          achievements: { id: string; achieved: boolean }[];
+          challenges: { id: string; progress: number; target: number }[];
+        });
       })
       .catch(() => {});
   }, []);

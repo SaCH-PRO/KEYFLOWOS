@@ -91,8 +91,7 @@ export function ContactDetailInfo({ contact, relatedContacts, onSelectRelatedCon
   const hasAddress = !!(contact.addressLine1 || contact.addressLine2 || contact.city || contact.state || contact.postalCode || contact.country || contact.timezone);
   const hasPreferences = contact.marketingOptIn != null || contact.doNotContact != null || contact.lifecycleStage || contact.segment;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-  const customObj = (contact as any)?.custom;
+  const customObj = (contact as { custom?: unknown })?.custom;
 
   const customData = customObj && typeof customObj === "object" && !Array.isArray(customObj) ? customObj as Record<string, unknown> : null;
   const reservedKeys = new Set(["linkedinUrl", "instagramUrl", "twitterUrl", "referredBy", "nextScheduledInteraction"]);

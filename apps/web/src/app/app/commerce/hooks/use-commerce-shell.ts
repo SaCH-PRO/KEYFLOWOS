@@ -56,8 +56,7 @@ export function useCommerceShell() {
           fetchContacts(businessId),
           listQuotes(businessId),
           getGmailStatus(businessId),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-          apiGet<{ metaData: Record<string, any> }>(`/identity/businesses/${businessId}`),
+          apiGet<{ metaData: Record<string, unknown> }>(`/identity/businesses/${businessId}`),
         ]);
         setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
         setInvoices(invoicesRes.data ?? []);

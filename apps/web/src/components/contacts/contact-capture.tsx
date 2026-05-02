@@ -65,8 +65,10 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onDevi
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-    setDeviceSupported("contacts" in navigator && typeof (navigator as any).contacts?.select === "function");
+    setDeviceSupported(
+      "contacts" in navigator
+      && typeof (navigator as Navigator & { contacts?: { select?: unknown } }).contacts?.select === "function",
+    );
   }, []);
 
   const handleGoogleConnect = async () => {

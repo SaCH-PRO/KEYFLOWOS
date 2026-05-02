@@ -9,8 +9,7 @@ import type { Testimonial } from "./store-types";
 interface SocialProofPanelProps {
   storefrontConfig: StorefrontConfig;
   configSaving: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onConfigChange: (section: string, updates: Record<string, any>) => void;
+  onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => void;
 }
 

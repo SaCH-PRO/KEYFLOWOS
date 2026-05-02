@@ -17,6 +17,7 @@ import {
   Circle,
 } from "lucide-react";
 import { EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
+import type { Product as ProductDTO, ProductVariant, MarketplaceListing } from "@/lib/marketplace-types";
 
 function ReadinessDot({ ok, label }: { ok: boolean; label: string }) {
   return (
@@ -31,8 +32,7 @@ function ReadinessDot({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function VariantPill({ variant }: { variant: any }) {
+function VariantPill({ variant }: { variant: ProductVariant }) {
   return (
     <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10">
       {variant.name || variant.sku || "Variant"}
@@ -47,21 +47,17 @@ export function CommerceCatalogTab({
   onCreateProduct,
   onEditProduct,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  products: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  listings: any[];
+  products: ProductDTO[];
+  listings: MarketplaceListing[];
   onCreateProduct: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onEditProduct: (product: any) => void;
+  onEditProduct: (product: ProductDTO) => void;
 }) {
   const [search, setSearch] = useState("");
   const [filterModel, setFilterModel] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const listingsByProduct = useMemo(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    const map: Record<string, any[]> = {};
+    const map: Record<string, MarketplaceListing[]> = {};
     for (const l of listings) {
       if (l.productId) {
         if (!map[l.productId]) map[l.productId] = [];
@@ -149,8 +145,7 @@ export function CommerceCatalogTab({
       </div>
 
       <div className="space-y-2">
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-        {paginated.map((product: any) => {
+        {paginated.map((product) => {
           const productListings = listingsByProduct[product.id] || [];
           const variants = product.variants ?? [];
           const hasVariants = variants.length > 0;
@@ -205,7 +200,7 @@ export function CommerceCatalogTab({
                     {hasCost && (
                       <div className="text-right hidden sm:block">
                         <p className="text-[10px] text-muted-foreground">Price</p>
-                        <p className="text-sm font-semibold">${parseFloat(product.price || product.costPrice || 0).toFixed(2)}</p>
+                        <p className="text-sm font-semibold">${parseFloat(String(product.price ?? product.costPrice ?? 0)).toFixed(2)}</p>
                       </div>
                     )}
                     <span className={`text-[10px] font-semibold ${readinessColor}`}>{readinessScore}/4</span>
@@ -233,8 +228,7 @@ export function CommerceCatalogTab({
                         <Layers className="w-3 h-3" /> Variants
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                        {variants.map((v: any, i: number) => (
+                        {variants.map((v: ProductVariant, i: number) => (
                           <VariantPill key={i} variant={v} />
                         ))}
                       </div>
@@ -260,7 +254,7 @@ export function CommerceCatalogTab({
                       {[
                         { label: "Cost Price", value: product.costPrice },
                         { label: "Sell Price", value: product.price },
-                        { label: "Margin", value: product.price && product.costPrice ? `${(((parseFloat(product.price) - parseFloat(product.costPrice)) / parseFloat(product.price)) * 100).toFixed(1)}%` : "—" },
+                        { label: "Margin", value: product.price && product.costPrice ? `${(((parseFloat(String(product.price)) - parseFloat(String(product.costPrice))) / parseFloat(String(product.price))) * 100).toFixed(1)}%` : "—" },
                       ].map((item) => (
                         <div key={item.label} className="bg-white/3 rounded-xl p-2.5 text-center" style={{ background: "rgba(255,255,255,0.03)" }}>
                           <p className="text-[10px] text-muted-foreground">{item.label}</p>
@@ -277,8 +271,7 @@ export function CommerceCatalogTab({
                         <Tag className="w-3 h-3" /> Active Listings ({productListings.length})
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                        {productListings.map((l: any) => (
+                        {productListings.map((l) => (
                           <span key={l.id} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                             {l.marketReach || "LOCAL"}
                           </span>

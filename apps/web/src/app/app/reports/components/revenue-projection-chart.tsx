@@ -194,11 +194,10 @@ export function RevenueProjectionChart({
                     borderRadius: 8,
                     fontSize: 12,
                   }}
-                  formatter={((value: number, name: string) => [
-                    formatCurrency(value, currency),
+                  formatter={(value, name) => [
+                    formatCurrency(Number(value), currency),
                     name === "historical" ? "Historical" : "Projected",
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
-                  ]) as any}
+                  ]}
                   labelFormatter={(label) => {
                     if (label === "Today") return "Today (current)";
                     if (label.startsWith("-")) return `${label} ago`;

@@ -357,8 +357,7 @@ function NlSearchRenderer({ data }: { data: BookingsAiSearchResult }) {
 
       {results.length > 0 ? (
         <div className="space-y-1.5 max-h-64 overflow-y-auto">
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-          {results.slice(0, 20).map((r: any, i: number) => {
+          {(results as Array<{ contact?: { firstName?: string; lastName?: string; email?: string }; service?: { name?: string }; name?: string; status?: string; startTime?: string; price?: number }>).slice(0, 20).map((r, i: number) => {
             const contactName = r.contact
               ? [r.contact.firstName, r.contact.lastName].filter(Boolean).join(" ") || r.contact.email || "Walk-in"
               : r.name || "Unknown";

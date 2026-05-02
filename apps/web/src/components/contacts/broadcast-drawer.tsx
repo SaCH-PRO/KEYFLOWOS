@@ -83,8 +83,7 @@ export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectA
           drag="y"
           dragConstraints={{ top: 0, bottom: 0 }}
           dragElastic={{ top: 0, bottom: 0.6 }}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-          onDragEnd={(_: any, info: PanInfo) => {
+          onDragEnd={(_, info: PanInfo) => {
             if (info.offset.y > 100 || info.velocity.y > 500) onClose();
           }}
           onClick={(e) => e.stopPropagation()}

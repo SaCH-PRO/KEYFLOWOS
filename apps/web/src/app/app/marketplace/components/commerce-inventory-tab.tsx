@@ -14,6 +14,7 @@ import {
   Archive,
 } from "lucide-react";
 import { EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
+import type { Warehouse as WarehouseDTO, InventoryStock, Product as ProductDTO } from "@/lib/marketplace-types";
 
 type InventoryMode = "warehouses" | "stock";
 
@@ -49,14 +50,10 @@ export function CommerceInventoryTab({
   onAddInventory,
   onCreateWarehouse,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  warehouses: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  inventory: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  products: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onEditWarehouse: (item: any) => void;
+  warehouses: WarehouseDTO[];
+  inventory: InventoryStock[];
+  products: ProductDTO[];
+  onEditWarehouse: (item: WarehouseDTO) => void;
   onDeleteWarehouse: (id: string) => void;
   onAddInventory: () => void;
   onCreateWarehouse: () => void;
@@ -64,11 +61,10 @@ export function CommerceInventoryTab({
   const [mode, setMode] = useState<InventoryMode>("warehouses");
 
   const reorderAlerts = inventory.filter(
-    (inv) => inv.reorderLevel && inv.quantity <= inv.reorderLevel
+    (inv) => inv.reorderAt && inv.quantity <= inv.reorderAt
   );
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const productsById: Record<string, any> = {};
+  const productsById: Record<string, ProductDTO> = {};
   for (const p of products) productsById[p.id] = p;
 
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(inventory, 20);
@@ -137,10 +133,8 @@ export function CommerceInventoryTab({
       {mode === "warehouses" && (
         <div className="space-y-3">
           {warehouses.map((wh) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-            const whInventory = inventory.filter((inv: any) => inv.warehouseId === wh.id);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-            const totalUnits = whInventory.reduce((sum: number, inv: any) => sum + (inv.quantity || 0), 0);
+            const whInventory = inventory.filter((inv) => inv.warehouseId === wh.id);
+            const totalUnits = whInventory.reduce((sum, inv) => sum + (inv.quantity || 0), 0);
 
             return (
               <motion.div
@@ -188,10 +182,9 @@ export function CommerceInventoryTab({
                       Inventory
                     </div>
                     <div className="divide-y divide-white/5">
-                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                      {whInventory.map((inv: any) => {
+                      {whInventory.map((inv) => {
                         const product = productsById[inv.productId];
-                        const isLow = inv.reorderLevel && inv.quantity <= inv.reorderLevel;
+                        const isLow = inv.reorderAt && inv.quantity <= inv.reorderAt;
                         return (
                           <div key={inv.id} className="px-4 py-2.5 flex items-center justify-between">
                             <span className="text-xs">{product?.name || inv.product?.name || "Product"}</span>
@@ -202,7 +195,7 @@ export function CommerceInventoryTab({
                               <span className={`text-sm font-semibold ${isLow ? "text-amber-400" : ""}`}>
                                 {(inv.quantity || 0).toLocaleString()} units
                               </span>
-                              <InventoryModeTag quantity={inv.quantity || 0} reorderLevel={inv.reorderLevel} />
+                              <InventoryModeTag quantity={inv.quantity || 0} reorderLevel={inv.reorderAt ?? undefined} />
                             </div>
                           </div>
                         );
@@ -230,17 +223,16 @@ export function CommerceInventoryTab({
                   <span className="text-right">Status</span>
                 </div>
                 <div className="divide-y divide-white/5">
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                  {paginated.map((inv: any) => {
+                  {paginated.map((inv) => {
                     const product = productsById[inv.productId];
                     const warehouse = warehouses.find((w) => w.id === inv.warehouseId);
-                    const isLow = inv.reorderLevel && inv.quantity <= inv.reorderLevel;
+                    const isLow = inv.reorderAt && inv.quantity <= inv.reorderAt;
                     return (
                       <div key={inv.id} className="grid grid-cols-5 px-4 py-3 items-center">
                         <div className="col-span-2">
                           <p className="text-xs font-medium">{product?.name || inv.product?.name || "Product"}</p>
-                          {inv.reorderLevel && (
-                            <p className="text-[10px] text-muted-foreground">Reorder at {inv.reorderLevel}</p>
+                          {inv.reorderAt && (
+                            <p className="text-[10px] text-muted-foreground">Reorder at {inv.reorderAt}</p>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground truncate">{warehouse?.name || "—"}</p>
@@ -253,7 +245,7 @@ export function CommerceInventoryTab({
                           )}
                         </div>
                         <div className="flex justify-end">
-                          <InventoryModeTag quantity={inv.quantity || 0} reorderLevel={inv.reorderLevel} />
+                          <InventoryModeTag quantity={inv.quantity || 0} reorderLevel={inv.reorderAt ?? undefined} />
                         </div>
                       </div>
                     );

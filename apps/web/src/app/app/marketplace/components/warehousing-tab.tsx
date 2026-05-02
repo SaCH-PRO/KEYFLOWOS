@@ -3,6 +3,12 @@
 import { motion } from "framer-motion";
 import { Warehouse, Building2, Pencil, Trash2, AlertCircle, Layers } from "lucide-react";
 import { EmptyState } from "./marketplace-utils";
+import type { Warehouse as WarehouseDTO, InventoryStock } from "@/lib/marketplace-types";
+
+type InventoryRow = InventoryStock & {
+  reorderLevel?: number | null;
+  productName?: string | null;
+};
 
 export function WarehousingTab({
   warehouses,
@@ -11,12 +17,9 @@ export function WarehousingTab({
   onDelete,
   onAddInventory,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  warehouses: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  inventory: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onEdit: (item: any) => void;
+  warehouses: WarehouseDTO[];
+  inventory: InventoryRow[];
+  onEdit: (item: WarehouseDTO) => void;
   onDelete: (id: string) => void;
   onAddInventory: () => void;
 }) {
@@ -27,8 +30,7 @@ export function WarehousingTab({
     <div className="space-y-4">
       <div className="space-y-3">
         {warehouses.map((wh) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-          const whInventory = inventory.filter((inv: any) => inv.warehouseId === wh.id);
+          const whInventory = inventory.filter((inv) => inv.warehouseId === wh.id);
           return (
             <motion.div
               key={wh.id}
@@ -60,9 +62,9 @@ export function WarehousingTab({
                 <div className="border-t border-white/5">
                   <div className="px-4 py-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Inventory</div>
                   <div className="divide-y divide-white/5">
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                    {whInventory.map((inv: any) => {
-                      const isLow = inv.reorderLevel && inv.quantity <= inv.reorderLevel;
+                    {whInventory.map((inv) => {
+                      const reorder = inv.reorderLevel ?? inv.reorderAt;
+                      const isLow = reorder != null && inv.quantity <= reorder;
                       return (
                         <div key={inv.id} className="px-4 py-2 flex items-center justify-between">
                           <span className="text-xs">{inv.product?.name || inv.productName || "Product"}</span>

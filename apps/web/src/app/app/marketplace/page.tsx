@@ -27,7 +27,16 @@ import { CommerceFulfillmentTab } from "./components/commerce-fulfillment-tab";
 import { InventoryCommandCenter } from "./components/inventory-command-center";
 import { CommerceSuppliersTab } from "./components/commerce-suppliers-tab";
 import { CommerceInsightsTab } from "./components/commerce-insights-tab";
-import { ProductEditorModal } from "./components/product-editor-modal";
+import { ProductEditorModal, type ProductFormDraft } from "./components/product-editor-modal";
+import type {
+  Product,
+  MarketplaceListing,
+  MarketplaceOrder,
+  Shipment,
+  PurchaseOrder,
+  Warehouse as WarehouseType,
+  InventoryStock,
+} from "@/lib/marketplace-types";
 
 type Tab = "catalog" | "listings" | "orders" | "fulfillment" | "inventory" | "suppliers" | "insights";
 
@@ -46,34 +55,23 @@ export default function MarketplacePage() {
   const [activeTab, setActiveTab] = useState<Tab>("catalog");
   const [loading, setLoading] = useState(true);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [products, setProducts] = useState<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [listings, setListings] = useState<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [orders, setOrders] = useState<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [shipments, setShipments] = useState<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [warehouses, setWarehouses] = useState<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [inventory, setInventory] = useState<any[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [listings, setListings] = useState<MarketplaceListing[]>([]);
+  const [orders, setOrders] = useState<MarketplaceOrder[]>([]);
+  const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseType[]>([]);
+  const [inventory, setInventory] = useState<InventoryStock[]>([]);
 
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<string>("");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [editingItem, setEditingItem] = useState<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [formData, setFormData] = useState<Record<string, any>>({});
+  const [editingItem, setEditingItem] = useState<{ id?: string; [k: string]: unknown } | null>(null);
+  const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
 
   const [showProductEditor, setShowProductEditor] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [editingProduct, setEditingProduct] = useState<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [productForm, setProductForm] = useState<Record<string, any>>({});
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [productForm, setProductForm] = useState<ProductFormDraft>({});
   const [productSaving, setProductSaving] = useState(false);
 
   const [showGuide, setShowGuide] = useState(false);
@@ -97,90 +95,72 @@ export default function MarketplacePage() {
         switch (tab) {
           case "catalog": {
             const [prodRes, listRes] = await Promise.all([
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${commercePath}/products`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${basePath}/listings`),
+              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
+              apiGet<{ data?: MarketplaceListing[] } | MarketplaceListing[]>(`${basePath}/listings`),
             ]);
-            if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
-            if (listRes.data) setListings(listRes.data.data ?? listRes.data);
+            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
+            if (listRes.data) setListings((Array.isArray(listRes.data) ? listRes.data : listRes.data.data) ?? []);
             break;
           }
           case "listings": {
             const [listRes, prodRes] = await Promise.all([
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${basePath}/listings`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${commercePath}/products`),
+              apiGet<{ data?: MarketplaceListing[] } | MarketplaceListing[]>(`${basePath}/listings`),
+              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
             ]);
-            if (listRes.data) setListings(listRes.data.data ?? listRes.data);
-            if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
+            if (listRes.data) setListings((Array.isArray(listRes.data) ? listRes.data : listRes.data.data) ?? []);
+            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
             break;
           }
           case "orders": {
             const [ordRes, prodRes] = await Promise.all([
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${basePath}/orders`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${commercePath}/products`),
+              apiGet<{ data?: MarketplaceOrder[] } | MarketplaceOrder[]>(`${basePath}/orders`),
+              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
             ]);
-            if (ordRes.data) setOrders(ordRes.data.data ?? ordRes.data);
-            if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
+            if (ordRes.data) setOrders((Array.isArray(ordRes.data) ? ordRes.data : ordRes.data.data) ?? []);
+            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
             break;
           }
           case "fulfillment": {
             const [shipRes, poRes, prodRes] = await Promise.all([
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${basePath}/shipments`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${basePath}/purchase-orders`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${commercePath}/products`),
+              apiGet<{ data?: Shipment[] } | Shipment[]>(`${basePath}/shipments`),
+              apiGet<{ data?: PurchaseOrder[] } | PurchaseOrder[]>(`${basePath}/purchase-orders`),
+              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
             ]);
-            if (shipRes.data) setShipments(shipRes.data.data ?? shipRes.data);
-            if (poRes.data) setPurchaseOrders(poRes.data.data ?? poRes.data);
-            if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
+            if (shipRes.data) setShipments((Array.isArray(shipRes.data) ? shipRes.data : shipRes.data.data) ?? []);
+            if (poRes.data) setPurchaseOrders((Array.isArray(poRes.data) ? poRes.data : poRes.data.data) ?? []);
+            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
             break;
           }
           case "inventory": {
             const [whRes, invRes, prodRes] = await Promise.all([
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any[]>(`${basePath}/warehouses`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any[]>(`${basePath}/inventory`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${commercePath}/products`),
+              apiGet<WarehouseType[]>(`${basePath}/warehouses`),
+              apiGet<InventoryStock[]>(`${basePath}/inventory`),
+              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
             ]);
             if (whRes.data) setWarehouses(whRes.data);
             if (invRes.data) setInventory(invRes.data);
-            if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
+            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
             break;
           }
           case "suppliers": {
             const [poRes, prodRes] = await Promise.all([
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${basePath}/purchase-orders`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${commercePath}/products`),
+              apiGet<{ data?: PurchaseOrder[] } | PurchaseOrder[]>(`${basePath}/purchase-orders`),
+              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
             ]);
-            if (poRes.data) setPurchaseOrders(poRes.data.data ?? poRes.data);
-            if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
+            if (poRes.data) setPurchaseOrders((Array.isArray(poRes.data) ? poRes.data : poRes.data.data) ?? []);
+            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
             break;
           }
           case "insights": {
             const [prodRes, listRes, ordRes, invRes] = await Promise.all([
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${commercePath}/products`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${basePath}/listings`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any>(`${basePath}/orders`),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              apiGet<any[]>(`${basePath}/inventory`),
+              apiGet<{ data?: Product[] } | Product[]>(`${commercePath}/products`),
+              apiGet<{ data?: MarketplaceListing[] } | MarketplaceListing[]>(`${basePath}/listings`),
+              apiGet<{ data?: MarketplaceOrder[] } | MarketplaceOrder[]>(`${basePath}/orders`),
+              apiGet<InventoryStock[]>(`${basePath}/inventory`),
             ]);
-            if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
-            if (listRes.data) setListings(listRes.data.data ?? listRes.data);
-            if (ordRes.data) setOrders(ordRes.data.data ?? ordRes.data);
+            if (prodRes.data) setProducts((Array.isArray(prodRes.data) ? prodRes.data : prodRes.data.data) ?? []);
+            if (listRes.data) setListings((Array.isArray(listRes.data) ? listRes.data : listRes.data.data) ?? []);
+            if (ordRes.data) setOrders((Array.isArray(ordRes.data) ? ordRes.data : ordRes.data.data) ?? []);
             if (invRes.data) setInventory(invRes.data);
             break;
           }
@@ -195,24 +175,21 @@ export default function MarketplacePage() {
     void loadTab(activeTab);
   }, [activeTab, loadTab]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const openCreate = (type: string, defaults: Record<string, any> = {}) => {
+  const openCreate = (type: string, defaults: Record<string, unknown> = {}) => {
     setModalType(type);
     setEditingItem(null);
     setFormData(defaults);
     setShowModal(true);
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const openEdit = (type: string, item: any) => {
+  const openEdit = <T extends { id?: string }>(type: string, item: T) => {
     setModalType(type);
-    setEditingItem(item);
-    setFormData({ ...item });
+    setEditingItem(item as { id?: string; [k: string]: unknown });
+    setFormData({ ...(item as Record<string, unknown>) });
     setShowModal(true);
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const openProductEditor = (product: any | null = null) => {
+  const openProductEditor = (product: Product | null = null) => {
     setEditingProduct(product);
     setProductForm(product ? { ...product } : {});
     setShowProductEditor(true);
@@ -309,8 +286,7 @@ export default function MarketplacePage() {
     } catch {}
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const handleUpdateListing = async (id: string, data: any) => {
+  const handleUpdateListing = async (id: string, data: Partial<MarketplaceListing>) => {
     if (!businessId) return;
     try {
       await apiPatch(`${basePath}/listings/${id}`, data);
@@ -318,8 +294,7 @@ export default function MarketplacePage() {
     } catch {}
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const updateForm = (key: string, value: any) => setFormData((prev) => ({ ...prev, [key]: value }));
+  const updateForm = (key: string, value: unknown) => setFormData((prev) => ({ ...prev, [key]: value }));
 
   if (loading && activeTab === "catalog" && products.length === 0) return <DashboardSkeleton />;
 
@@ -560,20 +535,19 @@ export default function MarketplacePage() {
           <>
             <FormField label="Product">
               <select
-                value={formData.productId || ""}
+                value={String(formData.productId ?? "")}
                 onChange={(e) => updateForm("productId", e.target.value)}
                 className={selectClass}
               >
                 <option value="">Select a product...</option>
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                {products.map((p: any) => (
+                {products.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
             </FormField>
             <FormField label="Title (optional override)">
               <input
-                value={formData.title || ""}
+                value={String(formData.title ?? "")}
                 onChange={(e) => updateForm("title", e.target.value)}
                 className={inputClass}
                 placeholder="Custom listing title"
@@ -581,7 +555,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Fulfillment Strategy">
               <select
-                value={formData.fulfillmentStrategy || ""}
+                value={String(formData.fulfillmentStrategy ?? "")}
                 onChange={(e) => updateForm("fulfillmentStrategy", e.target.value)}
                 className={selectClass}
               >
@@ -597,7 +571,7 @@ export default function MarketplacePage() {
               <FormField label="Price">
                 <input
                   type="number"
-                  value={formData.price || ""}
+                  value={String(formData.price ?? "")}
                   onChange={(e) => updateForm("price", e.target.value)}
                   className={inputClass}
                   placeholder="25.00"
@@ -606,7 +580,7 @@ export default function MarketplacePage() {
               <FormField label="Compare-at Price">
                 <input
                   type="number"
-                  value={formData.compareAtPrice || ""}
+                  value={String(formData.compareAtPrice ?? "")}
                   onChange={(e) => updateForm("compareAtPrice", e.target.value)}
                   className={inputClass}
                   placeholder="30.00"
@@ -615,7 +589,7 @@ export default function MarketplacePage() {
             </div>
             <FormField label="Market Reach">
               <select
-                value={formData.marketReach || "LOCAL"}
+                value={typeof formData.marketReach === "string" && formData.marketReach ? formData.marketReach : "LOCAL"}
                 onChange={(e) => updateForm("marketReach", e.target.value)}
                 className={selectClass}
               >
@@ -626,7 +600,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Status">
               <select
-                value={formData.status || "ACTIVE"}
+                value={typeof formData.status === "string" && formData.status ? formData.status : "ACTIVE"}
                 onChange={(e) => updateForm("status", e.target.value)}
                 className={selectClass}
               >
@@ -636,7 +610,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Countries (comma-separated)">
               <input
-                value={formData.countries || ""}
+                value={String(formData.countries ?? "")}
                 onChange={(e) => updateForm("countries", e.target.value)}
                 className={inputClass}
                 placeholder="TT, JM, BB..."
@@ -644,7 +618,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="HS Code">
               <input
-                value={formData.hsCode || ""}
+                value={String(formData.hsCode ?? "")}
                 onChange={(e) => updateForm("hsCode", e.target.value)}
                 className={inputClass}
                 placeholder="8471.30"
@@ -657,7 +631,7 @@ export default function MarketplacePage() {
           <>
             <FormField label="Order ID">
               <input
-                value={formData.orderId || ""}
+                value={String(formData.orderId ?? "")}
                 onChange={(e) => updateForm("orderId", e.target.value)}
                 className={inputClass}
                 placeholder="Order ID"
@@ -665,7 +639,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Carrier">
               <input
-                value={formData.carrier || ""}
+                value={String(formData.carrier ?? "")}
                 onChange={(e) => updateForm("carrier", e.target.value)}
                 className={inputClass}
                 placeholder="FedEx, DHL, UPS..."
@@ -673,7 +647,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Tracking Number">
               <input
-                value={formData.trackingNumber || ""}
+                value={String(formData.trackingNumber ?? "")}
                 onChange={(e) => updateForm("trackingNumber", e.target.value)}
                 className={inputClass}
                 placeholder="1Z999AA10123456784"
@@ -681,7 +655,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Status">
               <select
-                value={formData.status || "PREPARING"}
+                value={typeof formData.status === "string" && formData.status ? formData.status : "PREPARING"}
                 onChange={(e) => updateForm("status", e.target.value)}
                 className={selectClass}
               >
@@ -693,7 +667,7 @@ export default function MarketplacePage() {
             <FormField label="Estimated Delivery">
               <input
                 type="date"
-                value={formData.estimatedDelivery || ""}
+                value={String(formData.estimatedDelivery ?? "")}
                 onChange={(e) => updateForm("estimatedDelivery", e.target.value)}
                 className={inputClass}
               />
@@ -705,7 +679,7 @@ export default function MarketplacePage() {
           <>
             <FormField label="Supplier Name">
               <input
-                value={formData.supplierName || ""}
+                value={String(formData.supplierName ?? "")}
                 onChange={(e) => updateForm("supplierName", e.target.value)}
                 className={inputClass}
                 placeholder="Supplier Co."
@@ -713,7 +687,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Supplier Email">
               <input
-                value={formData.supplierEmail || ""}
+                value={String(formData.supplierEmail ?? "")}
                 onChange={(e) => updateForm("supplierEmail", e.target.value)}
                 className={inputClass}
                 placeholder="supplier@co.com"
@@ -721,13 +695,12 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Product">
               <select
-                value={formData.productId || ""}
+                value={String(formData.productId ?? "")}
                 onChange={(e) => updateForm("productId", e.target.value)}
                 className={selectClass}
               >
                 <option value="">Select product...</option>
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                {products.map((p: any) => (
+                {products.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
@@ -736,7 +709,7 @@ export default function MarketplacePage() {
               <FormField label="Quantity">
                 <input
                   type="number"
-                  value={formData.quantity || ""}
+                  value={String(formData.quantity ?? "")}
                   onChange={(e) => updateForm("quantity", e.target.value)}
                   className={inputClass}
                   placeholder="100"
@@ -745,7 +718,7 @@ export default function MarketplacePage() {
               <FormField label="Unit Cost">
                 <input
                   type="number"
-                  value={formData.unitCost || ""}
+                  value={String(formData.unitCost ?? "")}
                   onChange={(e) => updateForm("unitCost", e.target.value)}
                   className={inputClass}
                   placeholder="25.00"
@@ -755,14 +728,14 @@ export default function MarketplacePage() {
             <FormField label="Expected Delivery">
               <input
                 type="date"
-                value={formData.expectedDelivery || ""}
+                value={String(formData.expectedDelivery ?? "")}
                 onChange={(e) => updateForm("expectedDelivery", e.target.value)}
                 className={inputClass}
               />
             </FormField>
             <FormField label="Status">
               <select
-                value={formData.status || "DRAFT"}
+                value={typeof formData.status === "string" && formData.status ? formData.status : "DRAFT"}
                 onChange={(e) => updateForm("status", e.target.value)}
                 className={selectClass}
               >
@@ -778,7 +751,7 @@ export default function MarketplacePage() {
           <>
             <FormField label="Warehouse Name">
               <input
-                value={formData.name || ""}
+                value={String(formData.name ?? "")}
                 onChange={(e) => updateForm("name", e.target.value)}
                 className={inputClass}
                 placeholder="Main Warehouse"
@@ -786,7 +759,7 @@ export default function MarketplacePage() {
             </FormField>
             <FormField label="Address">
               <input
-                value={formData.address || ""}
+                value={String(formData.address ?? "")}
                 onChange={(e) => updateForm("address", e.target.value)}
                 className={inputClass}
                 placeholder="123 Industrial Dr"
@@ -795,7 +768,7 @@ export default function MarketplacePage() {
             <div className="grid grid-cols-2 gap-3">
               <FormField label="City">
                 <input
-                  value={formData.city || ""}
+                  value={String(formData.city ?? "")}
                   onChange={(e) => updateForm("city", e.target.value)}
                   className={inputClass}
                   placeholder="Port of Spain"
@@ -803,7 +776,7 @@ export default function MarketplacePage() {
               </FormField>
               <FormField label="Country">
                 <input
-                  value={formData.country || ""}
+                  value={String(formData.country ?? "")}
                   onChange={(e) => updateForm("country", e.target.value)}
                   className={inputClass}
                   placeholder="Trinidad & Tobago"
@@ -813,7 +786,7 @@ export default function MarketplacePage() {
             <FormField label="Capacity">
               <input
                 type="number"
-                value={formData.capacity || ""}
+                value={String(formData.capacity ?? "")}
                 onChange={(e) => updateForm("capacity", e.target.value)}
                 className={inputClass}
                 placeholder="1000"
@@ -826,26 +799,24 @@ export default function MarketplacePage() {
           <>
             <FormField label="Warehouse">
               <select
-                value={formData.warehouseId || ""}
+                value={String(formData.warehouseId ?? "")}
                 onChange={(e) => updateForm("warehouseId", e.target.value)}
                 className={selectClass}
               >
                 <option value="">Select warehouse...</option>
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                {warehouses.map((w: any) => (
+                {warehouses.map((w) => (
                   <option key={w.id} value={w.id}>{w.name}</option>
                 ))}
               </select>
             </FormField>
             <FormField label="Product">
               <select
-                value={formData.productId || ""}
+                value={String(formData.productId ?? "")}
                 onChange={(e) => updateForm("productId", e.target.value)}
                 className={selectClass}
               >
                 <option value="">Select product...</option>
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                {products.map((p: any) => (
+                {products.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
@@ -854,7 +825,7 @@ export default function MarketplacePage() {
               <FormField label="Quantity">
                 <input
                   type="number"
-                  value={formData.quantity || ""}
+                  value={String(formData.quantity ?? "")}
                   onChange={(e) => updateForm("quantity", e.target.value)}
                   className={inputClass}
                   placeholder="100"
@@ -863,7 +834,7 @@ export default function MarketplacePage() {
               <FormField label="Reserved">
                 <input
                   type="number"
-                  value={formData.reserved || ""}
+                  value={String(formData.reserved ?? "")}
                   onChange={(e) => updateForm("reserved", e.target.value)}
                   className={inputClass}
                   placeholder="0"
@@ -872,7 +843,7 @@ export default function MarketplacePage() {
               <FormField label="Reorder Level">
                 <input
                   type="number"
-                  value={formData.reorderLevel || ""}
+                  value={String(formData.reorderLevel ?? "")}
                   onChange={(e) => updateForm("reorderLevel", e.target.value)}
                   className={inputClass}
                   placeholder="10"

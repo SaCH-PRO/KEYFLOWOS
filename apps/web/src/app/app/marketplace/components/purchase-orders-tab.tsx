@@ -3,17 +3,27 @@
 import { motion } from "framer-motion";
 import { ClipboardList, Mail, Calendar, Pencil } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
+import type { PurchaseOrder } from "@/lib/marketplace-types";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-export function PurchaseOrdersTab({ purchaseOrders, onEdit }: { purchaseOrders: any[]; onEdit: (item: any) => void }) {
+type PurchaseOrderRow = PurchaseOrder & {
+  quantity?: number | string;
+  unitCost?: number | string;
+};
+
+export function PurchaseOrdersTab({
+  purchaseOrders,
+  onEdit,
+}: {
+  purchaseOrders: PurchaseOrderRow[];
+  onEdit: (item: PurchaseOrderRow) => void;
+}) {
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(purchaseOrders);
   if (purchaseOrders.length === 0) {
     return <EmptyState icon={ClipboardList} title="No Purchase Orders" description="Create purchase orders to track supplier orders, deliveries, and costs." />;
   }
   return (
     <div className="space-y-3">
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-      {paginated.map((po: any) => (
+      {paginated.map((po) => (
         <motion.div
           key={po.id}
           initial={{ opacity: 0, y: 8 }}
@@ -36,7 +46,7 @@ export function PurchaseOrdersTab({ purchaseOrders, onEdit }: { purchaseOrders: 
               {po.unitCost && po.quantity && (
                 <div className="text-right">
                   <p className="text-xs text-muted-foreground">Total</p>
-                  <p className="text-sm font-semibold">{formatCurrency((parseFloat(po.unitCost) || 0) * (parseInt(po.quantity) || 0))}</p>
+                  <p className="text-sm font-semibold">{formatCurrency((parseFloat(String(po.unitCost)) || 0) * (parseInt(String(po.quantity)) || 0))}</p>
                 </div>
               )}
               <button onClick={() => onEdit(po)} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors">

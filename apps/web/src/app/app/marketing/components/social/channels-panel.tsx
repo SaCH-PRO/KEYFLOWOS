@@ -229,8 +229,11 @@ export function ChannelsPanel() {
 
   async function handleTestConnection(platform: string) {
     setTestLoading(platform);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    setTestResults((prev) => ({ ...prev, [platform]: undefined as any }));
+    setTestResults((prev) => {
+      const next = { ...prev };
+      delete next[platform];
+      return next;
+    });
     const bId = getStoredBusinessId() || undefined;
     const { data, error: testErr } = await testSocialConnection(platform, bId);
     if (testErr) {

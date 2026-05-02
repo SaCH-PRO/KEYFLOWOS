@@ -295,24 +295,21 @@ export default function QuotesPanel({
   });
 
   function addQuoteItem() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    setQuoteForm((f: any) => ({
+    setQuoteForm((f) => ({
       ...f,
       items: [...f.items, { id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
     }));
   }
 
   function removeQuoteItem(itemId: string) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    setQuoteForm((f: any) => ({
+    setQuoteForm((f) => ({
       ...f,
       items: f.items.filter((item: InvoiceLineItem) => item.id !== itemId),
     }));
   }
 
   function updateQuoteItem(itemId: string, field: keyof InvoiceLineItem, value: string | boolean) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    setQuoteForm((f: any) => ({
+    setQuoteForm((f) => ({
       ...f,
       items: f.items.map((item: InvoiceLineItem) =>
         item.id === itemId ? { ...item, [field]: value } : item
@@ -322,8 +319,7 @@ export default function QuotesPanel({
 
   function selectProductForQuoteItem(itemId: string, productId: string) {
     if (productId === "__NEW__") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      setQuoteForm((f: any) => ({
+      setQuoteForm((f) => ({
         ...f,
         items: f.items.map((item: InvoiceLineItem) =>
           item.id === itemId
@@ -344,8 +340,7 @@ export default function QuotesPanel({
     }
     const product = products.find((p) => p.id === productId);
     if (product) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      setQuoteForm((f: any) => ({
+      setQuoteForm((f) => ({
         ...f,
         items: f.items.map((item: InvoiceLineItem) =>
           item.id === itemId
@@ -361,8 +356,7 @@ export default function QuotesPanel({
         ),
       }));
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      setQuoteForm((f: any) => ({
+      setQuoteForm((f) => ({
         ...f,
         items: f.items.map((item: InvoiceLineItem) =>
           item.id === itemId
@@ -405,8 +399,7 @@ export default function QuotesPanel({
       businessId,
       quoteId: quote.id,
       contactId: quote.contactId,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      items: (quote.items ?? []).map((item: any) => ({
+      items: (quote.items ?? []).map((item) => ({
         description: item.description,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -467,8 +460,7 @@ export default function QuotesPanel({
 
   const { filtered: filteredQuotes } = useCommerceSearch(
     statusFiltered,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    (q) => `${q.quoteNumber} ${q.contact?.firstName ?? ""} ${q.contact?.lastName ?? ""} ${q.contact?.email ?? ""} ${(q.items ?? []).map((i: any) => `${i.description ?? ""}`).join(" ")} ${q.notes ?? ""} ${Number(q.total).toFixed(2)}`,
+    (q) => `${q.quoteNumber} ${q.contact?.firstName ?? ""} ${q.contact?.lastName ?? ""} ${q.contact?.email ?? ""} ${(q.items ?? []).map((i) => `${i.description ?? ""}`).join(" ")} ${q.notes ?? ""} ${Number(q.total).toFixed(2)}`,
     quoteSearch,
   );
 
@@ -548,8 +540,7 @@ export default function QuotesPanel({
     setQuoteForm({
       contactId: quote.contactId,
       expiryDate: quote.expiryDate ? quote.expiryDate.split("T")[0] : "",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      items: (quote.items ?? []).map((item: any) => ({
+      items: (quote.items ?? []).map((item) => ({
         id: item.id,
         productId: item.productId ?? "",
         description: item.description,
@@ -643,8 +634,7 @@ export default function QuotesPanel({
     setQuoteForm({
       contactId: quote.contactId || "",
       expiryDate: "",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      items: (quote.items ?? []).map((item: any) => ({
+      items: (quote.items ?? []).map((item) => ({
         id: generateItemId(),
         productId: item.productId ?? "",
         description: item.description,
@@ -745,28 +735,22 @@ export default function QuotesPanel({
         products={products}
         currency={currency}
         contactId={quoteForm.contactId}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        onContactChange={(id) => setQuoteForm((f: any) => ({ ...f, contactId: id }))}
+        onContactChange={(id) => setQuoteForm((f) => ({ ...f, contactId: id }))}
         dateValue={quoteForm.expiryDate}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        onDateChange={(v) => setQuoteForm((f: any) => ({ ...f, expiryDate: v }))}
+        onDateChange={(v) => setQuoteForm((f) => ({ ...f, expiryDate: v }))}
         items={quoteForm.items}
         onAddItem={addQuoteItem}
         onRemoveItem={removeQuoteItem}
         onUpdateItem={updateQuoteItem}
         onSelectProduct={selectProductForQuoteItem}
         taxRate={quoteForm.taxRate}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        onTaxRateChange={(v) => setQuoteForm((f: any) => ({ ...f, taxRate: v }))}
+        onTaxRateChange={(v) => setQuoteForm((f) => ({ ...f, taxRate: v }))}
         discountType={quoteForm.discountType}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        onDiscountTypeChange={(v) => setQuoteForm((f: any) => ({ ...f, discountType: v }))}
+        onDiscountTypeChange={(v) => setQuoteForm((f) => ({ ...f, discountType: v }))}
         discountValue={quoteForm.discountValue}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        onDiscountValueChange={(v) => setQuoteForm((f: any) => ({ ...f, discountValue: v }))}
+        onDiscountValueChange={(v) => setQuoteForm((f) => ({ ...f, discountValue: v }))}
         notes={quoteForm.notes}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        onNotesChange={(v) => setQuoteForm((f: any) => ({ ...f, notes: v }))}
+        onNotesChange={(v) => setQuoteForm((f) => ({ ...f, notes: v }))}
         originLabel={crossModuleOriginLabel}
         originRoute={crossModuleOriginRoute}
       />
@@ -1013,8 +997,7 @@ export default function QuotesPanel({
                 badges={cardBadges}
                 selected={selectedQuote?.id === quote.id}
                 onClick={() => setSelectedQuote(quote)}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                linkedService={(quote.items ?? []).find((item: any) => item.description)?.description?.slice(0, 30) || null}
+                linkedService={(quote.items ?? []).find((item) => item.description)?.description?.slice(0, 30) || null}
                 onViewContact={onViewContact && quote.contactId ? () => onViewContact(quote.contactId!) : undefined}
                 smartCTA={
                   <button

@@ -3348,8 +3348,7 @@ export interface StorefrontSection {
   visible: boolean;
   type?: StorefrontSectionType;
   enabled?: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  config?: Record<string, any>;
+  config?: Record<string, unknown>;
 }
 
 export interface FaqEntry {
@@ -3983,19 +3982,42 @@ export async function fetchCashFlowForecast(businessId: string, days = 30): Prom
 // ---
 // FLOW AI BOT
 // ---
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  name?: string;
+  toolCallId?: string;
+}
+
+export interface FlowSessionSummary {
+  id: string;
+  businessId: string;
+  title?: string | null;
+  lastMessageAt?: string | null;
+  messageCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface BusinessSummary {
+  id: string;
+  name: string;
+  logoUrl?: string;
+  headline?: string;
+  industry?: string;
+}
+
 export interface FlowToolCall {
   id: string;
   name: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  arguments: Record<string, any>;
+  arguments: Record<string, unknown>;
   riskLevel: 'low' | 'medium' | 'high';
 }
 
 export interface FlowToolResult {
   toolCallId: string;
   name: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  result: any;
+  result: unknown;
   changedEntities: string[];
   followOnSuggestions: string[];
   family: string;
@@ -4007,8 +4029,7 @@ export interface FlowToolResult {
 export interface FlowPendingConfirmation {
   toolCallId: string;
   name: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  arguments: Record<string, any>;
+  arguments: Record<string, unknown>;
   description: string;
   riskLevel: 'low' | 'medium' | 'high';
 }
@@ -4030,17 +4051,14 @@ export interface FlowChatResponse {
 export async function sendFlowChat(
   businessId: string,
   message: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  history?: any[],
+  history?: ChatMessage[],
   pendingConfirmation?: {
     toolCallId: string;
     confirmed: boolean;
     toolName?: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-    toolArgs?: Record<string, any>;
+    toolArgs?: Record<string, unknown>;
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  pageContext?: Record<string, any>,
+  pageContext?: Record<string, unknown>,
 ): Promise<ApiResult<FlowChatResponse>> {
   return apiPost<FlowChatResponse>({
     path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/chat`,
@@ -4052,8 +4070,7 @@ export async function confirmFlowAction(
   businessId: string,
   toolCallId: string,
   toolName: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  toolArgs: Record<string, any>,
+  toolArgs: Record<string, unknown>,
   confirmed: boolean,
 ): Promise<ApiResult<FlowChatResponse>> {
   return apiPost<FlowChatResponse>({
@@ -4062,10 +4079,8 @@ export async function confirmFlowAction(
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-export async function fetchFlowSessions(businessId: string): Promise<ApiResult<any[]>> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  return apiGetSimple<any[]>(`/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions`);
+export async function fetchFlowSessions(businessId: string): Promise<ApiResult<FlowSessionSummary[]>> {
+  return apiGetSimple<FlowSessionSummary[]>(`/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions`);
 }
 
 export async function clearFlowSession(businessId: string, sessionId: string): Promise<ApiResult<{ success: boolean }>> {
@@ -5761,8 +5776,7 @@ export interface CommunityNotificationItem {
   body?: string | null;
   referenceId?: string | null;
   referenceType?: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  data?: Record<string, any> | null;
+  data?: Record<string, unknown> | null;
   isRead: boolean;
   createdAt: string;
 }
@@ -6112,10 +6126,8 @@ export async function sendBusinessMessage(
 export async function fetchMessageThreads(businessId: string): Promise<ApiResult<MessageThread[]>> {
   return apiGetSimple<MessageThread[]>(`/businesses/${encodeURIComponent(businessId)}/community/messages/threads`);
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-export async function fetchMessageThread(businessId: string, otherBusinessId: string): Promise<ApiResult<{ messages: BusinessMessageItem[]; otherBusiness: any }>> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  return apiGetSimple<{ messages: BusinessMessageItem[]; otherBusiness: any }>(`/businesses/${encodeURIComponent(businessId)}/community/messages/thread/${encodeURIComponent(otherBusinessId)}`);
+export async function fetchMessageThread(businessId: string, otherBusinessId: string): Promise<ApiResult<{ messages: BusinessMessageItem[]; otherBusiness: BusinessSummary }>> {
+  return apiGetSimple<{ messages: BusinessMessageItem[]; otherBusiness: BusinessSummary }>(`/businesses/${encodeURIComponent(businessId)}/community/messages/thread/${encodeURIComponent(otherBusinessId)}`);
 }
 export async function saveBusinessToShortlist(businessId: string, savedBusinessId: string, note?: string): Promise<ApiResult<SavedBusinessItem>> {
   return apiPost<SavedBusinessItem>({ path: `/businesses/${encodeURIComponent(businessId)}/community/saved`, body: { savedBusinessId, note } });
@@ -6174,8 +6186,7 @@ export async function fetchCommunityDirectory(params?: { search?: string; indust
 export interface SimulationResult {
   simulation: string;
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-export async function runSimulation(businessId: string, scenario: string, variables?: Record<string, any>): Promise<ApiResult<SimulationResult>> {
+export async function runSimulation(businessId: string, scenario: string, variables?: Record<string, unknown>): Promise<ApiResult<SimulationResult>> {
   return apiPost<SimulationResult>({ path: `/businesses/${encodeURIComponent(businessId)}/ai/simulate`, body: { scenario, variables } });
 }
 
@@ -6246,8 +6257,7 @@ export interface ContactList {
   description?: string | null;
   color?: string | null;
   type: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  filters?: any;
+  filters?: unknown;
   contactIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -6276,8 +6286,7 @@ export async function fetchContactLists(businessId: string = DEFAULT_BUSINESS_ID
 
 export async function createContactList(
   businessId: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  data: { name: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] },
+  data: { name: string; description?: string; color?: string; type?: string; filters?: unknown; contactIds?: string[] },
 ): Promise<ApiResult<ContactList>> {
   return apiPost<ContactList>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/lists`,
@@ -6288,8 +6297,7 @@ export async function createContactList(
 export async function updateContactList(
   businessId: string,
   listId: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  data: { name?: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] },
+  data: { name?: string; description?: string; color?: string; type?: string; filters?: unknown; contactIds?: string[] },
 ): Promise<ApiResult<ContactList>> {
   const url = `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}`;
   try {
@@ -6898,8 +6906,7 @@ export type CommercePricingSuggestion = {
 export type CommerceCommandResult = {
   isAction: boolean;
   action: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  params: Record<string, any>;
+  params: Record<string, unknown>;
   confirmation: string;
   confidence: number;
 };
@@ -6909,8 +6916,7 @@ export type CommerceExecuteResult = {
   message?: string;
   error?: string;
   action?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
   invoiceId?: string;
   productId?: string;
 };
@@ -6961,8 +6967,7 @@ export async function commerceAiCommand(command: string, businessId?: string): P
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-export async function commerceAiExecute(action: string, params: Record<string, any> = {}, businessId?: string): Promise<ApiResult<CommerceExecuteResult>> {
+export async function commerceAiExecute(action: string, params: Record<string, unknown> = {}, businessId?: string): Promise<ApiResult<CommerceExecuteResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<CommerceExecuteResult>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-execute`,
@@ -6994,8 +6999,7 @@ export async function scanProductImage(imageFile: File, businessId?: string, cur
     });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-      const message = (json as any)?.message ?? res.statusText;
+      const message = (json as { message?: string } | null)?.message ?? res.statusText;
       return { data: null, error: message };
     }
     return { data: json, error: null };
@@ -7017,8 +7021,7 @@ export async function importProductsFile(file: File, businessId?: string): Promi
     });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-      const message = (json as any)?.message ?? res.statusText;
+      const message = (json as { message?: string } | null)?.message ?? res.statusText;
       return { data: null, error: message };
     }
     return { data: json, error: null };
@@ -7041,8 +7044,7 @@ export type CommerceNlSearchResult = {
   filters: Record<string, unknown>;
   interpretation: string;
   confidence: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  results: Array<Record<string, any>>;
+  results: Array<Record<string, unknown>>;
 };
 
 export type CommerceProductHealthResult = {
@@ -7381,10 +7383,8 @@ export async function updateCrossModuleWorkflow(input: {
   businessId?: string;
   workflowKey: string;
   enabled?: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  config?: Record<string, any>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-}): Promise<ApiResult<any>> {
+  config?: Record<string, unknown>;
+}): Promise<ApiResult<Record<string, unknown>>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   try {
     const res = await fetch(`${API_BASE}/flow/businesses/${encodeURIComponent(businessId)}/cross-module-workflows/${encodeURIComponent(input.workflowKey)}`, {
@@ -8255,10 +8255,8 @@ export async function fetchQualificationAnalytics(businessId: string): Promise<A
   return apiGetSimple<QualificationJourneyAnalytics>(`/site/businesses/${encodeURIComponent(businessId)}/qualification-analytics`);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-export async function quoteFromConversation(businessId: string, conversationText: string): Promise<ApiResult<any>> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  return apiPost<any>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/ai-quote-from-conversation`, body: { conversationText } });
+export async function quoteFromConversation(businessId: string, conversationText: string): Promise<ApiResult<Record<string, unknown>>> {
+  return apiPost<Record<string, unknown>>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/ai-quote-from-conversation`, body: { conversationText } });
 }
 
 export { DEFAULT_BUSINESS_ID };
@@ -8288,8 +8286,7 @@ export interface KeyflowEvent {
   href?: string;
   refType?: string;
   refId?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
   color?: string;
   source?: string;
 }
@@ -8545,8 +8542,7 @@ export type PartnerProgram = {
   name: string;
   description: string;
   commissionRate?: number | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  terms?: any;
+  terms?: unknown;
   startDate?: string | null;
   endDate?: string | null;
   status: PartnerProgramStatus;
@@ -8628,8 +8624,7 @@ export async function listMyResources(businessId: string) {
   return apiGetSimple<ResourceListing[]>(`/businesses/${encodeURIComponent(businessId)}/community/resources/mine`);
 }
 export async function recordResourceDownload(businessId: string, id: string, source?: string) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  return apiPost<{ download: any; downloadUrl: string; licenseTerms?: string | null }>({
+  return apiPost<{ download: { id?: string; createdAt?: string; downloadUrl?: string }; downloadUrl: string; licenseTerms?: string | null }>({
     path: `/businesses/${encodeURIComponent(businessId)}/community/resources/${encodeURIComponent(id)}/download`,
     body: { source },
   });
@@ -8653,8 +8648,7 @@ export type NetworkActivityItem = {
   refId?: string | null;
   title: string;
   body?: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy generic API surface — pending typed wrapper migration
-  metadata?: Record<string, any> | null;
+  metadata?: Record<string, unknown> | null;
   isPublic: boolean;
   createdAt: string;
   actor?: { id: string; name: string; logoUrl?: string | null; headline?: string | null; industry?: string | null; slug?: string | null };

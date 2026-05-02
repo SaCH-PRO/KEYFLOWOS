@@ -61,16 +61,21 @@ function ScoreGauge({ score, label }: { score: number; label: string }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function Recommendations({ recommendations }: { recommendations: any[] }) {
+type RecommendationItem = {
+  title?: string;
+  description?: string;
+  priority?: string;
+  expectedImpact?: string;
+};
+
+function Recommendations({ recommendations }: { recommendations: RecommendationItem[] }) {
   if (!recommendations?.length) return null;
   return (
     <Section title="Recommendations">
       <div className="space-y-1.5">
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-        {recommendations.map((r: any, i: number) => (
+        {recommendations.map((r, i) => (
           <div key={i} className="flex items-start gap-1.5">
-            <Lightbulb className={`w-3 h-3 shrink-0 mt-0.5 ${PRIORITY_COLORS[r.priority] || "text-amber-400"}`} />
+            <Lightbulb className={`w-3 h-3 shrink-0 mt-0.5 ${PRIORITY_COLORS[r.priority ?? ""] || "text-amber-400"}`} />
             <div>
               <span className="text-[11px] font-medium text-foreground/80">{r.title}</span>
               <p className="text-[10px] text-muted-foreground/60">{r.description}</p>
@@ -90,8 +95,7 @@ type StoreOptimizerResult = {
   score: number;
   totalItems: number;
   testimonialCount: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-  recommendations: any[];
+  recommendations: RecommendationItem[];
 };
 
 function StoreOptimizerRenderer({ data }: { data: StoreOptimizerResult }) {
@@ -179,8 +183,7 @@ type PricingAdvisorResult = {
   maxPrice?: number;
   totalProducts?: number;
   pricedCount?: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-  recommendations: any[];
+  recommendations: RecommendationItem[];
 };
 
 function PricingAdvisorRenderer({ data }: { data: PricingAdvisorResult }) {
@@ -219,14 +222,18 @@ function PricingAdvisorRenderer({ data }: { data: PricingAdvisorResult }) {
   );
 }
 
+type FrictionPointItem = {
+  area?: string;
+  impact?: string;
+  suggestion?: string;
+};
+
 type StorefrontAnalyzerResult = {
   summary: string;
   conversionScore: number;
   checks: { label: string; passed: boolean }[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-  frictionPoints: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-  recommendations: any[];
+  frictionPoints: FrictionPointItem[];
+  recommendations: RecommendationItem[];
 };
 
 function StorefrontAnalyzerRenderer({ data }: { data: StorefrontAnalyzerResult }) {
@@ -258,15 +265,14 @@ function StorefrontAnalyzerRenderer({ data }: { data: StorefrontAnalyzerResult }
       {data.frictionPoints?.length > 0 && (
         <Section title="Friction Points">
           <div className="space-y-1.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-            {data.frictionPoints.map((fp: any, i: number) => (
+            {data.frictionPoints.map((fp, i) => (
               <div key={i} className="p-2 rounded-lg bg-white/[0.02] border border-border/30">
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
                     <Zap className="w-3 h-3 text-amber-400" />
                     <span className="text-[11px] font-medium text-foreground/80">{fp.area}</span>
                   </div>
-                  <ImpactBadge impact={fp.impact} />
+                  <ImpactBadge impact={fp.impact ?? "medium"} />
                 </div>
                 <p className="text-[10px] text-muted-foreground/60">{fp.suggestion}</p>
               </div>

@@ -115,8 +115,12 @@ export default function PartnersPage() {
                 {p.commissionRate != null && (
                   <p className="text-xs"><span className="text-muted-foreground">Commission:</span> {p.commissionRate}%</p>
                 )}
-                {p.terms && typeof p.terms === "string" && <p className="text-xs text-muted-foreground mt-2 italic">{p.terms}</p>}
-                {p.terms && typeof p.terms === "object" && p.terms.notes && <p className="text-xs text-muted-foreground mt-2 italic">{p.terms.notes}</p>}
+                {typeof p.terms === "string" && p.terms && <p className="text-xs text-muted-foreground mt-2 italic">{p.terms}</p>}
+                {(() => {
+                  if (!p.terms || typeof p.terms !== "object") return null;
+                  const notes = (p.terms as { notes?: unknown }).notes;
+                  return typeof notes === "string" ? <p className="text-xs text-muted-foreground mt-2 italic">{notes}</p> : null;
+                })()}
 
                 <div className="flex gap-2 mt-3">
                   {p.status === "PROPOSED" && !isInitiator && (
@@ -156,8 +160,7 @@ function ProposeModal({ businessId, onClose, onProposed }: { businessId: string;
     terms: "",
   });
   const [search, setSearch] = useState("");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<Array<{ id: string; name: string; logoUrl?: string | null; headline?: string | null }>>([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {

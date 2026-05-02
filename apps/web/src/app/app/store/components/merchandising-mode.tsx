@@ -31,8 +31,7 @@ import Image from "next/image";
 
 type SeoProps = {
   storefrontConfig: StorefrontConfig;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onConfigChange: (section: string, updates: Record<string, any>) => void;
+  onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => Promise<void>;
   configSaving: boolean;
   publicUrl: string;
@@ -150,8 +149,7 @@ type Props = {
   commerceProducts: Product[];
   liveProductIds: Set<string>;
   storefrontConfig: StorefrontConfig;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onConfigChange: (section: string, updates: Record<string, any>) => void;
+  onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => Promise<void>;
   configSaving: boolean;
   publicUrl: string;
@@ -372,8 +370,7 @@ export function MerchandisingMode({
   const pc = appearance?.primaryColor || businessData?.primaryColor || "#F97316";
   const ac = "#a78bfa";
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const testimonials = (storefrontConfig.socialProof as any)?.testimonials ?? [];
+  const testimonials = storefrontConfig.socialProof?.testimonials ?? [];
   const faqEntries = storefrontConfig.faqEntries ?? [];
   const seo = storefrontConfig.seo as { metaTitle?: string; metaDescription?: string } | undefined;
   const liveItems = commerceProducts.filter((p) => liveProductIds.has(p.id));
@@ -417,8 +414,7 @@ export function MerchandisingMode({
       order: existing.length + i,
     }));
     const merged = [...existing, ...newEntries];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    onConfigChange("faqEntries", merged as any);
+    onConfigChange("faqEntries", merged as unknown as Record<string, unknown>);
   }
 
   function handleApplySeo(data: { metaTitle: string; metaDescription: string }) {

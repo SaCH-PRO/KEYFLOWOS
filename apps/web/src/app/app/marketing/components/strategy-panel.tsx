@@ -68,6 +68,35 @@ const MARKETING_CHANNELS = [
   "SMS Marketing",
 ];
 
+type StrategyAction = { title?: string; description?: string; timeline?: string };
+type ChannelStrategy = { channel?: string; priority?: string; recommendations?: string[] };
+type BudgetAllocation = { category?: string; percentage?: number; justification?: string; amount?: string | number };
+type KpiTarget = { metric?: string; target30Days?: string | number; target90Days?: string | number; target12Months?: string | number };
+type FinancialPeriod = { investment?: string | number; expectedRevenue?: string | number; netImpact?: string | number };
+type CompetitiveAdvantage = { advantage?: string; howToLeverage?: string };
+type RiskItem = { risk?: string; likelihood?: string; mitigation?: string };
+interface MarketingStrategyResult {
+  executiveSummary?: string;
+  shortTermPlan?: { actions?: StrategyAction[] };
+  longTermPlan?: { actions?: StrategyAction[] };
+  channelStrategy?: ChannelStrategy[];
+  budgetModel?: { totalRecommendedBudget?: string | number; allocation?: BudgetAllocation[]; expectedROI?: string | number };
+  kpiTargets?: KpiTarget[];
+  financialProjections?: Record<string, FinancialPeriod>;
+  competitiveAdvantages?: CompetitiveAdvantage[];
+  risks?: RiskItem[];
+}
+interface BusinessSnapshot {
+  industry?: string;
+  archetype?: string;
+  totalRevenue?: number;
+  currency?: string;
+  totalContacts?: number;
+  totalProducts?: number;
+  totalBookings?: number;
+  totalCampaigns?: number;
+}
+
 interface StrategyMetrics {
   industry: string;
   monthlyRevenue: string;
@@ -117,7 +146,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
   const [copied, setCopied] = useState(false);
   const resultRef = useRef<HTMLDivElement>(null);
 
-  const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null);
+  const [snapshot, setSnapshot] = useState<BusinessSnapshot | null>(null);
   const snapshotLoaded = useRef(false);
 
   useEffect(() => {
@@ -128,14 +157,13 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
         const { fetchBusinessSnapshot } = await import("@/lib/client");
         const res = await fetchBusinessSnapshot(businessId);
         if (res.data) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-          const s = res.data as any;
+          const s = res.data as BusinessSnapshot;
           setSnapshot(s);
           setMetrics(prev => ({
             ...prev,
             industry: prev.industry || s.industry || "",
             businessStage: prev.businessStage || (s.archetype === "LOCAL_SERVICE" ? "Growth" : ""),
-            monthlyRevenue: prev.monthlyRevenue || (s.totalRevenue > 0 ? `${s.currency} ${(s.totalRevenue / 12).toFixed(0)}/mo (est.)` : ""),
+            monthlyRevenue: prev.monthlyRevenue || ((s.totalRevenue ?? 0) > 0 ? `${s.currency} ${((s.totalRevenue ?? 0) / 12).toFixed(0)}/mo (est.)` : ""),
           }));
         }
       } catch {
@@ -169,41 +197,34 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
         toast.error(res.error);
         return;
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-      const data = res.data as any;
+      const data = res.data as MarketingStrategyResult;
 
       const shortTermItems = Array.isArray(data?.shortTermPlan?.actions)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-        ? data.shortTermPlan.actions.map((a: any) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
+        ? data.shortTermPlan!.actions!.map((a: StrategyAction) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
         : ["Focus on quick wins with your existing audience", "Audit current marketing channels", "Set up tracking and analytics"];
 
       const longTermItems = Array.isArray(data?.longTermPlan?.actions)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-        ? data.longTermPlan.actions.map((a: any) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
+        ? data.longTermPlan!.actions!.map((a: StrategyAction) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
         : ["Build sustainable content marketing pipeline", "Develop brand authority in your niche", "Scale successful channels"];
 
       const channelItems = Array.isArray(data?.channelStrategy)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-        ? data.channelStrategy.map((c: any) => `${c.channel} (${c.priority}): ${(c.recommendations ?? []).join("; ")}`)
+        ? data.channelStrategy!.map((c: ChannelStrategy) => `${c.channel} (${c.priority}): ${(c.recommendations ?? []).join("; ")}`)
         : ["Prioritize channels where your target audience is most active", "Test new channels with small budget allocations"];
 
       const budgetItems = Array.isArray(data?.budgetModel?.allocation)
         ? [
             ...(data.budgetModel.totalRecommendedBudget ? [`Total recommended: ${data.budgetModel.totalRecommendedBudget}`] : []),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-            ...data.budgetModel.allocation.map((a: any) => `${a.category}: ${a.percentage}% — ${a.justification ?? a.amount ?? ""}`),
+            ...data.budgetModel!.allocation!.map((a: BudgetAllocation) => `${a.category}: ${a.percentage}% — ${a.justification ?? a.amount ?? ""}`),
             ...(data.budgetModel.expectedROI ? [`Expected ROI: ${data.budgetModel.expectedROI}`] : []),
           ]
         : ["Allocate 60% to proven channels", "Reserve 20% for testing", "Keep 20% for content and tools"];
 
       const kpiItems = Array.isArray(data?.kpiTargets)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-        ? data.kpiTargets.map((k: any) => `${k.metric}: ${k.target30Days ?? "—"} (30d) → ${k.target90Days ?? "—"} (90d) → ${k.target12Months ?? "—"} (12mo)`)
+        ? data.kpiTargets!.map((k: KpiTarget) => `${k.metric}: ${k.target30Days ?? "—"} (30d) → ${k.target90Days ?? "—"} (90d) → ${k.target12Months ?? "—"} (12mo)`)
         : ["Define clear conversion metrics", "Set monthly growth targets", "Track CAC and LTV"];
 
       const financialItems = data?.financialProjections
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-        ? Object.entries(data.financialProjections).map(([period, vals]: [string, any]) =>
+        ? Object.entries(data.financialProjections!).map(([period, vals]: [string, FinancialPeriod]) =>
             `${period}: Investment ${vals?.investment ?? "—"}, Revenue ${vals?.expectedRevenue ?? "—"}, Net ${vals?.netImpact ?? "—"}`)
         : ["Project ROI for each channel", "Estimate revenue impact", "Plan for seasonal fluctuations"];
 
@@ -221,8 +242,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
           title: "Competitive Advantages",
           icon: Sparkles,
           color: "#f97316",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-          items: data.competitiveAdvantages.map((a: any) => `${a.advantage}: ${a.howToLeverage}`),
+          items: data.competitiveAdvantages!.map((a: CompetitiveAdvantage) => `${a.advantage}: ${a.howToLeverage}`),
         });
       }
 
@@ -231,8 +251,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
           title: "Risks & Mitigations",
           icon: BarChart3,
           color: "#ef4444",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-          items: data.risks.map((r: any) => `${r.risk} (${r.likelihood}): ${r.mitigation}`),
+          items: data.risks!.map((r: RiskItem) => `${r.risk} (${r.likelihood}): ${r.mitigation}`),
         });
       }
 
@@ -356,16 +375,11 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-[11px]">
                   {[
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-                    ["Contacts", (snapshot as any).totalContacts],
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-                    ["Products", (snapshot as any).totalProducts],
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-                    ["Revenue", `${(snapshot as any).currency} ${Number((snapshot as any).totalRevenue || 0).toLocaleString()}`],
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-                    ["Bookings", (snapshot as any).totalBookings],
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-                    ["Campaigns", (snapshot as any).totalCampaigns],
+                    ["Contacts", snapshot?.totalContacts],
+                    ["Products", snapshot?.totalProducts],
+                    ["Revenue", `${snapshot?.currency} ${Number(snapshot?.totalRevenue || 0).toLocaleString()}`],
+                    ["Bookings", snapshot?.totalBookings],
+                    ["Campaigns", snapshot?.totalCampaigns],
                   ].map(([label, val]) => (
                     <div key={String(label)} className="bg-muted/30 rounded-lg p-1.5 text-center">
                       <div className="font-semibold text-xs">{val}</div>
@@ -412,8 +426,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
                 <input
                   value={metrics.monthlyRevenue}
                   onChange={e => setMetrics(p => ({ ...p, monthlyRevenue: e.target.value }))}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-                  placeholder={`e.g. 10,000 ${(snapshot as any)?.currency || 'TTD'}`}
+                  placeholder={`e.g. 10,000 ${snapshot?.currency || 'TTD'}`}
                   className="w-full bg-muted/30 border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
                 />
               </div>
@@ -426,8 +439,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
                 <input
                   value={metrics.budget}
                   onChange={e => setMetrics(p => ({ ...p, budget: e.target.value }))}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-                  placeholder={`e.g. 2,000 ${(snapshot as any)?.currency || 'TTD'}`}
+                  placeholder={`e.g. 2,000 ${snapshot?.currency || 'TTD'}`}
                   className="w-full bg-muted/30 border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
                 />
               </div>

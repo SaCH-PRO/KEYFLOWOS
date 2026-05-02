@@ -334,8 +334,7 @@ export function QualificationConfig({ businessId, products }: Props) {
             </p>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {products.filter(p => p.isActive).map(product => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                const current = (product as any).executionModel ?? "";
+                const current = (product as { executionModel?: string }).executionModel ?? "";
                 return (
                   <div key={product.id} className="flex items-center justify-between gap-3 py-1.5">
                     <div className="flex-1 min-w-0">
@@ -393,8 +392,7 @@ export function QualificationConfig({ businessId, products }: Props) {
                   value={field.type}
                   onChange={e => {
                     const checklist = [...(config.intakeChecklist ?? [])];
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                    checklist[idx] = { ...checklist[idx], type: e.target.value as any };
+                    checklist[idx] = { ...checklist[idx], type: e.target.value as 'text' | 'file' | 'color' | 'textarea' };
                     setConfig(prev => ({ ...prev, intakeChecklist: checklist }));
                   }}
                   className="text-[10px] rounded border px-1.5 py-0.5"

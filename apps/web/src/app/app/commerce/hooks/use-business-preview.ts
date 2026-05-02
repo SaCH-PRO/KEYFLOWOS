@@ -15,8 +15,20 @@ export function useBusinessPreview() {
       const id = getStoredBusinessId();
       if (!id) return;
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        const res = await apiGet<any>(`/identity/businesses/${id}`);
+        const res = await apiGet<{
+          name?: string;
+          logoUrl?: string | null;
+          address?: string | null;
+          city?: string | null;
+          country?: string | null;
+          phone?: string | null;
+          email?: string | null;
+          website?: string | null;
+          tagline?: string | null;
+          primaryColor?: string | null;
+          secondaryColor?: string | null;
+          invoiceTemplate?: string | null;
+        }>(`/identity/businesses/${id}`);
         if (res.data) {
           setBusinessData({
             name: res.data.name || "",

@@ -61,7 +61,7 @@ import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 import { listOutboundContent } from "@/lib/client";
-import type { EmailCampaign, LeadForm, OutboundContent } from "@/lib/client";
+import type { EmailCampaign, LeadForm, OutboundContent, SocialPost } from "@/lib/client";
 import type { BusinessPulse, MarketingStats } from "./hooks/use-marketing";
 import type { ChannelHealthData, EnrichedConnection } from "@/hooks/use-channel-health";
 
@@ -207,8 +207,7 @@ function ContentIntelligenceStrip({
   onScheduleDraft,
 }: {
   campaigns: EmailCampaign[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  socialPosts: any[];
+  socialPosts: SocialPost[];
   onCreateCampaign: () => void;
   onCreatePost: () => void;
   onScheduleDraft: () => void;
@@ -226,8 +225,11 @@ function ContentIntelligenceStrip({
     const scheduledCampaigns = campaigns.filter((c) => c.status === "SCHEDULED" && c.scheduledAt);
     const scheduledPosts = socialPosts.filter((p) => p.status === "SCHEDULED" && p.scheduledFor);
     const upcomingCount = [...scheduledCampaigns, ...scheduledPosts].filter((item) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const d = new Date((item as any).scheduledAt || (item as any).scheduledFor);
+      const candidate =
+        (item as { scheduledAt?: string | null }).scheduledAt ??
+        (item as { scheduledFor?: string | null }).scheduledFor ??
+        "";
+      const d = new Date(candidate);
       return d >= now && d <= fiveDaysFromNow;
     }).length;
 
@@ -1096,8 +1098,7 @@ export default function ContentPage() {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function CalendarInsightStrip({ campaigns, socialPosts }: { campaigns: EmailCampaign[]; socialPosts: any[] }) {
+function CalendarInsightStrip({ campaigns, socialPosts }: { campaigns: EmailCampaign[]; socialPosts: SocialPost[] }) {
   const insights = useMemo(() => {
     const items: { text: string; color?: string }[] = [];
     const now = new Date();

@@ -53,8 +53,18 @@ interface SeoDashboard {
     previousPosition?: number | null; impressions: number; clicks: number;
     ctr: number; trend: string; positionChange: number; pageId?: string | null;
   }>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-  recentIssues: Array<any>;
+  recentIssues: Array<{
+    id: string;
+    issueType: string;
+    severity: string;
+    category: string;
+    title: string;
+    description?: string;
+    pageUrl?: string;
+    recommendation?: string;
+    status: string;
+    detectedAt: string;
+  }>;
 }
 
 interface SeoPage {
@@ -82,8 +92,8 @@ interface ContentBrief {
   id: string; title: string; targetKeyword: string; secondaryKeywords: string[];
   contentType: string; status: string; priority: string; approvalStatus: string;
   searchIntent?: string; recommendedWordCount?: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-  outline?: any; suggestedMetaTitle?: string; suggestedMetaDescription?: string;
+  outline?: Array<{ heading?: string; talkingPoints?: string[] }>;
+  suggestedMetaTitle?: string; suggestedMetaDescription?: string;
   callToAction?: string; competitorAngle?: string; createdAt: string;
 }
 
@@ -717,8 +727,7 @@ function BriefsTab({
                 <details className="mt-3 text-sm">
                   <summary className="cursor-pointer text-slate-300 hover:text-white">View outline ({b.outline.length} sections)</summary>
                   <ul className="mt-2 space-y-1 pl-4">
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract */}
-                    {b.outline.map((s: any, i: number) => (
+                    {b.outline.map((s, i) => (
                       <li key={i} className="text-slate-400">
                         <span className="text-slate-300">{s.heading}</span>
                         {Array.isArray(s.talkingPoints) && s.talkingPoints.length > 0 && (
@@ -778,13 +787,34 @@ function RevenueTab({ revenue }: { revenue: RevenueAttribution | null }) {
   );
 }
 
+interface ConnectorsTabProps {
+  gscStatus: { connected: boolean; siteUrl: string | null; lastSync: string | null } | null;
+  ga4Status: { connected: boolean; propertyId: string | null; lastSync: string | null } | null;
+  showGsc: boolean;
+  setShowGsc: (v: boolean) => void;
+  showGa4: boolean;
+  setShowGa4: (v: boolean) => void;
+  gscSiteUrl: string;
+  setGscSiteUrl: (v: string) => void;
+  gscToken: string;
+  setGscToken: (v: string) => void;
+  ga4PropertyId: string;
+  setGa4PropertyId: (v: string) => void;
+  ga4Token: string;
+  setGa4Token: (v: string) => void;
+  onConnectGsc: () => void;
+  onConnectGa4: () => void;
+  onSyncGsc: () => void;
+  onSyncGa4: () => void;
+  syncing: boolean;
+}
+
 function ConnectorsTab({
   gscStatus, ga4Status, showGsc, setShowGsc, showGa4, setShowGa4,
   gscSiteUrl, setGscSiteUrl, gscToken, setGscToken,
   ga4PropertyId, setGa4PropertyId, ga4Token, setGa4Token,
   onConnectGsc, onConnectGa4, onSyncGsc, onSyncGa4, syncing,
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-}: any) {
+}: ConnectorsTabProps) {
   return (
     <div className="grid md:grid-cols-2 gap-4">
       <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">

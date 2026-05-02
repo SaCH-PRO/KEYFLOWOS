@@ -40,17 +40,32 @@ type Action = {
 
 const EMPTY: UniversalSearchResult = { contacts: [], invoices: [], bookings: [], products: [], projects: [] };
 
+type SearchItem = {
+  id: string;
+  displayName?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string | null;
+  status?: string;
+  invoiceNumber?: string | null;
+  currency?: string | null;
+  total?: number | null;
+  contact?: { firstName?: string | null; lastName?: string | null } | null;
+  service?: { name?: string | null } | null;
+  startTime?: string;
+  name?: string;
+  price?: number | null;
+  priority?: string | null;
+};
+
 type SearchSection = {
   key: keyof UniversalSearchResult;
   label: string;
   icon: typeof User;
   color: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-  getHref: (item: any) => string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-  getTitle: (item: any) => string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-  getSub: (item: any) => string;
+  getHref: (item: SearchItem) => string;
+  getTitle: (item: SearchItem) => string;
+  getSub: (item: SearchItem) => string;
 };
 
 const SEARCH_SECTIONS: SearchSection[] = [
@@ -78,13 +93,11 @@ const SEARCH_SECTIONS: SearchSection[] = [
     icon: Calendar,
     color: "hsl(var(--kf-info))",
     getHref: () => `/app/bookings`,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-    getTitle: (b: any) => {
+    getTitle: (b) => {
       const name = b.contact ? [b.contact.firstName, b.contact.lastName].filter(Boolean).join(" ") : "";
       return `${b.service?.name || "Booking"} ${name ? `· ${name}` : ""}`;
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-    getSub: (b: any) => `${new Date(b.startTime).toLocaleDateString()} · ${b.status}`,
+    getSub: (b) => `${new Date(b.startTime ?? "").toLocaleDateString()} · ${b.status ?? ""}`,
   },
   {
     key: "products",
@@ -92,7 +105,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
     icon: Package,
     color: "hsl(var(--kf-warning))",
     getHref: () => `/app/commerce?tab=products`,
-    getTitle: (p) => p.name,
+    getTitle: (p) => p.name ?? "",
     getSub: (p) => `${p.currency || "TTD"} ${p.price?.toFixed(2) ?? "0.00"}`,
   },
   {
@@ -101,7 +114,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
     icon: FolderKanban,
     color: "hsl(var(--kf-accent1))",
     getHref: () => `/app/projects`,
-    getTitle: (p) => p.name,
+    getTitle: (p) => p.name ?? "",
     getSub: (p) => `${p.status || ""} · ${p.priority || ""}`,
   },
 ];
@@ -245,8 +258,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       for (const section of SEARCH_SECTIONS) {
         const sectionItems = searchResults[section.key];
         if (sectionItems && sectionItems.length > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-          for (const item of sectionItems as any[]) {
+          for (const item of sectionItems as SearchItem[]) {
             items.push({
               type: "search",
               id: `search-${section.key}-${item.id}`,
@@ -339,8 +351,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                       <Icon className="w-3 h-3" style={{ color: section.color }} />
                       {section.label}
                     </div>
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract */}
-                    {(items as any[]).map((item: any) => {
+                    {(items as SearchItem[]).map((item) => {
                       const idx = getNextIdx();
                       return (
                         <button

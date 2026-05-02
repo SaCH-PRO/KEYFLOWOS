@@ -20,6 +20,9 @@ import {
   Hand,
 } from "lucide-react";
 import { EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
+import type { MarketplaceListing, Product as ProductDTO } from "@/lib/marketplace-types";
+
+type ListingExt = MarketplaceListing & { active?: boolean; title?: string; price?: string | number | null; compareAtPrice?: string | number | null; imageUrl?: string | null; fulfillmentStrategy?: string | null; status?: string };
 
 const FULFILLMENT_STRATEGIES = [
   { key: "local_stock", label: "Local Stock", icon: ShoppingBag, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
@@ -62,23 +65,18 @@ export function CommerceListingsTab({
   onUpdateListing,
   onCreateListing,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  listings: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  products: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onEdit: (item: any) => void;
+  listings: ListingExt[];
+  products: ProductDTO[];
+  onEdit: (item: ListingExt) => void;
   onDelete: (id: string) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onUpdateListing: (id: string, data: any) => void;
+  onUpdateListing: (id: string, data: Record<string, unknown>) => void;
   onCreateListing: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [filterStrategy, setFilterStrategy] = useState("all");
 
   const productsById = useMemo(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    const map: Record<string, any> = {};
+    const map: Record<string, ProductDTO> = {};
     for (const p of products) map[p.id] = p;
     return map;
   }, [products]);
@@ -159,8 +157,7 @@ export function CommerceListingsTab({
       </div>
 
       <div className="space-y-2">
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-        {paginated.map((listing: any) => {
+        {paginated.map((listing) => {
           const product = productsById[listing.productId];
           const isActive = listing.status === "ACTIVE" || listing.active === true;
           const hasFulfillment = !!listing.fulfillmentStrategy;
@@ -197,14 +194,14 @@ export function CommerceListingsTab({
                     </div>
 
                     <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      {hasFulfillment && <FulfillmentBadge strategy={listing.fulfillmentStrategy} />}
+                      {hasFulfillment && listing.fulfillmentStrategy && <FulfillmentBadge strategy={listing.fulfillmentStrategy} />}
                       {listing.price && (
                         <span className="flex items-center gap-1 text-[11px] text-emerald-400">
                           <TrendingUp className="w-3 h-3" />
-                          ${parseFloat(listing.price).toFixed(2)}
+                          ${parseFloat(String(listing.price)).toFixed(2)}
                           {listing.compareAtPrice && (
                             <span className="line-through text-muted-foreground/50 ml-1">
-                              ${parseFloat(listing.compareAtPrice).toFixed(2)}
+                              ${parseFloat(String(listing.compareAtPrice)).toFixed(2)}
                             </span>
                           )}
                         </span>

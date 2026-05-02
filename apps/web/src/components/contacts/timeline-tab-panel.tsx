@@ -344,20 +344,14 @@ export function TimelineTabPanel({
                             {new Date(event.createdAt).toLocaleString("en-TT", { dateStyle: "medium", timeStyle: "short" })}
                           </span>
                         </div>
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation */}
-                        {event.type === "status.changed" && (event.data as any)?.from && (event.data as any)?.to && (
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-                          <p className="text-xs text-muted-foreground mt-0.5">{(event.data as any).from} &rarr; {(event.data as any).to}</p>
+                        {event.type === "status.changed" && Boolean((event.data as Record<string, unknown>)?.from) && Boolean((event.data as Record<string, unknown>)?.to) && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{String((event.data as Record<string, unknown>).from)} &rarr; {String((event.data as Record<string, unknown>).to)}</p>
                         )}
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation */}
-                        {event.type === "bulk.updated" && (event.data as any)?.status && (
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-                          <p className="text-xs text-muted-foreground mt-0.5">Status &rarr; {(event.data as any).status}</p>
+                        {event.type === "bulk.updated" && Boolean((event.data as Record<string, unknown>)?.status) && (
+                          <p className="text-xs text-muted-foreground mt-0.5">Status &rarr; {String((event.data as Record<string, unknown>).status)}</p>
                         )}
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation */}
-                        {event.type === "bulk.updated" && (event.data as any)?.addedTags && (
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-                          <p className="text-xs text-muted-foreground mt-0.5">Tags: {(event.data as any).addedTags.join(", ")}</p>
+                        {event.type === "bulk.updated" && Boolean((event.data as Record<string, unknown>)?.addedTags) && (
+                          <p className="text-xs text-muted-foreground mt-0.5">Tags: {((event.data as Record<string, unknown>).addedTags as string[]).join(", ")}</p>
                         )}
                         <div className="flex items-center gap-0.5 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button onClick={() => handleCopyEvent(event.id, `${EVENT_LABELS[event.type] || event.type} — ${new Date(event.createdAt).toLocaleString("en-TT")}`)} className="p-1 rounded-md hover:bg-muted transition-colors" title="Copy event">

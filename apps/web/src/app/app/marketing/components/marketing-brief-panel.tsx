@@ -262,8 +262,7 @@ export function MarketingBriefPanel({ businessId, isOpen, onClose }: MarketingBr
         toast.error(res.error);
         return;
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const data = res.data as any;
+      const data = res.data as { success?: boolean; message?: string; method?: string } | null;
       if (data?.success === false) {
         toast.error(data?.message || "Could not send marketing brief. Please connect Gmail in Settings.");
         return;

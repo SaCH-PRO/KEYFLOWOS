@@ -327,10 +327,23 @@ export function PaymentsTab() {
     const load = async () => {
       const businessId = getStoredBusinessId();
       if (!businessId) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
-      const res = await apiGet<{ metaData: Record<string, any>; address?: string }>(`/identity/businesses/${businessId}`);
+      type BusinessMeta = {
+        wipayApiKey?: string;
+        wipayAccountNumber?: string;
+        paypalClientId?: string;
+        paypalClientSecret?: string;
+        bankTransferEnabled?: boolean;
+        bankName?: string;
+        bankAccountNumber?: string;
+        bankRoutingNumber?: string;
+        bankBranch?: string;
+        bankInstructions?: string;
+        cashEnabled?: boolean;
+        address?: string;
+      };
+      const res = await apiGet<{ metaData: BusinessMeta; address?: string }>(`/identity/businesses/${businessId}`);
       if (res.data) {
-        const meta = res.data.metaData || {};
+        const meta: BusinessMeta = res.data.metaData || {};
         setSettings({
           wipayApiKey: meta.wipayApiKey || "",
           wipayAccountNumber: meta.wipayAccountNumber || "",

@@ -3,17 +3,27 @@
 import { motion } from "framer-motion";
 import { Clock, User, Mail, Calendar, Pencil } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
+import type { PreOrder, Product } from "@/lib/marketplace-types";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-export function PreOrdersTab({ preOrders, onEdit }: { preOrders: any[]; onEdit: (item: any) => void }) {
+type PreOrderRow = PreOrder & {
+  product?: Product | null;
+  productName?: string;
+};
+
+export function PreOrdersTab({
+  preOrders,
+  onEdit,
+}: {
+  preOrders: PreOrderRow[];
+  onEdit: (item: PreOrderRow) => void;
+}) {
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(preOrders);
   if (preOrders.length === 0) {
     return <EmptyState icon={Clock} title="No Pre-Orders" description="Manage pre-orders with deposit tracking and expected delivery dates." />;
   }
   return (
     <div className="space-y-3">
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-      {paginated.map((po: any) => (
+      {paginated.map((po) => (
         <motion.div
           key={po.id}
           initial={{ opacity: 0, y: 8 }}
@@ -33,10 +43,10 @@ export function PreOrdersTab({ preOrders, onEdit }: { preOrders: any[]; onEdit: 
               </div>
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
-              {po.depositAmount && (
+              {po.depositAmount != null && (
                 <div className="text-right">
                   <p className="text-xs text-muted-foreground">Deposit</p>
-                  <p className="text-sm font-semibold">{formatCurrency(parseFloat(po.depositAmount) || 0)}</p>
+                  <p className="text-sm font-semibold">{formatCurrency(parseFloat(String(po.depositAmount)) || 0)}</p>
                 </div>
               )}
               <button onClick={() => onEdit(po)} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors">

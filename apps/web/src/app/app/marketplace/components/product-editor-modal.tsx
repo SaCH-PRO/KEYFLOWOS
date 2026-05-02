@@ -17,6 +17,36 @@ import { inputClass, selectClass, FormField } from "./marketplace-utils";
 
 type ProductEditorTab = "general" | "variants" | "sources" | "cost" | "listing";
 
+export interface ProductVariantDraft {
+  name?: string | null;
+  sku?: string | null;
+  price?: string | number | null;
+  stock?: string | number | null;
+}
+
+export type ProductFormValue = unknown;
+
+export interface ProductFormDraft {
+  id?: string;
+  name?: string | null;
+  sku?: string | null;
+  description?: string | null;
+  fulfillmentModel?: string | null;
+  category?: string | null;
+  hsCode?: string | null;
+  supplierName?: string | null;
+  supplierEmail?: string | null;
+  sourceUrl?: string | null;
+  leadTime?: string | number | null;
+  moq?: string | number | null;
+  costPrice?: string | number | null;
+  price?: string | number | null;
+  shippingCost?: string | number | null;
+  dutyRate?: string | number | null;
+  variants?: ProductVariantDraft[];
+  [key: string]: unknown;
+}
+
 const EDITOR_TABS: { key: ProductEditorTab; label: string; icon: React.ElementType }[] = [
   { key: "general", label: "General", icon: Package },
   { key: "variants", label: "Variants", icon: Layers },
@@ -35,29 +65,25 @@ export function ProductEditorModal({
 }: {
   open: boolean;
   onClose: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  product: Record<string, any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onChange: (key: string, value: any) => void;
+  product: ProductFormDraft;
+  onChange: (key: string, value: ProductFormValue) => void;
   onSave: () => void;
   saving: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<ProductEditorTab>("general");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [variants, setVariants] = useState<any[]>([]);
+  const [variants, setVariants] = useState<ProductVariantDraft[]>([]);
 
   useEffect(() => {
     if (open) {
       setActiveTab("general");
-      setVariants(product.variants ?? []);
+      setVariants((product.variants as ProductVariantDraft[] | undefined) ?? []);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only when the modal opens or the selected product identity changes, to seed the editor. Including `product.variants` would clobber in-progress edits whenever the parent updates the variants array.
   }, [open, product.id]);
 
   if (!open) return null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const updateField = (key: string, value: any) => onChange(key, value);
+  const updateField = (key: string, value: ProductFormValue) => onChange(key, value);
 
   const addVariant = () => {
     const updated = [...variants, { name: "", sku: "", price: "", stock: "" }];
@@ -77,10 +103,10 @@ export function ProductEditorModal({
     onChange("variants", updated);
   };
 
-  const costPrice = parseFloat(product.costPrice || 0);
-  const sellPrice = parseFloat(product.price || 0);
-  const shippingCost = parseFloat(product.shippingCost || 0);
-  const dutyRate = parseFloat(product.dutyRate || 0);
+  const costPrice = parseFloat(String(product.costPrice ?? 0));
+  const sellPrice = parseFloat(String(product.price ?? 0));
+  const shippingCost = parseFloat(String(product.shippingCost ?? 0));
+  const dutyRate = parseFloat(String(product.dutyRate ?? 0));
   const landedCost = costPrice + shippingCost + (costPrice * dutyRate) / 100;
   const margin = sellPrice > 0 ? ((sellPrice - landedCost) / sellPrice) * 100 : 0;
   const marginColor = margin >= 30 ? "text-emerald-400" : margin >= 15 ? "text-amber-400" : "text-red-400";
@@ -391,7 +417,7 @@ export function ProductEditorModal({
                   )}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     {[
-                      { label: "Price", value: product.price ? `$${parseFloat(product.price).toFixed(2)}` : "—" },
+                      { label: "Price", value: product.price ? `$${parseFloat(String(product.price)).toFixed(2)}` : "—" },
                       { label: "Fulfillment", value: product.fulfillmentModel || "—" },
                       { label: "Variants", value: variants.length > 0 ? String(variants.length) : "None" },
                     ].map((item) => (
