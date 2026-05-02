@@ -18,6 +18,7 @@ import type { Request } from 'express';
 import { IdentityService } from './identity.service';
 import { IdentitySignupService, isEmailVerificationRequired } from './identity-signup.service';
 import { AuthSecurityService } from './auth-security.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { SignupDto, ResendVerificationDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { BusinessContextService } from './business-context.service';
@@ -44,18 +45,59 @@ export class IdentityController {
     @Inject(BusinessContextService) private readonly bizContext: BusinessContextService,
     @Inject(IdentitySignupService) private readonly signupSvc: IdentitySignupService,
     @Inject(AuthSecurityService) private readonly authSec: AuthSecurityService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   /**
-   * Pull the best-effort client IP for rate-limiting + audit. Trusts
-   * `x-forwarded-for` only when running behind a known proxy (the front
-   * door of the deploy sets this); falls back to the socket address.
-   * IPs are stored solely as opaque strings, never resolved or shown
-   * to other users.
+   * Admin-only paginated read of the auth audit log. Surfaces the
+   * stream of signup / login / rate-limit events captured by
+   * {@link AuthSecurityService.audit}. Used by the admin Security
+   * Settings page to investigate suspicious activity.
+   *
+   * Filters: `event` (one of: signup, login_success, login_failure,
+   * resend_verification, rate_limited), `email`, `ip`, optional
+   * `since` ISO timestamp. Returns most recent first, capped at 200.
+   */
+  @UseGuards(AuthGuard)
+  @Get('admin/auth-audit')
+  async getAuthAudit(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('event') event?: string,
+    @Query('email') email?: string,
+    @Query('ip') ip?: string,
+    @Query('since') since?: string,
+    @Query('limit') limitStr?: string,
+  ) {
+    if (user?.role !== 'SUPER_ADMIN') {
+      throw new UnauthorizedException('Admin access required');
+    }
+    const limit = Math.min(200, Math.max(1, Number.parseInt(limitStr ?? '50', 10) || 50));
+    const where: Record<string, unknown> = {};
+    if (event) where.event = event;
+    if (email) where.email = email.trim().toLowerCase();
+    if (ip) where.ip = ip.trim();
+    if (since) {
+      const dt = new Date(since);
+      if (!Number.isNaN(dt.getTime())) where.createdAt = { gte: dt };
+    }
+    const rows = await this.prisma.client.authAuditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    return { entries: rows, count: rows.length };
+  }
+
+  /**
+   * Pull the client IP for rate-limiting + audit. We rely **exclusively**
+   * on `req.ip` so the trust-proxy setting (configured once in
+   * `app-bootstrap.ts` from the `TRUST_PROXY` env var) is the only
+   * place that decides how many `x-forwarded-for` hops are honoured.
+   * Manually parsing XFF here would let attackers spoof IPs to bypass
+   * the per-IP rate limiter — see the architect review for context.
    */
   private clientIp(req: Request): string {
-    const fwd = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
-    return fwd || req.ip || (req.socket as { remoteAddress?: string } | undefined)?.remoteAddress || 'unknown';
+    return req.ip || (req.socket as { remoteAddress?: string } | undefined)?.remoteAddress || 'unknown';
   }
 
   private clientUa(req: Request): string {

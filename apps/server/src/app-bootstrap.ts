@@ -6,7 +6,16 @@ import { allowedCorsOrigins } from './core/config/runtime-urls';
 
 export function configureNestApp(app: INestApplication): void {
   const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.set('trust proxy', 1);
+  // Trust-proxy hop count drives Express's `req.ip` derivation from
+  // `x-forwarded-for`. Wrong setting → either spoofable IPs (too high)
+  // or every request looks like 127.0.0.1 (too low). Operators MUST
+  // set this to the real number of proxies in front of the API
+  // (Caddy/nginx/Cloudflare/etc.). Default 1 covers the typical single
+  // front-door deploy. We never read XFF manually anywhere — every IP
+  // comes from `req.ip` so this single switch governs the whole app.
+  const trustProxy = process.env.TRUST_PROXY ?? '1';
+  const parsedHops = Number.parseInt(trustProxy, 10);
+  expressApp.set('trust proxy', Number.isFinite(parsedHops) ? parsedHops : trustProxy);
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.useGlobalPipes(
     new ValidationPipe({

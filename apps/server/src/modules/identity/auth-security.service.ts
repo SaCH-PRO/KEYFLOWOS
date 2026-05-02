@@ -100,16 +100,43 @@ export class AuthSecurityService {
     const windowStart = new Date(now - rule.windowMs);
 
     try {
-      const count = await this.prisma.client.authRateLimit.count({
-        where: { bucket, hitAt: { gte: windowStart } },
-      });
-      if (count >= rule.limit) {
+      // Atomic check-and-insert via a single CTE. The previous
+      // count-then-create pattern allowed concurrent requests to slip
+      // past the limit (architect-flagged race condition). We perform
+      // the count and the conditional insert inside one statement so
+      // Postgres serialises the work for us — at most `rule.limit`
+      // rows can ever land inside the window for a given bucket.
+      //
+      // Returns one row: { prior_count, allowed } where `allowed`
+      // indicates whether the insert actually fired. We must compare
+      // against `rule.limit` AFTER the call: if `allowed` is false the
+      // bucket is full and we 429 the caller.
+      const rows = await this.prisma.client.$queryRaw<
+        Array<{ prior_count: number | bigint; allowed: boolean }>
+      >`
+        WITH window_count AS (
+          SELECT count(*)::int AS c
+          FROM auth_rate_limits
+          WHERE bucket = ${bucket} AND hit_at >= ${windowStart}
+        ),
+        ins AS (
+          INSERT INTO auth_rate_limits (id, bucket, hit_at)
+          SELECT gen_random_uuid()::text, ${bucket}, NOW()
+          WHERE (SELECT c FROM window_count) < ${rule.limit}
+          RETURNING 1
+        )
+        SELECT
+          (SELECT c FROM window_count) AS prior_count,
+          EXISTS(SELECT 1 FROM ins) AS allowed
+      `;
+
+      const allowed = rows[0]?.allowed === true;
+      if (!allowed) {
         throw new HttpException(
           { code: 'rate_limited', message: 'Too many attempts. Please wait a few minutes and try again.' },
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
-      await this.prisma.client.authRateLimit.create({ data: { bucket } });
     } catch (err) {
       // Re-throw the 429 so the caller actually rejects the request.
       if (err instanceof HttpException) throw err;
