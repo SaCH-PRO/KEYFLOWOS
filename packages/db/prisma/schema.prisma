@@ -4762,6 +4762,11 @@ model GrowthInsight {
   description  String?
   // What the system recommends
   recommendation String? @map("recommendation")
+  // LLM-written context: short rationale explaining *why* this matters and a concrete first step
+  rationale       String? @map("rationale")
+  suggestedAction String? @map("suggested_action")
+  // Source of the rationale/recommendation: 'heuristic' (rules only) or 'ai' (LLM-enriched)
+  source          String  @default("heuristic") @map("source")
   // Estimated impact (money or % uplift)
   estimatedImpact Decimal? @db.Decimal(12, 2) @map("estimated_impact")
   impactCurrency  String?   @default("TTD") @map("impact_currency")
