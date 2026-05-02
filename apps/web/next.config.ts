@@ -30,12 +30,16 @@ function buildAllowedDevOrigins(): string[] {
 const isProd = process.env.NODE_ENV === "production";
 
 const nextConfig: NextConfig = {
+  // `@keyflow/ui` is a workspace package whose package.json `exports` already
+  // points at its TypeScript source. `transpilePackages` is sufficient on its
+  // own to consume it. Do NOT add a `turbopack.resolveAlias` entry for it —
+  // a relative alias is resolved per-importer by Turbopack and will duplicate
+  // the module graph, which causes the recurring "module factory is not
+  // available" HMR error on Next 16 + React 19. See apps/web/README.md
+  // (Troubleshooting → Turbopack HMR) and Task #226 for the full root cause.
   transpilePackages: ["@keyflow/ui"],
   turbopack: {
     root: repoRoot,
-    resolveAlias: {
-      "@keyflow/ui": "../../packages/ui/src/index.ts",
-    },
   },
   allowedDevOrigins: buildAllowedDevOrigins(),
   async headers() {
