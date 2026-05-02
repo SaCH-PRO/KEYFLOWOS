@@ -25,7 +25,7 @@ import {
   Users,
   ShieldCheck,
 } from "lucide-react";
-import { bootstrapIdentity } from "@/lib/client";
+import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
 import { applyDevBypassToLocalStorage, isDevAuthBypassEnabled } from "@/lib/keyflow-dev-auth";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -36,22 +36,6 @@ function signUpWithGoogle() {
   if (!SUPABASE_URL) return;
   const redirectTo = `${SITE_URL.replace(/\/$/, "")}/auth/callback`;
   window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
-}
-
-async function supabaseSignUp(email: string, password: string) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, password, options: { emailRedirectTo: `${SITE_URL.replace(/\/$/, "")}/auth/login?verified=1` } }),
-  });
-  const json = await res.json().catch(() => null);
-  if (!res.ok) {
-    const detail = (json && typeof json === "object" && ("error_description" in json || "msg" in json || "error" in json)
-      ? (json.error_description as string) || (json.msg as string) || (json.error as string) : null) || res.statusText;
-    throw new Error(detail || "Signup failed");
-  }
-  return json as { access_token?: string | null };
 }
 
 async function isUsernameAvailable(username: string): Promise<boolean> {
@@ -94,6 +78,8 @@ export default function AuthSignup() {
   const [error, setError] = useState<string | null>(null);
   const [pendingVerification, setPendingVerification] = useState(false);
   const [resending, setResending] = useState(false);
+  const [resendNote, setResendNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [resendCooldownSec, setResendCooldownSec] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
 
@@ -107,6 +93,12 @@ export default function AuthSignup() {
       router.replace("/app");
     }
   }, [router]);
+
+  useEffect(() => {
+    if (resendCooldownSec <= 0) return;
+    const id = setTimeout(() => setResendCooldownSec((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(id);
+  }, [resendCooldownSec]);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,33 +128,84 @@ export default function AuthSignup() {
     try {
       const available = await isUsernameAvailable(username.trim());
       if (!available) { setError("That username is taken. Please choose another."); setStep(1); setLoading(false); return; }
-      const session = await supabaseSignUp(email, password);
-      const profileDraft = { firstName: firstName.trim(), lastName: lastName.trim(), username: username.trim(), company: company.trim(), phone: phone.trim() };
+
+      const profileDraft = {
+        firstName: firstName.trim(), lastName: lastName.trim(), username: username.trim(),
+        company: company.trim(), phone: phone.trim(),
+      };
       window.localStorage.setItem("kf_profile_draft", JSON.stringify(profileDraft));
       window.localStorage.setItem("kf_username", username.trim());
       window.localStorage.setItem("kf_email", email.trim());
-      if (session?.access_token) {
-        window.localStorage.setItem("kf_token", session.access_token);
+
+      const result = await identitySignup({
+        email: email.trim(),
+        password,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        username: username.trim(),
+        company: company.trim() || undefined,
+        phone: phone.trim() || undefined,
+      });
+
+      if (result.error || !result.data) {
+        setError(result.error || "Sign up failed.");
+        setLoading(false);
+        return;
+      }
+
+      const data = result.data;
+      if (data.status === "authenticated") {
+        // Auto-confirm path (dev / verification disabled): we received a session,
+        // bootstrap the user and route into the app.
+        window.localStorage.setItem("kf_token", data.accessToken);
+        if (data.refreshToken) window.localStorage.setItem("kf_refresh_token", data.refreshToken);
         const bootstrap = await bootstrapIdentity({
           email: email.trim(), username: username.trim(),
           name: `${firstName.trim()} ${lastName.trim()}`.trim(),
           firstName: firstName.trim(), lastName: lastName.trim(),
           phone: phone.trim(), company: company.trim(),
         });
-        if (bootstrap.data?.business?.id) window.localStorage.setItem("kf_business_id", bootstrap.data.business.id);
-        else if (bootstrap.error) throw new Error(bootstrap.error);
+        if (bootstrap.data?.business?.id) {
+          window.localStorage.setItem("kf_business_id", bootstrap.data.business.id);
+        } else if (bootstrap.error) {
+          setError(bootstrap.error);
+          setLoading(false);
+          return;
+        }
+        router.replace("/app");
+        return;
       }
+
+      // Verification path: server has sent the email through Resend.
       setPendingVerification(true);
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "Check email for verification link.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Sign up failed. Please try again.");
     } finally { setLoading(false); }
   };
 
   const resendVerification = async () => {
-    setError(null); setResending(true);
-    try { await supabaseSignUp(email, password); }
-    catch (error: unknown) { setError(error instanceof Error ? error.message : "Resend failed"); }
-    finally { setResending(false); }
+    setResendNote(null); setResending(true);
+    try {
+      const res = await identityResendVerification(email.trim());
+      if (res.error) {
+        setResendNote({ kind: "error", text: res.error });
+      } else if (res.data?.cooldownRemainingMs && res.data.cooldownRemainingMs > 0) {
+        const seconds = Math.ceil(res.data.cooldownRemainingMs / 1000);
+        setResendCooldownSec(seconds);
+        setResendNote({
+          kind: "error",
+          text: `Please wait ${seconds}s before requesting another email.`,
+        });
+      } else {
+        setResendCooldownSec(60);
+        setResendNote({
+          kind: "success",
+          text: "Verification email sent — check your inbox.",
+        });
+      }
+    } catch (err: unknown) {
+      setResendNote({ kind: "error", text: err instanceof Error ? err.message : "Resend failed" });
+    } finally { setResending(false); }
   };
 
   const initials = (firstName || lastName) ? `${firstName[0] || ""}${lastName[0] || ""}`.toUpperCase() : "";
@@ -271,17 +314,42 @@ export default function AuthSignup() {
                   <p className="text-sm font-semibold mt-1 text-[hsl(24_95%_53%)]">{email}</p>
                 </div>
                 <div className="flex flex-col gap-3 w-full">
+                  <AnimatePresence>
+                    {resendNote && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        role="status"
+                        aria-live="polite"
+                        className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-sm border ${
+                          resendNote.kind === "success"
+                            ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                            : "bg-red-500/10 text-red-400 border-red-500/20"
+                        }`}
+                      >
+                        {resendNote.kind === "success"
+                          ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                          : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
+                        <span className="flex-1">{resendNote.text}</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   <button type="button" onClick={() => router.push("/auth/login")}
                     className="w-full py-3 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-[hsl(24_95%_53%)] to-[hsl(24_95%_45%)] hover:brightness-110 transition-all flex items-center justify-center gap-2">
                     I verified — sign in <ArrowRight className="w-4 h-4" />
                   </button>
-                  <button type="button" onClick={() => { setPendingVerification(false); setStep(1); }}
+                  <button type="button" onClick={() => { setPendingVerification(false); setStep(1); setResendNote(null); setResendCooldownSec(0); }}
                     className="text-sm text-[hsl(30_10%_55%)] hover:text-[hsl(30_10%_70%)] transition-colors">
                     Edit info / try again
                   </button>
-                  <button type="button" onClick={resendVerification} disabled={resending}
-                    className="text-sm text-[hsl(24_95%_53%)] hover:text-[hsl(24_95%_63%)] disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5">
-                    {resending ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Resending...</> : "Resend verification email"}
+                  <button type="button" onClick={resendVerification} disabled={resending || resendCooldownSec > 0}
+                    className="text-sm text-[hsl(24_95%_53%)] hover:text-[hsl(24_95%_63%)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5">
+                    {resending
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Resending...</>
+                      : resendCooldownSec > 0
+                        ? `Resend available in ${resendCooldownSec}s`
+                        : "Resend verification email"}
                   </button>
                 </div>
               </motion.div>

@@ -679,3 +679,77 @@ ${ctx.productNames.map((n) => `<li style="margin:4px 0;">${n}</li>`).join('')}
 
   return { subject, html: baseLayout(ctx, subject, body) };
 }
+
+export interface VerificationEmailContext {
+  recipientName?: string;
+  recipientEmail: string;
+  confirmationUrl: string;
+  productName?: string;
+  supportEmail?: string;
+}
+
+/**
+ * System-level signup verification email — branded for Keyflow itself,
+ * NOT for any individual tenant business. Used by the new `/identity/signup`
+ * flow, sent through `SystemEmailService` (Resend).
+ */
+export function verificationEmailTemplate(ctx: VerificationEmailContext): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const productName = ctx.productName || "Keyflow";
+  const greetingName = ctx.recipientName?.trim() || ctx.recipientEmail;
+  const subject = `Confirm your ${productName} email`;
+  const support = ctx.supportEmail
+    ? `If you did not create a ${productName} account, you can safely ignore this email or contact us at ${ctx.supportEmail}.`
+    : `If you did not create a ${productName} account, you can safely ignore this email.`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${subject}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0c0a09;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0c0a09;">
+<tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background-color:#1a1a1e;border-radius:16px;overflow:hidden;">
+<tr><td style="background:linear-gradient(135deg,#F97316,#14B8A6);padding:28px 32px;">
+<h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.01em;">${productName}</h1>
+</td></tr>
+<tr><td style="padding:32px;">
+<h2 style="margin:0 0 16px;color:#fafafa;font-size:18px;font-weight:600;">Confirm your email</h2>
+<p style="margin:0 0 12px;color:#d4d4d8;font-size:14px;line-height:1.6;">Hi ${greetingName},</p>
+<p style="margin:0 0 20px;color:#d4d4d8;font-size:14px;line-height:1.6;">Welcome to ${productName}. Tap the button below to verify your email address and finish setting up your account.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;">
+<tr><td style="border-radius:10px;background:linear-gradient(135deg,#F97316,#ea580c);">
+<a href="${ctx.confirmationUrl}" style="display:inline-block;padding:14px 28px;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;border-radius:10px;">Verify my email</a>
+</td></tr>
+</table>
+<p style="margin:0 0 12px;color:#a1a1aa;font-size:13px;line-height:1.6;">Or copy and paste this link into your browser:</p>
+<p style="margin:0 0 24px;word-break:break-all;"><a href="${ctx.confirmationUrl}" style="color:#F97316;font-size:13px;text-decoration:underline;">${ctx.confirmationUrl}</a></p>
+<p style="margin:0;color:#71717a;font-size:12px;line-height:1.5;">${support}</p>
+</td></tr>
+<tr><td style="padding:16px 32px 24px;border-top:1px solid #2a2a2e;">
+<p style="margin:0;color:#52525b;font-size:11px;">This is an automated message from ${productName}. Please do not reply directly to this email.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
+  const text = [
+    `Hi ${greetingName},`,
+    "",
+    `Welcome to ${productName}. Confirm your email to finish setting up your account by visiting:`,
+    "",
+    ctx.confirmationUrl,
+    "",
+    support,
+  ].join("\n");
+
+  return { subject, html, text };
+}
