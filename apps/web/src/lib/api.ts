@@ -1,6 +1,26 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 const AI_SUGGEST_URL = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
+// One-shot reachability check: the first time a network error is observed
+// against API_BASE, log a single loud warning so the developer knows the
+// configured backend URL is wrong. We only nag once per session.
+let unreachableWarned = false;
+function warnUnreachable(error: unknown) {
+  if (unreachableWarned) return;
+  unreachableWarned = true;
+  const msg = error instanceof Error ? error.message : String(error);
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[keyflow-api] Could not reach API at ${API_BASE} (${msg}).\n` +
+      `  - Verify NEXT_PUBLIC_API_BASE_URL in .env matches the running server port.\n` +
+      `  - The default dev server runs on http://localhost:3001.\n` +
+      `  - Run \`pnpm run verify:up\` to diagnose end-to-end.`,
+  );
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("kf:api-unreachable", { detail: { apiBase: API_BASE, message: msg } }));
+  }
+}
+
 type FetchOptions = {
   path: string;
   body?: unknown;
@@ -68,6 +88,7 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
     if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
     return { data: data as T, error: null };
   } catch (error: unknown) {
+    warnUnreachable(error);
     const message = error instanceof Error ? error.message : "Network error";
     return { data: null, error: message };
   }
@@ -96,6 +117,7 @@ export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): 
     if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
     return { data: data as T, error: null };
   } catch (error: unknown) {
+    warnUnreachable(error);
     const message = error instanceof Error ? error.message : "Network error";
     return { data: null, error: message };
   }
@@ -112,6 +134,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiRespo
     if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
     return { data: data as T, error: null };
   } catch (error: unknown) {
+    warnUnreachable(error);
     const message = error instanceof Error ? error.message : "Network error";
     return { data: null, error: message };
   }
@@ -128,6 +151,7 @@ export async function apiDelete<T>(path: string, body?: unknown): Promise<ApiRes
     if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
     return { data: data as T, error: null };
   } catch (error: unknown) {
+    warnUnreachable(error);
     const message = error instanceof Error ? error.message : "Network error";
     return { data: null, error: message };
   }
@@ -148,6 +172,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<ApiRespons
     if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
     return { data: data as T, error: null };
   } catch (error: unknown) {
+    warnUnreachable(error);
     const message = error instanceof Error ? error.message : "Network error";
     return { data: null, error: message };
   }
