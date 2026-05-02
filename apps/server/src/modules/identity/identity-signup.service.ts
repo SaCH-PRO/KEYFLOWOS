@@ -3,6 +3,7 @@ import { SupabaseAdminService, SupabaseAdminError } from '../../core/auth/supaba
 import { SystemEmailService } from '../notifications/system-email.service';
 import { verificationEmailTemplate } from '../notifications/email-templates';
 import { appUrl } from '../../core/config/runtime-urls';
+import { PasswordPolicyService } from './password-policy.service';
 
 export type SignupOutcome =
   | { mode: 'session'; userId: string; email: string; accessToken: string; refreshToken: string }
@@ -32,6 +33,7 @@ export class IdentitySignupService {
   constructor(
     @Inject(SupabaseAdminService) private readonly supabaseAdmin: SupabaseAdminService,
     @Inject(SystemEmailService) private readonly systemEmail: SystemEmailService,
+    @Inject(PasswordPolicyService) private readonly passwordPolicy: PasswordPolicyService,
   ) {}
 
   /**
@@ -97,6 +99,12 @@ export class IdentitySignupService {
     }
 
     const email = args.email.trim().toLowerCase();
+
+    // Tier-2: enforce password policy + breach check BEFORE we hit
+    // Supabase. Doing this first means brute attempts that fail policy
+    // never touch the upstream API or burn rate-limit budget there.
+    await this.passwordPolicy.validate({ password: args.password, email });
+
     const requireVerification = isEmailVerificationRequired();
     const siteUrl = this.resolveSiteUrl(args.requestOrigin);
     const redirectTo = this.buildVerifiedRedirect(siteUrl);
