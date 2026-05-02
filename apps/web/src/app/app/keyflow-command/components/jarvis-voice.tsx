@@ -19,8 +19,7 @@ interface VoiceTurn {
 
 interface Props {
   businessId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-  pageContext?: Record<string, any>;
+  pageContext?: Record<string, unknown>;
 }
 
 const VOICE_OPTIONS = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;

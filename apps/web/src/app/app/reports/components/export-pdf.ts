@@ -1,6 +1,24 @@
 import { GeneratedReport } from "@/lib/client";
 import { formatCurrency, formatDate } from "./report-types";
 
+type AutoTableOptions = {
+  startY?: number;
+  head?: (string | number)[][];
+  body?: (string | number)[][];
+  margin?: { left?: number; right?: number; top?: number; bottom?: number };
+  styles?: Record<string, unknown>;
+  headStyles?: Record<string, unknown>;
+  alternateRowStyles?: Record<string, unknown>;
+  theme?: string;
+  tableLineColor?: number[];
+  tableLineWidth?: number;
+};
+
+type AutoTableJsPDF = {
+  autoTable: (options: AutoTableOptions) => void;
+  lastAutoTable: { finalY: number };
+};
+
 export function exportReportCSV(report: GeneratedReport) {
   const m = report.metrics;
   const rows: string[][] = [];
@@ -150,8 +168,8 @@ export async function exportReportPDF(report: GeneratedReport) {
     ["Bookings (Period)", m.bookings.total.toString()],
   ];
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
-  const at = (doc as any).autoTable?.bind(doc);
+  const docAt = doc as unknown as AutoTableJsPDF;
+  const at = docAt.autoTable?.bind(docAt);
   if (at) {
     at({
       startY: y,
@@ -165,8 +183,7 @@ export async function exportReportPDF(report: GeneratedReport) {
       tableLineColor: [60, 60, 80],
       tableLineWidth: 0.1,
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
-    y = (doc as any).lastAutoTable.finalY + 10;
+    y = docAt.lastAutoTable.finalY + 10;
   }
 
   if (m.expenses.byCategory.length > 0) {
@@ -190,8 +207,7 @@ export async function exportReportPDF(report: GeneratedReport) {
       tableLineColor: [60, 60, 80],
       tableLineWidth: 0.1,
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
-    y = (doc as any).lastAutoTable.finalY + 10;
+    y = docAt.lastAutoTable.finalY + 10;
   }
 
   if (m.revenue.topClients.length > 0) {
@@ -215,8 +231,7 @@ export async function exportReportPDF(report: GeneratedReport) {
       tableLineColor: [60, 60, 80],
       tableLineWidth: 0.1,
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
-    y = (doc as any).lastAutoTable.finalY + 10;
+    y = docAt.lastAutoTable.finalY + 10;
   }
 
   if (report.aiNarrative) {

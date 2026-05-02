@@ -366,8 +366,7 @@ export function useMarketing(): UseMarketingReturn {
   useModuleEvent(
     "contact:imported",
     useCallback(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      (event: any) => {
+      (event: { data?: { count?: number } } | undefined) => {
         const count = event?.data?.count ?? "multiple";
         addSignal({
           type: "contacts_imported",

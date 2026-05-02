@@ -11,8 +11,18 @@ import {
   listMyResources,
   listMyResourceDownloads,
   type ResourceListing,
+  type ResourceType,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+
+type ResourceDownloadEntry = {
+  id: string;
+  productId: string;
+  pricePaid: number;
+  currency: string;
+  createdAt: string;
+  product: ResourceListing & { business?: { name?: string } | null; downloadUrl?: string };
+};
 
 const RESOURCE_TYPES = [
   { value: "TEMPLATE", label: "Template" },
@@ -29,8 +39,7 @@ export default function ResourcesPage() {
   const [tab, setTab] = useState<"browse" | "mine" | "downloaded">("browse");
   const [items, setItems] = useState<ResourceListing[]>([]);
   const [mine, setMine] = useState<ResourceListing[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-  const [downloads, setDownloads] = useState<any[]>([]);
+  const [downloads, setDownloads] = useState<ResourceDownloadEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -192,8 +201,7 @@ function PublishModal({ businessId, onClose, onPublished }: { businessId: string
     await publishResource(businessId, {
       name: form.name,
       description: form.description || undefined,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-      resourceType: form.resourceType as any,
+      resourceType: form.resourceType as ResourceType,
       price: form.isFree ? 0 : Number(form.price),
       currency: form.currency,
       downloadUrl: form.downloadUrl,

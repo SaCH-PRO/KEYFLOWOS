@@ -119,8 +119,7 @@ function worstStatus(statuses: CheckStatus[]): CheckStatus {
 const STATUS_CONFIG: Record<
   CheckStatus,
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin diagnostics dynamic shape — pending typed wrapper
-    icon: React.ComponentType<any>;
+    icon: React.ComponentType<{ className?: string }>;
     color: string;
     bg: string;
     border: string;
@@ -150,8 +149,7 @@ const STATUS_CONFIG: Record<
   },
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin diagnostics dynamic shape — pending typed wrapper
-const CATEGORY_ICONS: Record<string, React.ComponentType<any>> = {
+const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "Infrastructure": Database,
   "Modules": Layers,
   "Integrations": Globe,

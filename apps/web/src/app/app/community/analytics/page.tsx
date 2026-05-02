@@ -26,12 +26,18 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
+type RecentViewerRow = {
+  id: string;
+  createdAt: string;
+  source?: string | null;
+  viewer?: { id: string; name?: string; logoUrl?: string | null; headline?: string | null; slug?: string | null } | null;
+};
+
 export default function NetworkAnalyticsPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [data, setData] = useState<AnalyticsDashboard | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-  const [recentViewers, setRecentViewers] = useState<any[]>([]);
+  const [recentViewers, setRecentViewers] = useState<RecentViewerRow[]>([]);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
 
@@ -159,8 +165,7 @@ export default function NetworkAnalyticsPage() {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-function Stat({ icon: Icon, label, value, sub, delta }: { icon: any; label: string; value: number | string; sub?: string; delta?: number }) {
+function Stat({ icon: Icon, label, value, sub, delta }: { icon: React.ElementType; label: string; value: number | string; sub?: string; delta?: number }) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="kf-card rounded-xl p-4 border border-border/30">
       <div className="flex items-center justify-between mb-2">

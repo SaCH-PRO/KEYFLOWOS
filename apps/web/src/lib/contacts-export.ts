@@ -1,5 +1,20 @@
 import type { LocalContact } from "./contacts-db";
 
+type AutoTableOptions = {
+  head?: (string | number)[][];
+  body?: (string | number)[][];
+  startY?: number;
+  styles?: Record<string, unknown>;
+  headStyles?: Record<string, unknown>;
+  alternateRowStyles?: Record<string, unknown>;
+  margin?: { left?: number; right?: number; top?: number; bottom?: number };
+};
+
+type AutoTableJsPDF = {
+  autoTable: (options: AutoTableOptions) => void;
+  lastAutoTable?: { finalY?: number };
+};
+
 const EXPORT_COLUMNS = [
   { key: "firstName", label: "First Name" },
   { key: "lastName", label: "Last Name" },
@@ -36,18 +51,17 @@ const EXPORT_COLUMNS = [
 function contactToRow(c: LocalContact): Record<string, string> {
   const row: Record<string, string> = {};
   for (const col of EXPORT_COLUMNS) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-    const val = (c as any)[col.key];
+    const val: unknown = c[col.key as keyof LocalContact];
     if (col.key === "tags") {
       row[col.label] = Array.isArray(val) ? val.join(", ") : "";
     } else if (col.key === "createdAt" && val) {
-      row[col.label] = new Date(val).toLocaleDateString("en-TT", {
+      row[col.label] = new Date(val as string).toLocaleDateString("en-TT", {
         year: "numeric", month: "short", day: "numeric",
       });
     } else if (col.key === "marketingOptIn" || col.key === "doNotContact") {
       row[col.label] = val === true ? "Yes" : val === false ? "No" : "";
     } else {
-      row[col.label] = val ?? "";
+      row[col.label] = val == null ? "" : String(val);
     }
   }
   return row;
@@ -171,8 +185,7 @@ export async function exportToPDF(contacts: LocalContact[], filename = "contacts
     Array.isArray(c.tags) ? c.tags.join(", ") : "—",
   ]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-  (doc as any).autoTable({
+  (doc as unknown as AutoTableJsPDF).autoTable({
     head: [columns],
     body: rows,
     startY: 28,
@@ -295,8 +308,7 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
     ["New This Week", metrics.newThisWeek.toString()],
   ];
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-  (doc as any).autoTable({
+  (doc as unknown as AutoTableJsPDF).autoTable({
     head: [["Metric", "Value"]],
     body: summaryData,
     startY: 34,
@@ -312,8 +324,7 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
     .slice(0, 10);
 
   if (topRevenue.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-    const finalY = (doc as any).lastAutoTable?.finalY ?? 80;
+    const finalY = (doc as unknown as AutoTableJsPDF).lastAutoTable?.finalY ?? 80;
     doc.setFontSize(12);
     doc.setTextColor(40);
     doc.text("Top Revenue Clients", 14, finalY + 10);
@@ -324,8 +335,7 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
       formatTTDExport(c.meta?.totalRevenue ?? 0),
     ]);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-    (doc as any).autoTable({
+    (doc as unknown as AutoTableJsPDF).autoTable({
       head: [["#", "Client", "Revenue"]],
       body: revenueRows,
       startY: finalY + 14,

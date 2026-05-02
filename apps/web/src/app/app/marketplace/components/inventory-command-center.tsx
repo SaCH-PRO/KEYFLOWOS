@@ -43,6 +43,44 @@ import {
 import { apiGet, apiPost, apiDelete, getAuthHeaders, API_BASE } from "@/lib/api";
 import { saveAs } from "@/lib/download";
 import { EmptyState, usePagination, PaginationBar, formatCurrency, formatDate } from "./marketplace-utils";
+import type {
+  Warehouse as WarehouseDTO,
+  InventoryStock,
+  Product as ProductDTO,
+  PurchaseOrder,
+  PurchaseOrderItem,
+  StockMovement,
+  InventorySummary,
+  InventoryAlert,
+  InventorySheetStatus,
+  InventorySheetDiff,
+  InventorySheetConflict,
+  InventorySheetPullPreview,
+  InventoryImportResult,
+} from "@/lib/marketplace-types";
+
+interface XlsxWizardState {
+  file: File;
+  headers: string[];
+  previewRows: unknown[][];
+  columnMap: Record<string, string>;
+}
+
+interface ExtendedAlert extends InventoryAlert {
+  productSku?: string | null;
+  reserved?: number;
+  available?: number;
+  salesVelocity30d?: number;
+  suggestedReorderQty?: number;
+  avgDailySales?: number;
+  daysOfStockLeft?: number | null;
+}
+
+interface ValuationItem extends InventoryStock {
+  product?: ProductDTO | null;
+  cost: number;
+  totalValue: number;
+}
 
 type ICCTab = "overview" | "stock" | "movements" | "warehouses" | "orders" | "alerts" | "valuation" | "spreadsheets";
 
@@ -171,22 +209,16 @@ export function InventoryCommandCenter({
 }: {
   businessId: string;
   basePath: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  warehouses: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  inventory: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  products: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  purchaseOrders: any[];
+  warehouses: WarehouseDTO[];
+  inventory: InventoryStock[];
+  products: ProductDTO[];
+  purchaseOrders: PurchaseOrder[];
   onCreateWarehouse: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onEditWarehouse: (wh: any) => void;
+  onEditWarehouse: (wh: WarehouseDTO) => void;
   onDeleteWarehouse: (id: string) => void;
   onAddInventory: () => void;
   onCreatePO: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onEditPO: (po: any) => void;
+  onEditPO: (po: PurchaseOrder) => void;
   onRefresh: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<ICCTab>("overview");
@@ -194,12 +226,9 @@ export function InventoryCommandCenter({
   const [inventory, setInventory] = useState(initialInventory);
   const [purchaseOrders, setPurchaseOrders] = useState(initialPOs);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [summary, setSummary] = useState<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [movements, setMovements] = useState<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [alerts, setAlerts] = useState<any[]>([]);
+  const [summary, setSummary] = useState<InventorySummary | null>(null);
+  const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [alerts, setAlerts] = useState<ExtendedAlert[]>([]);
   const [loadingData, setLoadingData] = useState(false);
 
   const [stockSearch, setStockSearch] = useState("");
@@ -208,8 +237,7 @@ export function InventoryCommandCenter({
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const [showAdjustModal, setShowAdjustModal] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [adjustTarget, setAdjustTarget] = useState<any>(null);
+  const [adjustTarget, setAdjustTarget] = useState<InventoryStock | null>(null);
   const [adjustData, setAdjustData] = useState({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" });
   const [adjustSaving, setAdjustSaving] = useState(false);
 
@@ -217,33 +245,21 @@ export function InventoryCommandCenter({
   const [transferData, setTransferData] = useState({ productId: "", fromWarehouseId: "", toWarehouseId: "", quantity: 1, note: "" });
   const [transferSaving, setTransferSaving] = useState(false);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [sheetStatus, setSheetStatus] = useState<any>(null);
+  const [sheetStatus, setSheetStatus] = useState<InventorySheetStatus | null>(null);
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetAction, setSheetAction] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [pullPreview, setPullPreview] = useState<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [sheetDiff, setSheetDiff] = useState<any>(null);
+  const [pullPreview, setPullPreview] = useState<InventorySheetPullPreview | null>(null);
+  const [sheetDiff, setSheetDiff] = useState<InventorySheetDiff | null>(null);
   const [conflictResolutions, setConflictResolutions] = useState<Record<number, "system" | "sheet">>({});
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const [importResult, setImportResult] = useState<any>(null);
+  const [importResult, setImportResult] = useState<InventoryImportResult | null>(null);
   const [xlsxImporting, setXlsxImporting] = useState(false);
-  const [xlsxWizard, setXlsxWizard] = useState<{
-    file: File;
-    headers: string[];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    previewRows: any[][];
-    columnMap: Record<string, string>;
-  } | null>(null);
+  const [xlsxWizard, setXlsxWizard] = useState<XlsxWizardState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const EXPECTED_COLUMNS = ["SKU", "Product Name", "Warehouse", "Quantity On Hand", "Reserved", "Reorder Level", "Cost Per Unit", "Currency"];
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const productsById = Object.fromEntries(products.map((p: any) => [p.id, p]));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const warehousesById = Object.fromEntries(warehouses.map((w: any) => [w.id, w]));
+  const productsById: Record<string, ProductDTO> = Object.fromEntries(products.map((p) => [p.id, p]));
+  const warehousesById: Record<string, WarehouseDTO> = Object.fromEntries(warehouses.map((w) => [w.id, w]));
 
   useEffect(() => { setWarehouses(initialWarehouses); }, [initialWarehouses]);
   useEffect(() => { setInventory(initialInventory); }, [initialInventory]);
@@ -254,28 +270,23 @@ export function InventoryCommandCenter({
     setLoadingData(true);
     try {
       if (tab === "overview" || tab === "valuation") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        const res = await apiGet<any>(`${basePath}/inventory/summary`);
+        const res = await apiGet<InventorySummary>(`${basePath}/inventory/summary`);
         if (res.data) setSummary(res.data);
       }
       if (tab === "movements") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        const res = await apiGet<any[]>(`${basePath}/inventory/movements`);
+        const res = await apiGet<StockMovement[]>(`${basePath}/inventory/movements`);
         if (res.data) setMovements(res.data);
       }
       if (tab === "alerts") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        const res = await apiGet<any[]>(`${basePath}/inventory/alerts`);
+        const res = await apiGet<ExtendedAlert[]>(`${basePath}/inventory/alerts`);
         if (res.data) setAlerts(Array.isArray(res.data) ? res.data : []);
       }
       if (tab === "orders") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        const res = await apiGet<any>(`${basePath}/purchase-orders`);
+        const res = await apiGet<PurchaseOrder[] | { data: PurchaseOrder[] }>(`${basePath}/purchase-orders`);
         if (res.data) setPurchaseOrders(Array.isArray(res.data) ? res.data : (res.data.data ?? []));
       }
       if (tab === "spreadsheets") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        const res = await apiGet<any>(`/drive/businesses/${businessId}/inventory-sheet/status`);
+        const res = await apiGet<InventorySheetStatus>(`/drive/businesses/${businessId}/inventory-sheet/status`);
         if (res.data) setSheetStatus(res.data);
       }
     } catch {}
@@ -304,11 +315,9 @@ export function InventoryCommandCenter({
       await apiPost({ path: `${basePath}/inventory/adjust`, body: { stockId: adjustTarget.id, ...adjustData } });
       setShowAdjustModal(false);
       setAdjustTarget(null);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const res = await apiGet<any[]>(`${basePath}/inventory`);
+      const res = await apiGet<InventoryStock[]>(`${basePath}/inventory`);
       if (res.data) setInventory(res.data);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const movRes = await apiGet<any[]>(`${basePath}/inventory/movements`);
+      const movRes = await apiGet<StockMovement[]>(`${basePath}/inventory/movements`);
       if (movRes.data) setMovements(movRes.data);
     } catch {}
     setAdjustSaving(false);
@@ -319,11 +328,9 @@ export function InventoryCommandCenter({
     try {
       await apiPost({ path: `${basePath}/inventory/transfer`, body: transferData });
       setShowTransferModal(false);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const res = await apiGet<any[]>(`${basePath}/inventory`);
+      const res = await apiGet<InventoryStock[]>(`${basePath}/inventory`);
       if (res.data) setInventory(res.data);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const movRes = await apiGet<any[]>(`${basePath}/inventory/movements`);
+      const movRes = await apiGet<StockMovement[]>(`${basePath}/inventory/movements`);
       if (movRes.data) setMovements(movRes.data);
     } catch {}
     setTransferSaving(false);
@@ -354,8 +361,7 @@ export function InventoryCommandCenter({
     try {
       const data = await readXlsxAsRows(file);
       if (!data.length) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const headers = (data[0] || []).map((h: any) => String(h ?? "").trim());
+      const headers = (data[0] || []).map((h: unknown) => String(h ?? "").trim());
       const previewRows = data.slice(1, 6);
       const autoMap: Record<string, string> = {};
       for (const expected of EXPECTED_COLUMNS) {
@@ -376,11 +382,9 @@ export function InventoryCommandCenter({
       const rawRows = await readXlsxAsRows(xlsxWizard.file);
       const headers = rawRows[0] || [];
       const headerIdx: Record<string, number> = {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      (headers as any[]).forEach((h: any, i: number) => { headerIdx[String(h ?? "").trim()] = i; });
+      (headers as unknown[]).forEach((h: unknown, i: number) => { headerIdx[String(h ?? "").trim()] = i; });
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const mappedRows = rawRows.slice(1).map((row: any[]) => {
+      const mappedRows: Record<string, string>[] = rawRows.slice(1).map((row: unknown[]) => {
         const obj: Record<string, string> = {};
         for (const [expected, sourceCol] of Object.entries(xlsxWizard.columnMap)) {
           if (sourceCol) obj[expected] = String(row[headerIdx[sourceCol]] ?? "");
@@ -404,8 +408,7 @@ export function InventoryCommandCenter({
       const data = await res.json();
       setImportResult(data);
       setXlsxWizard(null);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const invRes = await apiGet<any[]>(`${basePath}/inventory`);
+      const invRes = await apiGet<InventoryStock[]>(`${basePath}/inventory`);
       if (invRes.data) setInventory(invRes.data);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Import failed";
@@ -419,8 +422,7 @@ export function InventoryCommandCenter({
     setSheetAction("push");
     try {
       await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/push`, body: {} });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const res = await apiGet<any>(`/drive/businesses/${businessId}/inventory-sheet/status`);
+      const res = await apiGet<InventorySheetStatus>(`/drive/businesses/${businessId}/inventory-sheet/status`);
       if (res.data) setSheetStatus(res.data);
     } catch {}
     setSheetLoading(false);
@@ -431,22 +433,20 @@ export function InventoryCommandCenter({
     setSheetLoading(true);
     setSheetAction("pull");
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const res = await apiGet<any>(`/drive/businesses/${businessId}/inventory-sheet/pull`);
+      const res = await apiGet<InventorySheetPullPreview>(`/drive/businesses/${businessId}/inventory-sheet/pull`);
       if (res.data) setPullPreview(res.data);
     } catch {}
     setSheetLoading(false);
     setSheetAction(null);
   };
 
-  const handleApplyPulledInventory = async (rows: Record<string, string>[]) => {
+  const handleApplyPulledInventory = async (rows: Record<string, unknown>[]) => {
     setSheetLoading(true);
     setSheetAction("apply");
     try {
       const res = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/apply`, body: { rows } });
       if (res.data) setImportResult(res.data);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const invRes = await apiGet<any[]>(`${basePath}/inventory`);
+      const invRes = await apiGet<InventoryStock[]>(`${basePath}/inventory`);
       if (invRes.data) setInventory(invRes.data);
       setPullPreview(null);
       setSheetDiff(null);
@@ -460,13 +460,11 @@ export function InventoryCommandCenter({
     setSheetLoading(true);
     setSheetAction("diff");
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const res = await apiGet<any>(`/drive/businesses/${businessId}/inventory-sheet/diff`);
+      const res = await apiGet<InventorySheetDiff>(`/drive/businesses/${businessId}/inventory-sheet/diff`);
       if (res.data) {
         setSheetDiff(res.data);
         const defaultResolutions: Record<number, "system" | "sheet"> = {};
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-        (res.data.conflicts || []).forEach((_: any, i: number) => { defaultResolutions[i] = "sheet"; });
+        (res.data.conflicts || []).forEach((_: InventorySheetConflict, i: number) => { defaultResolutions[i] = "sheet"; });
         setConflictResolutions(defaultResolutions);
       }
     } catch {}
@@ -476,16 +474,14 @@ export function InventoryCommandCenter({
 
   const handleApplyResolved = async () => {
     if (!sheetDiff?.conflicts) return;
-    const rowsToApply = sheetDiff.conflicts
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      .filter((_: any, i: number) => conflictResolutions[i] === "sheet")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      .map((c: any) => ({
-        'SKU': c.sku,
-        'Product Name': c.productName,
-        'Warehouse': c.warehouseName,
-        'Quantity On Hand': String(c.sheetQty),
-        'Reorder Level': c.sheetReorderAt !== null ? String(c.sheetReorderAt) : '',
+    const rowsToApply: Record<string, string>[] = sheetDiff.conflicts
+      .filter((_: InventorySheetConflict, i: number) => conflictResolutions[i] === "sheet")
+      .map((c: InventorySheetConflict) => ({
+        'SKU': c.sku ?? '',
+        'Product Name': c.productName ?? '',
+        'Warehouse': c.warehouseName ?? '',
+        'Quantity On Hand': String(c.sheetQty ?? ''),
+        'Reorder Level': c.sheetReorderAt != null ? String(c.sheetReorderAt) : '',
       }));
     await handleApplyPulledInventory(rowsToApply);
   };
@@ -512,9 +508,8 @@ export function InventoryCommandCenter({
   const handleAdvancePO = async (poId: string, status: string) => {
     try {
       await apiPost({ path: `${basePath}/purchase-orders/${poId}/advance`, body: { status } });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-      const res = await apiGet<any>(`${basePath}/purchase-orders`);
-      if (res.data) setPurchaseOrders(res.data.data ?? res.data);
+      const res = await apiGet<PurchaseOrder[] | { data: PurchaseOrder[] }>(`${basePath}/purchase-orders`);
+      if (res.data) setPurchaseOrders(Array.isArray(res.data) ? res.data : (res.data.data ?? []));
       onRefresh();
     } catch {}
   };
@@ -589,7 +584,7 @@ export function InventoryCommandCenter({
               expandedRows={expandedRows}
               setExpandedRows={setExpandedRows}
 
-              onAdjust={(inv: Record<string, unknown>) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
+              onAdjust={(inv: InventoryStock) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
               onAddInventory={onAddInventory}
             />
           )}
@@ -604,7 +599,7 @@ export function InventoryCommandCenter({
               warehousesById={warehousesById}
               basePath={basePath}
 
-              onAdjust={(inv: Record<string, unknown>) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
+              onAdjust={(inv: InventoryStock) => { setAdjustTarget(inv); setAdjustData({ quantityChange: 0, reasonCode: "COUNT_CORRECTION", note: "" }); setShowAdjustModal(true); }}
               onShowTransfer={() => setShowTransferModal(true)}
             />
           )}
@@ -684,8 +679,7 @@ export function InventoryCommandCenter({
               }}
               onLinkSheet={(sheetId: string, sheetName: string) =>
                 apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/link`, body: { sheetId, sheetName } })
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                  .then(() => apiGet<any>(`/drive/businesses/${businessId}/inventory-sheet/status`))
+                  .then(() => apiGet<InventorySheetStatus>(`/drive/businesses/${businessId}/inventory-sheet/status`))
                   .then(r => { if (r.data) setSheetStatus(r.data); })
               }
             />
@@ -722,8 +716,17 @@ export function InventoryCommandCenter({
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function OverviewTab({ summary, loading, inventory, warehouses, products: _products, productsById: _productsById, onAddInventory, onCreateWarehouse }: any) {
+interface OverviewTabProps {
+  summary: InventorySummary | null;
+  loading: boolean;
+  inventory: InventoryStock[];
+  warehouses: WarehouseDTO[];
+  products: ProductDTO[];
+  productsById: Record<string, ProductDTO>;
+  onAddInventory: () => void;
+  onCreateWarehouse: () => void;
+}
+function OverviewTab({ summary, loading, inventory, warehouses, products: _products, productsById: _productsById, onAddInventory, onCreateWarehouse }: OverviewTabProps) {
   if (loading && !summary) return (
     <div className="flex items-center justify-center py-16">
       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -746,17 +749,14 @@ function OverviewTab({ summary, loading, inventory, warehouses, products: _produ
 
   const totalSKUs = summary?.totalSKUs ?? inventory.length;
   const totalStockValue = summary?.totalStockValue ?? 0;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const belowReorderCount = summary?.belowReorderCount ?? inventory.filter((i: any) => i.reorderAt && i.quantity <= i.reorderAt).length;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const outOfStockCount = summary?.outOfStockCount ?? inventory.filter((i: any) => i.quantity <= 0).length;
+  const belowReorderCount = summary?.belowReorderCount ?? inventory.filter((i) => i.reorderAt && i.quantity <= i.reorderAt).length;
+  const outOfStockCount = summary?.outOfStockCount ?? inventory.filter((i) => i.quantity <= 0).length;
   const healthScore = summary?.healthScore ?? 100;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const warehouseBreakdown = summary?.warehouseBreakdown ?? warehouses.map((wh: any) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    const whInv = inventory.filter((i: any) => i.warehouseId === wh.id);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    return { id: wh.id, name: wh.name, skuCount: whInv.length, totalUnits: whInv.reduce((s: number, i: any) => s + i.quantity, 0), capacity: wh.capacity };
+  const warehouseBreakdown = summary?.warehouseBreakdown ?? warehouses.map((wh) => {
+    const whInv = inventory.filter((i) => i.warehouseId === wh.id);
+    const totalUnits = whInv.reduce((sum, i) => sum + i.quantity, 0);
+    const capacityUtilization = wh.capacity ? Math.min(Math.round((totalUnits / wh.capacity) * 100), 100) : null;
+    return { id: wh.id, name: wh.name, skuCount: whInv.length, totalUnits, capacity: wh.capacity, capacityUtilization };
   });
 
   return (
@@ -791,8 +791,7 @@ function OverviewTab({ summary, loading, inventory, warehouses, products: _produ
             Warehouse Distribution
           </h3>
           <div className="space-y-3">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-            {warehouseBreakdown.map((wh: any) => (
+            {warehouseBreakdown.map((wh) => (
               <div key={wh.id}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium">{wh.name}</span>
@@ -830,8 +829,29 @@ function OverviewTab({ summary, loading, inventory, warehouses, products: _produ
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPage, setPageSize, warehouses, productsById, warehousesById, stockSearch, setStockSearch, stockWarehouseFilter, setStockWarehouseFilter, stockStatusFilter, setStockStatusFilter, expandedRows, setExpandedRows, onAdjust, onAddInventory }: any) {
+interface StockGridTabProps {
+  inventory: InventoryStock[];
+  paginated: InventoryStock[];
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  setPage: React.Dispatch<React.SetStateAction<number>>;
+  setPageSize: React.Dispatch<React.SetStateAction<number>>;
+  warehouses: WarehouseDTO[];
+  productsById: Record<string, ProductDTO>;
+  warehousesById: Record<string, WarehouseDTO>;
+  stockSearch: string;
+  setStockSearch: (v: string) => void;
+  stockWarehouseFilter: string;
+  setStockWarehouseFilter: (v: string) => void;
+  stockStatusFilter: string;
+  setStockStatusFilter: (v: string) => void;
+  expandedRows: Set<string>;
+  setExpandedRows: React.Dispatch<React.SetStateAction<Set<string>>>;
+  onAdjust: (inv: InventoryStock) => void;
+  onAddInventory: () => void;
+}
+function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPage, setPageSize, warehouses, productsById, warehousesById, stockSearch, setStockSearch, stockWarehouseFilter, setStockWarehouseFilter, stockStatusFilter, setStockStatusFilter, expandedRows, setExpandedRows, onAdjust, onAddInventory }: StockGridTabProps) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -850,8 +870,7 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
           className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500/40"
         >
           <option value="all">All Warehouses</option>
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-          {warehouses.map((wh: any) => <option key={wh.id} value={wh.id}>{wh.name}</option>)}
+          {warehouses.map((wh) => <option key={wh.id} value={wh.id}>{wh.name}</option>)}
         </select>
         <select
           value={stockStatusFilter}
@@ -884,8 +903,7 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
               <span className="col-span-1 text-right">Action</span>
             </div>
             <div className="divide-y divide-white/5">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-              {paginated.map((inv: any) => {
+              {paginated.map((inv) => {
                 const product = productsById[inv.productId] || inv.product;
                 const warehouse = warehousesById[inv.warehouseId] || inv.warehouse;
                 const available = inv.quantity - inv.reserved;
@@ -970,8 +988,18 @@ function StockGridTab({ inventory, paginated, page, pageSize, totalPages, setPag
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function MovementsTab({ movements, loading, inventory, warehouses: _warehouses, productsById, warehousesById, basePath: _basePath, onAdjust, onShowTransfer }: any) {
+interface MovementsTabProps {
+  movements: StockMovement[];
+  loading: boolean;
+  inventory: InventoryStock[];
+  warehouses: WarehouseDTO[];
+  productsById: Record<string, ProductDTO>;
+  warehousesById: Record<string, WarehouseDTO>;
+  basePath: string;
+  onAdjust: (inv: InventoryStock) => void;
+  onShowTransfer: () => void;
+}
+function MovementsTab({ movements, loading, inventory, warehouses: _warehouses, productsById, warehousesById, basePath: _basePath, onAdjust, onShowTransfer }: MovementsTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -1003,8 +1031,7 @@ function MovementsTab({ movements, loading, inventory, warehouses: _warehouses, 
       ) : (
         <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
           <div className="divide-y divide-white/5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-            {movements.map((m: any) => {
+            {movements.map((m: StockMovement & { product?: ProductDTO | null; warehouse?: WarehouseDTO | null }) => {
               const product = m.product || (m.productId ? productsById[m.productId] : null);
               const warehouse = m.warehouse || (m.warehouseId ? warehousesById[m.warehouseId] : null);
               return (
@@ -1043,8 +1070,16 @@ function MovementsTab({ movements, loading, inventory, warehouses: _warehouses, 
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function WarehousesTab({ warehouses, inventory, productsById, onCreateWarehouse, onEditWarehouse, onDeleteWarehouse, onShowTransfer }: any) {
+interface WarehousesTabProps {
+  warehouses: WarehouseDTO[];
+  inventory: InventoryStock[];
+  productsById: Record<string, ProductDTO>;
+  onCreateWarehouse: () => void;
+  onEditWarehouse: (wh: WarehouseDTO) => void;
+  onDeleteWarehouse: (id: string) => void;
+  onShowTransfer: () => void;
+}
+function WarehousesTab({ warehouses, inventory, productsById, onCreateWarehouse, onEditWarehouse, onDeleteWarehouse, onShowTransfer }: WarehousesTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -1063,12 +1098,9 @@ function WarehousesTab({ warehouses, inventory, productsById, onCreateWarehouse,
         <EmptyState icon={Building2} title="No Warehouses" description="Add warehouse locations to manage your inventory." />
       ) : (
         <div className="space-y-3">
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-          {warehouses.map((wh: any) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-            const whInv = inventory.filter((inv: any) => inv.warehouseId === wh.id);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-            const totalUnits = whInv.reduce((s: number, i: any) => s + i.quantity, 0);
+          {warehouses.map((wh) => {
+            const whInv = inventory.filter((inv) => inv.warehouseId === wh.id);
+            const totalUnits = whInv.reduce((sum, i) => sum + i.quantity, 0);
             const capacityPct = wh.capacity ? Math.min(Math.round((totalUnits / wh.capacity) * 100), 100) : null;
 
             return (
@@ -1111,8 +1143,7 @@ function WarehousesTab({ warehouses, inventory, productsById, onCreateWarehouse,
                   <div className="border-t border-white/5">
                     <div className="px-4 py-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Inventory</div>
                     <div className="divide-y divide-white/5">
-                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                      {whInv.map((inv: any) => {
+                      {whInv.map((inv) => {
                         const product = productsById[inv.productId] || inv.product;
                         return (
                           <div key={inv.id} className="px-4 py-2.5 flex items-center justify-between">
@@ -1152,8 +1183,14 @@ const PO_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   SHIPPED: { label: "Shipped", color: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20" },
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, onEditPO, onAdvancePO }: any) {
+interface PurchaseOrdersTabProps {
+  purchaseOrders: PurchaseOrder[];
+  products: ProductDTO[];
+  onCreatePO: () => void;
+  onEditPO: (po: PurchaseOrder) => void;
+  onAdvancePO: (poId: string, status: string) => void;
+}
+function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, onEditPO, onAdvancePO }: PurchaseOrdersTabProps) {
   const NEXT_STATUS: Record<string, string> = {
     DRAFT: "SUBMITTED",
     SUBMITTED: "ACKNOWLEDGED",
@@ -1174,8 +1211,7 @@ function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, on
         <EmptyState icon={ShoppingBag} title="No Purchase Orders" description="Create purchase orders to restock your inventory from suppliers." />
       ) : (
         <div className="space-y-3">
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-          {purchaseOrders.map((po: any) => {
+          {purchaseOrders.map((po) => {
             const statusCfg = PO_STATUS_CONFIG[po.status] || { label: po.status, color: "bg-white/5 text-white/60 border-white/10" };
             const nextStatus = NEXT_STATUS[po.status];
             return (
@@ -1190,14 +1226,12 @@ function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, on
                     {po.expectedDelivery && <p className="text-[10px] text-muted-foreground">Expected: {formatDate(po.expectedDelivery)}</p>}
                     {po.items && Array.isArray(po.items) && (
                       <div className="mt-2 flex flex-wrap gap-1">
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                        {(po.items as any[]).slice(0, 3).map((item: any, idx: number) => (
+                        {(po.items as PurchaseOrderItem[]).slice(0, 3).map((item, idx: number) => (
                           <span key={idx} className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-muted-foreground">
-                            {item.productName || `Item ${idx + 1}`} × {item.quantity}
+                            {item.name || `Item ${idx + 1}`} × {item.quantity}
                           </span>
                         ))}
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                        {(po.items as any[]).length > 3 && <span className="text-[10px] text-muted-foreground">+{(po.items as any[]).length - 3} more</span>}
+                        {(po.items as PurchaseOrderItem[]).length > 3 && <span className="text-[10px] text-muted-foreground">+{(po.items as PurchaseOrderItem[]).length - 3} more</span>}
                       </div>
                     )}
                   </div>
@@ -1228,8 +1262,7 @@ function PurchaseOrdersTab({ purchaseOrders, products: _products, onCreatePO, on
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function AlertsTab({ alertItems, loading, onCreatePO }: { alertItems: any[]; loading: boolean; onCreatePO: () => void }) {
+function AlertsTab({ alertItems, loading, onCreatePO }: { alertItems: ExtendedAlert[]; loading: boolean; onCreatePO: () => void }) {
   if (loading && alertItems.length === 0) return (
     <div className="flex items-center justify-center py-12">
       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -1263,8 +1296,7 @@ function AlertsTab({ alertItems, loading, onCreatePO }: { alertItems: any[]; loa
       </div>
 
       <div className="space-y-3">
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-        {alertItems.map((alert: any, i: number) => {
+        {alertItems.map((alert, i: number) => {
           const isOut = alert.type === "OUT_OF_STOCK";
           return (
             <motion.div key={`${alert.productId}-${alert.warehouseId}-${i}`} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="bg-white/5 border border-white/10 rounded-2xl p-4">
@@ -1285,12 +1317,12 @@ function AlertsTab({ alertItems, loading, onCreatePO }: { alertItems: any[]; loa
                     <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground flex-wrap">
                       <span>On Hand: <span className="font-medium text-white">{alert.quantity}</span></span>
                       <span>Reserved: {alert.reserved}</span>
-                      <span>Available: <span className={`font-medium ${alert.available <= 0 ? "text-red-400" : "text-amber-400"}`}>{alert.available}</span></span>
+                      <span>Available: <span className={`font-medium ${(alert.available ?? 0) <= 0 ? "text-red-400" : "text-amber-400"}`}>{alert.available}</span></span>
                       <span>Reorder At: {alert.reorderAt}</span>
                     </div>
                     {(alert.salesVelocity30d !== undefined || alert.suggestedReorderQty !== undefined) && (
                       <div className="flex items-center gap-3 mt-1.5 text-[11px] flex-wrap">
-                        {alert.avgDailySales > 0 && (
+                        {(alert.avgDailySales ?? 0) > 0 && (
                           <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">
                             <TrendingDown className="w-2.5 h-2.5" />
                             {alert.avgDailySales} units/day avg
@@ -1325,33 +1357,33 @@ function AlertsTab({ alertItems, loading, onCreatePO }: { alertItems: any[]; loa
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function ValuationTab({ summary, inventory, productsById, loading }: any) {
+interface ValuationTabProps {
+  summary: InventorySummary | null;
+  inventory: InventoryStock[];
+  productsById: Record<string, ProductDTO>;
+  loading: boolean;
+}
+function ValuationTab({ summary, inventory, productsById, loading }: ValuationTabProps) {
   if (loading && !summary) return (
     <div className="flex items-center justify-center py-12">
       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
     </div>
   );
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const totalValue = summary?.totalStockValue ?? inventory.reduce((sum: number, inv: any) => {
+  const totalValue = summary?.totalStockValue ?? inventory.reduce((sum, inv) => {
     const product = productsById[inv.productId] || inv.product;
     const cost = inv.costPerUnit ?? product?.costProfile?.landedCostEstimate ?? 0;
     return sum + (inv.quantity * cost);
   }, 0);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const valuedItems = inventory.map((inv: any) => {
+  const valuedItems: ValuationItem[] = inventory.map((inv) => {
     const product = productsById[inv.productId] || inv.product;
     const cost = inv.costPerUnit ?? product?.costProfile?.landedCostEstimate ?? 0;
     return { ...inv, product, cost, totalValue: inv.quantity * cost };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  }).sort((a: any, b: any) => b.totalValue - a.totalValue);
+  }).sort((a, b) => b.totalValue - a.totalValue);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const withCost = valuedItems.filter((i: any) => i.cost > 0);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const withoutCost = valuedItems.filter((i: any) => i.cost <= 0);
+  const withCost = valuedItems.filter((i) => i.cost > 0);
+  const withoutCost = valuedItems.filter((i) => i.cost <= 0);
 
   return (
     <div className="space-y-5">
@@ -1367,8 +1399,7 @@ function ValuationTab({ summary, inventory, productsById, loading }: any) {
             <h3 className="text-sm font-semibold">Top Value Items</h3>
           </div>
           <div className="divide-y divide-white/5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-            {withCost.slice(0, 10).map((item: any) => (
+            {withCost.slice(0, 10).map((item) => (
               <div key={item.id} className="px-4 py-3 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium">{item.product?.name || "Product"}</p>
@@ -1396,8 +1427,37 @@ function ValuationTab({ summary, inventory, productsById, loading }: any) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, sheetDiff, conflictResolutions, setConflictResolutions, importResult, xlsxImporting, xlsxWizard, setXlsxWizard, expectedColumns, onApplyXlsxMapping, fileInputRef, inventory: _inventory, businessId: _businessId, onPush, onPull, onApply, onGenerateDiff, onApplyResolved, onCreateSheet, onUnlink, onExportExcel, onDownloadTemplate, onXlsxImport, onConnectDrive, onLinkSheet }: any) {
+interface SpreadsheetsTabProps {
+  sheetStatus: (InventorySheetStatus & { connected?: boolean }) | null;
+  sheetLoading: boolean;
+  sheetAction: string | null;
+  pullPreview: InventorySheetPullPreview | null;
+  sheetDiff: (InventorySheetDiff & { unchanged?: number }) | null;
+  conflictResolutions: Record<number, "system" | "sheet">;
+  setConflictResolutions: React.Dispatch<React.SetStateAction<Record<number, "system" | "sheet">>>;
+  importResult: InventoryImportResult | null;
+  xlsxImporting: boolean;
+  xlsxWizard: XlsxWizardState | null;
+  setXlsxWizard: React.Dispatch<React.SetStateAction<XlsxWizardState | null>>;
+  expectedColumns: string[];
+  onApplyXlsxMapping: () => void;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  inventory: InventoryStock[];
+  businessId: string;
+  onPush: () => void;
+  onPull: () => void;
+  onApply: (rows: Record<string, unknown>[]) => void;
+  onGenerateDiff: () => void;
+  onApplyResolved: () => void;
+  onCreateSheet: () => void;
+  onUnlink: () => void;
+  onExportExcel: () => void;
+  onDownloadTemplate: () => void;
+  onXlsxImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onConnectDrive: () => void;
+  onLinkSheet: (sheetId: string, sheetName: string) => void;
+}
+function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, sheetDiff, conflictResolutions, setConflictResolutions, importResult, xlsxImporting, xlsxWizard, setXlsxWizard, expectedColumns, onApplyXlsxMapping, fileInputRef, inventory: _inventory, businessId: _businessId, onPush, onPull, onApply, onGenerateDiff, onApplyResolved, onCreateSheet, onUnlink, onExportExcel, onDownloadTemplate, onXlsxImport, onConnectDrive, onLinkSheet }: SpreadsheetsTabProps) {
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
 
@@ -1536,8 +1596,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
               <button
                 onClick={() => {
                   const all: Record<number, "system" | "sheet"> = {};
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                  (sheetDiff.conflicts || []).forEach((_: any, i: number) => { all[i] = "system"; });
+                  (sheetDiff.conflicts || []).forEach((_: InventorySheetConflict, i: number) => { all[i] = "system"; });
                   setConflictResolutions(all);
                 }}
                 className="text-[10px] px-2 py-1 rounded-lg bg-white/5 text-muted-foreground hover:text-white transition-colors"
@@ -1547,8 +1606,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
               <button
                 onClick={() => {
                   const all: Record<number, "system" | "sheet"> = {};
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                  (sheetDiff.conflicts || []).forEach((_: any, i: number) => { all[i] = "sheet"; });
+                  (sheetDiff.conflicts || []).forEach((_: InventorySheetConflict, i: number) => { all[i] = "sheet"; });
                   setConflictResolutions(all);
                 }}
                 className="text-[10px] px-2 py-1 rounded-lg bg-white/5 text-muted-foreground hover:text-white transition-colors"
@@ -1573,8 +1631,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
             </div>
           ) : (
             <div className="divide-y divide-white/5 max-h-80 overflow-y-auto">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-              {(sheetDiff.conflicts || []).map((conflict: any, i: number) => {
+              {(sheetDiff.conflicts || []).map((conflict, i: number) => {
                 const resolution = conflictResolutions[i] ?? "sheet";
                 return (
                   <div key={i} className={`px-4 py-3 transition-colors ${resolution === "system" ? "bg-blue-500/5" : "bg-emerald-500/5"}`}>
@@ -1583,7 +1640,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-xs font-medium">{conflict.productName}</p>
                           {conflict.sku && <span className="text-[10px] text-muted-foreground">{conflict.sku}</span>}
-                          {conflict.isNew && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400">New Row</span>}
+                          {(conflict as InventorySheetConflict & { isNew?: boolean }).isNew && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400">New Row</span>}
                         </div>
                         <p className="text-[11px] text-muted-foreground">{conflict.warehouseName}</p>
                         <div className="flex items-center gap-3 mt-1 text-[11px]">
@@ -1598,15 +1655,13 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
                       </div>
                       <div className="flex gap-1.5">
                         <button
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                          onClick={() => setConflictResolutions((r: any) => ({ ...r, [i]: "system" }))}
+                          onClick={() => setConflictResolutions((r) => ({ ...r, [i]: "system" }))}
                           className={`px-2 py-1 rounded-lg text-[10px] font-medium transition-colors ${resolution === "system" ? "bg-blue-500/30 text-blue-400 border border-blue-500/40" : "bg-white/5 text-muted-foreground hover:bg-white/10"}`}
                         >
                           Keep System
                         </button>
                         <button
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                          onClick={() => setConflictResolutions((r: any) => ({ ...r, [i]: "sheet" }))}
+                          onClick={() => setConflictResolutions((r) => ({ ...r, [i]: "sheet" }))}
                           className={`px-2 py-1 rounded-lg text-[10px] font-medium transition-colors ${resolution === "sheet" ? "bg-emerald-500/30 text-emerald-400 border border-emerald-500/40" : "bg-white/5 text-muted-foreground hover:bg-white/10"}`}
                         >
                           Accept Sheet
@@ -1650,11 +1705,10 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                {(pullPreview.rows || []).slice(0, 15).map((row: any, i: number) => (
+                {(pullPreview.rows || []).slice(0, 15).map((row: Record<string, unknown>, i: number) => (
                   <tr key={i} className="hover:bg-white/3">
                     {(pullPreview.headers || []).map((h: string, j: number) => (
-                      <td key={j} className="px-3 py-2 text-muted-foreground whitespace-nowrap">{row[h] || "—"}</td>
+                      <td key={j} className="px-3 py-2 text-muted-foreground whitespace-nowrap">{String(row[h] ?? "—")}</td>
                     ))}
                   </tr>
                 ))}
@@ -1663,7 +1717,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
           </div>
           {(pullPreview.rows?.length ?? 0) > 15 && (
             <div className="px-4 py-2 border-t border-white/5 text-[10px] text-muted-foreground">
-              Showing 15 of {pullPreview.rows.length} rows — all rows will be applied
+              Showing 15 of {pullPreview.rows?.length ?? 0} rows — all rows will be applied
             </div>
           )}
         </div>
@@ -1718,8 +1772,7 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
                   <ArrowRight className="w-3 h-3 text-muted-foreground shrink-0" />
                   <select
                     value={xlsxWizard.columnMap[col] || ""}
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                    onChange={e => setXlsxWizard((w: any) => ({ ...w, columnMap: { ...w.columnMap, [col]: e.target.value } }))}
+                    onChange={e => setXlsxWizard((w) => w ? ({ ...w, columnMap: { ...w.columnMap, [col]: e.target.value } }) : w)}
                     className="flex-1 text-[11px] bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-orange-500/50"
                   >
                     <option value="">— not mapped —</option>
@@ -1742,11 +1795,10 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                    {xlsxWizard.previewRows.map((row: any[], i: number) => (
+                    {xlsxWizard.previewRows.map((row, i: number) => (
                       <tr key={i}>
                         {xlsxWizard.headers.map((_: string, j: number) => (
-                          <td key={j} className="px-2 py-1 text-muted-foreground whitespace-nowrap">{row[j] ?? "—"}</td>
+                          <td key={j} className="px-2 py-1 text-muted-foreground whitespace-nowrap">{String(row[j] ?? "—")}</td>
                         ))}
                       </tr>
                     ))}
@@ -1769,11 +1821,11 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
         )}
 
         {importResult && (
-          <div className={`mt-3 p-3 rounded-xl border text-xs ${importResult.imported > 0 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-red-500/10 border-red-500/20 text-red-400"}`}>
+          <div className={`mt-3 p-3 rounded-xl border text-xs ${(importResult.imported ?? 0) > 0 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-red-500/10 border-red-500/20 text-red-400"}`}>
             <p className="font-medium">Import complete: {importResult.imported} imported, {importResult.skipped} skipped</p>
-            {importResult.errors?.length > 0 && (
+            {(importResult.errors?.length ?? 0) > 0 && (
               <ul className="mt-1 space-y-0.5">
-                {importResult.errors.slice(0, 5).map((err: string, i: number) => <li key={i} className="text-muted-foreground">• {err}</li>)}
+                {(importResult.errors ?? []).slice(0, 5).map((err: string, i: number) => <li key={i} className="text-muted-foreground">• {err}</li>)}
               </ul>
             )}
           </div>
@@ -1788,8 +1840,17 @@ function SpreadsheetsTab({ sheetStatus, sheetLoading, sheetAction, pullPreview, 
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function AdjustModal({ target, data, setData, saving, productsById, warehousesById, onSave, onClose }: any) {
+interface AdjustModalProps {
+  target: InventoryStock | null;
+  data: { quantityChange: number; reasonCode: string; note: string };
+  setData: React.Dispatch<React.SetStateAction<{ quantityChange: number; reasonCode: string; note: string }>>;
+  saving: boolean;
+  productsById: Record<string, ProductDTO>;
+  warehousesById: Record<string, WarehouseDTO>;
+  onSave: () => void;
+  onClose: () => void;
+}
+function AdjustModal({ target, data, setData, saving, productsById, warehousesById, onSave, onClose }: AdjustModalProps) {
   const product = target ? (productsById[target.productId] || target.product) : null;
   const warehouse = target ? (warehousesById[target.warehouseId] || target.warehouse) : null;
 
@@ -1821,20 +1882,17 @@ function AdjustModal({ target, data, setData, saving, productsById, warehousesBy
             <label className="text-[11px] text-muted-foreground block mb-1">Quantity Change</label>
             <div className="flex items-center gap-2">
               <button
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                onClick={() => setData((d: any) => ({ ...d, quantityChange: Math.min(d.quantityChange - 1, -1) }))}
+                onClick={() => setData((d) => ({ ...d, quantityChange: Math.min(d.quantityChange - 1, -1) }))}
                 className="w-8 h-8 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors flex items-center justify-center text-lg font-bold"
               >−</button>
               <input
                 type="number"
                 value={data.quantityChange}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                onChange={e => setData((d: any) => ({ ...d, quantityChange: parseInt(e.target.value) || 0 }))}
+                onChange={e => setData((d) => ({ ...d, quantityChange: parseInt(e.target.value) || 0 }))}
                 className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-center text-white focus:outline-none focus:border-orange-500/40"
               />
               <button
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-                onClick={() => setData((d: any) => ({ ...d, quantityChange: Math.max(d.quantityChange + 1, 1) }))}
+                onClick={() => setData((d) => ({ ...d, quantityChange: Math.max(d.quantityChange + 1, 1) }))}
                 className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors flex items-center justify-center text-lg font-bold"
               >+</button>
             </div>
@@ -1850,8 +1908,7 @@ function AdjustModal({ target, data, setData, saving, productsById, warehousesBy
             <label className="text-[11px] text-muted-foreground block mb-1">Reason</label>
             <select
               value={data.reasonCode}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              onChange={e => setData((d: any) => ({ ...d, reasonCode: e.target.value }))}
+              onChange={e => setData((d) => ({ ...d, reasonCode: e.target.value }))}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500/40"
             >
               {REASON_CODES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -1862,8 +1919,7 @@ function AdjustModal({ target, data, setData, saving, productsById, warehousesBy
             <label className="text-[11px] text-muted-foreground block mb-1">Note (optional)</label>
             <textarea
               value={data.note}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              onChange={e => setData((d: any) => ({ ...d, note: e.target.value }))}
+              onChange={e => setData((d) => ({ ...d, note: e.target.value }))}
               placeholder="Additional context for this adjustment..."
               rows={2}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-muted-foreground focus:outline-none focus:border-orange-500/40 resize-none"
@@ -1886,10 +1942,18 @@ function AdjustModal({ target, data, setData, saving, productsById, warehousesBy
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-function TransferModal({ data, setData, saving, inventory, warehouses, productsById, onSave, onClose }: any) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const products = [...new Map(inventory.map((inv: any) => [inv.productId, productsById[inv.productId] || inv.product])).values()].filter(Boolean);
+interface TransferModalProps {
+  data: { productId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; note: string };
+  setData: React.Dispatch<React.SetStateAction<{ productId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; note: string }>>;
+  saving: boolean;
+  inventory: InventoryStock[];
+  warehouses: WarehouseDTO[];
+  productsById: Record<string, ProductDTO>;
+  onSave: () => void;
+  onClose: () => void;
+}
+function TransferModal({ data, setData, saving, inventory, warehouses, productsById, onSave, onClose }: TransferModalProps) {
+  const products = [...new Map(inventory.map((inv) => [inv.productId, productsById[inv.productId] || inv.product])).values()].filter((p): p is ProductDTO => Boolean(p));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1903,31 +1967,25 @@ function TransferModal({ data, setData, saving, inventory, warehouses, productsB
         <div className="space-y-3">
           <div>
             <label className="text-[11px] text-muted-foreground block mb-1">Product</label>
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-            <select value={data.productId} onChange={e => setData((d: any) => ({ ...d, productId: e.target.value }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500/40">
+            <select value={data.productId} onChange={e => setData((d) => ({ ...d, productId: e.target.value }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500/40">
               <option value="">Select product...</option>
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-              {products.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-[11px] text-muted-foreground block mb-1">From Warehouse</label>
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-              <select value={data.fromWarehouseId} onChange={e => setData((d: any) => ({ ...d, fromWarehouseId: e.target.value }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500/40">
+              <select value={data.fromWarehouseId} onChange={e => setData((d) => ({ ...d, fromWarehouseId: e.target.value }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500/40">
                 <option value="">Select...</option>
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                {warehouses.map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
             </div>
             <div>
               <label className="text-[11px] text-muted-foreground block mb-1">To Warehouse</label>
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-              <select value={data.toWarehouseId} onChange={e => setData((d: any) => ({ ...d, toWarehouseId: e.target.value }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500/40">
+              <select value={data.toWarehouseId} onChange={e => setData((d) => ({ ...d, toWarehouseId: e.target.value }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500/40">
                 <option value="">Select...</option>
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                {warehouses.filter((w: any) => w.id !== data.fromWarehouseId).map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                {warehouses.filter((w) => w.id !== data.fromWarehouseId).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
             </div>
           </div>
@@ -1938,8 +1996,7 @@ function TransferModal({ data, setData, saving, inventory, warehouses, productsB
               type="number"
               min="1"
               value={data.quantity}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              onChange={e => setData((d: any) => ({ ...d, quantity: parseInt(e.target.value) || 1 }))}
+              onChange={e => setData((d) => ({ ...d, quantity: parseInt(e.target.value) || 1 }))}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500/40"
             />
           </div>
@@ -1948,8 +2005,7 @@ function TransferModal({ data, setData, saving, inventory, warehouses, productsB
             <label className="text-[11px] text-muted-foreground block mb-1">Note (optional)</label>
             <input
               value={data.note}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-              onChange={e => setData((d: any) => ({ ...d, note: e.target.value }))}
+              onChange={e => setData((d) => ({ ...d, note: e.target.value }))}
               placeholder="Reason for transfer..."
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-muted-foreground focus:outline-none focus:border-orange-500/40"
             />

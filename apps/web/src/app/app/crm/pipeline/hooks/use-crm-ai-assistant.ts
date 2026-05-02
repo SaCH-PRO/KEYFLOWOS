@@ -27,8 +27,7 @@ async function generateCrmSuggestions(context: ModuleContext): Promise<AiSuggest
     }
 
     if (result.data.suggestedActions?.length) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-      result.data.suggestedActions.forEach((action: any, i: number) => {
+      result.data.suggestedActions.forEach((action: { title?: string; description?: string; priority?: string; type: string; contactId?: string }, i: number) => {
         suggestions.push({
           id: `action-${Date.now()}-${i}`,
           type: "action",

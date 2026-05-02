@@ -241,9 +241,10 @@ function PublicPaymentPageInner() {
       }
 
       if (gatewayRes.data) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public-flow payload — pending typed contract
-        const gwList = Array.isArray(gatewayRes.data) ? gatewayRes.data : (gatewayRes.data as any).gateways || [];
-        setGateways(gwList);
+        const gwList = Array.isArray(gatewayRes.data)
+          ? gatewayRes.data
+          : (gatewayRes.data as { gateways?: unknown[] }).gateways || [];
+        setGateways(gwList as typeof gateways);
       }
 
       setLoading(false);

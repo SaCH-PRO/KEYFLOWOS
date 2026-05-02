@@ -91,8 +91,7 @@ export function FulfillmentPanel({
   const [actionError, setActionError] = useState<string | null>(null);
 
   const handleAction = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-    async (action: string, extraData?: Record<string, any>) => {
+    async (action: string, extraData?: Record<string, unknown>) => {
       setLoading(true);
       setActionError(null);
       const { data, error } = await apiPost<Order>({

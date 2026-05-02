@@ -187,8 +187,7 @@ export function CashFlowForecastView({ businessId, currency = "TTD" }: CashFlowF
                       borderRadius: 8,
                       fontSize: 12,
                     }}
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reports payload — pending typed reporting schema
-                    formatter={((value: number) => [formatCurrency(value, currency), "Balance"]) as any}
+                    formatter={(value) => [formatCurrency(Number(value), currency), "Balance"]}
                     labelFormatter={(label) => `Day: ${label}`}
                   />
                   <ReferenceLine y={0} stroke="hsl(var(--kf-error) / 0.5)" strokeDasharray="4 4" />

@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { apiPostSimple } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import type { SocialConnection } from "@/lib/client";
 
 type CallbackStatus = "processing" | "success" | "error";
 
@@ -20,8 +21,7 @@ function platformDisplayName(p: string) {
   return PLATFORM_DISPLAY_NAMES[p.toUpperCase()] || p;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-function notifyOpener(data: Record<string, any>) {
+function notifyOpener(data: Record<string, unknown> & { type?: string }) {
   try {
     if (window.opener && !window.opener.closed) {
       window.opener.postMessage(data, window.location.origin);
@@ -55,8 +55,7 @@ async function exchangeCode(
   try {
     setMessage(`Connecting your ${platformDisplayName(platform)} account...`);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-    const res = await apiPostSimple<{ success: boolean; error?: string; connection?: any }>(
+    const res = await apiPostSimple<{ success: boolean; error?: string; connection?: SocialConnection }>(
       `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/callback`,
       { code, state },
     );

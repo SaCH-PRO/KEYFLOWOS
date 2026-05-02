@@ -86,8 +86,7 @@ function NlSearchRenderer({ data }: { data: MarketingAiSearchResult }) {
       </div>
       {results.length > 0 ? (
         <div className="space-y-1.5 max-h-64 overflow-y-auto">
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-          {results.slice(0, 20).map((r: Record<string, any>, i: number) => {
+          {(results as Array<{ name?: string; subject?: string; status?: string; isActive?: boolean }>).slice(0, 20).map((r, i: number) => {
             const name = r.name || r.subject || "Untitled";
             const status = r.status || (r.isActive !== undefined ? (r.isActive ? "ACTIVE" : "INACTIVE") : "");
             return (

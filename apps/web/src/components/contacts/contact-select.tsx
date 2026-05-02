@@ -22,12 +22,20 @@ const STATUS_DOT: Record<string, string> = {
   LOST: "bg-red-500",
 };
 
+export interface ContactOption {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  status?: string;
+  tags?: string[];
+}
+
 interface ContactSelectProps {
   value: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-  onChange: (contactId: string, contact?: any) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-  contacts?: any[];
+  onChange: (contactId: string, contact?: ContactOption) => void;
+  contacts?: ContactOption[];
   placeholder?: string;
   label?: string;
   required?: boolean;
@@ -71,8 +79,7 @@ export function ContactSelect({
   const selectedContact = useMemo(() => {
     if (!value) return null;
     const all = externalContacts ?? results;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-    return all.find((c: any) => c.id === value) ?? null;
+    return all.find((c) => c.id === value) ?? null;
   }, [value, externalContacts, results]);
 
   useEffect(() => {
@@ -91,8 +98,7 @@ export function ContactSelect({
   }, [search, results]);
 
   const handleSelect = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-    (contact: any) => {
+    (contact: ContactOption) => {
       onChange(contact.id, contact);
       setOpen(false);
       setSearch("");
@@ -260,8 +266,7 @@ export function ContactSelect({
               role="listbox"
               className="max-h-48 overflow-y-auto py-1"
             >
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation */}
-              {results.map((contact: any, idx: number) => {
+              {results.map((contact, idx) => {
                 const name =
                   [contact.firstName, contact.lastName].filter(Boolean).join(" ") ||
                   contact.email ||

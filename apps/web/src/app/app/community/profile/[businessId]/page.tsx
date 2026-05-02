@@ -200,9 +200,9 @@ export default function PublicProfilePage() {
       .then(([profileRes, postsRes, trustRes, endorseRes]) => {
         if (profileRes.data) setProfile(profileRes.data);
         if (postsRes.data) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-          const arr = Array.isArray(postsRes.data) ? postsRes.data : (postsRes.data as any)?.data || [];
-          setPosts(arr.filter((p: CommunityPost) => p.businessId === businessId));
+          const raw = postsRes.data as CommunityPost[] | { data?: CommunityPost[] };
+          const arr: CommunityPost[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+          setPosts(arr.filter((p) => p.businessId === businessId));
         }
         if (trustRes.data) setTrustSignals(trustRes.data);
         if (endorseRes.data) {
@@ -334,8 +334,15 @@ export default function PublicProfilePage() {
     setSavingEdit(false);
   }, [myBusinessId, editingEndorsement, editMessage, savingEdit]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-  const handleQuoteSubmit = useCallback(async (data: any) => {
+  const handleQuoteSubmit = useCallback(async (data: {
+    title: string;
+    description: string;
+    budgetMin?: number;
+    budgetMax?: number;
+    currency?: string;
+    timeline?: string;
+    aiSuggestionScore?: number;
+  }) => {
     if (!myBusinessId) return;
     await createCommunityQuoteRequest(myBusinessId, {
       toBusinessId: businessId,
@@ -344,14 +351,24 @@ export default function PublicProfilePage() {
     });
   }, [myBusinessId, businessId]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-  const handleReferralSubmit = useCallback(async (data: any) => {
+  const handleReferralSubmit = useCallback(async (data: {
+    referredToName: string;
+    referredToEmail?: string;
+    referredToPhone?: string;
+    opportunity: string;
+    context?: string;
+  }) => {
     if (!myBusinessId) return;
     await createCommunityReferral(myBusinessId, { toBusinessId: businessId, ...data });
   }, [myBusinessId, businessId]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
-  const handleCollabSubmit = useCallback(async (data: any) => {
+  const handleCollabSubmit = useCallback(async (data: {
+    type?: string;
+    title: string;
+    scope: string;
+    proposedTerms?: string;
+    timeline?: string;
+  }) => {
     if (!myBusinessId) return;
     await createCommunityCollaboration(myBusinessId, { toBusinessId: businessId, ...data });
   }, [myBusinessId, businessId]);

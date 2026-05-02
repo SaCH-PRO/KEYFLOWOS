@@ -16,6 +16,9 @@ import {
   Link2,
 } from "lucide-react";
 import { formatDate, EmptyState } from "./marketplace-utils";
+import type { PurchaseOrder, Product as ProductDTO } from "@/lib/marketplace-types";
+
+type SupplierPO = PurchaseOrder & { quantity?: string | number };
 
 type SupplierSection = "connections" | "catalog" | "mapping";
 
@@ -42,18 +45,14 @@ export function CommerceSuppliersTab({
   onCreatePO,
   onEditPO,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  purchaseOrders: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  products: any[];
+  purchaseOrders: SupplierPO[];
+  products: ProductDTO[];
   onCreatePO: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  onEditPO: (item: any) => void;
+  onEditPO: (item: SupplierPO) => void;
 }) {
   const [section, setSection] = useState<SupplierSection>("connections");
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  const supplierMap: Record<string, { name: string; email?: string; pos: any[] }> = {};
+  const supplierMap: Record<string, { name: string; email?: string | null; pos: SupplierPO[] }> = {};
   for (const po of purchaseOrders) {
     const key = po.supplierName || "Unknown Supplier";
     if (!supplierMap[key]) supplierMap[key] = { name: key, email: po.supplierEmail, pos: [] };
@@ -153,8 +152,7 @@ export function CommerceSuppliersTab({
                     <div className="mt-3 pt-3 border-t border-white/5">
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">Active Orders</p>
                       <div className="flex flex-wrap gap-1.5">
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                        {activePOs.slice(0, 4).map((po: any) => (
+                        {activePOs.slice(0, 4).map((po) => (
                           <span
                             key={po.id}
                             className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20"
@@ -181,8 +179,7 @@ export function CommerceSuppliersTab({
             <Globe className="w-4 h-4 shrink-0" />
             <span>Supplier catalog imports will appear here when external supplier connectors are configured. This feature is coming in a future release.</span>
           </div>
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-          {purchaseOrders.slice(0, 3).map((po: any) => (
+          {purchaseOrders.slice(0, 3).map((po) => (
             <motion.div
               key={po.id}
               initial={{ opacity: 0, y: 6 }}
@@ -231,8 +228,7 @@ export function CommerceSuppliersTab({
                 <span>Source</span>
               </div>
               <div className="divide-y divide-white/5">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-                {productsWithSource.map((product: any) => (
+                {productsWithSource.map((product) => (
                   <div key={product.id} className="grid grid-cols-3 px-4 py-3 items-center gap-2">
                     <p className="text-xs font-medium truncate">{product.name}</p>
                     <p className="text-xs text-muted-foreground truncate">{product.supplierName || "—"}</p>

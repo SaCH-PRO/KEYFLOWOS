@@ -62,6 +62,19 @@ import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 import { RequireAuth } from "@/components/require-auth";
 
+interface NotificationItem {
+  id: string;
+  type?: string;
+  category?: string;
+  title?: string;
+  body?: string;
+  createdAt?: string;
+  read?: boolean;
+  link?: string | null;
+  href?: string | null;
+  data?: { link?: string | null; [k: string]: unknown } | null;
+}
+
 function relativeTime(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
@@ -77,8 +90,7 @@ function relativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-function getNotificationIcon(n: any): typeof Bell {
+function getNotificationIcon(n: NotificationItem): typeof Bell {
   const type = (n.type || n.category || "").toLowerCase();
   const title = (n.title || "").toLowerCase();
   if (type.includes("invoice") || title.includes("invoice") || title.includes("payment")) return Receipt;
@@ -93,8 +105,7 @@ function getNotificationIcon(n: any): typeof Bell {
   return Bell;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-function getNotificationLink(n: any): string | null {
+function getNotificationLink(n: NotificationItem): string | null {
   const type = (n.type || n.category || "").toLowerCase();
   const title = (n.title || "").toLowerCase();
   if (type.includes("invoice") || title.includes("invoice")) return "/app/commerce?tab=invoices";
@@ -108,7 +119,7 @@ function getNotificationLink(n: any): string | null {
   if (type.includes("endorsement") && n.data?.link) return n.data.link;
   if (type.includes("connector") || title.includes("reconnect")) return "/app/connect";
   if (n.data?.link) return n.data.link;
-  if (n.link || n.href) return n.link || n.href;
+  if (n.link || n.href) return (n.link || n.href) ?? null;
   return null;
 }
 
@@ -341,8 +352,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const { setAccent1, setAccent2 } = useThemeColors();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifOpen, setNotifOpen] = useState(false);
   const [connectorAlertCount, setConnectorAlertCount] = useState(0);
@@ -433,10 +443,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       apiGet(`/notifications/businesses/${businessId}?unreadOnly=false`),
       apiGet(`/notifications/businesses/${businessId}/unread-count`),
     ]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-    if (listRes.data) setNotifications(listRes.data as any[]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-    if (countRes.data) setUnreadCount((countRes.data as any).count ?? 0);
+    if (listRes.data) setNotifications(listRes.data as NotificationItem[]);
+    if (countRes.data) setUnreadCount((countRes.data as { count?: number }).count ?? 0);
   }, []);
 
   const fetchConnectorAlerts = useCallback(async () => {
@@ -788,8 +796,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                       {notifications.length === 0 ? (
                         <div className="px-4 py-8 text-center text-sm text-muted-foreground">No notifications yet</div>
                       ) : (
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
-                        notifications.slice(0, 20).map((n: any) => {
+                        notifications.slice(0, 20).map((n: NotificationItem) => {
                           const notifLink = getNotificationLink(n);
                           const NotifIcon = getNotificationIcon(n);
                           const itemClass = cn(
@@ -811,7 +818,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                                 </div>
                                 {n.body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>}
                                 <p className="text-[10px] text-muted-foreground mt-1">
-                                  {relativeTime(n.createdAt)}
+                                  {n.createdAt ? relativeTime(n.createdAt) : ""}
                                 </p>
                               </div>
                             </div>

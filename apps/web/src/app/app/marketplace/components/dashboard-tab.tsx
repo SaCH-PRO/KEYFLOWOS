@@ -12,10 +12,21 @@ import {
 } from "lucide-react";
 import { StatCards } from "@/components/ui/stat-cards";
 import { formatCurrency, formatDate, StatusBadge, EmptyState } from "./marketplace-utils";
+import type { MarketplaceOrder } from "@/lib/marketplace-types";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-export function DashboardTab({ data }: { data: any }) {
-  const stats = data || {};
+interface DashboardData {
+  activeListings?: number;
+  pendingOrders?: number;
+  inTransitShipments?: number;
+  monthlyRevenue?: number;
+  preOrders?: number;
+  warehouses?: number;
+  marketReach?: Partial<Record<"LOCAL" | "REGIONAL" | "INTERNATIONAL", number>>;
+  recentOrders?: MarketplaceOrder[];
+}
+
+export function DashboardTab({ data }: { data: DashboardData | null | undefined }) {
+  const stats: DashboardData = data || {};
   return (
     <div className="space-y-6">
       <StatCards
@@ -61,7 +72,7 @@ export function DashboardTab({ data }: { data: any }) {
         </motion.div>
       )}
 
-      {stats.recentOrders?.length > 0 && (
+      {stats.recentOrders && stats.recentOrders.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -75,12 +86,11 @@ export function DashboardTab({ data }: { data: any }) {
             </h3>
           </div>
           <div className="divide-y divide-white/5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-            {stats.recentOrders.slice(0, 5).map((order: any) => (
+            {stats.recentOrders.slice(0, 5).map((order) => (
               <div key={order.id} className="px-4 py-3 flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium">{order.customerName || "Customer"}</p>
-                  <p className="text-xs text-muted-foreground">{formatDate(order.createdAt)}</p>
+                  <p className="text-xs text-muted-foreground">{formatDate(order.createdAt ?? "")}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <StatusBadge status={order.status} />

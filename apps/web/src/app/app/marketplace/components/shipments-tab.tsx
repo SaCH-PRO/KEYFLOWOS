@@ -3,9 +3,15 @@
 import { motion } from "framer-motion";
 import { Truck, Pencil } from "lucide-react";
 import { formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
+import type { Shipment } from "@/lib/marketplace-types";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-export function ShipmentsTab({ shipments, onEdit }: { shipments: any[]; onEdit: (item: any) => void }) {
+export function ShipmentsTab({
+  shipments,
+  onEdit,
+}: {
+  shipments: Shipment[];
+  onEdit: (item: Shipment) => void;
+}) {
   const timeline = ["PREPARING", "PICKED_UP", "IN_TRANSIT", "CUSTOMS", "DELIVERED"];
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(shipments);
 
@@ -14,8 +20,7 @@ export function ShipmentsTab({ shipments, onEdit }: { shipments: any[]; onEdit: 
   }
   return (
     <div className="space-y-3">
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
-      {paginated.map((shipment: any) => {
+      {paginated.map((shipment) => {
         const currentIdx = timeline.indexOf(shipment.status || "PREPARING");
         return (
           <motion.div

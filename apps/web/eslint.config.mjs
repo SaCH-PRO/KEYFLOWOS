@@ -21,14 +21,10 @@ const reactCompilerStrictRules = {
   "react-hooks/set-state-in-effect": "warn",
 };
 
-// `@typescript-eslint/no-explicit-any` is enforced as an error so that any
-// new `any` introduced after this point trips the build. The bulk of the
-// pre-existing offenders (≈760, concentrated in untyped LLM tool result
-// renderers, the legacy generic API client wrapper, and marketplace/commerce
-// domain DTO consumers) are individually suppressed at their site with a
-// `// eslint-disable-next-line @typescript-eslint/no-explicit-any -- <reason>`
-// comment that documents the underlying tech-debt category. Suppressions
-// should only be added with a similar specific justification.
+// `@typescript-eslint/no-explicit-any` is enforced as an error. The codebase
+// is fully `any`-free; new `any` introductions trip the build. Prefer
+// narrowing with proper backend/Prisma-derived types (or `unknown` + a runtime
+// guard) over adding suppression comments.
 const inheritedTechDebtRules = {
   "@typescript-eslint/no-explicit-any": "error",
 };

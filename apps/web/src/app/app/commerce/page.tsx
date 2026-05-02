@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
+import type { InvoiceLineItem } from "./components/commerce-types";
 import { useCommerceShell } from "./hooks/use-commerce-shell";
 import { useBillingWorkspace } from "./hooks/use-billing-workspace";
 import { useCommerceOverview } from "./hooks/use-commerce-overview";
@@ -162,8 +163,7 @@ export default function CommercePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed to overview.handleTabChange; including the full `overview` bag would re-create this tab-change callback on every overview state change and break memoized children.
   }, [overview.handleTabChange]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  useModuleEvent("commerce:create_quote_for_contact", useCallback((event: any) => {
+  useModuleEvent<{ contactId?: string; items?: InvoiceLineItem[] }>("commerce:create_quote_for_contact", useCallback((event) => {
     const { contactId, items } = event.data ?? {};
     if (contactId) {
       billing.prefillForContact(contactId, "quotes", items);
@@ -174,8 +174,7 @@ export default function CommercePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed to billing.prefillForContact; including the full `billing` bag would re-bind this event listener on every billing state change.
   }, [billing.prefillForContact, handleTabChange]));
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  useModuleEvent("commerce:create_invoice_for_contact", useCallback((event: any) => {
+  useModuleEvent<{ contactId?: string; items?: InvoiceLineItem[] }>("commerce:create_invoice_for_contact", useCallback((event) => {
     const { contactId, items } = event.data ?? {};
     if (contactId) {
       billing.prefillForContact(contactId, "invoices", items);

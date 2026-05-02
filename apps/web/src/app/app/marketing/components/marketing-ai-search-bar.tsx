@@ -266,8 +266,7 @@ function MarketingAiSearchBarInner({ businessId, onResults, onApplyFilters }: Ma
                 </div>
               ) : (
                 <div className="p-1.5 space-y-0.5">
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-                  {results.map((r: Record<string, any>, i: number) => {
+                  {(results as Array<{ id?: string; name?: string; subject?: string; status?: string; isActive?: boolean; createdAt?: string }>).map((r, i: number) => {
                     const name = r.name || r.subject || "Untitled";
                     const status = r.status || (r.isActive !== undefined ? (r.isActive ? "ACTIVE" : "INACTIVE") : undefined);
                     const TypeIcon = RESULT_TYPE_ICONS[searchData.type] ?? BarChart3;

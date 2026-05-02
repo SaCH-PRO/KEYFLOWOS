@@ -12,6 +12,15 @@ import {
   Zap,
   Clock,
 } from "lucide-react";
+import type {
+  Product,
+  MarketplaceListing,
+  MarketplaceOrder,
+  InventoryStock,
+} from "@/lib/marketplace-types";
+
+type ListingRow = MarketplaceListing & { status?: string; active?: boolean };
+type InventoryRow = InventoryStock & { reorderLevel?: number | null };
 
 function InsightCard({
   icon: Icon,
@@ -98,14 +107,10 @@ export function CommerceInsightsTab({
   orders,
   inventory,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  products: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  listings: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  orders: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-  inventory: any[];
+  products: Product[];
+  listings: ListingRow[];
+  orders: MarketplaceOrder[];
+  inventory: InventoryRow[];
 }) {
   const activeListings = listings.filter((l) => l.status === "ACTIVE" || l.active).length;
   const totalRevenue = orders
@@ -115,11 +120,16 @@ export function CommerceInsightsTab({
   const avgMargin =
     productsWithCost.length > 0
       ? productsWithCost.reduce((sum, p) => {
-          const margin = ((parseFloat(p.price) - parseFloat(p.costPrice)) / parseFloat(p.price)) * 100;
+          const price = parseFloat(String(p.price));
+          const cost = parseFloat(String(p.costPrice));
+          const margin = ((price - cost) / price) * 100;
           return sum + margin;
         }, 0) / productsWithCost.length
       : 0;
-  const lowStockCount = inventory.filter((i) => i.reorderLevel && i.quantity <= i.reorderLevel).length;
+  const lowStockCount = inventory.filter((i) => {
+    const reorder = i.reorderLevel ?? i.reorderAt;
+    return reorder != null && i.quantity <= reorder;
+  }).length;
   const readyProducts = products.filter((p) => p.price && p.costPrice).length;
 
   return (
@@ -227,8 +237,7 @@ export function CommerceInsightsTab({
           {[
             { label: "Priced", count: readyProducts, total: products.length, color: "text-emerald-400", bg: "bg-emerald-500" },
             { label: "Listed", count: listings.length, total: products.length, color: "text-blue-400", bg: "bg-blue-500" },
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
-            { label: "In Orders", count: new Set(orders.flatMap((o) => o.items?.map((i: any) => i.productId) ?? [])).size, total: products.length, color: "text-purple-400", bg: "bg-purple-500" },
+            { label: "In Orders", count: new Set(orders.flatMap((o) => o.items?.map((i) => i.productId) ?? [])).size, total: products.length, color: "text-purple-400", bg: "bg-purple-500" },
           ].map((item) => {
             const pct = products.length > 0 ? Math.round((item.count / products.length) * 100) : 0;
             return (

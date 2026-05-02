@@ -53,6 +53,60 @@ const SCORE_CONFIG: Record<string, { color: string; bg: string }> = {
   Cold: { color: "text-slate-400", bg: "bg-slate-500/10" },
 };
 
+
+interface SummaryData {
+  sentiment?: string; relationshipHealth?: string; summary?: string;
+  keyInsights?: string[]; recommendedAction?: string;
+}
+type ScoreFactor = { factor?: string; impact?: string; weight?: number };
+interface LeadScoreData {
+  score?: number; label?: string; reasoning?: string; factors?: ScoreFactor[];
+}
+interface PrepBriefData {
+  relationshipHealth?: string; keyInfo?: string[]; talkingPoints?: string[];
+  icebreakers?: string[]; thingsToAvoid?: string[];
+}
+type TagSuggestion = { tag?: string; reason?: string; confidence?: number };
+interface TagSuggestionsData { suggestedTags?: TagSuggestion[] }
+type AtRiskContact = { name?: string; riskLevel?: string; probability?: number; reasons?: string[] };
+interface ChurnDetectionData {
+  summary?: string; estimatedRevenueLoss?: number | string;
+  atRiskContacts?: AtRiskContact[];
+}
+type SuggestedAction = { title?: string; description?: string };
+interface AnalysisData {
+  analysis?: string; suggestedActions?: SuggestedAction[]; guidelines?: string[];
+}
+type FieldBreakdown = { field?: string; missing?: number; percentage?: number };
+type TopIssueItem = { contactName?: string; completeness?: number; missingFields?: string[] };
+interface DataQualityData {
+  averageCompleteness?: number; totalContacts?: number; contactsWithIssues?: number;
+  fieldBreakdown?: FieldBreakdown[]; topIssues?: TopIssueItem[];
+}
+type DuplicateContact = { name?: string; email?: string };
+type DuplicateCluster = { reason?: string; confidence?: number; contacts?: DuplicateContact[] };
+interface DuplicateFinderData {
+  duplicateClusters?: DuplicateCluster[]; estimatedDuplicates?: number;
+}
+type ReengagementSuggestion = {
+  contactName?: string; urgency?: string; daysSinceLastInteraction?: number;
+  recommendedAction?: string; suggestedSequence?: string;
+};
+interface ReengagementData { totalStale?: number; suggestions?: ReengagementSuggestion[] }
+type RevenueOpportunity = {
+  contactName?: string; estimatedValue?: number | string; opportunityType?: string;
+  company?: string; totalRevenue?: number | string;
+};
+interface RevenueOpportunitiesData {
+  totalEstimatedRevenue?: number | string; contactsAnalyzed?: number;
+  opportunities?: RevenueOpportunity[];
+}
+type FollowUpMessage = { channel?: string; tone?: string; subject?: string; body?: string };
+interface FollowUpDraftData {
+  contactName?: string; context?: string; messages?: FollowUpMessage[]; bestTime?: string;
+}
+
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
@@ -69,27 +123,26 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function SummaryResult({ data }: { data: any }) {
+function SummaryResult({ data }: { data: SummaryData | null }) {
   if (!data) return null;
-  const SentIcon = SENTIMENT_ICONS[data.sentiment] || Minus;
+  const SentIcon = SENTIMENT_ICONS[data.sentiment ?? ""] || Minus;
   return (
     <div className="space-y-2.5">
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1.5">
-          <SentIcon className={`w-3.5 h-3.5 ${SENTIMENT_COLORS[data.sentiment] || "text-muted-foreground"}`} />
-          <span className={`text-xs font-medium ${SENTIMENT_COLORS[data.sentiment] || "text-muted-foreground"}`}>
+          <SentIcon className={`w-3.5 h-3.5 ${SENTIMENT_COLORS[data.sentiment ?? ""] || "text-muted-foreground"}`} />
+          <span className={`text-xs font-medium ${SENTIMENT_COLORS[data.sentiment ?? ""] || "text-muted-foreground"}`}>
             {data.sentiment?.replace("_", " ")}
           </span>
         </div>
         {data.relationshipHealth && (
-          <span className={`text-xs ${HEALTH_COLORS[data.relationshipHealth] || "text-muted-foreground"}`}>
+          <span className={`text-xs ${HEALTH_COLORS[data.relationshipHealth ?? ""] || "text-muted-foreground"}`}>
             Health: {data.relationshipHealth}
           </span>
         )}
       </div>
       <p className="text-[11px] text-muted-foreground/70 leading-relaxed">{data.summary}</p>
-      {data.keyInsights?.length > 0 && (
+      {Array.isArray(data.keyInsights) && data.keyInsights.length > 0 && (
         <Section title="Key Insights">
           <ul className="space-y-1">
             {data.keyInsights.map((i: string, idx: number) => (
@@ -110,10 +163,9 @@ function SummaryResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function LeadScoreResult({ data }: { data: any }) {
+function LeadScoreResult({ data }: { data: LeadScoreData | null }) {
   if (!data) return null;
-  const cfg = SCORE_CONFIG[data.label] || SCORE_CONFIG.Neutral;
+  const cfg = SCORE_CONFIG[data.label ?? ""] || SCORE_CONFIG.Neutral;
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-4">
@@ -121,7 +173,7 @@ function LeadScoreResult({ data }: { data: any }) {
           <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
             <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" className="text-white/5" strokeWidth="4" />
             <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" className={cfg.color} strokeWidth="4"
-              strokeDasharray={`${(data.score / 100) * 176} 176`} strokeLinecap="round" />
+              strokeDasharray={`${((data.score ?? 0) / 100) * 176} 176`} strokeLinecap="round" />
           </svg>
           <span className={`absolute inset-0 flex items-center justify-center text-lg font-bold ${cfg.color}`}>
             {data.score}
@@ -132,11 +184,10 @@ function LeadScoreResult({ data }: { data: any }) {
           <p className="text-[11px] text-muted-foreground/60 mt-0.5">{data.reasoning}</p>
         </div>
       </div>
-      {data.factors?.length > 0 && (
+      {Array.isArray(data.factors) && data.factors.length > 0 && (
         <Section title="Score Factors">
           <div className="space-y-1.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-            {data.factors.map((f: any, i: number) => (
+            {data.factors.map((f: ScoreFactor, i: number) => (
               <div key={i} className="flex items-center justify-between">
                 <span className="text-[11px] text-muted-foreground/70">{f.factor}</span>
                 <div className="flex items-center gap-1.5">
@@ -154,20 +205,19 @@ function LeadScoreResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function PrepBriefResult({ data }: { data: any }) {
+function PrepBriefResult({ data }: { data: PrepBriefData | null }) {
   if (!data) return null;
   return (
     <div className="space-y-2.5">
       {data.relationshipHealth && (
         <div className="flex items-center gap-2 mb-2">
-          <Heart className={`w-3.5 h-3.5 ${HEALTH_COLORS[data.relationshipHealth] || "text-muted-foreground"}`} />
-          <span className={`text-xs font-medium ${HEALTH_COLORS[data.relationshipHealth] || "text-muted-foreground"}`}>
+          <Heart className={`w-3.5 h-3.5 ${HEALTH_COLORS[data.relationshipHealth ?? ""] || "text-muted-foreground"}`} />
+          <span className={`text-xs font-medium ${HEALTH_COLORS[data.relationshipHealth ?? ""] || "text-muted-foreground"}`}>
             {data.relationshipHealth} relationship
           </span>
         </div>
       )}
-      {data.keyInfo?.length > 0 && (
+      {Array.isArray(data.keyInfo) && data.keyInfo.length > 0 && (
         <Section title="Key Info">
           <ul className="space-y-1">
             {data.keyInfo.map((i: string, idx: number) => (
@@ -179,7 +229,7 @@ function PrepBriefResult({ data }: { data: any }) {
           </ul>
         </Section>
       )}
-      {data.talkingPoints?.length > 0 && (
+      {Array.isArray(data.talkingPoints) && data.talkingPoints.length > 0 && (
         <Section title="Talking Points">
           <ul className="space-y-1">
             {data.talkingPoints.map((p: string, idx: number) => (
@@ -191,7 +241,7 @@ function PrepBriefResult({ data }: { data: any }) {
           </ul>
         </Section>
       )}
-      {data.icebreakers?.length > 0 && (
+      {Array.isArray(data.icebreakers) && data.icebreakers.length > 0 && (
         <Section title="Icebreakers">
           <ul className="space-y-1">
             {data.icebreakers.map((i: string, idx: number) => (
@@ -200,7 +250,7 @@ function PrepBriefResult({ data }: { data: any }) {
           </ul>
         </Section>
       )}
-      {data.thingsToAvoid?.length > 0 && (
+      {Array.isArray(data.thingsToAvoid) && data.thingsToAvoid.length > 0 && (
         <Section title="Avoid">
           <ul className="space-y-1">
             {data.thingsToAvoid.map((a: string, idx: number) => (
@@ -216,13 +266,11 @@ function PrepBriefResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function TagSuggestionsResult({ data }: { data: any }) {
+function TagSuggestionsResult({ data }: { data: TagSuggestionsData | null }) {
   if (!data?.suggestedTags) return null;
   return (
     <div className="space-y-2">
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-      {data.suggestedTags.map((tag: any, i: number) => (
+      {data.suggestedTags.map((tag: TagSuggestion, i: number) => (
         <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-border/30">
           <div className="flex items-center gap-2">
             <Tags className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
@@ -230,8 +278,8 @@ function TagSuggestionsResult({ data }: { data: any }) {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-muted-foreground/50">{tag.reason}</span>
-            <span className={`text-[10px] font-medium ${tag.confidence >= 0.8 ? "text-emerald-400" : tag.confidence >= 0.6 ? "text-blue-400" : "text-amber-400"}`}>
-              {Math.round(tag.confidence * 100)}%
+            <span className={`text-[10px] font-medium ${(tag.confidence ?? 0) >= 0.8 ? "text-emerald-400" : (tag.confidence ?? 0) >= 0.6 ? "text-blue-400" : "text-amber-400"}`}>
+              {Math.round((tag.confidence ?? 0) * 100)}%
             </span>
           </div>
         </div>
@@ -240,8 +288,7 @@ function TagSuggestionsResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function ChurnDetectionResult({ data }: { data: any }) {
+function ChurnDetectionResult({ data }: { data: ChurnDetectionData | null }) {
   if (!data) return null;
   const RISK_COLORS: Record<string, string> = {
     critical: "text-red-400",
@@ -258,19 +305,18 @@ function ChurnDetectionResult({ data }: { data: any }) {
           <span className="text-xs text-red-400">Estimated revenue at risk: ${data.estimatedRevenueLoss}</span>
         </div>
       )}
-      {data.atRiskContacts?.length > 0 && (
+      {Array.isArray(data.atRiskContacts) && data.atRiskContacts.length > 0 && (
         <Section title={`At-Risk Contacts (${data.atRiskContacts.length})`}>
           <div className="space-y-2">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-            {data.atRiskContacts.map((c: any, i: number) => (
+            {data.atRiskContacts.map((c: AtRiskContact, i: number) => (
               <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium text-foreground/80">{c.name}</span>
-                  <span className={`text-[10px] font-bold ${RISK_COLORS[c.riskLevel] || "text-muted-foreground"}`}>
+                  <span className={`text-[10px] font-bold ${RISK_COLORS[c.riskLevel ?? ""] || "text-muted-foreground"}`}>
                     {c.probability}% risk
                   </span>
                 </div>
-                {c.reasons?.length > 0 && (
+                {Array.isArray(c.reasons) && c.reasons.length > 0 && (
                   <ul className="space-y-0.5">
                     {c.reasons.slice(0, 3).map((r: string, ri: number) => (
                       <li key={ri} className="text-[10px] text-muted-foreground/60">• {r}</li>
@@ -286,19 +332,17 @@ function ChurnDetectionResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function AnalysisResult({ data }: { data: any }) {
+function AnalysisResult({ data }: { data: AnalysisData | null }) {
   if (!data) return null;
   return (
     <div className="space-y-2.5">
       {data.analysis && (
         <p className="text-[11px] text-muted-foreground/70 leading-relaxed">{data.analysis}</p>
       )}
-      {data.suggestedActions?.length > 0 && (
+      {Array.isArray(data.suggestedActions) && data.suggestedActions.length > 0 && (
         <Section title="Recommended Actions">
           <div className="space-y-1.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-            {data.suggestedActions.map((a: any, i: number) => (
+            {data.suggestedActions.map((a: SuggestedAction, i: number) => (
               <div key={i} className="flex items-start gap-1.5">
                 <Target className="w-3 h-3 text-[hsl(var(--kf-accent1))] shrink-0 mt-0.5" />
                 <div>
@@ -312,7 +356,7 @@ function AnalysisResult({ data }: { data: any }) {
           </div>
         </Section>
       )}
-      {data.guidelines?.length > 0 && (
+      {Array.isArray(data.guidelines) && data.guidelines.length > 0 && (
         <Section title="Guidelines">
           <ul className="space-y-1">
             {data.guidelines.map((g: string, i: number) => (
@@ -328,8 +372,7 @@ function AnalysisResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function DataQualityResult({ data }: { data: any }) {
+function DataQualityResult({ data }: { data: DataQualityData | null }) {
   if (!data) return null;
   const score = data.averageCompleteness ?? 0;
   const scoreColor = score >= 80 ? "text-emerald-400" : score >= 60 ? "text-amber-400" : "text-red-400";
@@ -353,16 +396,15 @@ function DataQualityResult({ data }: { data: any }) {
           </p>
         </div>
       </div>
-      {data.fieldBreakdown?.length > 0 && (
+      {Array.isArray(data.fieldBreakdown) && data.fieldBreakdown.length > 0 && (
         <Section title="Field Breakdown">
           <div className="space-y-1.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-            {data.fieldBreakdown.map((fb: any, i: number) => (
+            {data.fieldBreakdown.map((fb: FieldBreakdown, i: number) => (
               <div key={i} className="flex items-center justify-between">
                 <span className="text-[11px] text-muted-foreground/70 capitalize">{fb.field}</span>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-muted-foreground/50">{fb.missing} missing</span>
-                  <span className={`text-[10px] font-medium ${fb.percentage > 30 ? "text-red-400" : fb.percentage > 15 ? "text-amber-400" : "text-emerald-400"}`}>
+                  <span className={`text-[10px] font-medium ${(fb.percentage ?? 0) > 30 ? "text-red-400" : (fb.percentage ?? 0) > 15 ? "text-amber-400" : "text-emerald-400"}`}>
                     {fb.percentage}%
                   </span>
                 </div>
@@ -371,19 +413,18 @@ function DataQualityResult({ data }: { data: any }) {
           </div>
         </Section>
       )}
-      {data.topIssues?.length > 0 && (
+      {Array.isArray(data.topIssues) && data.topIssues.length > 0 && (
         <Section title={`Contacts with Issues (${data.topIssues.length})`}>
           <div className="space-y-1.5">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-            {data.topIssues.slice(0, 10).map((issue: any, i: number) => (
+            {data.topIssues.slice(0, 10).map((issue: TopIssueItem, i: number) => (
               <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-white/[0.02] border border-border/30">
-                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${issue.completeness < 40 ? "text-red-400" : issue.completeness < 70 ? "text-amber-400" : "text-blue-400"}`} />
+                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${(issue.completeness ?? 0) < 40 ? "text-red-400" : (issue.completeness ?? 0) < 70 ? "text-amber-400" : "text-blue-400"}`} />
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-medium text-foreground/80">{issue.contactName}</span>
                     <span className="text-[10px] text-muted-foreground/50">{issue.completeness}%</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground/60">Missing: {issue.missingFields.join(', ')}</p>
+                  <p className="text-[10px] text-muted-foreground/60">Missing: {(issue.missingFields ?? []).join(', ')}</p>
                 </div>
               </div>
             ))}
@@ -394,8 +435,7 @@ function DataQualityResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function DuplicateFinderResult({ data }: { data: any }) {
+function DuplicateFinderResult({ data }: { data: DuplicateFinderData | null }) {
   if (!data) return null;
   const clusters = data.duplicateClusters ?? [];
   return (
@@ -406,10 +446,9 @@ function DuplicateFinderResult({ data }: { data: any }) {
           {clusters.length} potential duplicate groups · {data.estimatedDuplicates ?? 0} duplicates
         </span>
       </div>
-      {clusters.length > 0 && (
+      {Array.isArray(clusters) && clusters.length > 0 && (
         <div className="space-y-2">
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-          {clusters.slice(0, 10).map((cluster: any, i: number) => (
+          {clusters.slice(0, 10).map((cluster: DuplicateCluster, i: number) => (
             <div key={i} className="p-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[11px] font-medium text-amber-400">
@@ -417,8 +456,7 @@ function DuplicateFinderResult({ data }: { data: any }) {
                 </span>
               </div>
               <div className="space-y-1">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-                {cluster.contacts?.map((c: any, ci: number) => (
+                {cluster.contacts?.map((c: DuplicateContact, ci: number) => (
                   <div key={ci} className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
                     <Users className="w-3 h-3 shrink-0" />
                     <span>{c.name}</span>
@@ -441,8 +479,7 @@ function DuplicateFinderResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function ReengagementResult({ data }: { data: any }) {
+function ReengagementResult({ data }: { data: ReengagementData | null }) {
   if (!data) return null;
   const suggestions = data.suggestions ?? [];
   const URGENCY_COLORS: Record<string, string> = { high: "text-red-400", medium: "text-amber-400", low: "text-blue-400" };
@@ -454,13 +491,12 @@ function ReengagementResult({ data }: { data: any }) {
       {suggestions.length > 0 && (
         <Section title={`Re-engagement Suggestions (${suggestions.length})`}>
           <div className="space-y-2">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-            {suggestions.slice(0, 8).map((s: any, i: number) => (
+            {suggestions.slice(0, 8).map((s: ReengagementSuggestion, i: number) => (
               <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium text-foreground/80">{s.contactName}</span>
                   <div className="flex items-center gap-2">
-                    <span className={`text-[10px] font-medium ${URGENCY_COLORS[s.urgency] || "text-muted-foreground"}`}>
+                    <span className={`text-[10px] font-medium ${URGENCY_COLORS[s.urgency ?? ""] || "text-muted-foreground"}`}>
                       {s.urgency}
                     </span>
                     {s.daysSinceLastInteraction != null && (
@@ -484,8 +520,7 @@ function ReengagementResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function RevenueOpportunitiesResult({ data }: { data: any }) {
+function RevenueOpportunitiesResult({ data }: { data: RevenueOpportunitiesData | null }) {
   if (!data) return null;
   return (
     <div className="space-y-2.5">
@@ -500,11 +535,10 @@ function RevenueOpportunitiesResult({ data }: { data: any }) {
         )}
         <span className="text-[10px] text-muted-foreground/50 ml-2">{data.contactsAnalyzed} analyzed</span>
       </div>
-      {data.opportunities?.length > 0 && (
+      {Array.isArray(data.opportunities) && data.opportunities.length > 0 && (
         <Section title={`Opportunities (${data.opportunities.length})`}>
           <div className="space-y-2">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-            {data.opportunities.slice(0, 8).map((opp: any, i: number) => (
+            {data.opportunities.slice(0, 8).map((opp: RevenueOpportunity, i: number) => (
               <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium text-foreground/80">{opp.contactName}</span>
@@ -523,8 +557,7 @@ function RevenueOpportunitiesResult({ data }: { data: any }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
-function FollowUpDraftResult({ data }: { data: any }) {
+function FollowUpDraftResult({ data }: { data: FollowUpDraftData | null }) {
   if (!data) return null;
   const messages = data.messages ?? [];
   return (
@@ -540,8 +573,7 @@ function FollowUpDraftResult({ data }: { data: any }) {
       {data.context && (
         <p className="text-[11px] text-muted-foreground/70 italic">{data.context}</p>
       )}
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
-      {messages.map((msg: any, i: number) => (
+      {messages.map((msg: FollowUpMessage, i: number) => (
         <div key={i} className="rounded-lg border border-border/30 overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-white/[0.03] border-b border-border/20">
             {msg.channel === "email" ? <Mail className="w-3 h-3 text-blue-400" /> :
@@ -572,27 +604,27 @@ function FollowUpDraftResult({ data }: { data: any }) {
 export function renderCrmToolResult(toolId: string, result: unknown): React.ReactNode {
   switch (toolId) {
     case "contact-summary":
-      return <SummaryResult data={result} />;
+      return <SummaryResult data={result as SummaryData | null} />;
     case "lead-score":
-      return <LeadScoreResult data={result} />;
+      return <LeadScoreResult data={result as LeadScoreData | null} />;
     case "prep-brief":
-      return <PrepBriefResult data={result} />;
+      return <PrepBriefResult data={result as PrepBriefData | null} />;
     case "tag-suggestions":
-      return <TagSuggestionsResult data={result} />;
+      return <TagSuggestionsResult data={result as TagSuggestionsData | null} />;
     case "churn-detection":
-      return <ChurnDetectionResult data={result} />;
+      return <ChurnDetectionResult data={result as ChurnDetectionData | null} />;
     case "crm-analysis":
-      return <AnalysisResult data={result} />;
+      return <AnalysisResult data={result as AnalysisData | null} />;
     case "data-quality":
-      return <DataQualityResult data={result} />;
+      return <DataQualityResult data={result as DataQualityData | null} />;
     case "duplicate-finder":
-      return <DuplicateFinderResult data={result} />;
+      return <DuplicateFinderResult data={result as DuplicateFinderData | null} />;
     case "reengagement":
-      return <ReengagementResult data={result} />;
+      return <ReengagementResult data={result as ReengagementData | null} />;
     case "revenue-opportunities":
-      return <RevenueOpportunitiesResult data={result} />;
+      return <RevenueOpportunitiesResult data={result as RevenueOpportunitiesData | null} />;
     case "follow-up-drafter":
-      return <FollowUpDraftResult data={result} />;
+      return <FollowUpDraftResult data={result as FollowUpDraftData | null} />;
     default:
       return (
         <div className="rounded-xl border border-border/40 p-3 bg-white/[0.02]">

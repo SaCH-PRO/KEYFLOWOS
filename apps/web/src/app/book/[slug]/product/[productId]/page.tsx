@@ -131,8 +131,7 @@ export default function ProductDetailPage() {
       }
       setBusiness(res.data);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public-flow payload — pending typed contract
-      const sfRes = await apiGet<any>(`/site/storefront/public/${encodeURIComponent(slug)}`);
+      const sfRes = await apiGet<{ storefront?: StorefrontConfig; storefrontConfig?: StorefrontConfig }>(`/site/storefront/public/${encodeURIComponent(slug)}`);
       if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
       else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
 
