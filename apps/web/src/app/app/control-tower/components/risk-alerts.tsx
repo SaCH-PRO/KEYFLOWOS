@@ -4,8 +4,16 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import {
-  ShieldAlert, Banknote, UserX, Clock, CalendarOff, Store, AlertTriangle,
-  ChevronDown, ChevronUp, ArrowRight,
+  ShieldAlert,
+  Banknote,
+  UserX,
+  Clock,
+  CalendarOff,
+  Store,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  ArrowRight,
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import type { ControlTowerRiskAlert } from "@/lib/client";

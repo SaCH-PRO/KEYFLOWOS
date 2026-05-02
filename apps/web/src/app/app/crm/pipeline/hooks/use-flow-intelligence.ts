@@ -7,9 +7,12 @@ import type { NextAction as NextActionUI } from "@/components/contacts/next-acti
 import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
 import type { RevenueData } from "@/components/contacts/predictive-revenue";
 import {
-  fetchFlowIntelligence, fetchNextActions,
-  fetchAutopilotActionsForCrm, fetchPredictiveRevenue,
-  fetchFinancialGrowth, fetchAiNextActions,
+  fetchFlowIntelligence,
+  fetchNextActions,
+  fetchAutopilotActionsForCrm,
+  fetchPredictiveRevenue,
+  fetchFinancialGrowth,
+  fetchAiNextActions,
   completeNextAction,
   approveAutopilotAction as approveAutopilotActionApi,
   denyAutopilotAction as denyAutopilotActionApi,

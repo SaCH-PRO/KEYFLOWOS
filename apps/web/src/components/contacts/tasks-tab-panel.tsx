@@ -3,18 +3,38 @@
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import {
-  Plus, Search, Copy, MessageCircle, Mail,
-  ListTodo, StickyNote, Check, Clock,
-  Flag, Bell, Calendar,
-  CheckCircle2, AlertTriangle,
-  Trash2, ChevronDown, Pencil, X,
+  Plus,
+  Search,
+  Copy,
+  MessageCircle,
+  Mail,
+  ListTodo,
+  StickyNote,
+  Check,
+  Clock,
+  Flag,
+  Bell,
+  Calendar,
+  CheckCircle2,
+  AlertTriangle,
+  Trash2,
+  ChevronDown,
+  Pencil,
+  X,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactTask } from "./contact-detail";
 import {
-  TASK_PRIORITIES, TASK_TEMPLATES,
-  getPriorityConfig, isOverdue, isDueSoon, formatRelativeDate, formatDateTimeTZ,
-  type TaskPriority, type TaskFilter, type TaskSort,
+  TASK_PRIORITIES,
+  TASK_TEMPLATES,
+  getPriorityConfig,
+  isOverdue,
+  isDueSoon,
+  formatRelativeDate,
+  formatDateTimeTZ,
+  type TaskPriority,
+  type TaskFilter,
+  type TaskSort,
 } from "./tab-constants";
 
 interface TasksTabPanelProps {

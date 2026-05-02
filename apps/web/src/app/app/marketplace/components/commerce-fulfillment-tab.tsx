@@ -107,7 +107,7 @@ function RouteCard({ route }: { route: any }) {
 export function CommerceFulfillmentTab({
   shipments,
   purchaseOrders,
-  products,
+  products: _products,
   onEditShipment,
   onCreateShipment,
   onEditPO,

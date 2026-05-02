@@ -2,9 +2,25 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  Briefcase, Sparkles, FileText, Tag, MapPin, Heart, Shield,
-  Wand2, RefreshCw, AlertCircle, ChevronRight, X,
-  Scale, DollarSign, Palette, Building2, CheckCircle, Clock, Store,
+  Briefcase,
+  Sparkles,
+  FileText,
+  Tag,
+  MapPin,
+  Heart,
+  Shield,
+  Wand2,
+  RefreshCw,
+  AlertCircle,
+  ChevronRight,
+  X,
+  Scale,
+  DollarSign,
+  Palette,
+  Building2,
+  CheckCircle,
+  Clock,
+  Store,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
 import { apiPatch, apiPost } from "@/lib/api";

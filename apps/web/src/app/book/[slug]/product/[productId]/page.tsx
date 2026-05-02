@@ -59,13 +59,6 @@ export default function ProductDetailPage() {
   const themeKey = (appearance?.theme ?? "default") as ThemeKey;
   const ts = getThemeStyles(themeKey, primaryColor, secondaryColor, accentColor);
 
-  const updateCart = useCallback(
-    (newCart: CartItem[]) => {
-      setCart(newCart);
-      saveCart(slug, newCart);
-    },
-    [slug]
-  );
 
   const addToCart = useCallback(
     (ci: CatalogItem, qty = 1) => {

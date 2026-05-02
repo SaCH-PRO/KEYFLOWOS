@@ -220,11 +220,11 @@ export function LaunchMode({
   businessData,
   services,
   commerceProducts,
-  storefrontConfig,
-  hasHeroImage,
-  hoursConfigured,
-  hasTestimonials,
-  activeDeliveryMethodsCount = 0,
+  storefrontConfig: _storefrontConfig,
+  hasHeroImage: _hasHeroImage,
+  hoursConfigured: _hoursConfigured,
+  hasTestimonials: _hasTestimonials,
+  activeDeliveryMethodsCount: _activeDeliveryMethodsCount = 0,
   onModeChange,
   readiness,
   onCopilotAction,
@@ -236,7 +236,7 @@ export function LaunchMode({
   const readinessPercent = readiness?.scores?.overall ?? 0;
   const totalItems = readiness?.items?.length ?? 0;
   const resolvedItems = readiness?.items?.filter((i) => i.resolved).length ?? 0;
-  const blockerCount = readiness?.items?.filter((i) => !i.resolved && i.severity === "blocker").length ?? 0;
+  const _blockerCount = readiness?.items?.filter((i) => !i.resolved && i.severity === "blocker").length ?? 0;
 
   const metrics: MetricStripItem[] = [
     {

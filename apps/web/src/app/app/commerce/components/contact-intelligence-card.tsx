@@ -26,7 +26,7 @@ interface ContactIntelligenceCardProps {
 
 export const ContactIntelligenceCard = React.memo(function ContactIntelligenceCard({
   contactId,
-  contactName,
+  contactName: _contactName,
   invoices,
   currency,
   badge,

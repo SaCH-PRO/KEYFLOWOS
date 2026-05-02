@@ -2,8 +2,13 @@
 
 import { useMemo } from "react";
 import {
-  Circle, CheckCircle, AlertTriangle, ArrowRight, Calendar,
-  MessageSquare, Flag,
+  Circle,
+  CheckCircle,
+  AlertTriangle,
+  ArrowRight,
+  Calendar,
+  MessageSquare,
+  Flag,
 } from "lucide-react";
 import { Project } from "@/lib/client";
 import { normalizeStatus, getStageInfo, isOverdue, formatDate } from "../project-constants";
@@ -152,7 +157,7 @@ export function TimelineTab({ project, notes, milestones = [] }: TimelineTabProp
               })}
             </div>
             <div className="flex mt-2">
-              {milestones.map((ms, i) => {
+              {milestones.map((ms, _i) => {
                 const segWidth = 100 / milestones.length;
                 return (
                   <div key={ms.id} className="flex flex-col items-center" style={{ width: `${segWidth}%` }}>

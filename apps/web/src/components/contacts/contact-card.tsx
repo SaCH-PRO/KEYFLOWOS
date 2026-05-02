@@ -75,7 +75,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
   const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   const statusColor = STATUS_COLORS[contact.status ?? ""] ?? STATUS_COLORS.LEAD;
-  const statusDot = STATUS_DOT_COLORS[contact.status ?? ""] ?? "bg-blue-400";
+  const _statusDot = STATUS_DOT_COLORS[contact.status ?? ""] ?? "bg-blue-400";
 
   const leadScore = contact.meta?.leadScore;
   const hasLeadScore = leadScore != null && leadScore > 0;

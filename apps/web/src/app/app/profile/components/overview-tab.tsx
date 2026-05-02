@@ -2,10 +2,23 @@
 
 import { useMemo } from "react";
 import {
-  Sparkles, Brain, ArrowRight, CheckCircle2, AlertCircle,
-  Briefcase, TrendingUp, Users, Target, Building2,
-  FileText, Zap, BarChart3, Clock,
-  DollarSign, Globe, Lightbulb,
+  Sparkles,
+  Brain,
+  ArrowRight,
+  CheckCircle2,
+  AlertCircle,
+  Briefcase,
+  TrendingUp,
+  Users,
+  Target,
+  Building2,
+  FileText,
+  Zap,
+  BarChart3,
+  Clock,
+  DollarSign,
+  Globe,
+  Lightbulb,
 } from "lucide-react";
 import type { ProfileBusinessData } from "./profile-types";
 
@@ -58,7 +71,7 @@ const AI_PROMPTS = [
 
 export function OverviewTab({
   businessData,
-  profileCompleteness,
+  profileCompleteness: _profileCompleteness,
   intelligenceTiers,
   overallIntelligenceScore,
   completenessItems,
@@ -664,7 +677,6 @@ export function OverviewTab({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {keyUnlocks.map((unlock, idx) => {
-              const Icon = unlock.icon;
               return (
                 <div
                   key={idx}

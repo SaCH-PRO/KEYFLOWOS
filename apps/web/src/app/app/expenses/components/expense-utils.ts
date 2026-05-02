@@ -1,7 +1,11 @@
 "use client";
 
 import {
-  CreditCard, Wallet, Building2, FileText, DollarSign,
+  CreditCard,
+  Wallet,
+  Building2,
+  FileText,
+  DollarSign,
 } from "lucide-react";
 
 export const CATEGORY_COLORS = [

@@ -28,7 +28,7 @@ export function TaskContinuityHeader({
   const { getReturnLabel, getReturnHref, navigateBack, getOriginWorkspace } = useReturnNavigation();
 
   const resolvedReturnLabel = returnLabel ?? getReturnLabel();
-  const resolvedReturnHref = returnHref ?? getReturnHref();
+  const _resolvedReturnHref = returnHref ?? getReturnHref();
   const originWorkspace = getOriginWorkspace();
 
   const handleReturn = () => {

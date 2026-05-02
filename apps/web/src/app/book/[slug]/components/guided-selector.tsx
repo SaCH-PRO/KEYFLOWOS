@@ -3,8 +3,14 @@
 import { useState, useEffect } from "react";
 import { apiGet, apiPost } from "@/lib/api";
 import {
-  Sparkles, ArrowRight, ArrowLeft, CheckCircle2, Loader2,
-  Target, Star, ChevronRight,
+  Sparkles,
+  ArrowRight,
+  ArrowLeft,
+  CheckCircle2,
+  Loader2,
+  Target,
+  Star,
+  ChevronRight,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 

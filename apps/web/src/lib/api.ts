@@ -9,7 +9,6 @@ function warnUnreachable(error: unknown) {
   if (unreachableWarned) return;
   unreachableWarned = true;
   const msg = error instanceof Error ? error.message : String(error);
-  // eslint-disable-next-line no-console
   console.warn(
     `[keyflow-api] Could not reach API at ${API_BASE} (${msg}).\n` +
       `  - Verify NEXT_PUBLIC_API_BASE_URL in .env matches the running server port.\n` +

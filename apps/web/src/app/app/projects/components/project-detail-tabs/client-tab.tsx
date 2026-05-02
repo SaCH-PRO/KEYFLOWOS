@@ -2,9 +2,19 @@
 
 import { useEffect, useState } from "react";
 import {
-  User, ExternalLink, Mail, Phone, Building, Tag,
-  Calendar, TrendingUp, Globe, Briefcase, Clock,
-  MessageSquare, Star,
+  User,
+  ExternalLink,
+  Mail,
+  Phone,
+  Building,
+  Tag,
+  Calendar,
+  TrendingUp,
+  Globe,
+  Briefcase,
+  Clock,
+  MessageSquare,
+  Star,
 } from "lucide-react";
 import { fetchContactDetail } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";

@@ -9,8 +9,12 @@ import type { ConversationContextData } from "@/components/contacts/conversation
 import type { AiInsight } from "@/components/contacts/ai-copilot";
 import type { Contact, ContactDetail as ContactDetailAPI, CrossJourneyResponse } from "@/lib/client";
 import {
-  fetchContactDetail, fetchContactHealthMetrics, fetchContactJourney,
-  fetchConversationContext, generateAiInsight, fetchContactCrossJourney,
+  fetchContactDetail,
+  fetchContactHealthMetrics,
+  fetchContactJourney,
+  fetchConversationContext,
+  generateAiInsight,
+  fetchContactCrossJourney,
 } from "@/lib/client";
 
 export function useContactDetail(businessId: string | null, contacts: Contact[]) {

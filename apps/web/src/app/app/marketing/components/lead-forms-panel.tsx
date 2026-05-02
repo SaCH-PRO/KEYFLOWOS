@@ -62,7 +62,7 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
   businessId,
   forms,
   setForms,
-  onViewContact,
+  onViewContact: _onViewContact,
   onAiOptimize,
   searchQuery: externalSearch,
   onSearchChange: externalSearchChange,

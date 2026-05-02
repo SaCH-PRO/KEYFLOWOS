@@ -1,24 +1,24 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { 
-  Trophy, 
-  Star, 
-  Zap, 
-  TrendingUp, 
-  UserPlus, 
-  Package, 
-  FileText, 
-  Calendar, 
-  Mail, 
-  Share2, 
-  Building2, 
-  Users, 
-  Globe, 
-  Award, 
-  Flame, 
+import {
+  Trophy,
+  Star,
+  Zap,
+  TrendingUp,
+  UserPlus,
+  Package,
+  FileText,
+  Calendar,
+  Mail,
+  Share2,
+  Building2,
+  Users,
+  Globe,
+  Award,
+  Flame,
   CheckCircle,
-  LucideIcon
+  LucideIcon,
 } from "lucide-react";
 
 interface Achievement {

@@ -185,7 +185,7 @@ function RecommendationCard({
   onViewProfile: (id: string) => void;
   onFeedback: (targetBusinessId: string, feedback: 'HELPFUL' | 'DISMISSED', score: number, matchType: string) => void;
 }) {
-  const router = useRouter();
+  const _router = useRouter();
   const [feedbackGiven, setFeedbackGiven] = useState<'HELPFUL' | 'DISMISSED' | null>(null);
   const biz = rec.business;
   const logo = biz.logoUrl
@@ -581,7 +581,7 @@ export function Directory({ onViewProfile }: DirectoryProps) {
 
   const [recommendations, setRecommendations] = useState<BusinessRecommendation[]>([]);
   const [recsLoading, setRecsLoading] = useState(false);
-  const [recsError, setRecsError] = useState(false);
+  const [, setRecsError] = useState(false);
   const [showRecs, setShowRecs] = useState(true);
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [insights, setInsights] = useState<{ underutilized: RelationshipInsightItem[]; suggestions: string[] } | null>(null);

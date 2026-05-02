@@ -1,10 +1,25 @@
 "use client";
 
 import {
-  Heart, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Minus,
-  Lightbulb, Target, MessageSquare, Tags,
-  ChevronDown, ChevronUp, Clock, FileText, Users,
-  Mail, Copy, DollarSign, Send,
+  Heart,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  CheckCircle,
+  Minus,
+  Lightbulb,
+  Target,
+  MessageSquare,
+  Tags,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  FileText,
+  Users,
+  Mail,
+  Copy,
+  DollarSign,
+  Send,
 } from "lucide-react";
 import { useState } from "react";
 

@@ -2,8 +2,13 @@
 
 import { motion } from "framer-motion";
 import {
-  Zap, Lightbulb, AlertTriangle, TrendingUp, Sparkles,
-  X, ChevronRight,
+  Zap,
+  Lightbulb,
+  AlertTriangle,
+  TrendingUp,
+  Sparkles,
+  X,
+  ChevronRight,
 } from "lucide-react";
 
 type RecommendationType = "action" | "insight" | "warning" | "tip" | "risk" | "opportunity";

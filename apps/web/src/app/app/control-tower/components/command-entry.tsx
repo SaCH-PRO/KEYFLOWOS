@@ -4,12 +4,21 @@ import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
-  Sparkles, Send, Loader2, ChevronDown, ChevronUp,
-  AlertTriangle, Check, X, Play,
+  Sparkles,
+  Send,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  Check,
+  X,
+  Play,
 } from "lucide-react";
 import {
-  planAction, executeAction,
-  type ActionPlanResponse, type ActionExecuteResponse,
+  planAction,
+  executeAction,
+  type ActionPlanResponse,
+  type ActionExecuteResponse,
 } from "@/lib/client";
 
 type PlanPreview = ActionPlanResponse & { input: string };

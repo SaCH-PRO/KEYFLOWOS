@@ -244,18 +244,12 @@ export type Invoice = {
 
 type ApiResult<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null };
 
-const fallbackContacts: Contact[] = [];
 
 const fallbackBookings: Booking[] = [
   { id: "bk_1", startTime: new Date().toISOString(), endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(), status: "CONFIRMED" },
   { id: "bk_2", startTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(), endTime: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(), status: "PENDING" },
 ];
 
-const fallbackProducts: Product[] = [
-  { id: "pd_1", name: "Consultation", price: 850, currency: "TTD", category: "SERVICE", isActive: true },
-  { id: "pd_2", name: "Follow-up Session", price: 600, currency: "TTD", category: "SERVICE", isActive: true },
-  { id: "pd_3", name: "Wellness Package", price: 1200, currency: "TTD", category: "PACKAGE", isActive: true },
-];
 
 const fallbackInvoices: Invoice[] = [
   { id: "inv_1", invoiceNumber: "INV-001", status: "PAID", total: 850, currency: "TTD", contact: { firstName: "Sarah", email: "sarah@example.com" } },
@@ -2631,7 +2625,7 @@ export type AutopilotSettings = {
   quietHoursEnd: string;
 };
 
-const autopilotDraftSchema = z.object({
+const _autopilotDraftSchema = z.object({
   subject: z.string(),
   message: z.string(),
   tone: z.string(),
@@ -2772,14 +2766,14 @@ const momentumHistorySchema = z.array(z.object({
 
 export type MomentumHistory = z.infer<typeof momentumHistorySchema>;
 
-const momentumDraftSchema = z.object({
+const _momentumDraftSchema = z.object({
   subject: z.string(),
   message: z.string(),
   tone: z.string(),
   suggestedChannel: z.enum(['whatsapp', 'email']),
 });
 
-export type MomentumDraft = z.infer<typeof momentumDraftSchema>;
+export type MomentumDraft = z.infer<typeof _momentumDraftSchema>;
 
 export async function fetchMomentumRecommendations(businessId?: string, limit?: number): Promise<ApiResult<MomentumRecommendation[]>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
@@ -2950,7 +2944,7 @@ const conversationContextSchema = z.object({
 
 export type ConversationContextData = z.infer<typeof conversationContextSchema>;
 
-const aiInsightSchema = z.object({
+const _aiInsightSchema = z.object({
   summary: z.string(),
   nextBestAction: z.string(),
   reasoning: z.string().optional(),
@@ -2959,7 +2953,7 @@ const aiInsightSchema = z.object({
   tags: z.array(z.string()).optional(),
 });
 
-export type AiInsight = z.infer<typeof aiInsightSchema>;
+export type AiInsight = z.infer<typeof _aiInsightSchema>;
 
 export async function fetchFlowIntelligence(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<FlowIntelligenceData>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;

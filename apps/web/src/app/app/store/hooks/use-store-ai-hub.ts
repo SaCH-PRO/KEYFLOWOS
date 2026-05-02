@@ -48,7 +48,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   const hasMetaTitle = data.hasMetaTitle ?? false;
   const hasMetaDescription = data.hasMetaDescription ?? false;
   const hasPolicies = data.hasPolicies ?? false;
-  const hasFaq = data.hasFaq ?? false;
+  const _hasFaq = data.hasFaq ?? false;
   const activeDeliveryCount = data.activeDeliveryCount ?? 0;
   const readinessScores = data.readinessScores;
   const readinessItems = data.readinessItems;

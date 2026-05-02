@@ -3,10 +3,27 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  AlertTriangle, TrendingUp, TrendingDown, Store, FileQuestion, Receipt,
-  Target, BarChart3, Lightbulb, ArrowRight, PieChart, ShieldAlert,
-  Zap, DollarSign, Sparkles, Brain, Shield,
-  ChevronDown, ChevronUp, Users, Percent,
+  AlertTriangle,
+  TrendingUp,
+  TrendingDown,
+  Store,
+  FileQuestion,
+  Receipt,
+  Target,
+  BarChart3,
+  Lightbulb,
+  ArrowRight,
+  PieChart,
+  ShieldAlert,
+  Zap,
+  DollarSign,
+  Sparkles,
+  Brain,
+  Shield,
+  ChevronDown,
+  ChevronUp,
+  Users,
+  Percent,
 } from "lucide-react";
 import { Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget, MarginAnalysis, RecurringCandidate } from "@/lib/client";
 import { formatCurrency } from "./expense-utils";
@@ -244,7 +261,7 @@ export function ExpenseInsightsTab({
     }
 
     if (recurringExpenseCount > 3) {
-      const recurringTotal = expenses.filter(e => e.isRecurring).reduce((s, e) => s + e.amount, 0);
+      const _recurringTotal = expenses.filter(e => e.isRecurring).reduce((s, e) => s + e.amount, 0);
       cards.push({
         id: "recurring-cost",
         type: "info",

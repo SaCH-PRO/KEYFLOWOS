@@ -437,7 +437,7 @@ export function TemplateCustomizer({
     { id: "print", icon: Printer, label: "Print", desc: "A4" },
   ];
 
-  const showIframe = viewMode === "mobile" || viewMode === "print";
+  const _showIframe = viewMode === "mobile" || viewMode === "print";
 
   return (
     <AnimatePresence>

@@ -3,9 +3,22 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Users, UserPlus, Trash2, CheckCircle2, Mail, Shield, Crown,
-  Activity, Settings2, ChevronRight, Zap, Eye, Edit3,
-  Lock, Unlock, Filter,
+  Users,
+  UserPlus,
+  Trash2,
+  CheckCircle2,
+  Mail,
+  Shield,
+  Crown,
+  Activity,
+  Settings2,
+  ChevronRight,
+  Zap,
+  Eye,
+  Edit3,
+  Lock,
+  Unlock,
+  Filter,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -222,7 +235,6 @@ function MemberCard({
 }) {
   const displayName = getDisplayName(member);
   const role = roleConfig[member.role] || roleConfig.STAFF;
-  const RoleIcon = role.icon;
 
   return (
     <div className="flex items-center justify-between rounded-xl border border-border/40 bg-[#1a1a1e] px-4 py-3 hover:bg-[#1e1e22] transition-colors group">

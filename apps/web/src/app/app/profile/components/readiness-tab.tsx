@@ -3,11 +3,24 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  Shield, CheckCircle2, Circle, Unlock,
-  Brain, Sparkles, TrendingUp, DollarSign,
-  Users, Target, Settings, Lightbulb,
-  ArrowRight, Zap, BarChart3, Globe,
-  Calendar, FileText,
+  Shield,
+  CheckCircle2,
+  Circle,
+  Unlock,
+  Brain,
+  Sparkles,
+  TrendingUp,
+  DollarSign,
+  Users,
+  Target,
+  Settings,
+  Lightbulb,
+  ArrowRight,
+  Zap,
+  BarChart3,
+  Globe,
+  Calendar,
+  FileText,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import type { ProfileBusinessData } from "./profile-types";

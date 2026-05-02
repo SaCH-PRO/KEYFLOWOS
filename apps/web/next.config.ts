@@ -9,7 +9,7 @@ const repoRoot = path.resolve(__dirname, "../../");
 // evaluated. Manually preload the repo-root .env(s) so the env validator
 // below sees them. Best-effort: never throw if dotenv isn't installed.
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const dotenv = require("dotenv");
   for (const p of [
     path.join(repoRoot, ".env.local"),

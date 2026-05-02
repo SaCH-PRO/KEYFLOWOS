@@ -5,9 +5,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  CalendarClock, Loader2, ChevronDown, ChevronUp,
-  Target, Users, DollarSign, Megaphone, FolderKanban, Zap,
-  Play, Check, Bot,
+  CalendarClock,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  Target,
+  Users,
+  DollarSign,
+  Megaphone,
+  FolderKanban,
+  Zap,
+  Play,
+  Check,
+  Bot,
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import { apiGet } from "@/lib/api";
@@ -65,7 +75,7 @@ function normalizePlan(raw: RawPlanResponse): WeeklyPlanData {
   if (raw.dailyFocus && Array.isArray(raw.dailyFocus)) {
     for (const df of raw.dailyFocus) {
       const category = inferCategory(df.theme || "");
-      const blocks: DayBlock[] = (df.tasks || []).map((task, i) => ({
+      const blocks: DayBlock[] = (df.tasks || []).map((task, _i) => ({
         timeSlot: "",
         focus: df.theme || "Focus",
         description: task,

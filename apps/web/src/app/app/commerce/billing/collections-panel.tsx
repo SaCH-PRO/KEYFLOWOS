@@ -109,7 +109,7 @@ export default function CollectionsPanel({
   quotes,
   currency,
   businessId,
-  contacts,
+  contacts: _contacts,
   setInvoices,
   onAiRecoveryPlan,
 }: CollectionsPanelProps) {

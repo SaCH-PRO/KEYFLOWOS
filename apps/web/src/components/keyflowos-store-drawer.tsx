@@ -2,11 +2,35 @@
 
 import { useState, useRef, useEffect } from "react";
 import {
-  X, Send, ExternalLink, Sparkles, CheckCircle, Loader2,
-  Rocket, Globe, Palette, Bot, TrendingUp, Users, Calculator,
-  Scale, Shield, BookOpen, Wrench, Package, FileText, BarChart3,
-  Lightbulb, Target, Megaphone, Settings, Building2, ChevronRight,
-  Zap, GraduationCap, FolderOpen
+  X,
+  Send,
+  ExternalLink,
+  Sparkles,
+  CheckCircle,
+  Loader2,
+  Rocket,
+  Globe,
+  Palette,
+  Bot,
+  TrendingUp,
+  Users,
+  Calculator,
+  Scale,
+  Shield,
+  BookOpen,
+  Wrench,
+  Package,
+  FileText,
+  BarChart3,
+  Lightbulb,
+  Target,
+  Megaphone,
+  Settings,
+  Building2,
+  ChevronRight,
+  Zap,
+  GraduationCap,
+  FolderOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { submitPublicIntake } from "@/lib/client";

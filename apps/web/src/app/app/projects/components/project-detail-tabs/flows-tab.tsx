@@ -2,8 +2,14 @@
 
 import { useEffect, useState } from "react";
 import {
-  Zap, ExternalLink, Play, CheckCircle, AlertTriangle,
-  Activity, Shield, RefreshCw,
+  Zap,
+  ExternalLink,
+  Play,
+  CheckCircle,
+  AlertTriangle,
+  Activity,
+  Shield,
+  RefreshCw,
 } from "lucide-react";
 import { fetchCrossModuleWorkflows, fetchAutomationCoverage, type CrossModuleWorkflow, type AutomationCoverage } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";

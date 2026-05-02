@@ -3,9 +3,19 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Loader2, CheckCircle, XCircle, Clock, AlertCircle,
-  RotateCcw, ChevronDown, ChevronRight, Mail,
-  MessageSquare, Globe, RefreshCw, Filter,
+  Loader2,
+  CheckCircle,
+  XCircle,
+  Clock,
+  AlertCircle,
+  RotateCcw,
+  ChevronDown,
+  ChevronRight,
+  Mail,
+  MessageSquare,
+  Globe,
+  RefreshCw,
+  Filter,
 } from "lucide-react";
 import { toast } from "sonner";
 import { listDeliveries, retryDelivery, getDeliveryEvents } from "@/lib/client";

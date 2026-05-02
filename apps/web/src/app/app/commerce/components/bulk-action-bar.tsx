@@ -25,7 +25,7 @@ export function BulkActionBar({
   onBulkStatusChange,
   onBulkDelete,
   statusOptions = [],
-  entityLabel = "items",
+  entityLabel: _entityLabel = "items",
 }: BulkActionBarProps) {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
 

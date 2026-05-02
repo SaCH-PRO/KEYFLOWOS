@@ -2,8 +2,15 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Brain, Shield, ShieldCheck, AlertTriangle,
-  Activity, Loader2, Zap, Lock, Sparkles,
+  Brain,
+  Shield,
+  ShieldCheck,
+  AlertTriangle,
+  Activity,
+  Loader2,
+  Zap,
+  Lock,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";

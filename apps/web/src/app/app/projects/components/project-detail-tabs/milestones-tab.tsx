@@ -2,8 +2,14 @@
 
 import { useState } from "react";
 import {
-  Flag, Plus, Trash2, CheckCircle, Circle, Calendar,
-  ChevronRight, Sparkles,
+  Flag,
+  Plus,
+  Trash2,
+  CheckCircle,
+  Circle,
+  Calendar,
+  ChevronRight,
+  Sparkles,
 } from "lucide-react";
 import { isOverdue, formatDate } from "../project-constants";
 

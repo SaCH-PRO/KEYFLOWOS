@@ -2,8 +2,18 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Target, Plus, Trash2, Save, Loader2, GripVertical,
-  BarChart3, CheckCircle2, Sparkles, Upload, Users, TrendingUp,
+  Target,
+  Plus,
+  Trash2,
+  Save,
+  Loader2,
+  GripVertical,
+  BarChart3,
+  CheckCircle2,
+  Sparkles,
+  Upload,
+  Users,
+  TrendingUp,
 } from "lucide-react";
 import {
   fetchQualificationConfig,

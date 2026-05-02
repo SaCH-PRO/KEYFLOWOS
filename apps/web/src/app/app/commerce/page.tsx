@@ -49,7 +49,6 @@ import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
-import type { BillingSlots } from "./utils/commerce-slots";
 import InvoicesPanel from "./invoices/invoices-panel";
 import QuotesPanel from "./quotes/quotes-panel";
 import RecurringPanel from "./recurring/recurring-panel";
@@ -99,7 +98,7 @@ export default function CommercePage() {
 
   const productActions = useProducts(shell.businessId, shell.setProducts, shell.cachedImages, shell.setCachedImages);
 
-  const emitEvent = useModuleEmit();
+  const _emitEvent = useModuleEmit();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [helpOpen, setHelpOpen] = useState(false);
@@ -199,10 +198,6 @@ export default function CommercePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'commerceAi' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
   }, [businessId, tab, invoices.length, quotes.length, commerceAi.updateCommerceContext]);
 
-  const handleWrappedTabChange = useCallback((t: string) => {
-    handleTabChange(t);
-    emitEvent("module:tab_changed", "commerce", { tab: t });
-  }, [handleTabChange, emitEvent]);
 
   const financialSummary = useMemo(() => {
     const now = new Date();
@@ -329,9 +324,6 @@ export default function CommercePage() {
     return null;
   }, []);
 
-  const billingSlots = useMemo<BillingSlots>(() => ({
-    renderTimelineBadge,
-  }), [renderTimelineBadge]);
 
   const setupReadiness = useMemo(() => {
     const items = [

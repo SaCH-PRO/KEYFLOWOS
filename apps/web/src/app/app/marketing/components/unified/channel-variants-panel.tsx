@@ -3,8 +3,19 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Facebook, Instagram, Mail, MessageCircle, Globe,
-  ChevronDown, ChevronUp, Copy, Wand2, RotateCcw, AlertCircle, Hash, Eye,
+  Facebook,
+  Instagram,
+  Mail,
+  MessageCircle,
+  Globe,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Wand2,
+  RotateCcw,
+  AlertCircle,
+  Hash,
+  Eye,
 } from "lucide-react";
 import type { ChannelDestination } from "@/lib/client";
 

@@ -123,7 +123,7 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
       mediaRecorderRef.current = mr;
       mr.start();
       setRecording(true);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Microphone access denied");
     }
   };

@@ -3,22 +3,47 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, MoreHorizontal, Trash2, Archive, Edit3, Save, X,
-  LayoutDashboard, ListTodo, Flag, Clock, MessageSquare,
-  User, DollarSign, Calendar, Zap, FileText,
+  ArrowLeft,
+  MoreHorizontal,
+  Trash2,
+  Archive,
+  Edit3,
+  Save,
+  X,
+  LayoutDashboard,
+  ListTodo,
+  Flag,
+  Clock,
+  MessageSquare,
+  User,
+  DollarSign,
+  Calendar,
+  Zap,
+  FileText,
 } from "lucide-react";
 import {
-  Project, ProjectTask,
-  updateProject, deleteProject,
-  createProjectTask, updateProjectTask, deleteProjectTask,
+  Project,
+  ProjectTask,
+  updateProject,
+  deleteProject,
+  createProjectTask,
+  updateProjectTask,
+  deleteProjectTask,
 } from "@/lib/client";
 import { toast } from "sonner";
 import { TabNav } from "@/components/ui/tab-nav";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 import {
-  PROJECT_STAGES, normalizeStatus, getStageInfo, PROJECT_COLORS,
-  getProjectProgress, getProjectRisk, RISK_STYLES, isOverdue, isDueSoon,
+  PROJECT_STAGES,
+  normalizeStatus,
+  getStageInfo,
+  PROJECT_COLORS,
+  getProjectProgress,
+  getProjectRisk,
+  RISK_STYLES,
+  isOverdue,
+  isDueSoon,
 } from "./project-constants";
 import { OverviewTab } from "./project-detail-tabs/overview-tab";
 import { TasksTab } from "./project-detail-tabs/tasks-tab";

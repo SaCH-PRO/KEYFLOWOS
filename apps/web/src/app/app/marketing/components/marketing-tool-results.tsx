@@ -1,10 +1,19 @@
 "use client";
 
 import {
-  TrendingUp, TrendingDown, Minus,
-  Lightbulb, Target, AlertTriangle,
-  ChevronDown, ChevronUp, Mail, Users,
-  Zap, ClipboardList, Star,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Lightbulb,
+  Target,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Mail,
+  Users,
+  Zap,
+  ClipboardList,
+  Star,
 } from "lucide-react";
 import { useState } from "react";
 import type {

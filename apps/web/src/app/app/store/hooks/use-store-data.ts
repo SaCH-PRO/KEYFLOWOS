@@ -330,7 +330,7 @@ export function useStoreData() {
     }
   }
 
-  async function handleDeleteServiceFromStore(serviceId: string, productName?: string) {
+  async function handleDeleteServiceFromStore(serviceId: string, _productName?: string) {
     if (!businessId) return;
     const mapping = storeGraph?.mappings.find((m) => m.serviceId === serviceId);
     const productId = mapping?.productId;

@@ -5,8 +5,13 @@ import { Zap, Play, Eye, X, ArrowDown, Search, CheckCircle, Sparkles, Workflow, 
 import { createPlaybook, fetchPlaybooks } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
-  AUTOMATION_TEMPLATES, COVERAGE_MODULES, getTriggerLabel, getActionLabel,
-  MODULE_COLORS, type AutomationTemplate, type FlowComplexity,
+  AUTOMATION_TEMPLATES,
+  COVERAGE_MODULES,
+  getTriggerLabel,
+  getActionLabel,
+  MODULE_COLORS,
+  type AutomationTemplate,
+  type FlowComplexity,
 } from "./automation-constants";
 
 const CATEGORY_STYLES: Record<string, string> = {

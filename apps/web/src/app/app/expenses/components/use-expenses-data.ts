@@ -2,9 +2,23 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
-  fetchExpenses, fetchExpenseCategories, fetchExpenseSummary, fetchVendorAnalytics, fetchExpenseBudgets,
-  fetchMarginAnalysis, fetchRecurringCandidates, fetchProjects, fetchServices, fetchContacts,
-  Expense, ExpenseCategory, ExpenseSummary, VendorAnalytics, ExpenseBudget, MarginAnalysis, RecurringCandidate,
+  fetchExpenses,
+  fetchExpenseCategories,
+  fetchExpenseSummary,
+  fetchVendorAnalytics,
+  fetchExpenseBudgets,
+  fetchMarginAnalysis,
+  fetchRecurringCandidates,
+  fetchProjects,
+  fetchServices,
+  fetchContacts,
+  Expense,
+  ExpenseCategory,
+  ExpenseSummary,
+  VendorAnalytics,
+  ExpenseBudget,
+  MarginAnalysis,
+  RecurringCandidate,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 

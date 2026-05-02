@@ -248,7 +248,7 @@ export function UpgradePrompt({
 }
 
 export function PlanLimitBanner({
-  resourceKey,
+  resourceKey: _resourceKey,
   label,
   currentUsage,
   limit,

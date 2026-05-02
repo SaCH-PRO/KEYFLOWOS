@@ -81,14 +81,14 @@ export function CheckoutFlow({
   staff,
   primaryColor,
   secondaryColor,
-  accentColor,
+  accentColor: _accentColor,
   cartTotal,
   cartCurrency,
   promoCode,
   shippingZones,
   taxRate,
   onBack,
-  onUpdateQuantity,
+  onUpdateQuantity: _onUpdateQuantity,
   onSubmit,
 }: Props) {
   const [checkoutStep, setCheckoutStep] = useState(0);

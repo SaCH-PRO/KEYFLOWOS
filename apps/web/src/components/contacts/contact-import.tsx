@@ -270,7 +270,7 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
     }>;
   } | null>(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
-  const [skipDuplicates, setSkipDuplicates] = useState(false);
+  const [, setSkipDuplicates] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleGoogleConnect = async () => {

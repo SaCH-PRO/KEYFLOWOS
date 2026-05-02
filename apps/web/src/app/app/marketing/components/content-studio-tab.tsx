@@ -3,11 +3,37 @@
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Wifi, WifiOff, Shield, ShieldAlert, ShieldCheck, ShieldX,
-  RefreshCw, Loader2, ChevronDown, ChevronRight, Plus, Trash2,
-  Facebook, Instagram, Mail, MessageCircle, Globe, ExternalLink,
-  Check, X, AlertCircle, Settings, Power, PowerOff, Eye,
-  FileText, Image as ImageIcon, Video, Clock, Zap, Link2,
+  Wifi,
+  WifiOff,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldX,
+  RefreshCw,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  Trash2,
+  Facebook,
+  Instagram,
+  Mail,
+  MessageCircle,
+  Globe,
+  ExternalLink,
+  Check,
+  X,
+  AlertCircle,
+  Settings,
+  Power,
+  PowerOff,
+  Eye,
+  FileText,
+  Image as ImageIcon,
+  Video,
+  Clock,
+  Zap,
+  Link2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -232,7 +258,7 @@ function DestinationCard({ dest, onToggle }: { dest: ChannelDestination; onToggl
 
 function ConnectionCard({
   connection,
-  businessId,
+  businessId: _businessId,
   onHealthCheck,
   onDisconnect,
   onReconnect,

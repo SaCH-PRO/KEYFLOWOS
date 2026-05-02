@@ -22,7 +22,7 @@ interface BroadcastDrawerProps {
   onDeselectAll: () => void;
 }
 
-export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectAll }: BroadcastDrawerProps) {
+export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectAll: _onDeselectAll }: BroadcastDrawerProps) {
   const [message, setMessage] = useState("");
   const [channel, setChannel] = useState<"whatsapp" | "email">("whatsapp");
   const [sending, setSending] = useState(false);

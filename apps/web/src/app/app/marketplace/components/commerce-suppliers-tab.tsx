@@ -106,7 +106,7 @@ export function CommerceSuppliersTab({
               description="Create purchase orders to establish supplier connections and track health status."
             />
           ) : (
-            suppliers.map((supplier, i) => {
+            suppliers.map((supplier, _i) => {
               const activePOs = supplier.pos.filter((p) => !["CANCELLED", "RECEIVED"].includes(p.status));
               const lastSync = supplier.pos[0]?.updatedAt || supplier.pos[0]?.createdAt;
               const health = activePOs.length > 0 ? "ACTIVE" : "INACTIVE";

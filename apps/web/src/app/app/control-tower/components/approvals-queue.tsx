@@ -4,8 +4,15 @@ import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
-  ShieldCheck, Check, X, Clock, Loader2, ChevronDown, ChevronUp,
-  AlertTriangle, Zap,
+  ShieldCheck,
+  Check,
+  X,
+  Clock,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  Zap,
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import {

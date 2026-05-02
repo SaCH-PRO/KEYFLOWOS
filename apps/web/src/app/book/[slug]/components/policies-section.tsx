@@ -4,11 +4,6 @@ import { useState } from "react";
 import { X, FileText, ShieldCheck, Truck, ScrollText } from "lucide-react";
 import type { PolicyPage } from "@/lib/client";
 
-type Props = {
-  policies: PolicyPage[];
-  primaryColor: string;
-  businessName: string;
-};
 
 const policyIcons: Record<string, typeof FileText> = {
   refund: ShieldCheck,
@@ -44,7 +39,7 @@ function PolicyModal({ policy, onClose }: { policy: PolicyPage; onClose: () => v
   );
 }
 
-export function PoliciesFooterLinks({ policies, primaryColor }: { policies: PolicyPage[]; primaryColor: string }) {
+export function PoliciesFooterLinks({ policies, primaryColor: _primaryColor }: { policies: PolicyPage[]; primaryColor: string }) {
   const [activePolicy, setActivePolicy] = useState<PolicyPage | null>(null);
   const enabledPolicies = policies.filter((p) => p.enabled && p.content);
 

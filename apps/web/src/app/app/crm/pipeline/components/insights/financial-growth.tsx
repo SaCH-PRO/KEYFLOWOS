@@ -3,12 +3,27 @@
 import React from "react";
 import { motion } from "framer-motion";
 import {
-  TrendingUp, TrendingDown, DollarSign, Wallet, Clock,
-  ArrowUpRight, ArrowDownRight, ShieldAlert, Briefcase, Users,
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Wallet,
+  Clock,
+  ArrowUpRight,
+  ArrowDownRight,
+  ShieldAlert,
+  Briefcase,
+  Users,
 } from "lucide-react";
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  BarChart, Bar, Cell,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  Cell,
 } from "recharts";
 import type { FinancialGrowthData } from "@/lib/client";
 import { formatTTD, RECHARTS_TOOLTIP_STYLE, stagger } from "./insights-shared";
@@ -352,7 +367,7 @@ export const TopServicesRevenue = React.memo(function TopServicesRevenue({
     );
   }
 
-  const maxRevenue = Math.max(...services.map((s) => s.revenue), 1);
+  const _maxRevenue = Math.max(...services.map((s) => s.revenue), 1);
 
   return (
     <div className="space-y-2">

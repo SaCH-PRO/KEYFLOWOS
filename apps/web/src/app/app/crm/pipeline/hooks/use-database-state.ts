@@ -246,7 +246,6 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
 
   const [serverContacts, setServerContacts] = useState<LocalContact[]>([]);
   const [serverLoading, setServerLoading] = useState(false);
-  const [serverTotalCount, setServerTotalCount] = useState(0);
   const [serverHasMore, setServerHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const serverAbortRef = useRef<AbortController | null>(null);

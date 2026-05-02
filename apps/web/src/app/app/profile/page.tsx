@@ -5,9 +5,18 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  User, CheckCircle2, AlertCircle, FileText,
-  Building2, Briefcase, Globe, Brain,
-  LayoutDashboard, Shield, Sparkles, Target,
+  User,
+  CheckCircle2,
+  AlertCircle,
+  FileText,
+  Building2,
+  Briefcase,
+  Globe,
+  Brain,
+  LayoutDashboard,
+  Shield,
+  Sparkles,
+  Target,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";

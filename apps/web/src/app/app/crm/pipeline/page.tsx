@@ -43,7 +43,7 @@ export default function ContactsPage() {
   const crmAi = useCrmAiHub();
   const { checkLimit } = usePlan();
   const emitEvent = useModuleEmit();
-  const [slideDirection, setSlideDirection] = useState(0);
+  const [, setSlideDirection] = useState(0);
   const { setCurrentMeta } = useNavigationContext();
   useReturnNavigation({ restoreScrollOnMount: true });
 
@@ -55,16 +55,16 @@ export default function ContactsPage() {
     showBroadcast, setShowBroadcast,
     confirmState, setConfirmState,
     selectedContactsForBroadcast,
-    selectedIds, setSelectedIds, setSelectMode,
+     setSelectedIds, setSelectMode,
     contacts, loadContacts,
-    activeListId, setActiveListId, setActiveListContactIds,
-    setListsCount,
-    flowIntelligence, flowDataLoading, revenueData, aiNextActions,
-    setStatusFilter,
+      
+    
+       
+    
     nextActions, autopilotActions, autopilotPaused,
     setAutopilotPaused,
     handleCompleteNextAction, handleDoAction,
-    handleViewExpiringQuotes, handleViewOverdueInvoices,
+     
     handleApproveAutopilot, handleDenyAutopilot,
     selectContact, loadFlowData,
   } = state;
@@ -140,21 +140,6 @@ export default function ContactsPage() {
   const handleDeselectAll = useCallback(() => { setSelectedIds(new Set()); setSelectMode(false); }, [setSelectedIds, setSelectMode]);
   const handleConfirmAction = useCallback(() => { confirmStateRef.current.action(); setConfirmState({ open: false, action: () => {} }); }, [setConfirmState]);
   const handleCancelConfirm = useCallback(() => setConfirmState({ open: false, action: () => {} }), [setConfirmState]);
-  const handleRefreshContacts = useCallback(() => { void loadContacts(); }, [loadContacts]);
-  const handleSelectList = useCallback((listId: string | null, contactIds?: string[] | null) => {
-    setActiveListId(listId);
-    setActiveListContactIds(contactIds || null);
-    if (listId) setCrmViewTab("contacts");
-  }, [setActiveListId, setActiveListContactIds, setCrmViewTab]);
-  const handleSelectDbContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("contacts"); }, [selectContact, setCrmViewTab]);
-  const handleViewCold = useCallback(() => { setStatusFilter("LEAD"); setCrmViewTab("contacts"); }, [setStatusFilter, setCrmViewTab]);
-  const handleViewReady = useCallback(() => { setStatusFilter("PROSPECT"); setCrmViewTab("contacts"); }, [setStatusFilter, setCrmViewTab]);
-  const handleInsightsRefresh = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
-  const handleNavigatePipeline = useCallback((filter?: { status?: string; segment?: string }) => {
-    if (filter?.status) setStatusFilter(filter.status);
-    if (filter?.segment) state.setActiveSegment(filter.segment as any);
-    setCrmViewTab("contacts");
-  }, [setStatusFilter, setCrmViewTab, state.setActiveSegment]);
   const handleViewEngageContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("contacts"); }, [selectContact, setCrmViewTab]);
   const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused((prev: boolean) => !prev), [setAutopilotPaused]);
   const handleTabChange = useCallback((t: string) => {
@@ -167,36 +152,12 @@ export default function ContactsPage() {
     emitEvent("module:tab_changed", "crm", { tab: t });
   }, [crmViewTab, setCrmViewTab, emitEvent, setCurrentMeta]);
 
-  const { swipeHandlers } = useSwipeTabs({
+  const { swipeHandlers: _swipeHandlers } = useSwipeTabs({
     tabs: CRM_TABS,
     activeTab: crmViewTab,
     onTabChange: handleTabChange,
   });
 
-  const databaseContacts = useMemo(() => contacts.map((c) => ({
-    id: c.id,
-    firstName: c.firstName ?? null, lastName: c.lastName ?? null,
-    email: c.email ?? null, phone: c.phone ?? null,
-    status: c.status ?? "LEAD", source: c.source ?? null,
-    tags: Array.isArray(c.tags) ? c.tags : [],
-    companyName: c.companyName ?? null, jobTitle: c.jobTitle ?? null,
-    city: c.city ?? null, country: c.country ?? null,
-    preferredChannel: c.preferredChannel ?? null,
-    createdAt: c.createdAt ?? null,
-    addressLine1: c.addressLine1 ?? null, addressLine2: c.addressLine2 ?? null,
-    whatsappNumber: c.whatsappNumber ?? null,
-    department: c.department ?? null, industry: c.industry ?? null,
-    lifecycleStage: c.lifecycleStage ?? null,
-    sourceDetail: c.sourceDetail ?? null, notesInternal: c.notesInternal ?? null,
-    updatedAt: c.updatedAt ?? null,
-    secondaryEmail: c.secondaryEmail ?? null, secondaryPhone: c.secondaryPhone ?? null,
-    displayName: c.displayName ?? null, segment: c.segment ?? null,
-    language: c.language ?? null, timezone: c.timezone ?? null,
-    state: c.state ?? null, postalCode: c.postalCode ?? null,
-    marketingOptIn: c.marketingOptIn ?? null,
-    doNotContact: c.doNotContact ?? null,
-    custom: c.custom ?? null,
-  })), [contacts]);
 
   if (workspaceLoading) return <KanbanSkeleton />;
 

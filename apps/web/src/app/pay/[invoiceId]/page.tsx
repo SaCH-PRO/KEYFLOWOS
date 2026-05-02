@@ -176,7 +176,7 @@ function PublicPaymentPageInner() {
   const wipayStatus = searchParams.get("status");
   const wipayOrderId = searchParams.get("order_id");
   const paypalToken = searchParams.get("token");
-  const paypalPayerId = searchParams.get("PayerID");
+  const _paypalPayerId = searchParams.get("PayerID");
 
   useEffect(() => {
     if (wipayStatus && wipayOrderId) {

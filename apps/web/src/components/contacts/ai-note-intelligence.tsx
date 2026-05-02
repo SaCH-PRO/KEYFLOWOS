@@ -3,8 +3,15 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import {
-  Sparkles, AlertTriangle, Tag, ListPlus,
-  CheckCircle, Minus, TrendingDown, Zap, X,
+  Sparkles,
+  AlertTriangle,
+  Tag,
+  ListPlus,
+  CheckCircle,
+  Minus,
+  TrendingDown,
+  Zap,
+  X,
 } from "lucide-react";
 import { aiNoteAnalysis, type AiNoteAnalysis } from "@/lib/client";
 

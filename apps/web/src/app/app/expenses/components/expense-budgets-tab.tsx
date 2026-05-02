@@ -17,7 +17,7 @@ interface ExpenseBudgetsTabProps {
   onReload: () => void;
 }
 
-export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses, summary, onReload }: ExpenseBudgetsTabProps) {
+export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _expenses, summary: _summary, onReload }: ExpenseBudgetsTabProps) {
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [budgetForm, setBudgetForm] = useState({ categoryId: "", amount: "", alertAt: "80" });
 

@@ -3,12 +3,32 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Facebook, Instagram, Linkedin, Twitter, CheckCircle2, XCircle, Loader2,
-  Key, Globe, AlertCircle, RefreshCw, ExternalLink, Music2, Unlink, Wifi, WifiOff, ChevronUp, Settings2,
+  Facebook,
+  Instagram,
+  Linkedin,
+  Twitter,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Key,
+  Globe,
+  AlertCircle,
+  RefreshCw,
+  ExternalLink,
+  Music2,
+  Unlink,
+  Wifi,
+  WifiOff,
+  ChevronUp,
+  Settings2,
 } from "lucide-react";
 import {
-  fetchSocialConnections, startSocialOAuth, connectSocialManual,
-  disconnectSocial, testSocialConnection, fetchOAuthAvailability,
+  fetchSocialConnections,
+  startSocialOAuth,
+  connectSocialManual,
+  disconnectSocial,
+  testSocialConnection,
+  fetchOAuthAvailability,
   SocialConnection,
 } from "@/lib/client";
 import { toast } from "sonner";

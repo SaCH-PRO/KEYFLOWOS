@@ -2,20 +2,38 @@
 
 import { useState } from "react";
 import {
-  MessageSquare, ListTodo, History,
-  Copy, MessageCircle, Mail,
-  StickyNote, AlertCircle,
-  Check, Clock, ChevronDown, ChevronUp, ChevronRight,
-  Circle, Sparkles, Heart, Brain,
-  Zap, Target, RefreshCw,
+  MessageSquare,
+  ListTodo,
+  History,
+  Copy,
+  MessageCircle,
+  Mail,
+  StickyNote,
+  AlertCircle,
+  Check,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  ChevronRight,
+  Circle,
+  Sparkles,
+  Heart,
+  Brain,
+  Zap,
+  Target,
+  RefreshCw,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactEvent } from "./contact-detail";
 import {
-  EVENT_LABELS, EVENT_ICONS, MILESTONE_ICONS,
+  EVENT_LABELS,
+  EVENT_ICONS,
+  MILESTONE_ICONS,
   HEALTH_METRICS_CONFIG,
-  type JourneyMilestoneData, type HealthMetricsData,
-  type ConversationContextData, type AiInsightData,
+  type JourneyMilestoneData,
+  type HealthMetricsData,
+  type ConversationContextData,
+  type AiInsightData,
 } from "./tab-constants";
 
 interface TimelineTabPanelProps {

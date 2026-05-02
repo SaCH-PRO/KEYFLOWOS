@@ -3,8 +3,14 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import {
-  ShieldAlert, RefreshCw, AlertTriangle, ChevronDown, ChevronUp,
-  TrendingDown, Lightbulb, Users,
+  ShieldAlert,
+  RefreshCw,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  TrendingDown,
+  Lightbulb,
+  Users,
 } from "lucide-react";
 import { aiChurnDetection, type AiChurnRisk } from "@/lib/client";
 import { InfoBadge } from "@/components/ui/info-badge";

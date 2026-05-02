@@ -3,11 +3,32 @@
 import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-  Package, ShoppingBag, Truck, Star, FileText,
-  TrendingUp, AlertTriangle, CheckCircle2, ArrowRight,
-  Image as ImageIcon, Shield, ShoppingCart,
-  Zap, Clock, BarChart3, Users, RefreshCw, Loader2,
-  Sparkles, Eye, Target, DollarSign, Percent, Send, UserPlus, Megaphone,
+  Package,
+  ShoppingBag,
+  Truck,
+  Star,
+  FileText,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle2,
+  ArrowRight,
+  Image as ImageIcon,
+  Shield,
+  ShoppingCart,
+  Zap,
+  Clock,
+  BarChart3,
+  Users,
+  RefreshCw,
+  Loader2,
+  Sparkles,
+  Eye,
+  Target,
+  DollarSign,
+  Percent,
+  Send,
+  UserPlus,
+  Megaphone,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import { apiGet } from "@/lib/api";
@@ -444,7 +465,7 @@ function CrmActionBar({ businessId, businessName, onCopilotAction }: { businessI
 export function OverviewMode({
   businessId,
   storeEnabled,
-  publicUrl,
+  publicUrl: _publicUrl,
   businessData,
   commerceProducts,
   services,
@@ -468,10 +489,10 @@ export function OverviewMode({
   const hasHeroImage = !!(hero?.imageUrl || hero?.coverImageUrl);
   const hasTestimonials = !!(socialProof?.testimonials?.length);
   const hasLogo = !!businessData?.logoUrl;
-  const hasSlug = !!businessData?.slug;
-  const hoursConfigured = Object.values(businessHours).some((h) => h?.enabled);
-  const hasMetaSeo = !!(seo?.metaTitle && seo?.metaDescription);
-  const hasContact = !!(businessData?.phone || businessData?.email || contact?.whatsapp);
+  const _hasSlug = !!businessData?.slug;
+  const _hoursConfigured = Object.values(businessHours).some((h) => h?.enabled);
+  const _hasMetaSeo = !!(seo?.metaTitle && seo?.metaDescription);
+  const _hasContact = !!(businessData?.phone || businessData?.email || contact?.whatsapp);
 
   const liveProductIds = new Set<string>();
   if (storeGraph) {

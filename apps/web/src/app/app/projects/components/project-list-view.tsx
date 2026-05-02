@@ -2,14 +2,25 @@
 
 import { useState, useMemo, useEffect } from "react";
 import {
-  FolderKanban, Calendar, User, Search,
-  ChevronUp, ChevronDown, ExternalLink, DollarSign,
+  FolderKanban,
+  Calendar,
+  User,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  ExternalLink,
+  DollarSign,
 } from "lucide-react";
 import { Project, fetchContacts, type Contact } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
-  normalizeStatus, getStageInfo, getProjectProgress, getProjectRisk,
-  RISK_STYLES, isOverdue, formatDate,
+  normalizeStatus,
+  getStageInfo,
+  getProjectProgress,
+  getProjectRisk,
+  RISK_STYLES,
+  isOverdue,
+  formatDate,
 } from "./project-constants";
 
 interface ProjectListViewProps {

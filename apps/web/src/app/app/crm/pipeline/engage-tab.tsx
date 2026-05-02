@@ -3,10 +3,27 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-  Sparkles, Filter, ArrowUpDown, History, CheckCircle2,
-  MessageSquare, FileText, Phone, Mail, DollarSign,
-  Zap, Bot, ChevronDown, X, Timer, Target, TrendingUp,
-  ArrowUpRight, Activity, AlertTriangle, ExternalLink,
+  Sparkles,
+  Filter,
+  ArrowUpDown,
+  History,
+  CheckCircle2,
+  MessageSquare,
+  FileText,
+  Phone,
+  Mail,
+  DollarSign,
+  Zap,
+  Bot,
+  ChevronDown,
+  X,
+  Timer,
+  Target,
+  TrendingUp,
+  ArrowUpRight,
+  Activity,
+  AlertTriangle,
+  ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import type { RevenueData } from "@/components/contacts/predictive-revenue";
@@ -131,7 +148,7 @@ const HeroStats = React.memo(function HeroStats({
     const urgentCount = nextActions.filter((a) => a.priority === "urgent" || a.priority === "high").length;
     const totalValue = nextActions.reduce((sum, a) => sum + (a.value ?? 0), 0);
     const autopilotDone = autopilotActions.filter((a) => a.status === "completed").length;
-    const totalTime = nextActions.reduce((sum, a) => sum + a.estimatedTime, 0);
+    const _totalTime = nextActions.reduce((sum, a) => sum + a.estimatedTime, 0);
 
     return [
       {
@@ -465,7 +482,7 @@ const CompletionTimeline = React.memo(function CompletionTimeline({ actions }: {
         <div className="absolute left-[15px] top-0 bottom-0 w-px bg-border/30" aria-hidden="true" />
 
         <div className="space-y-0.5">
-          {visible.map((action, i) => (
+          {visible.map((action, _i) => (
             <div key={action.id} className="flex items-center gap-3 py-2 px-1 rounded-lg hover:bg-white/[0.02] transition-colors relative">
               <div className="w-[11px] h-[11px] rounded-full border-2 border-[hsl(var(--kf-accent2))]/40 bg-card shrink-0 z-10 ml-[10px]" />
               <CheckCircle2 className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]/50 shrink-0" />

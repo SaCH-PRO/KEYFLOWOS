@@ -3,8 +3,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
-  Loader2, RefreshCw, Inbox, CheckCircle2,
-  Clock, AlertTriangle, FileText, Zap,
+  Loader2,
+  RefreshCw,
+  Inbox,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  FileText,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";

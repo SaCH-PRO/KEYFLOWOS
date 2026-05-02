@@ -3,17 +3,35 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Zap, Power, PowerOff, Brain, Settings2, Clock, Plus, Search, Pencil,
-  AlertTriangle, CheckCircle, TrendingUp, Workflow, Sparkles,
+  Zap,
+  Power,
+  PowerOff,
+  Brain,
+  Settings2,
+  Clock,
+  Plus,
+  Search,
+  Pencil,
+  AlertTriangle,
+  CheckCircle,
+  TrendingUp,
+  Workflow,
+  Sparkles,
 } from "lucide-react";
 import {
-  Playbook, updatePlaybook,
-  CrossModuleWorkflow, updateCrossModuleWorkflow,
+  Playbook,
+  updatePlaybook,
+  CrossModuleWorkflow,
+  updateCrossModuleWorkflow,
 } from "@/lib/client";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import {
-  getTriggerLabel, getActionLabels, getWorkflowActionSummary,
-  getFlowModules, getTriggerModule, MODULE_COLORS,
+  getTriggerLabel,
+  getActionLabels,
+  getWorkflowActionSummary,
+  getFlowModules,
+  getTriggerModule,
+  MODULE_COLORS,
 } from "./automation-constants";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonList } from "@/components/ui/skeleton";

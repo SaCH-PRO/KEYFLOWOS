@@ -7,12 +7,23 @@ import type { ContactFormData } from "@/components/contacts/contact-form";
 import type { QuickActionType } from "@/components/contacts";
 import type { Contact, ContactDetail as ContactDetailAPI } from "@/lib/client";
 import {
-  addContactNote, addContactTask, completeContactTask, reopenContactTask,
-  createContact, deleteContact, updateContact,
-  importContactsFromFile, importContactsFromLink,
-  logContactEvent, logCommunication, bulkUpdateContacts, bulkDeleteContacts,
-  deleteContactNote, deleteContactTask,
-  updateContactNote, updateContactTask,
+  addContactNote,
+  addContactTask,
+  completeContactTask,
+  reopenContactTask,
+  createContact,
+  deleteContact,
+  updateContact,
+  importContactsFromFile,
+  importContactsFromLink,
+  logContactEvent,
+  logCommunication,
+  bulkUpdateContacts,
+  bulkDeleteContacts,
+  deleteContactNote,
+  deleteContactTask,
+  updateContactNote,
+  updateContactTask,
   addContactsToList,
 } from "@/lib/client";
 import { moduleEvents } from "@/lib/module-events";

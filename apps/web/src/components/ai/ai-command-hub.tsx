@@ -3,12 +3,34 @@
 import { useEffect, useRef, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Sparkles, X, RefreshCw, Loader2, AlertTriangle,
-  Lightbulb, TrendingUp, Zap, ChevronRight, Brain,
-  Shield, Clock, ChevronLeft, Search, BarChart3,
-  Wand2, Radar, Settings2, ArrowRight,
-  FileText, Tags, ShieldAlert, MessageSquare,
-  Target, Activity, DollarSign, GitBranch, Bell,
+  Sparkles,
+  X,
+  RefreshCw,
+  Loader2,
+  AlertTriangle,
+  Lightbulb,
+  TrendingUp,
+  Zap,
+  ChevronRight,
+  Brain,
+  Shield,
+  Clock,
+  ChevronLeft,
+  Search,
+  BarChart3,
+  Wand2,
+  Radar,
+  Settings2,
+  ArrowRight,
+  FileText,
+  Tags,
+  ShieldAlert,
+  MessageSquare,
+  Target,
+  Activity,
+  DollarSign,
+  GitBranch,
+  Bell,
   Terminal,
 } from "lucide-react";
 import type { UseModuleAiReturn, AiSuggestion, AiTool, AiToolCategory } from "@/hooks/use-module-ai";
@@ -223,7 +245,6 @@ export function AiCommandHub({
   toolResultRenderer,
 }: AiCommandHubProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {

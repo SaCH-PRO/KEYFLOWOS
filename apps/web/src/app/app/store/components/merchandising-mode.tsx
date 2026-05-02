@@ -3,9 +3,19 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  ShoppingBag, Star, HelpCircle, Search, Wand2,
-  DollarSign, Target, BarChart3,
-  Layers, Zap, AlertTriangle, CheckCircle2, Package,
+  ShoppingBag,
+  Star,
+  HelpCircle,
+  Search,
+  Wand2,
+  DollarSign,
+  Target,
+  BarChart3,
+  Layers,
+  Zap,
+  AlertTriangle,
+  CheckCircle2,
+  Package,
 } from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { MerchandisingPanel } from "./merchandising-panel";

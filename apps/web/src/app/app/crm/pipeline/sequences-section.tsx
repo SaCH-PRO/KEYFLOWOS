@@ -3,15 +3,39 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  GitBranch, Plus, ChevronDown, ChevronUp, Mail, Phone,
-  MessageSquare, Clock, Users, Trash2, X,
-  ArrowUp, ArrowDown, CheckCircle2, UserPlus, Copy, Pencil,
+  GitBranch,
+  Plus,
+  ChevronDown,
+  ChevronUp,
+  Mail,
+  Phone,
+  MessageSquare,
+  Clock,
+  Users,
+  Trash2,
+  X,
+  ArrowUp,
+  ArrowDown,
+  CheckCircle2,
+  UserPlus,
+  Copy,
+  Pencil,
 } from "lucide-react";
 import {
-  fetchSequences, createSequence, fetchSequenceDetail, deleteSequence,
-  enrollContactsInSequence, advanceSequenceEnrollment, unenrollFromSequence,
-  fetchContacts, updateSequence, duplicateSequence,
-  type CrmSequence, type CrmSequenceStep, type CrmSequenceDetail, type Contact,
+  fetchSequences,
+  createSequence,
+  fetchSequenceDetail,
+  deleteSequence,
+  enrollContactsInSequence,
+  advanceSequenceEnrollment,
+  unenrollFromSequence,
+  fetchContacts,
+  updateSequence,
+  duplicateSequence,
+  type CrmSequence,
+  type CrmSequenceStep,
+  type CrmSequenceDetail,
+  type Contact,
 } from "@/lib/client";
 import { Search } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";

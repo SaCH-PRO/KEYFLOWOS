@@ -3,7 +3,15 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  BarChart3, Download, Loader2, RefreshCw, ChevronDown, Send, Clock, FileSpreadsheet, GitCompare
+  BarChart3,
+  Download,
+  Loader2,
+  RefreshCw,
+  ChevronDown,
+  Send,
+  Clock,
+  FileSpreadsheet,
+  GitCompare,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";

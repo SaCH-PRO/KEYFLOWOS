@@ -578,7 +578,7 @@ export default function QuotesPanel({
       } else if (res.error) {
         toast.error("Failed to accept quote: " + res.error);
       }
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to accept quote");
     } finally {
       setActionLoading((prev) => { const next = { ...prev }; delete next[quote.id]; return next; });

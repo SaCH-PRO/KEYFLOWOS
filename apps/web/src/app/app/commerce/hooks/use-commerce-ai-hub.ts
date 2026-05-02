@@ -18,7 +18,7 @@ import {
 } from "@/lib/client";
 
 async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSuggestion[]> {
-  const { businessId, activeView, customData } = context;
+  const { businessId, activeView } = context;
   if (!businessId) return [];
 
   try {

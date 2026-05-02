@@ -65,7 +65,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
     label: "Invoices",
     icon: FileText,
     color: "hsl(var(--kf-success))",
-    getHref: (i) => `/app/commerce?tab=invoices`,
+    getHref: (_i) => `/app/commerce?tab=invoices`,
     getTitle: (i) => i.invoiceNumber || `Invoice ${i.id?.slice(0, 8)}`,
     getSub: (i) => `${i.currency || "TTD"} ${i.total?.toFixed(2) ?? "0.00"} · ${i.status || ""}`,
   },

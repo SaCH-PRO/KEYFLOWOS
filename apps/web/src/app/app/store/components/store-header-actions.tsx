@@ -2,8 +2,13 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Copy, ExternalLink, CheckCircle2, Share2,
-  MessageCircle, ChevronDown, Download,
+  Copy,
+  ExternalLink,
+  CheckCircle2,
+  Share2,
+  MessageCircle,
+  ChevronDown,
+  Download,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import QRCode from "qrcode";

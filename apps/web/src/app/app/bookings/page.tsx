@@ -87,7 +87,7 @@ export default function BookingsPage() {
   const [stats, setStats] = useState<BookingStats | null>(null);
   const [scheduleHealth, setScheduleHealth] = useState<ScheduleHealth | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
 
   const [showCreateBooking, setShowCreateBooking] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);

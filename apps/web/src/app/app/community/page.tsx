@@ -58,7 +58,7 @@ const COMMUNITY_TABS = [
   { key: "cohorts", label: "Cohorts", icon: Users, tooltip: "Join or browse peer groups organized by industry or business stage." },
   { key: "notifications", label: "Notifications", icon: Bell, tooltip: "Notifications for messages, requests, and follows." },
 ];
-const TAB_KEYS = COMMUNITY_TABS.map((t) => t.key);
+const _TAB_KEYS = COMMUNITY_TABS.map((t) => t.key);
 
 export default function CommunityPage() {
   const communityRouter = useRouter();

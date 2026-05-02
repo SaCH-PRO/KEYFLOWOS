@@ -3,10 +3,25 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
-  Store, Briefcase, ShoppingBag, Package, Search, Filter,
-  ChevronDown, X, CheckCircle2, AlertTriangle, ExternalLink,
-  GripVertical, Eye, EyeOff, Edit3, Tag, Clock,
-  TrendingUp, Layers,
+  Store,
+  Briefcase,
+  ShoppingBag,
+  Package,
+  Search,
+  Filter,
+  ChevronDown,
+  X,
+  CheckCircle2,
+  AlertTriangle,
+  ExternalLink,
+  GripVertical,
+  Eye,
+  EyeOff,
+  Edit3,
+  Tag,
+  Clock,
+  TrendingUp,
+  Layers,
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -102,7 +117,7 @@ export function CatalogManager({
   onDeselectAll,
   onConfirmRemoveChange,
   onDeleteFromStore,
-  services,
+  services: _services,
   onReorder,
   itemOverrides = {},
   onItemOverrideChange,

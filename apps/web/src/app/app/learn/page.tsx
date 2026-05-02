@@ -30,7 +30,7 @@ const LEARN_TABS = [
   { key: "certificates", label: "Certificates", icon: GraduationCap, tooltip: "View and download certificates for completed courses." },
 ];
 
-const LEARN_TAB_KEYS = LEARN_TABS.map((t) => t.key);
+const _LEARN_TAB_KEYS = LEARN_TABS.map((t) => t.key);
 
 export default function LearnPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
