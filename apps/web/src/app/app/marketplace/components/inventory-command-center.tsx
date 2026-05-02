@@ -61,6 +61,51 @@ function KPICard({ label, value, sub, color, icon: Icon }: { label: string; valu
   );
 }
 
+function cellValueToString(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if ("result" in obj && obj.result !== undefined) return cellValueToString(obj.result);
+    if ("richText" in obj && Array.isArray(obj.richText)) {
+      return (obj.richText as Array<{ text?: string }>).map((rt) => rt.text ?? "").join("");
+    }
+    if ("text" in obj && obj.text !== undefined) {
+      const t = obj.text;
+      return typeof t === "string" ? t : String(t);
+    }
+    if ("hyperlink" in obj && typeof obj.hyperlink === "string") return obj.hyperlink;
+    if ("error" in obj) return "";
+    return String(value);
+  }
+  return String(value);
+}
+
+async function readXlsxAsRows(file: File): Promise<string[][]> {
+  const ExcelJS = (await import("exceljs")).default;
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(arrayBuffer);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return [];
+
+  const lastRow = sheet.actualRowCount > 0 ? sheet.rowCount : 0;
+  const lastCol = sheet.columnCount;
+  const rows: string[][] = [];
+  for (let r = 1; r <= lastRow; r++) {
+    const row = sheet.getRow(r);
+    const arr: string[] = [];
+    let hasValue = false;
+    for (let c = 1; c <= lastCol; c++) {
+      const v = cellValueToString(row.getCell(c).value);
+      arr.push(v);
+      if (v !== "") hasValue = true;
+    }
+    if (hasValue || r === 1) rows.push(arr);
+  }
+  return rows;
+}
+
 function MovementTypeBadge({ type }: { type: string }) {
   const config: Record<string, { label: string; color: string; icon: React.ElementType }> = {
     ADJUSTMENT: { label: "Adjustment", color: "text-blue-400 bg-blue-500/10 border-blue-500/20", icon: Activity },
@@ -251,12 +296,7 @@ export function InventoryCommandCenter({
     if (!file) return;
     if (fileInputRef.current) fileInputRef.current.value = "";
     try {
-      const XLSX = await import("xlsx");
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-      const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      const data = await readXlsxAsRows(file);
       if (!data.length) return;
       const headers = (data[0] || []).map((h: any) => String(h ?? "").trim());
       const previewRows = data.slice(1, 6);
@@ -275,11 +315,8 @@ export function InventoryCommandCenter({
     if (!xlsxWizard) return;
     setXlsxImporting(true);
     try {
-      const XLSX = await import("xlsx");
-      const arrayBuffer = await xlsxWizard.file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      const ExcelJS = (await import("exceljs")).default;
+      const rawRows = await readXlsxAsRows(xlsxWizard.file);
       const headers = rawRows[0] || [];
       const headerIdx: Record<string, number> = {};
       (headers as any[]).forEach((h: any, i: number) => { headerIdx[String(h ?? "").trim()] = i; });
@@ -292,16 +329,16 @@ export function InventoryCommandCenter({
         return obj;
       }).filter(r => r["Product Name"] || r["SKU"]);
 
-      const newWorkbook = XLSX.utils.book_new();
-      const newSheet = XLSX.utils.aoa_to_sheet([
-        EXPECTED_COLUMNS,
-        ...mappedRows.map(r => EXPECTED_COLUMNS.map(c => r[c] ?? "")),
-      ]);
-      XLSX.utils.book_append_sheet(newWorkbook, newSheet, "Sheet1");
-      const blob = new Blob(
-        [XLSX.write(newWorkbook, { type: "array", bookType: "xlsx" })],
-        { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
-      );
+      const newWorkbook = new ExcelJS.Workbook();
+      const newSheet = newWorkbook.addWorksheet("Sheet1");
+      newSheet.addRow(EXPECTED_COLUMNS);
+      for (const r of mappedRows) {
+        newSheet.addRow(EXPECTED_COLUMNS.map(c => r[c] ?? ""));
+      }
+      const buffer = await newWorkbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
       const form = new FormData();
       form.append("file", blob, "inventory.xlsx");
       const res = await fetch(`${API_BASE}${basePath}/inventory/import-excel`, { method: "POST", body: form, headers: getAuthHeaders() });

@@ -83,22 +83,33 @@ export async function exportToCSV(contacts: LocalContact[], filename = "contacts
 }
 
 export async function exportToExcel(contacts: LocalContact[], filename = "contacts.xlsx") {
-  const XLSX = await import("xlsx");
+  const ExcelJS = (await import("exceljs")).default;
   const rows = contacts.map(contactToRow);
-  const ws = XLSX.utils.json_to_sheet(rows);
 
-  const colWidths = EXPORT_COLUMNS.map((col) => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Contacts");
+  ws.columns = EXPORT_COLUMNS.map((col) => {
     const maxLen = Math.max(
       col.label.length,
       ...rows.map((r) => (r[col.label] || "").length),
     );
-    return { wch: Math.min(Math.max(maxLen + 2, 10), 40) };
+    return {
+      header: col.label,
+      key: col.label,
+      width: Math.min(Math.max(maxLen + 2, 10), 40),
+    };
   });
-  ws["!cols"] = colWidths;
+  for (const row of rows) {
+    ws.addRow(row);
+  }
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Contacts");
-  XLSX.writeFile(wb, filename);
+  const buffer = await wb.xlsx.writeBuffer();
+  downloadBlob(
+    new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    filename,
+  );
 }
 
 export async function exportToVCard(contacts: LocalContact[], filename = "contacts.vcf") {
