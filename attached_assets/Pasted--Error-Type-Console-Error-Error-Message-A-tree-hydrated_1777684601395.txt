@@ -1,0 +1,108 @@
+## Error Type
+Console Error
+
+## Error Message
+A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <AuthLogin params={Promise} searchParams={Promise}>
+      <Suspense fallback={null}>
+        <AuthLoginInner>
+          <div className="min-h-scre...">
+            <div>
+            <div>
+            <div className="flex-1 lg:...">
+              <motion.div initial={{opacity:0,y:16}} animate={{opacity:1,y:0}} transition={{duration:0.5, ...}} ...>
+                <div className="w-full max..." style={{opacity:0, ...}} ref={function useMotionRef.useCallback}>
+                  <div>
+                  <div>
+                  <AnimatePresence mode="wait">
+                    <PresenceChild isPresent={true} initial={undefined} custom={undefined} presenceAffectsLayout={true} ...>
+                      <motion.form initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} ...>
+                        <form onSubmit={function onSubmit} className="rounded-2x..." style={{opacity:0, ...}} ...>
+                          <AnimatePresence>
+                          <div className="flex flex-...">
+                            <label>
+                            <div className="relative">
+                              <Mail>
+                              <input
+                                required={true}
+                                type="email"
+                                value=""
+                                autoComplete="email"
+                                onChange={function onChange}
+                                className="w-full pl-10 pr-3 py-2.5 rounded-xl text-sm outline-none transition-all bg-..."
+                                placeholder="you@example.com"
+-                               fdprocessedid="n3v3r"
+                              >
+                          <div className="flex flex-...">
+                            <div className="flex items...">
+                              <label>
+                              <button
+                                type="button"
+                                onClick={function onClick}
+                                className="text-xs text-[hsl(24_95%_53%)] hover:text-[hsl(24_95%_63%)] transition-colors"
+-                               fdprocessedid="gxb4r"
+                              >
++                               Forgot password?
+                            <div className="relative">
+                              <Lock>
+                              <input
+                                required={true}
+                                type="password"
+                                value=""
+                                autoComplete="current-password"
+                                onChange={function onChange}
+                                className="w-full pl-10 pr-12 py-2.5 rounded-xl text-sm outline-none transition-all bg..."
+                                placeholder="Enter your password"
+-                               fdprocessedid="23hlfm"
+                              >
+                              <button
+                                type="button"
+                                onClick={function onClick}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-[hsl(30_10%_50%)] hover:text..."
+-                               fdprocessedid="yflqbv"
+                              >
+                          <button
+                            type="submit"
+                            disabled={false}
+                            className="w-full py-3 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-[..."
+-                           fdprocessedid="n0fgxr"
+                          >
+                          <div>
+                          <button
+                            type="button"
+                            onClick={function signInWithGoogle}
+                            className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl font-mediu..."
+-                           fdprocessedid="sm10lr"
+                          >
+                          ...
+                  ...
+
+
+
+    at console.patchedConsoleError [as error] (src/components/dev-hmr-error-suppressor.ts:62:28)
+    at input (<anonymous>:null:null)
+    at AuthLoginInner (src/app/auth/login/page.tsx:248:21)
+    at AuthLogin (src/app/auth/login/page.tsx:343:7)
+
+## Code Frame
+  60 |         return;
+  61 |       }
+> 62 |       originalConsoleError.apply(console, args);
+     |                            ^
+  63 |     };
+  64 |
+  65 |     const handleError = (event: ErrorEvent) => {
+
+Next.js version: 16.2.4 (Turbopack)
