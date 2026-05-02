@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight, type LucideIcon } from "lucide-react";
 
@@ -24,7 +24,10 @@ export function ModuleAccordion({ sections, defaultOpen, openKeys: controlledKey
   const [internalKeys, setInternalKeys] = useState<Set<string>>(new Set(defaultOpen ?? (sections[0] ? [sections[0].key] : [])));
 
   const isControlled = controlledKeys !== undefined;
-  const currentKeys = isControlled ? new Set(controlledKeys) : internalKeys;
+  const currentKeys = useMemo(
+    () => (isControlled ? new Set(controlledKeys) : internalKeys),
+    [isControlled, controlledKeys, internalKeys],
+  );
 
   useEffect(() => {
     if (isControlled) {

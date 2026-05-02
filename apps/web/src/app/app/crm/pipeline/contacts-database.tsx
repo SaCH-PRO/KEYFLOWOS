@@ -111,6 +111,7 @@ export function ContactsDatabase({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps: only the export-related fields drive this focus-trap effect. The full `db` object identity changes on every parent state update and would re-bind the listener uselessly.
   }, [db.showExport, db.closeExport]);
 
   useEffect(() => {
@@ -127,6 +128,7 @@ export function ContactsDatabase({
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to picker-specific fields. Including `db` would re-bind the keydown listener on unrelated state changes.
   }, [db.showColumnPicker, db.closeColumnPicker]);
 
   useEffect(() => {
@@ -140,6 +142,7 @@ export function ContactsDatabase({
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to picker-specific fields. Including `db` would re-bind the keydown listener on unrelated state changes.
   }, [db.showViewsPicker, db.closeViewsPicker]);
 
   return (

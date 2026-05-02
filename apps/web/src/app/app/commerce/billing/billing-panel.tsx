@@ -186,6 +186,7 @@ export function BillingPanel({
     if (activeSegment && activeSegment !== segment) {
       setSegment(activeSegment);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally syncs only when the controlled `activeSegment` prop changes; including local `segment` would re-fire on every internal segment change and overwrite user navigation.
   }, [activeSegment]);
 
   useEffect(() => {

@@ -267,7 +267,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
       const timer = setTimeout(() => nameRef.current?.focus(), 100);
       return () => clearTimeout(timer);
     }
-  }, [open]);
+  }, [open, dragY]);
 
   const validateField = useCallback(
     (field: string, value: string) => {

@@ -186,8 +186,8 @@ function BookingStatusChart({ report }: { report: GeneratedReport }) {
   const c = report.comparison;
   const d = report.data || {};
 
-  const timeSeries = d.bookingTimeSeries ?? [];
-  const prevTimeSeries = d.prevBookingTimeSeries ?? [];
+  const timeSeries = useMemo(() => d.bookingTimeSeries ?? [], [d.bookingTimeSeries]);
+  const prevTimeSeries = useMemo(() => d.prevBookingTimeSeries ?? [], [d.prevBookingTimeSeries]);
 
   const chartData = useMemo(() => {
     const current = aggregateTimeSeries(timeSeries, granularity);

@@ -394,6 +394,7 @@ function PublicBookingPageInner() {
       setSuccess(true);
     };
     restorePendingCheckout().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot pending-checkout restoration triggered when the storefront resolves; deliberately ignores transient cart/promo/shippingZones state and stable setters to avoid replaying restoration on unrelated state changes.
   }, [slug, business]);
 
   useEffect(() => {
@@ -556,7 +557,7 @@ function PublicBookingPageInner() {
   const pageUrl = typeof window !== "undefined" ? window.location.href : "";
   const _baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
-  const submitStoreOrder = async (payload: {
+  const submitStoreOrder = useCallback(async (payload: {
     items: { productId: string; quantity: number }[];
     customer: { name: string; email?: string; phone?: string };
     promoCode?: string;
@@ -570,9 +571,9 @@ function PublicBookingPageInner() {
     });
     if (orderErr) throw new Error(orderErr);
     return orderRes ?? null;
-  };
+  }, [slug]);
 
-  const handleStoreOrderResult = (
+  const handleStoreOrderResult = useCallback((
     storeOrder: StoreOrderResponse | null,
     bookingRefs: { bookingId: string; invoiceId?: string }[],
     paymentMethodUI: PaymentMethod,
@@ -660,7 +661,7 @@ function PublicBookingPageInner() {
     handleRemovePromo();
     if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
     return false;
-  };
+  }, [cart, cartTotal, shippingZones, business?.id, updateCart, handleRemovePromo, slug]);
 
   const handleCheckoutSubmit = async (data: {
     serviceBookings: Record<string, ServiceBookingData>;

@@ -96,6 +96,7 @@ export default function StorePage() {
       revenueSnapshot: s.readiness?.revenue,
       graphStats: s.storeGraph ? { liveCount: s.storeGraph.liveCount, draftCount: s.storeGraph.draftCount, driftCount: s.storeGraph.driftCount, totalProducts: s.storeGraph.totalProducts } : undefined,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to context-shaping fields; `ai.updateStoreContext`, `s.commerceProducts`, and `s.services` are summarized via `productCount`/`serviceCount` and an unstable `ai` bag identity would re-fire this on every render of the AI hub.
   }, [s.businessId, activeTab, productCount, serviceCount, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, deliveryCount, s.readiness, s.storeGraph]);
 
   const emitEvent = s.emitEvent;

@@ -719,6 +719,7 @@ export default function ContentPage() {
         } },
       ],
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to mk.loadData; including the full `mk` bag would re-create shortcuts on every marketing data refresh and re-bind keyboard handlers.
   ], [handleTabChange, handleNewItem, mk.loadData, showSearch]);
 
   useKeyboardShortcuts(shortcuts, !mk.loading);

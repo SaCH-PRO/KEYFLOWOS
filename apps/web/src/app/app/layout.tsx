@@ -116,7 +116,7 @@ function NewEntityMenu({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const menuRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(-1);
-  const items = [
+  const items = useMemo(() => [
     { label: "Contact", icon: Users, href: "/app/crm/pipeline", shortcut: "⌘⇧C" },
     { label: "Invoice", icon: Receipt, href: "/app/commerce", shortcut: "⌘⇧I" },
     { label: "Quote", icon: FileText, href: "/app/commerce?tab=quotes" },
@@ -126,7 +126,7 @@ function NewEntityMenu({ onClose }: { onClose: () => void }) {
     { label: "Campaign", icon: Megaphone, href: "/app/marketing" },
     { label: "Post", icon: MessageCircle, href: "/app/marketing?tab=social" },
     { label: "Flow", icon: Zap, href: "/app/automations" },
-  ];
+  ], []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

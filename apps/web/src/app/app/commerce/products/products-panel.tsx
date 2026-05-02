@@ -105,11 +105,13 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   }, []);
 
   useEffect(() => {
-    if (selectedProduct) {
-      const updated = products.find(p => p.id === selectedProduct.id);
-      if (updated && updated !== selectedProduct) setSelectedProduct(updated);
-      else if (!updated) setSelectedProduct(null);
-    }
+    setSelectedProduct(prev => {
+      if (!prev) return prev;
+      const updated = products.find(p => p.id === prev.id);
+      if (!updated) return null;
+      if (updated !== prev) return updated;
+      return prev;
+    });
   }, [products]);
 
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");

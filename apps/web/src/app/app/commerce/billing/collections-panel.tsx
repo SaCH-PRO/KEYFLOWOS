@@ -170,7 +170,7 @@ export default function CollectionsPanel({
     } finally {
       setReminderLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, selectedTone]);
 
   const handleCopyReminder = useCallback(async (text: string) => {
     try {

@@ -267,7 +267,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
     } else {
       setSelected(new Set(extracted.map((_: ExtractedProduct, i: number) => i)));
     }
-  }, [selected.size, extracted.length]);
+  }, [selected.size, extracted]);
 
   const updateExtractedItem = useCallback((idx: number, updates: Partial<ExtractedProduct>) => {
     setExtracted(prev => prev.map((item, i) => i === idx ? { ...item, ...updates } : item));

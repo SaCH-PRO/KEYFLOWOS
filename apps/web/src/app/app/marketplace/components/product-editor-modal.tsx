@@ -51,6 +51,7 @@ export function ProductEditorModal({
       setActiveTab("general");
       setVariants(product.variants ?? []);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only when the modal opens or the selected product identity changes, to seed the editor. Including `product.variants` would clobber in-progress edits whenever the parent updates the variants array.
   }, [open, product.id]);
 
   if (!open) return null;

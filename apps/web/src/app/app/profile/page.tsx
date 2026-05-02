@@ -120,9 +120,7 @@ export default function ProfileSettingsPage() {
   useEffect(() => {
     const current = searchParams.get("tab") || "overview";
     const mapped = mapLegacyTab(current);
-    if (mapped !== activeTab) {
-      setActiveTab(mapped);
-    }
+    setActiveTab(prev => (mapped !== prev ? mapped : prev));
   }, [searchParams]);
 
   const setStatus = useCallback((s: StatusMessage | null) => {
@@ -245,6 +243,7 @@ export default function ProfileSettingsPage() {
           console.error("Failed to load intelligence tiers:", err);
         });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time bootstrap: business id is read from storage and used to fetch initial profile data. `setStatus` is a stable useCallback wrapper but excluded to keep this from re-firing on status changes.
   }, []);
 
   useEffect(() => {
@@ -271,6 +270,7 @@ export default function ProfileSettingsPage() {
       setLoading(false);
     };
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time profile load. `setStatus` is stable and intentionally excluded to avoid refiring this fetch on transient banner messages.
   }, []);
 
   if (loading) return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Star, MessageSquare, Check, EyeOff, Filter, Send, Loader2, ChevronDown } from "lucide-react";
 import { apiGet, apiPatch } from "@/lib/api";
 
@@ -45,7 +45,7 @@ export function ReviewsPanel({ businessId, products = [] }: Props) {
     return map;
   }, [products]);
 
-  const loadReviews = async () => {
+  const loadReviews = useCallback(async () => {
     setLoading(true);
     try {
       const res = await apiGet<{ reviews: Review[]; stats: ReviewStats }>(
@@ -59,11 +59,11 @@ export function ReviewsPanel({ businessId, products = [] }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [businessId, statusFilter]);
 
   useEffect(() => {
     if (businessId) loadReviews();
-  }, [businessId, statusFilter]);
+  }, [businessId, loadReviews]);
 
   const handleModerate = async (reviewId: string, status: string) => {
     setSaving((prev) => ({ ...prev, [reviewId]: true }));
