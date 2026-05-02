@@ -137,6 +137,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
           moduleEvents.emit("marketing:social_post_published", "marketing", { postId: post.id });
           toast.success("Post published");
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         const published = pubData ? ((pubData as any).post || pubData) : post;
         setPosts((prev) => [published, ...prev]);
       } else {
@@ -181,6 +182,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
           moduleEvents.emit("marketing:social_post_published", "marketing", { postId: updated.id });
           toast.success("Post published");
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         const published = pubData ? ((pubData as any).post || pubData) : updated;
         setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? published : p)));
       } else {
@@ -199,6 +201,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
     const { data, error } = await publishPost(postId, channelIds, businessId ?? undefined);
     if (error) toast.error(error);
     if (data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       const updated = (data as any).post || data;
       setPosts((prev) => prev.map((p) => (p.id === postId ? updated : p)));
       moduleEvents.emit("marketing:social_post_published", "marketing", { postId });

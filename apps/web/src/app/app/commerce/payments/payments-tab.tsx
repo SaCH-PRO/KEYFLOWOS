@@ -232,6 +232,7 @@ export default function PaymentsTab({
   const handleExportCsv = useCallback(() => {
     const items = filteredInvoices.filter((inv) => selectedIds.size === 0 || selectedIds.has(inv.id));
     exportToCsv(
+
       items as unknown as Record<string, unknown>[],
       [
         { key: "invoiceNumber", header: "Invoice #" },

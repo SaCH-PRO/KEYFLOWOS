@@ -98,9 +98,13 @@ export function CommerceInsightsTab({
   orders,
   inventory,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   products: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   listings: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   orders: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   inventory: any[];
 }) {
   const activeListings = listings.filter((l) => l.status === "ACTIVE" || l.active).length;
@@ -223,6 +227,7 @@ export function CommerceInsightsTab({
           {[
             { label: "Priced", count: readyProducts, total: products.length, color: "text-emerald-400", bg: "bg-emerald-500" },
             { label: "Listed", count: listings.length, total: products.length, color: "text-blue-400", bg: "bg-blue-500" },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
             { label: "In Orders", count: new Set(orders.flatMap((o) => o.items?.map((i: any) => i.productId) ?? [])).size, total: products.length, color: "text-purple-400", bg: "bg-purple-500" },
           ].map((item) => {
             const pct = products.length > 0 ? Math.round((item.count / products.length) * 100) : 0;

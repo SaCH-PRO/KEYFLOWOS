@@ -80,6 +80,7 @@ export const ProductCard = React.memo(function ProductCard({
             <span className="px-1 py-0.5 rounded text-[9px] font-medium bg-red-500/20 text-red-400 border border-red-500/25 backdrop-blur-md">Off</span>
           )}
           {!isInactive && invoiceCount === 0 && quoteCount === 0 && (() => {
+
             const rawCreatedAt = (product as Record<string, unknown>)["createdAt"];
             const daysSince = rawCreatedAt ? Math.floor((Date.now() - new Date(rawCreatedAt as string).getTime()) / (1000 * 60 * 60 * 24)) : 0;
             if (daysSince > 90) return (

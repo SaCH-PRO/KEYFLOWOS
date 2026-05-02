@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { ShoppingCart, Mail, Phone, Calendar, Navigation } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 export function OrdersTab({ orders, onStatusUpdate }: { orders: any[]; onStatusUpdate: (id: string, status: string) => void }) {
   const statuses = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"];
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(orders);
@@ -13,6 +14,7 @@ export function OrdersTab({ orders, onStatusUpdate }: { orders: any[]; onStatusU
   }
   return (
     <div className="space-y-3">
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
       {paginated.map((order: any) => (
         <motion.div
           key={order.id}

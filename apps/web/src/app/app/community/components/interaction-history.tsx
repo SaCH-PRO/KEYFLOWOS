@@ -56,7 +56,9 @@ export function InteractionHistorySection({ businessId, otherBusinessId, otherBu
   const loadAll = useCallback(async () => {
     if (!businessId || !otherBusinessId) return;
     const [h, r] = await Promise.all([
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
       fetchInteractionHistory(businessId, otherBusinessId).catch(() => ({ data: null } as any)),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
       fetchReviewableTransactions(businessId, otherBusinessId).catch(() => ({ data: [] } as any)),
     ]);
     if (h?.data) setHistory(h.data);

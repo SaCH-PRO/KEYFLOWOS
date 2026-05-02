@@ -36,7 +36,9 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   const suggestions: AiSuggestion[] = [];
   const data = (customData ?? {}) as StoreCustomData;
 
+
   const products = (data.products ?? []) as Record<string, unknown>[];
+
   const services = (data.services ?? []) as Record<string, unknown>[];
   const testimonials = (data.testimonials ?? []) as unknown[];
   const storeEnabled = data.storeEnabled ?? false;
@@ -430,7 +432,9 @@ function buildStoreTools(): AiTool[] {
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
         const storeName = d.storeName || "Your Store";
+
         const products = (d.products ?? []) as Record<string, unknown>[];
+
         const services = (d.services ?? []) as Record<string, unknown>[];
         const tagline = d.businessTagline || "";
         const description = d.businessDescription || "";
@@ -491,7 +495,9 @@ function buildStoreTools(): AiTool[] {
       creditCost: 1,
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
+
         const products = (d.products ?? []) as Record<string, unknown>[];
+
         const services = (d.services ?? []) as Record<string, unknown>[];
         const storeName = d.storeName || "Your Store";
 
@@ -580,8 +586,11 @@ function buildStoreTools(): AiTool[] {
       creditCost: 1,
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
+
         const products = (d.products ?? []) as Record<string, unknown>[];
+
         const services = (d.services ?? []) as Record<string, unknown>[];
+
 
         type CatalogItem = Record<string, unknown> & { _type: string };
         const allItems: CatalogItem[] = [
@@ -669,7 +678,9 @@ function buildStoreTools(): AiTool[] {
       creditCost: 2,
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
+
         const products = (d.products ?? []) as Record<string, unknown>[];
+
         const services = (d.services ?? []) as Record<string, unknown>[];
         const storeName = d.storeName || "Your Store";
         const activeDelivery = d.activeDeliveryCount ?? 0;
@@ -745,7 +756,9 @@ function buildStoreTools(): AiTool[] {
       creditCost: 1,
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
+
         const products = (d.products ?? []) as Record<string, unknown>[];
+
         const services = (d.services ?? []) as Record<string, unknown>[];
         const storeName = d.storeName || "Your Store";
         const tagline = d.businessTagline || "";
@@ -858,7 +871,9 @@ function buildStoreTools(): AiTool[] {
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
         const storeName = d.storeName || "Your Store";
+
         const products = (d.products ?? []) as Record<string, unknown>[];
+
         const services = (d.services ?? []) as Record<string, unknown>[];
         const totalItems = products.length + services.length;
 
@@ -914,7 +929,9 @@ ${storeName}`;
       creditCost: 2,
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
+
         const products = (d.products ?? []) as Record<string, unknown>[];
+
         const services = (d.services ?? []) as Record<string, unknown>[];
         const testimonials = (d.testimonials ?? []) as unknown[];
         const storeEnabled = d.storeEnabled ?? false;
@@ -965,6 +982,7 @@ ${storeName}`;
       creditCost: 1,
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
+
         const products = (d.products ?? []) as Record<string, unknown>[];
         const storeName = d.storeName || "Your Store";
 
@@ -1008,6 +1026,7 @@ ${storeName}`;
       creditCost: 2,
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
+
         const products = (d.products ?? []) as Record<string, unknown>[];
         const pricedProducts = products.filter((p) => p.price && (p.price as number) > 0);
 
@@ -1054,7 +1073,9 @@ ${storeName}`;
       creditCost: 2,
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
+
         const products = (d.products ?? []) as Record<string, unknown>[];
+
         const services = (d.services ?? []) as Record<string, unknown>[];
         const testimonials = (d.testimonials ?? []) as unknown[];
         const storeEnabled = d.storeEnabled ?? false;

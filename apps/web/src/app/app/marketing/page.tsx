@@ -207,6 +207,7 @@ function ContentIntelligenceStrip({
   onScheduleDraft,
 }: {
   campaigns: EmailCampaign[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   socialPosts: any[];
   onCreateCampaign: () => void;
   onCreatePost: () => void;
@@ -225,6 +226,7 @@ function ContentIntelligenceStrip({
     const scheduledCampaigns = campaigns.filter((c) => c.status === "SCHEDULED" && c.scheduledAt);
     const scheduledPosts = socialPosts.filter((p) => p.status === "SCHEDULED" && p.scheduledFor);
     const upcomingCount = [...scheduledCampaigns, ...scheduledPosts].filter((item) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       const d = new Date((item as any).scheduledAt || (item as any).scheduledFor);
       return d >= now && d <= fiveDaysFromNow;
     }).length;
@@ -1092,6 +1094,7 @@ export default function ContentPage() {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 function CalendarInsightStrip({ campaigns, socialPosts }: { campaigns: EmailCampaign[]; socialPosts: any[] }) {
   const insights = useMemo(() => {
     const items: { text: string; color?: string }[] = [];

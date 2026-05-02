@@ -48,6 +48,7 @@ type ProductInfo = {
   description?: string | null;
   imageUrl?: string | null;
   executionModel?: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public-flow payload — pending typed contract
   executionMeta?: Record<string, any> | null;
 };
 

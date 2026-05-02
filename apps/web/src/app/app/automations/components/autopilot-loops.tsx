@@ -26,6 +26,7 @@ interface DelegationLoop {
   description: string | null;
   enabled: boolean;
   riskTier: number;
+
   config: Record<string, unknown>;
   stats: { totalRuns?: number; totalActionsCreated?: number; totalItemsMatched?: number } | null;
   lastRunAt: string | null;

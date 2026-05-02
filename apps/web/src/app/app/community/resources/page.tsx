@@ -29,6 +29,7 @@ export default function ResourcesPage() {
   const [tab, setTab] = useState<"browse" | "mine" | "downloaded">("browse");
   const [items, setItems] = useState<ResourceListing[]>([]);
   const [mine, setMine] = useState<ResourceListing[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
   const [downloads, setDownloads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -191,6 +192,7 @@ function PublishModal({ businessId, onClose, onPublished }: { businessId: string
     await publishResource(businessId, {
       name: form.name,
       description: form.description || undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
       resourceType: form.resourceType as any,
       price: form.isFree ? 0 : Number(form.price),
       currency: form.currency,

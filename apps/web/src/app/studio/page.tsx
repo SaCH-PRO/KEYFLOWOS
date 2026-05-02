@@ -163,6 +163,7 @@ export default function StudioPage() {
           hasServices: (svcRes.data?.length ?? 0) > 0,
           hasContacts: (contactRes.data?.contacts?.length ?? 0) > 0,
           hasProducts: (prodRes.data?.length ?? 0) > 0,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public-flow payload — pending typed contract
           hasHours: !!((biz as any)?.businessHours && Object.values((biz as any).businessHours as Record<string, { enabled?: boolean }>).some((h) => h?.enabled)),
           hasComplianceChecked: !!biz?.complianceStatus,
         });

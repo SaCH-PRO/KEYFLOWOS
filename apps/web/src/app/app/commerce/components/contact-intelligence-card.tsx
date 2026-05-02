@@ -47,6 +47,7 @@ export const ContactIntelligenceCard = React.memo(function ContactIntelligenceCa
       : 0;
 
     const recentActivity = contactInvoices
+
       .sort((a, b) => new Date((b as Record<string, unknown>)["createdAt"] as string ?? 0).getTime() - new Date((a as Record<string, unknown>)["createdAt"] as string ?? 0).getTime())
       .slice(0, 3);
 

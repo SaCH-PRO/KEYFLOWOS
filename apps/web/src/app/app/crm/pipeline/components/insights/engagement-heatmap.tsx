@@ -10,6 +10,7 @@ export const EngagementHeatmap = React.memo(function EngagementHeatmap({ contact
   const heatmapData = useMemo(() => {
     const dayCounts = new Array(7).fill(0);
     for (const c of contacts) {
+
       const meta = c.meta as Record<string, unknown> | undefined;
       const lastInteraction = meta?.lastInteractionAt as string | undefined;
       if (lastInteraction) {

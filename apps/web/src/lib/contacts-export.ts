@@ -36,6 +36,7 @@ const EXPORT_COLUMNS = [
 function contactToRow(c: LocalContact): Record<string, string> {
   const row: Record<string, string> = {};
   for (const col of EXPORT_COLUMNS) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
     const val = (c as any)[col.key];
     if (col.key === "tags") {
       row[col.label] = Array.isArray(val) ? val.join(", ") : "";
@@ -170,6 +171,7 @@ export async function exportToPDF(contacts: LocalContact[], filename = "contacts
     Array.isArray(c.tags) ? c.tags.join(", ") : "—",
   ]);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
   (doc as any).autoTable({
     head: [columns],
     body: rows,
@@ -293,6 +295,7 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
     ["New This Week", metrics.newThisWeek.toString()],
   ];
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
   (doc as any).autoTable({
     head: [["Metric", "Value"]],
     body: summaryData,
@@ -309,6 +312,7 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
     .slice(0, 10);
 
   if (topRevenue.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
     const finalY = (doc as any).lastAutoTable?.finalY ?? 80;
     doc.setFontSize(12);
     doc.setTextColor(40);
@@ -320,6 +324,7 @@ export async function exportInsightsReport(metrics: InsightsMetrics, format: Ins
       formatTTDExport(c.meta?.totalRevenue ?? 0),
     ]);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
     (doc as any).autoTable({
       head: [["#", "Client", "Revenue"]],
       body: revenueRows,

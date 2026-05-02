@@ -38,6 +38,7 @@ export function loadCart(slug: string): CartItem[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((item: unknown) => {
+
       const obj = item as Record<string, unknown>;
       return obj && typeof obj.id === "string" && typeof obj.name === "string";
     });

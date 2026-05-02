@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Package, MapPin, Hash, Pencil, Trash2 } from "lucide-react";
 import { ReachBadge, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 export function CatalogTab({ listings, onEdit, onDelete }: { listings: any[]; onEdit: (item: any) => void; onDelete: (id: string) => void }) {
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(listings);
   if (listings.length === 0) {
@@ -11,6 +12,7 @@ export function CatalogTab({ listings, onEdit, onDelete }: { listings: any[]; on
   }
   return (
     <div className="space-y-3">
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
       {paginated.map((listing: any) => (
         <motion.div
           key={listing.id}

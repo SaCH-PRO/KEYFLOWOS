@@ -65,6 +65,7 @@ export function CatalogMode({
   const packageCount = commerceProducts.filter((p) => p.category === "PACKAGE").length;
   const hiddenCount = Object.values(itemOverrides ?? {}).filter((o) => o.visibilityRule === "hidden").length;
   const featuredCount = Object.values(itemOverrides ?? {}).filter((o) => o.featured).length;
+
   const hoursActive = Object.values(businessHours).filter((h) => (h as Record<string, unknown>)?.enabled).length;
 
   const metrics: MetricStripItem[] = [

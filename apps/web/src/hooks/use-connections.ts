@@ -52,12 +52,17 @@ export function useConnections() {
       const cal = calRes.status === "fulfilled" ? calRes.value : null;
       const gmail = gmailRes.status === "fulfilled" ? gmailRes.value : null;
       const socialRaw = socialRes.status === "fulfilled" ? socialRes.value : [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
       const social: SocialConnection[] = Array.isArray(socialRaw) ? socialRaw : Array.isArray((socialRaw as any)?.data) ? (socialRaw as any).data : [];
 
       const data: ConnectionsState = {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
         calendarConnected: !!(cal as any)?.connected,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
         calendarEmail: (cal as any)?.email ?? null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
         gmailConnected: !!(gmail as any)?.connected,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped integration data — pending typed wrapper
         gmailEmail: (gmail as any)?.email ?? null,
         socialConnections: social,
         loading: false,

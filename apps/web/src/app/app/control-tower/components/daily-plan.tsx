@@ -30,6 +30,7 @@ type DayBlock = {
   category: string;
   actionRoute?: string;
   toolName?: string;
+
   toolArgs?: Record<string, unknown>;
 };
 

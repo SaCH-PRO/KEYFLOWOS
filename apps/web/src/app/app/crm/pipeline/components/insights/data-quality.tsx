@@ -137,6 +137,7 @@ export const TaskHealth = React.memo(function TaskHealth({ contacts }: { contact
   const stats = useMemo(() => {
     let overdue = 0, withOverdue = 0, totalUnpaid = 0, totalRevenue = 0, hasMeta = false;
     for (const c of contacts) {
+
       const meta = (c as Record<string, unknown>).meta as Record<string, unknown> | null | undefined;
       if (!meta) continue;
       hasMeta = true;

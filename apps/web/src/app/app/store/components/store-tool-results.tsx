@@ -61,11 +61,13 @@ function ScoreGauge({ score, label }: { score: number; label: string }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
 function Recommendations({ recommendations }: { recommendations: any[] }) {
   if (!recommendations?.length) return null;
   return (
     <Section title="Recommendations">
       <div className="space-y-1.5">
+        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
         {recommendations.map((r: any, i: number) => (
           <div key={i} className="flex items-start gap-1.5">
             <Lightbulb className={`w-3 h-3 shrink-0 mt-0.5 ${PRIORITY_COLORS[r.priority] || "text-amber-400"}`} />
@@ -88,6 +90,7 @@ type StoreOptimizerResult = {
   score: number;
   totalItems: number;
   testimonialCount: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
   recommendations: any[];
 };
 
@@ -176,6 +179,7 @@ type PricingAdvisorResult = {
   maxPrice?: number;
   totalProducts?: number;
   pricedCount?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
   recommendations: any[];
 };
 
@@ -219,7 +223,9 @@ type StorefrontAnalyzerResult = {
   summary: string;
   conversionScore: number;
   checks: { label: string; passed: boolean }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
   frictionPoints: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
   recommendations: any[];
 };
 
@@ -252,6 +258,7 @@ function StorefrontAnalyzerRenderer({ data }: { data: StorefrontAnalyzerResult }
       {data.frictionPoints?.length > 0 && (
         <Section title="Friction Points">
           <div className="space-y-1.5">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract */}
             {data.frictionPoints.map((fp: any, i: number) => (
               <div key={i} className="p-2 rounded-lg bg-white/[0.02] border border-border/30">
                 <div className="flex items-center justify-between mb-1">

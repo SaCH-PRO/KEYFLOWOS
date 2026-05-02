@@ -15,6 +15,7 @@ export function useBusinessPreview() {
       const id = getStoredBusinessId();
       if (!id) return;
       try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         const res = await apiGet<any>(`/identity/businesses/${id}`);
         if (res.data) {
           setBusinessData({

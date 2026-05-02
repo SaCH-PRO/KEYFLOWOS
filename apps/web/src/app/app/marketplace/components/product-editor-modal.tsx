@@ -35,12 +35,15 @@ export function ProductEditorModal({
 }: {
   open: boolean;
   onClose: () => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   product: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onChange: (key: string, value: any) => void;
   onSave: () => void;
   saving: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<ProductEditorTab>("general");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const [variants, setVariants] = useState<any[]>([]);
 
   useEffect(() => {
@@ -52,6 +55,7 @@ export function ProductEditorModal({
 
   if (!open) return null;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const updateField = (key: string, value: any) => onChange(key, value);
 
   const addVariant = () => {

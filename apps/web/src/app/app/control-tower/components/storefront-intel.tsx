@@ -98,6 +98,7 @@ export function StorefrontIntel({ businessId, storefront, monthlyRevenue }: Stor
       const res = await apiGet<{ recommendations: string[] }>(
         `/ai/businesses/${encodeURIComponent(businessId)}/ai/strategic/opportunities`,
       );
+
       const recs = (res.data as Record<string, unknown>)?.recommendations;
       setRecommendations(Array.isArray(recs) ? recs.slice(0, 5) : ["Review your catalog and pricing to optimize conversion."]);
     } catch {

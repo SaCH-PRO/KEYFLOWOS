@@ -18,6 +18,7 @@ import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, Pag
 
 type FulfillmentSection = "routes" | "purchase-orders" | "shipments";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 function ShipmentTracker({ shipment }: { shipment: any }) {
   const timeline = ["PREPARING", "PICKED_UP", "IN_TRANSIT", "CUSTOMS", "DELIVERED"];
   const currentIdx = timeline.indexOf(shipment.status || "PREPARING");
@@ -72,6 +73,7 @@ function ShipmentTracker({ shipment }: { shipment: any }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 function RouteCard({ route }: { route: any }) {
   const isRisky = route.risk === "high" || route.delayDays > 3;
   return (
@@ -113,11 +115,16 @@ export function CommerceFulfillmentTab({
   onEditPO,
   onCreatePO,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   shipments: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   purchaseOrders: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   products: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onEditShipment: (item: any) => void;
   onCreateShipment: () => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onEditPO: (item: any) => void;
   onCreatePO: () => void;
 }) {
@@ -127,6 +134,7 @@ export function CommerceFulfillmentTab({
   const { page: poPage, pageSize: poPageSize, setPage: setPoPage, setPageSize: setPoPageSize, totalPages: poTotal, paginated: paginatedPOs } = usePagination(purchaseOrders);
 
   const routeGroups = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     const groups: Record<string, any[]> = {};
     for (const s of shipments) {
       const key = s.status || "PREPARING";
@@ -194,6 +202,7 @@ export function CommerceFulfillmentTab({
             <EmptyState icon={Truck} title="No Shipments" description="Track shipments with carrier and tracking info here." />
           ) : (
             <>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
               {paginatedShipments.map((s: any) => (
                 <div key={s.id} className="relative">
                   <ShipmentTracker shipment={s} />
@@ -227,6 +236,7 @@ export function CommerceFulfillmentTab({
           ) : (
             <>
               <div className="space-y-2">
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                 {paginatedPOs.map((po: any) => (
                   <motion.div
                     key={po.id}
@@ -287,6 +297,7 @@ export function CommerceFulfillmentTab({
               <div key={status}>
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">{status.replace(/_/g, " ")} ({group.length})</p>
                 <div className="space-y-2">
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                   {group.map((route: any) => (
                     <RouteCard key={route.id} route={{ ...route, name: `${route.carrier || "Shipment"} — ${route.trackingNumber || route.id?.slice(0, 8)}` }} />
                   ))}

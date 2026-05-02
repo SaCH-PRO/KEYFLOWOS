@@ -31,6 +31,7 @@ function ReadinessDot({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 function VariantPill({ variant }: { variant: any }) {
   return (
     <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10">
@@ -46,9 +47,12 @@ export function CommerceCatalogTab({
   onCreateProduct,
   onEditProduct,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   products: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   listings: any[];
   onCreateProduct: () => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onEditProduct: (product: any) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -56,6 +60,7 @@ export function CommerceCatalogTab({
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const listingsByProduct = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     const map: Record<string, any[]> = {};
     for (const l of listings) {
       if (l.productId) {
@@ -144,6 +149,7 @@ export function CommerceCatalogTab({
       </div>
 
       <div className="space-y-2">
+        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
         {paginated.map((product: any) => {
           const productListings = listingsByProduct[product.id] || [];
           const variants = product.variants ?? [];
@@ -227,6 +233,7 @@ export function CommerceCatalogTab({
                         <Layers className="w-3 h-3" /> Variants
                       </p>
                       <div className="flex flex-wrap gap-1.5">
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                         {variants.map((v: any, i: number) => (
                           <VariantPill key={i} variant={v} />
                         ))}
@@ -270,6 +277,7 @@ export function CommerceCatalogTab({
                         <Tag className="w-3 h-3" /> Active Listings ({productListings.length})
                       </p>
                       <div className="flex flex-wrap gap-1.5">
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                         {productListings.map((l: any) => (
                           <span key={l.id} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                             {l.marketReach || "LOCAL"}

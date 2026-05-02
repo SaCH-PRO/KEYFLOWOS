@@ -44,7 +44,9 @@ export type ModuleContext = {
   activeView?: string;
   selectedItemId?: string;
   itemCount?: number;
+
   filters?: Record<string, unknown>;
+
   customData?: Record<string, unknown>;
 };
 
@@ -149,6 +151,7 @@ export function useModuleAi(config: ModuleAiConfig) {
       ),
     }));
   }, []);
+
 
   const notifyGlobalQueue = useCallback((eventType: string, detail: Record<string, unknown>) => {
     if (typeof window !== "undefined") {

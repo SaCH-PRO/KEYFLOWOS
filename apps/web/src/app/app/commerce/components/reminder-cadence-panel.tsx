@@ -67,6 +67,7 @@ export function ReminderCadencePanel({ businessId: _businessId, invoiceId: _invo
     setSteps(prev => prev.filter(s => s.id !== id));
   }, []);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const updateStep = useCallback((id: string, field: keyof ReminderStep, value: any) => {
     setSteps(prev => prev.map(s => {
       if (s.id !== id) return s;

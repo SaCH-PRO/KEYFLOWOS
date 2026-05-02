@@ -206,6 +206,7 @@ export function MissionsButton() {
   useEffect(() => {
     fetchGamificationStats()
       .then((result) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
         if (result && result.data) setStats(result.data as any);
       })
       .catch(() => {});

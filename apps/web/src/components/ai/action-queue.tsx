@@ -310,15 +310,19 @@ function EditPanel({
 }: {
   item: AiApprovalItem;
   onClose: () => void;
+
   onApprove: (id: string, payload: Record<string, unknown>) => void;
   onReject: (id: string) => void;
 }) {
+
   const [editedPayload, setEditedPayload] = useState<Record<string, unknown>>(
+
     () => (item.inputPayload && typeof item.inputPayload === "object" ? { ...(item.inputPayload as Record<string, unknown>) } : {})
   );
 
   const updateField = (key: string, value: string) => {
     setEditedPayload(prev => {
+
       const original = (item.inputPayload as Record<string, unknown>)?.[key];
       let parsed: unknown = value;
       if (typeof original === "number") {

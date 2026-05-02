@@ -156,6 +156,7 @@ function ProposeModal({ businessId, onClose, onProposed }: { businessId: string;
     terms: "",
   });
   const [search, setSearch] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
   const [results, setResults] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
 

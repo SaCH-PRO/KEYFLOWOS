@@ -49,9 +49,13 @@ export function CommerceInventoryTab({
   onAddInventory,
   onCreateWarehouse,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   warehouses: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   inventory: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   products: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   onEditWarehouse: (item: any) => void;
   onDeleteWarehouse: (id: string) => void;
   onAddInventory: () => void;
@@ -63,6 +67,7 @@ export function CommerceInventoryTab({
     (inv) => inv.reorderLevel && inv.quantity <= inv.reorderLevel
   );
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   const productsById: Record<string, any> = {};
   for (const p of products) productsById[p.id] = p;
 
@@ -132,7 +137,9 @@ export function CommerceInventoryTab({
       {mode === "warehouses" && (
         <div className="space-y-3">
           {warehouses.map((wh) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
             const whInventory = inventory.filter((inv: any) => inv.warehouseId === wh.id);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
             const totalUnits = whInventory.reduce((sum: number, inv: any) => sum + (inv.quantity || 0), 0);
 
             return (
@@ -181,6 +188,7 @@ export function CommerceInventoryTab({
                       Inventory
                     </div>
                     <div className="divide-y divide-white/5">
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                       {whInventory.map((inv: any) => {
                         const product = productsById[inv.productId];
                         const isLow = inv.reorderLevel && inv.quantity <= inv.reorderLevel;
@@ -222,6 +230,7 @@ export function CommerceInventoryTab({
                   <span className="text-right">Status</span>
                 </div>
                 <div className="divide-y divide-white/5">
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                   {paginated.map((inv: any) => {
                     const product = productsById[inv.productId];
                     const warehouse = warehouses.find((w) => w.id === inv.warehouseId);

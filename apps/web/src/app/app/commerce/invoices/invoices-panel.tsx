@@ -270,6 +270,7 @@ export default function InvoicesPanel({
       ? invoices.filter((i) => selectedIds.has(i.id))
       : invoices;
     exportToCsv(
+
       toExport as unknown as Record<string, unknown>[],
       [
         { key: "invoiceNumber", header: "Invoice #" },
@@ -325,11 +326,13 @@ export default function InvoicesPanel({
 
   const { filtered: filteredInvoices } = useCommerceSearch(
     statusFiltered,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     (inv) => `${inv.invoiceNumber ?? ""} ${inv.contact?.firstName ?? ""} ${inv.contact?.lastName ?? ""} ${inv.contact?.email ?? ""} ${(inv.items ?? []).map((i: any) => `${i.description ?? ""}`).join(" ")} ${inv.notes ?? ""} ${Number(inv.total).toFixed(2)}`,
     invoiceSearch,
   );
 
   function addInvoiceItem() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     setInvoiceForm((f: any) => ({
       ...f,
       items: [...f.items, { id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
@@ -337,6 +340,7 @@ export default function InvoicesPanel({
   }
 
   function removeInvoiceItem(itemId: string) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     setInvoiceForm((f: any) => ({
       ...f,
       items: f.items.filter((item: InvoiceLineItem) => item.id !== itemId),
@@ -344,6 +348,7 @@ export default function InvoicesPanel({
   }
 
   function updateInvoiceItem(itemId: string, field: keyof InvoiceLineItem, value: string | boolean) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     setInvoiceForm((f: any) => ({
       ...f,
       items: f.items.map((item: InvoiceLineItem) =>
@@ -354,6 +359,7 @@ export default function InvoicesPanel({
 
   function selectProductForItem(itemId: string, productId: string) {
     if (productId === "__NEW__") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       setInvoiceForm((f: any) => ({
         ...f,
         items: f.items.map((item: InvoiceLineItem) =>
@@ -375,6 +381,7 @@ export default function InvoicesPanel({
     }
     const product = products.find((p) => p.id === productId);
     if (product) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       setInvoiceForm((f: any) => ({
         ...f,
         items: f.items.map((item: InvoiceLineItem) =>
@@ -391,6 +398,7 @@ export default function InvoicesPanel({
         ),
       }));
     } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       setInvoiceForm((f: any) => ({
         ...f,
         items: f.items.map((item: InvoiceLineItem) =>
@@ -434,6 +442,7 @@ export default function InvoicesPanel({
     setInvoiceForm({
       contactId: inv.contactId || "",
       dueDate: "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       items: (inv.items ?? []).map((item: any) => ({
         id: generateItemId(),
         productId: item.productId ?? "",
@@ -451,6 +460,7 @@ export default function InvoicesPanel({
 
   function applyPaymentTerms(termKey: string) {
     const dueDate = getDueDateFromTerms(termKey);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     setInvoiceForm((f: any) => ({ ...f, dueDate }));
   }
 
@@ -730,8 +740,10 @@ export default function InvoicesPanel({
         products={products}
         currency={currency}
         contactId={invoiceForm.contactId}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onContactChange={(id) => setInvoiceForm((f: any) => ({ ...f, contactId: id }))}
         dateValue={invoiceForm.dueDate}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onDateChange={(v) => setInvoiceForm((f: any) => ({ ...f, dueDate: v }))}
         items={invoiceForm.items}
         onAddItem={addInvoiceItem}
@@ -739,12 +751,16 @@ export default function InvoicesPanel({
         onUpdateItem={updateInvoiceItem}
         onSelectProduct={selectProductForItem}
         taxRate={invoiceForm.taxRate}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onTaxRateChange={(v) => setInvoiceForm((f: any) => ({ ...f, taxRate: v }))}
         discountType={invoiceForm.discountType}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onDiscountTypeChange={(v) => setInvoiceForm((f: any) => ({ ...f, discountType: v }))}
         discountValue={invoiceForm.discountValue}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onDiscountValueChange={(v) => setInvoiceForm((f: any) => ({ ...f, discountValue: v }))}
         notes={invoiceForm.notes}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onNotesChange={(v) => setInvoiceForm((f: any) => ({ ...f, notes: v }))}
         onPaymentTermsChange={applyPaymentTerms}
         originLabel={crossModuleOriginLabel}
@@ -920,6 +936,7 @@ export default function InvoicesPanel({
                   setInvoiceForm({
                     contactId: inv.contactId || "",
                     dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
                     items: (inv.items ?? []).map((item: any) => ({
                       id: item.id,
                       productId: item.productId ?? "",
@@ -987,6 +1004,7 @@ export default function InvoicesPanel({
                   badges={cardBadges}
                   selected={selectedInvoice?.id === inv.id}
                   onClick={() => setSelectedInvoice(inv)}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
                   linkedService={(inv.items ?? []).find((item: any) => item.description)?.description?.slice(0, 30) || null}
                   onViewContact={onViewContact && inv.contactId ? () => onViewContact(inv.contactId!) : undefined}
                   smartCTA={
@@ -1014,6 +1032,7 @@ export default function InvoicesPanel({
                           setInvoiceForm({
                             contactId: inv.contactId || "",
                             dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
                             items: (inv.items ?? []).map((item: any) => ({
                               id: item.id,
                               productId: item.productId ?? "",

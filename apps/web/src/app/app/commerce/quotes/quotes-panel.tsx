@@ -271,6 +271,7 @@ export default function QuotesPanel({
       ? quotes.filter((q) => selectedIds.has(q.id))
       : quotes;
     exportToCsv(
+
       toExport as unknown as Record<string, unknown>[],
       [
         { key: "quoteNumber", header: "Quote #" },
@@ -294,6 +295,7 @@ export default function QuotesPanel({
   });
 
   function addQuoteItem() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     setQuoteForm((f: any) => ({
       ...f,
       items: [...f.items, { id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
@@ -301,6 +303,7 @@ export default function QuotesPanel({
   }
 
   function removeQuoteItem(itemId: string) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     setQuoteForm((f: any) => ({
       ...f,
       items: f.items.filter((item: InvoiceLineItem) => item.id !== itemId),
@@ -308,6 +311,7 @@ export default function QuotesPanel({
   }
 
   function updateQuoteItem(itemId: string, field: keyof InvoiceLineItem, value: string | boolean) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     setQuoteForm((f: any) => ({
       ...f,
       items: f.items.map((item: InvoiceLineItem) =>
@@ -318,6 +322,7 @@ export default function QuotesPanel({
 
   function selectProductForQuoteItem(itemId: string, productId: string) {
     if (productId === "__NEW__") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       setQuoteForm((f: any) => ({
         ...f,
         items: f.items.map((item: InvoiceLineItem) =>
@@ -339,6 +344,7 @@ export default function QuotesPanel({
     }
     const product = products.find((p) => p.id === productId);
     if (product) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       setQuoteForm((f: any) => ({
         ...f,
         items: f.items.map((item: InvoiceLineItem) =>
@@ -355,6 +361,7 @@ export default function QuotesPanel({
         ),
       }));
     } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       setQuoteForm((f: any) => ({
         ...f,
         items: f.items.map((item: InvoiceLineItem) =>
@@ -398,6 +405,7 @@ export default function QuotesPanel({
       businessId,
       quoteId: quote.id,
       contactId: quote.contactId,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       items: (quote.items ?? []).map((item: any) => ({
         description: item.description,
         quantity: item.quantity,
@@ -459,6 +467,7 @@ export default function QuotesPanel({
 
   const { filtered: filteredQuotes } = useCommerceSearch(
     statusFiltered,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
     (q) => `${q.quoteNumber} ${q.contact?.firstName ?? ""} ${q.contact?.lastName ?? ""} ${q.contact?.email ?? ""} ${(q.items ?? []).map((i: any) => `${i.description ?? ""}`).join(" ")} ${q.notes ?? ""} ${Number(q.total).toFixed(2)}`,
     quoteSearch,
   );
@@ -539,6 +548,7 @@ export default function QuotesPanel({
     setQuoteForm({
       contactId: quote.contactId,
       expiryDate: quote.expiryDate ? quote.expiryDate.split("T")[0] : "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       items: (quote.items ?? []).map((item: any) => ({
         id: item.id,
         productId: item.productId ?? "",
@@ -633,6 +643,7 @@ export default function QuotesPanel({
     setQuoteForm({
       contactId: quote.contactId || "",
       expiryDate: "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
       items: (quote.items ?? []).map((item: any) => ({
         id: generateItemId(),
         productId: item.productId ?? "",
@@ -734,8 +745,10 @@ export default function QuotesPanel({
         products={products}
         currency={currency}
         contactId={quoteForm.contactId}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onContactChange={(id) => setQuoteForm((f: any) => ({ ...f, contactId: id }))}
         dateValue={quoteForm.expiryDate}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onDateChange={(v) => setQuoteForm((f: any) => ({ ...f, expiryDate: v }))}
         items={quoteForm.items}
         onAddItem={addQuoteItem}
@@ -743,12 +756,16 @@ export default function QuotesPanel({
         onUpdateItem={updateQuoteItem}
         onSelectProduct={selectProductForQuoteItem}
         taxRate={quoteForm.taxRate}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onTaxRateChange={(v) => setQuoteForm((f: any) => ({ ...f, taxRate: v }))}
         discountType={quoteForm.discountType}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onDiscountTypeChange={(v) => setQuoteForm((f: any) => ({ ...f, discountType: v }))}
         discountValue={quoteForm.discountValue}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onDiscountValueChange={(v) => setQuoteForm((f: any) => ({ ...f, discountValue: v }))}
         notes={quoteForm.notes}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         onNotesChange={(v) => setQuoteForm((f: any) => ({ ...f, notes: v }))}
         originLabel={crossModuleOriginLabel}
         originRoute={crossModuleOriginRoute}
@@ -996,6 +1013,7 @@ export default function QuotesPanel({
                 badges={cardBadges}
                 selected={selectedQuote?.id === quote.id}
                 onClick={() => setSelectedQuote(quote)}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
                 linkedService={(quote.items ?? []).find((item: any) => item.description)?.description?.slice(0, 30) || null}
                 onViewContact={onViewContact && quote.contactId ? () => onViewContact(quote.contactId!) : undefined}
                 smartCTA={

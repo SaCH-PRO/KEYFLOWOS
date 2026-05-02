@@ -118,6 +118,7 @@ function getRelativeTime(dateStr: string): string {
 }
 
 function getEventDescription(event: ContactEvent): string | undefined {
+
   const data = event.data as Record<string, unknown> | undefined;
   if (!data) return undefined;
   if ((event.type === "status.changed" || event.type === "STATUS_CHANGED") && data.from && data.to) {

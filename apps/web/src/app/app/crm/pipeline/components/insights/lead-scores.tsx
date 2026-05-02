@@ -13,6 +13,7 @@ export const LeadScoreDistribution = React.memo(function LeadScoreDistribution({
   const buckets = useMemo(() => {
     let hot = 0, warm = 0, cool = 0, cold = 0;
     for (const c of contacts) {
+
       const score = (c as Record<string, unknown>).leadScore as number | null | undefined;
       if (score == null) continue;
       if (score >= 75) hot++;

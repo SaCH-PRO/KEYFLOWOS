@@ -237,6 +237,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
     try {
       const res = await sendCampaign(businessId, id);
       if (res.data) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
         const { sent, suppressed, warning } = res.data as any;
         setLastSendSuppressed(prev => ({ ...prev, [id]: suppressed }));
         setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status: "SENT", sentAt: new Date().toISOString(), totalRecipients: sent, sentCount: sent } : c));
@@ -364,6 +365,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
       try {
         const res = await sendCampaign(businessId, id);
         if (res.data) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
           const { sent: sentCount } = res.data as any;
           setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status: "SENT", sentAt: new Date().toISOString(), totalRecipients: sentCount, sentCount } : c));
           sent++;

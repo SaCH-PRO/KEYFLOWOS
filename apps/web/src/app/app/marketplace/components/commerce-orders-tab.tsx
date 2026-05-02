@@ -74,6 +74,7 @@ export function CommerceOrdersTab({
   orders,
   onStatusUpdate,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
   orders: any[];
   onStatusUpdate: (id: string, status: string) => void;
 }) {
@@ -135,6 +136,7 @@ export function CommerceOrdersTab({
       </div>
 
       <div className="space-y-2">
+        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
         {paginated.map((order: any) => {
           const isExpanded = expanded === order.id;
           const shipments = order.shipments ?? [];
@@ -232,6 +234,7 @@ export function CommerceOrdersTab({
                             <Truck className="w-3 h-3" /> Linked Shipments ({shipments.length})
                           </p>
                           <div className="space-y-1.5">
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                             {shipments.map((s: any) => (
                               <div key={s.id} className="flex items-center justify-between text-xs bg-white/3 rounded-xl px-3 py-2" style={{ background: "rgba(255,255,255,0.03)" }}>
                                 <span className="text-muted-foreground">{s.carrier || "Carrier"} — {s.trackingNumber || "No tracking"}</span>
@@ -246,6 +249,7 @@ export function CommerceOrdersTab({
                         <div>
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">Order Items</p>
                           <div className="space-y-1">
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
                             {order.items.map((item: any, i: number) => (
                               <div key={i} className="flex items-center justify-between text-xs">
                                 <span>{item.productName || item.name || "Item"} × {item.quantity || 1}</span>

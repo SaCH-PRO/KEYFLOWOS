@@ -90,6 +90,7 @@ export default function KeyflowCommandPage() {
         overdueTaskCount: d.data.dashboard.overdueTaskCount,
         pendingApprovals: d.data.pendingApprovals,
         activeProjects: d.data.dashboard.activeProjects,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inherited untyped data — pending typed contract
         priorities: d.priorities?.slice(0, 5).map((p: any) => ({
           title: p.title,
           severity: p.severity,

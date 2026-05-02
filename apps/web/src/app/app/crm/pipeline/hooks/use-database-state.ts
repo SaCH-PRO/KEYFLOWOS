@@ -150,6 +150,7 @@ const SORTABLE_FIELDS = new Set<string>([
 function getCustomField(contact: LocalContact, key: string): string | null {
   const custom = contact.custom;
   if (!custom || typeof custom !== "object") return null;
+
   const val = (custom as Record<string, unknown>)[key];
   return val ? String(val) : null;
 }

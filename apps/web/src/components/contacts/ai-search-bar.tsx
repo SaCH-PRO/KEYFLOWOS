@@ -37,6 +37,7 @@ import {
 import { aiNaturalLanguageSearch, aiInterpretCommand, type AiSearchResult, type AiCommandResult } from "@/lib/client";
 
 export type CrmCommand =
+
   | { type: "add_contact"; params?: Record<string, unknown> }
   | { type: "edit_contact"; contactId: string }
   | { type: "delete_contact"; contactId: string }
@@ -57,25 +58,37 @@ export type CrmCommand =
   | { type: "generate_prep_brief"; contactId: string }
   | { type: "suggest_tags"; contactId: string }
   | { type: "search_contacts"; query: string }
+
   | { type: "enroll_sequence"; contactId: string; params: Record<string, unknown> }
+
   | { type: "unenroll_sequence"; contactId: string; params: Record<string, unknown> }
+
   | { type: "create_list"; params: Record<string, unknown> }
+
   | { type: "add_to_list"; contactId: string; params: Record<string, unknown> }
+
   | { type: "remove_from_list"; contactId: string; params: Record<string, unknown> }
+
   | { type: "merge_contacts"; params: Record<string, unknown> }
+
   | { type: "bulk_status_change"; params: Record<string, unknown> }
+
   | { type: "bulk_delete"; params: Record<string, unknown> }
   | { type: "find_duplicates" }
   | { type: "data_cleanup" }
+
   | { type: "create_quote"; contactId: string; params?: Record<string, unknown> }
+
   | { type: "create_invoice"; contactId: string; params?: Record<string, unknown> }
   | { type: "generate_follow_up"; contactId: string }
   | { type: "revenue_scan" }
   | { type: "reengagement_scan" }
+
   | { type: "ai_execute"; action: string; contactId?: string; params?: Record<string, unknown> };
 
 interface AiSearchBarProps {
   onSelectContact?: (contactId: string) => void;
+
   onApplyFilters?: (filters: Record<string, unknown>) => void;
   onExecuteCommand?: (command: CrmCommand) => void;
 }

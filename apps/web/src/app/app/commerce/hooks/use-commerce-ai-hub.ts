@@ -79,6 +79,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
 
     if (activeView === "products") {
       if (stats.productCount > 0 && stats.topProducts?.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
         const lowPerformers = stats.topProducts.filter((p: any) => p.count === 0);
         if (lowPerformers.length > 0) {
           suggestions.push({

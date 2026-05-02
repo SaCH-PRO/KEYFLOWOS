@@ -130,6 +130,7 @@ export default function ExpensesPage() {
         categories: d.categories,
         budgets: d.budgets,
         vendors: d.vendors,
+
         summary: d.summary as Record<string, unknown> | null,
       });
     }
@@ -158,6 +159,7 @@ export default function ExpensesPage() {
   };
 
   const totalCount = d.summary?.count ?? d.totalExpenses;
+
   const summaryAny = d.summary as Record<string, unknown> | null;
   const uncategorizedCount = (typeof summaryAny?.uncategorizedCount === "number" ? summaryAny.uncategorizedCount : null) ?? d.expenses.filter(e => !e.categoryId).length;
   const missingReceiptCount = (typeof summaryAny?.missingReceiptCount === "number" ? summaryAny.missingReceiptCount : null) ?? d.expenses.filter(e => !e.receiptUrl).length;

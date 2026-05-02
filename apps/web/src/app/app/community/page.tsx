@@ -127,6 +127,7 @@ export default function CommunityPage() {
       const params = filterType !== "ALL" ? { type: filterType } : undefined;
       const res = await fetchCommunityPosts(params);
       if (Array.isArray(res.data)) setPosts(res.data);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CRM/community DTO — pending shared API schema generation
       else if (res.data && Array.isArray((res.data as any).data)) setPosts((res.data as any).data);
       else setPosts([]);
     } catch {}

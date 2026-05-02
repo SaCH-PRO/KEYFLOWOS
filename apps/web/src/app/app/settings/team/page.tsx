@@ -54,6 +54,7 @@ type ActivityItem = {
   detail?: string;
   entityType?: string;
   entityId?: string;
+
   meta?: Record<string, unknown>;
   createdAt: string;
 };
@@ -544,6 +545,7 @@ export default function TeamSettingsPage() {
       return;
     }
     setInviting(true);
+
     const payload: Record<string, unknown> = {
       email: inviteEmail.trim(),
       role: inviteRole,

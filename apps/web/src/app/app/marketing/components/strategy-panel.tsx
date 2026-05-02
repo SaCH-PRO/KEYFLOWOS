@@ -116,6 +116,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
   const resultRef = useRef<HTMLDivElement>(null);
+
   const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null);
   const snapshotLoaded = useRef(false);
 
@@ -127,6 +128,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
         const { fetchBusinessSnapshot } = await import("@/lib/client");
         const res = await fetchBusinessSnapshot(businessId);
         if (res.data) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
           const s = res.data as any;
           setSnapshot(s);
           setMetrics(prev => ({
@@ -167,33 +169,40 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
         toast.error(res.error);
         return;
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
       const data = res.data as any;
 
       const shortTermItems = Array.isArray(data?.shortTermPlan?.actions)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
         ? data.shortTermPlan.actions.map((a: any) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
         : ["Focus on quick wins with your existing audience", "Audit current marketing channels", "Set up tracking and analytics"];
 
       const longTermItems = Array.isArray(data?.longTermPlan?.actions)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
         ? data.longTermPlan.actions.map((a: any) => `${a.title}: ${a.description}${a.timeline ? ` (${a.timeline})` : ""}`)
         : ["Build sustainable content marketing pipeline", "Develop brand authority in your niche", "Scale successful channels"];
 
       const channelItems = Array.isArray(data?.channelStrategy)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
         ? data.channelStrategy.map((c: any) => `${c.channel} (${c.priority}): ${(c.recommendations ?? []).join("; ")}`)
         : ["Prioritize channels where your target audience is most active", "Test new channels with small budget allocations"];
 
       const budgetItems = Array.isArray(data?.budgetModel?.allocation)
         ? [
             ...(data.budgetModel.totalRecommendedBudget ? [`Total recommended: ${data.budgetModel.totalRecommendedBudget}`] : []),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
             ...data.budgetModel.allocation.map((a: any) => `${a.category}: ${a.percentage}% — ${a.justification ?? a.amount ?? ""}`),
             ...(data.budgetModel.expectedROI ? [`Expected ROI: ${data.budgetModel.expectedROI}`] : []),
           ]
         : ["Allocate 60% to proven channels", "Reserve 20% for testing", "Keep 20% for content and tools"];
 
       const kpiItems = Array.isArray(data?.kpiTargets)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
         ? data.kpiTargets.map((k: any) => `${k.metric}: ${k.target30Days ?? "—"} (30d) → ${k.target90Days ?? "—"} (90d) → ${k.target12Months ?? "—"} (12mo)`)
         : ["Define clear conversion metrics", "Set monthly growth targets", "Track CAC and LTV"];
 
       const financialItems = data?.financialProjections
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
         ? Object.entries(data.financialProjections).map(([period, vals]: [string, any]) =>
             `${period}: Investment ${vals?.investment ?? "—"}, Revenue ${vals?.expectedRevenue ?? "—"}, Net ${vals?.netImpact ?? "—"}`)
         : ["Project ROI for each channel", "Estimate revenue impact", "Plan for seasonal fluctuations"];
@@ -212,6 +221,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
           title: "Competitive Advantages",
           icon: Sparkles,
           color: "#f97316",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
           items: data.competitiveAdvantages.map((a: any) => `${a.advantage}: ${a.howToLeverage}`),
         });
       }
@@ -221,6 +231,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
           title: "Risks & Mitigations",
           icon: BarChart3,
           color: "#ef4444",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
           items: data.risks.map((r: any) => `${r.risk} (${r.likelihood}): ${r.mitigation}`),
         });
       }
@@ -345,10 +356,15 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-[11px]">
                   {[
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
                     ["Contacts", (snapshot as any).totalContacts],
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
                     ["Products", (snapshot as any).totalProducts],
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
                     ["Revenue", `${(snapshot as any).currency} ${Number((snapshot as any).totalRevenue || 0).toLocaleString()}`],
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
                     ["Bookings", (snapshot as any).totalBookings],
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
                     ["Campaigns", (snapshot as any).totalCampaigns],
                   ].map(([label, val]) => (
                     <div key={String(label)} className="bg-muted/30 rounded-lg p-1.5 text-center">
@@ -396,6 +412,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
                 <input
                   value={metrics.monthlyRevenue}
                   onChange={e => setMetrics(p => ({ ...p, monthlyRevenue: e.target.value }))}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
                   placeholder={`e.g. 10,000 ${(snapshot as any)?.currency || 'TTD'}`}
                   className="w-full bg-muted/30 border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
                 />
@@ -409,6 +426,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
                 <input
                   value={metrics.budget}
                   onChange={e => setMetrics(p => ({ ...p, budget: e.target.value }))}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LLM/AI tool result payload — shape varies by toolId, pending shared schema contract
                   placeholder={`e.g. 2,000 ${(snapshot as any)?.currency || 'TTD'}`}
                   className="w-full bg-muted/30 border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
                 />

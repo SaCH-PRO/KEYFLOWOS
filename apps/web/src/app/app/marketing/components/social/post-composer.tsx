@@ -231,9 +231,10 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
       setMediaFiles(prev => prev.map(m =>
         m.id === id ? { ...m, uploading: false, url: publicUrl, objectPath } : m
       ));
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Upload failed";
       setMediaFiles(prev => prev.map(m =>
-        m.id === id ? { ...m, uploading: false, error: err.message || "Upload failed" } : m
+        m.id === id ? { ...m, uploading: false, error: message } : m
       ));
     }
   }, []);

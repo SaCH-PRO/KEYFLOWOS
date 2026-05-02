@@ -46,6 +46,7 @@ type Props = {
   storeEnabled: boolean;
   businessHours: BusinessHoursMap;
   storefrontConfig: StorefrontConfig;
+
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => Promise<void>;
   configSaving: boolean;
@@ -119,6 +120,7 @@ function ContactOptionsPanel({
   saving,
 }: {
   storefrontConfig: StorefrontConfig;
+
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSave: () => Promise<void>;
   saving: boolean;
@@ -199,6 +201,7 @@ function DeliveryOptionsLegacy({
   saving,
 }: {
   storefrontConfig: StorefrontConfig;
+
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSave: () => Promise<void>;
   saving: boolean;
@@ -481,6 +484,7 @@ export function OperationsMode({
   const storeStatus: StoreStatus = storeSettings.storeStatus ?? (storeEnabled ? "active" : "paused");
   const deliveryOptions: DeliveryMethod[] = storeSettings.deliveryOptions ?? [];
   const contactOptions = storefrontConfig.contactOptions ?? {};
+
   const hoursActive = Object.values(businessHours).filter((h) => (h as Record<string, unknown>)?.enabled).length;
   const hasContact = !!(contactOptions.whatsappNumber || contactOptions.email || contactOptions.phone);
 

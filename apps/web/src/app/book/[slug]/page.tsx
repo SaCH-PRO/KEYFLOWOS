@@ -268,6 +268,7 @@ function PublicBookingPageInner() {
       }
       setBusiness(res.data);
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- public-flow payload — pending typed contract
       const sfRes = await apiGet<any>(`/site/storefront/public/${encodeURIComponent(slug)}`);
       if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
       else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
@@ -1453,6 +1454,7 @@ function PublicBookingPageInner() {
         accentColor={accentColor}
         promoCode={promoCode}
         slug={slug}
+
         taxRate={(storefrontConfig?.storeSettings as Record<string, unknown>)?.taxRate as number | undefined}
         onClose={() => setCartOpen(false)}
         onOpen={() => setCartOpen(true)}

@@ -155,6 +155,7 @@ export function useUpload(options: UseUploadOptions = {}) {
    */
   const getUploadParameters = useCallback(
     async (
+
       file: UppyFile<Record<string, unknown>, Record<string, unknown>>
     ): Promise<{
       method: "PUT";

@@ -17,6 +17,7 @@ export default function PublicSocialPage() {
   const [mediaUrls, setMediaUrls] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
+
   const request = async (path: string, body: Record<string, unknown>) => {
     setStatus("Submitting...");
     const { data, error } = await apiPost<SocialPostResponse>({ path, body });

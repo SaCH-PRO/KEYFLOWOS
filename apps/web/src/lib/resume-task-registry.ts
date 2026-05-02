@@ -10,6 +10,7 @@ export interface InterruptedTask {
   originRoute: string | null;
   originLabel: string | null;
   taskIntent: string | null;
+
   formData: Record<string, unknown> | null;
   interruptedAt: number;
   completedAt: number | null;

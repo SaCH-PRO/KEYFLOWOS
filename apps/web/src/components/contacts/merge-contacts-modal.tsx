@@ -51,6 +51,7 @@ interface MergeContact {
   source?: string | null;
   tags?: string[];
   createdAt?: string | null;
+
   custom?: Record<string, unknown> | null;
 }
 
@@ -59,6 +60,7 @@ interface MergeContactsModalProps {
   left: MergeContact;
   right: MergeContact;
   onClose: () => void;
+
   onMerge: (keepId: string, mergeId: string, fieldOverrides: Record<string, unknown>) => Promise<void>;
 }
 
@@ -106,6 +108,7 @@ function formatName(c: MergeContact) {
 }
 
 function getVal(contact: MergeContact, key: string): string | null | undefined {
+
   return (contact as unknown as Record<string, unknown>)[key] as string | null | undefined;
 }
 
@@ -142,6 +145,7 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
     setMerging(true);
     setMergeError(null);
     try {
+
       const fieldOverrides: Record<string, unknown> = {};
       for (const [key, side] of Object.entries(fieldChoices)) {
         const chosen = side === "left" ? left : right;

@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Clock, User, Mail, Calendar, Pencil } from "lucide-react";
 import { formatCurrency, formatDate, StatusBadge, EmptyState, usePagination, PaginationBar } from "./marketplace-utils";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation
 export function PreOrdersTab({ preOrders, onEdit }: { preOrders: any[]; onEdit: (item: any) => void }) {
   const { page, pageSize, setPage, setPageSize, totalPages, paginated } = usePagination(preOrders);
   if (preOrders.length === 0) {
@@ -11,6 +12,7 @@ export function PreOrdersTab({ preOrders, onEdit }: { preOrders: any[]; onEdit: 
   }
   return (
     <div className="space-y-3">
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- domain DTO from backend — pending shared API schema generation */}
       {paginated.map((po: any) => (
         <motion.div
           key={po.id}
