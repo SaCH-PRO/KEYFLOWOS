@@ -7,6 +7,61 @@ const TOKEN_KEY = "kf_token";
 const BUSINESS_CACHE_KEY = "kf_business_cache";
 const USER_CACHE_KEY = "kf_user_cache";
 
+const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+
+function isHttps(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.protocol === "https:";
+}
+
+function writeTokenCookie(token: string) {
+  if (typeof document === "undefined") return;
+  const secure = isHttps() ? "; Secure" : "";
+  document.cookie = `${TOKEN_KEY}=${encodeURIComponent(token)}; Path=/; Max-Age=${TOKEN_COOKIE_MAX_AGE}; SameSite=Lax${secure}`;
+}
+
+function clearTokenCookie() {
+  if (typeof document === "undefined") return;
+  document.cookie = `${TOKEN_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
+
+function readTokenCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const m = document.cookie.match(new RegExp(`(?:^|; )${TOKEN_KEY}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+/**
+ * Persist the auth token in BOTH localStorage (for fetch headers) and a
+ * `kf_token` cookie (so the Next.js edge middleware can fast-path-gate
+ * `/app/*` without server round-trip). Always call this from auth flows
+ * instead of touching localStorage directly.
+ */
+export function setStoredToken(token: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(TOKEN_KEY, token);
+  writeTokenCookie(token);
+}
+
+export function getStoredToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(TOKEN_KEY);
+}
+
+/**
+ * Migration helper: if a token exists in localStorage but not in the cookie
+ * (e.g. session predates the cookie-sync work), mirror it across so the
+ * middleware sees it on the next navigation. Returns true if a mirror happened.
+ */
+export function ensureTokenCookieMirror(): boolean {
+  if (typeof window === "undefined") return false;
+  const ls = window.localStorage.getItem(TOKEN_KEY);
+  if (!ls) return false;
+  if (readTokenCookie()) return false;
+  writeTokenCookie(ls);
+  return true;
+}
+
 export interface CachedBusiness {
   id: string;
   name: string;
@@ -99,6 +154,7 @@ export function clearStoredBusinessId() {
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_CACHE_KEY);
   window.localStorage.removeItem(BUSINESS_CACHE_KEY);
+  clearTokenCookie();
   userCache = null;
   businessCache = null;
 }

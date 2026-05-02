@@ -54,6 +54,18 @@ function emitPlanLimitEvent(planLimit: PlanLimitError) {
   }
 }
 
+/**
+ * Fired once per fetch wrapper response when the API returns 401. The
+ * <RequireAuth> provider listens for this and performs the sign-out +
+ * redirect-to-login. Centralising this here means every authenticated
+ * request — whether it goes through apiGet/apiPost/apiPatch/apiPut/apiDelete
+ * or the legacy `client.ts` apiGet — funnels through the same recovery path.
+ */
+export function emitUnauthorizedEvent(path: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("kf:unauthorized", { detail: { path } }));
+}
+
 function buildHeaders(initHeaders?: HeadersInit) {
   const headers = new Headers({
     "Content-Type": "application/json",
@@ -85,7 +97,7 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
       ...restInit,
     });
     const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText, res.status, path);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     warnUnreachable(error);
@@ -94,11 +106,12 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
   }
 }
 
-function handleErrorResponse<T>(data: unknown, statusText: string): ApiResponse<T> {
+function handleErrorResponse<T>(data: unknown, statusText: string, status?: number, path?: string): ApiResponse<T> {
 
   const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
   const planLimit = parsePlanLimitError(parsed);
   if (planLimit) emitPlanLimitEvent(planLimit);
+  if (status === 401) emitUnauthorizedEvent(path ?? "");
   const message =
     parsed && typeof parsed.message === "string" ? parsed.message : statusText || "Request failed";
   return { data: null, error: message, planLimitReached: planLimit };
@@ -115,7 +128,7 @@ export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): 
       signal: opts?.signal,
     });
     const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText, res.status, path);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     warnUnreachable(error);
@@ -132,7 +145,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiRespo
       body: JSON.stringify(body),
     });
     const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText, res.status, path);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     warnUnreachable(error);
@@ -149,7 +162,7 @@ export async function apiDelete<T>(path: string, body?: unknown): Promise<ApiRes
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText, res.status, path);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     warnUnreachable(error);
@@ -170,7 +183,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<ApiRespons
       body: JSON.stringify(body),
     });
     const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText, res.status, path);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     warnUnreachable(error);

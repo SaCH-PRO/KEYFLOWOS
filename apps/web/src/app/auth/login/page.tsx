@@ -20,13 +20,32 @@ import {
   ShieldCheck,
   Loader2,
 } from "lucide-react";
-import { bootstrapIdentity, identityResendVerification } from "@/lib/client";
+import { bootstrapIdentity, identityLogin, identityResendVerification } from "@/lib/client";
+import { setStoredToken } from "@/lib/workspace";
+
+const SAFE_REDIRECT_PREFIX = "/app";
+
+function safeFromParam(raw: string | null | undefined): string {
+  if (!raw) return "/app";
+  // Only allow same-origin app paths (no protocol-relative // or external)
+  if (!raw.startsWith(SAFE_REDIRECT_PREFIX)) return "/app";
+  if (raw.startsWith("//")) return "/app";
+  return raw;
+}
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "");
 
-async function supabaseSignIn(email: string, password: string) {
+/**
+ * Legacy direct-to-Supabase sign-in. Retained only so the
+ * `?verified=1` callback can still light the success banner without
+ * breaking existing tests. New auth flows go through the backend
+ * `POST /identity/login` proxy (see `identityLogin` in `lib/client.ts`),
+ * which adds rate-limiting, audit logging and CAPTCHA enforcement.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _legacySupabaseSignIn(email: string, password: string) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
@@ -68,6 +87,7 @@ function AuthLoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const verified = useMemo(() => searchParams?.get("verified") === "1", [searchParams]);
+  const fromPath = useMemo(() => safeFromParam(searchParams?.get("from")), [searchParams]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -99,8 +119,11 @@ function AuthLoginInner() {
     }
     setLoading(true);
     try {
-      const session = await supabaseSignIn(email, password);
-      window.localStorage.setItem("kf_token", session.access_token);
+      const result = await identityLogin({ email, password });
+      if (result.error || !result.data?.accessToken) {
+        throw new Error(result.error || "Sign in failed.");
+      }
+      setStoredToken(result.data.accessToken);
       const draft = JSON.parse(window.localStorage.getItem("kf_profile_draft") || "{}");
       const bootstrap = await bootstrapIdentity({
         email, firstName: draft.firstName, lastName: draft.lastName,
@@ -110,7 +133,7 @@ function AuthLoginInner() {
         window.localStorage.setItem("kf_business_id", bootstrap.data.business.id);
       } else if (bootstrap.error) { throw new Error(bootstrap.error); }
       else { throw new Error("Could not create workspace. Please try again."); }
-      router.push("/app");
+      router.push(fromPath);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Login failed";
       // Supabase returns "Email not confirmed" when the user exists but hasn't

@@ -17,7 +17,9 @@ import {
 import type { Request } from 'express';
 import { IdentityService } from './identity.service';
 import { IdentitySignupService, isEmailVerificationRequired } from './identity-signup.service';
+import { AuthSecurityService } from './auth-security.service';
 import { SignupDto, ResendVerificationDto } from './dto/signup.dto';
+import { LoginDto } from './dto/login.dto';
 import { BusinessContextService } from './business-context.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -41,7 +43,24 @@ export class IdentityController {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(BusinessContextService) private readonly bizContext: BusinessContextService,
     @Inject(IdentitySignupService) private readonly signupSvc: IdentitySignupService,
+    @Inject(AuthSecurityService) private readonly authSec: AuthSecurityService,
   ) {}
+
+  /**
+   * Pull the best-effort client IP for rate-limiting + audit. Trusts
+   * `x-forwarded-for` only when running behind a known proxy (the front
+   * door of the deploy sets this); falls back to the socket address.
+   * IPs are stored solely as opaque strings, never resolved or shown
+   * to other users.
+   */
+  private clientIp(req: Request): string {
+    const fwd = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
+    return fwd || req.ip || (req.socket as { remoteAddress?: string } | undefined)?.remoteAddress || 'unknown';
+  }
+
+  private clientUa(req: Request): string {
+    return ((req.headers['user-agent'] as string | undefined) ?? '').slice(0, 512);
+  }
 
   /**
    * Server-driven signup. Creates the user via Supabase Admin API and either
@@ -55,33 +74,97 @@ export class IdentityController {
     @Req() req: Request,
     @Headers('origin') originHeader?: string,
   ) {
+    const ip = this.clientIp(req);
+    const ua = this.clientUa(req);
+    const email = body.email.trim().toLowerCase();
+    try {
+      await this.authSec.enforce(AuthSecurityService.RULES.SIGNUP_IP, ip);
+      await this.authSec.enforce(AuthSecurityService.RULES.SIGNUP_EMAIL, email);
+    } catch (rateErr) {
+      await this.authSec.audit({ event: 'rate_limited', outcome: 'rate_limited', email, ip, userAgent: ua, reason: 'signup' });
+      throw rateErr;
+    }
     const origin = originHeader || this.deriveOriginFromRequest(req);
-    const outcome = await this.signupSvc.signup({
-      email: body.email,
-      password: body.password,
-      firstName: body.firstName,
-      lastName: body.lastName,
-      username: body.username,
-      company: body.company,
-      phone: body.phone,
-      requestOrigin: origin,
-    });
-    if (outcome.mode === 'session') {
+    try {
+      const outcome = await this.signupSvc.signup({
+        email,
+        password: body.password,
+        firstName: body.firstName,
+        lastName: body.lastName,
+        username: body.username,
+        company: body.company,
+        phone: body.phone,
+        requestOrigin: origin,
+      });
+      await this.authSec.audit({
+        event: 'signup',
+        outcome: 'success',
+        email,
+        userId: outcome.userId,
+        ip,
+        userAgent: ua,
+        reason: outcome.mode,
+      });
+      if (outcome.mode === 'session') {
+        return {
+          status: 'authenticated',
+          userId: outcome.userId,
+          email: outcome.email,
+          accessToken: outcome.accessToken,
+          refreshToken: outcome.refreshToken,
+          verificationRequired: false,
+        };
+      }
       return {
-        status: 'authenticated',
+        status: 'verification_sent',
         userId: outcome.userId,
         email: outcome.email,
-        accessToken: outcome.accessToken,
-        refreshToken: outcome.refreshToken,
-        verificationRequired: false,
+        verificationRequired: true,
       };
+    } catch (err) {
+      const reason = err instanceof BadRequestException
+        ? (((err.getResponse() as { code?: string })?.code) ?? err.message)
+        : err instanceof Error ? err.message : 'unknown';
+      await this.authSec.audit({ event: 'signup', outcome: 'failure', email, ip, userAgent: ua, reason });
+      throw err;
     }
-    return {
-      status: 'verification_sent',
-      userId: outcome.userId,
-      email: outcome.email,
-      verificationRequired: true,
-    };
+  }
+
+  /**
+   * Server-driven login. Proxies email/password through the backend so
+   * we can rate-limit (per IP and per email), audit every attempt, and
+   * keep the Supabase project URL/key off the client. Frontend used to
+   * call Supabase directly — that flow has been retired in favour of
+   * this endpoint as part of Tier 2 auth hardening.
+   */
+  @Post('login')
+  async login(@Body() body: LoginDto, @Req() req: Request) {
+    const ip = this.clientIp(req);
+    const ua = this.clientUa(req);
+    const email = body.email.trim().toLowerCase();
+    try {
+      await this.authSec.enforce(AuthSecurityService.RULES.LOGIN_IP, ip);
+      await this.authSec.enforce(AuthSecurityService.RULES.LOGIN_EMAIL, email);
+    } catch (rateErr) {
+      await this.authSec.audit({ event: 'rate_limited', outcome: 'rate_limited', email, ip, userAgent: ua, reason: 'login' });
+      throw rateErr;
+    }
+    try {
+      const session = await this.signupSvc.signInWithPassword(email, body.password);
+      await this.authSec.audit({ event: 'login_success', outcome: 'success', email, ip, userAgent: ua });
+      return {
+        status: 'authenticated',
+        email,
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+      };
+    } catch (err) {
+      const reason = err instanceof BadRequestException
+        ? (((err.getResponse() as { code?: string })?.code) ?? err.message)
+        : err instanceof Error ? err.message : 'unknown';
+      await this.authSec.audit({ event: 'login_failure', outcome: 'failure', email, ip, userAgent: ua, reason });
+      throw err;
+    }
   }
 
   /**
@@ -95,11 +178,22 @@ export class IdentityController {
     @Req() req: Request,
     @Headers('origin') originHeader?: string,
   ) {
+    const ip = this.clientIp(req);
+    const ua = this.clientUa(req);
+    const email = body.email.trim().toLowerCase();
+    try {
+      await this.authSec.enforce(AuthSecurityService.RULES.RESEND_IP, ip);
+      await this.authSec.enforce(AuthSecurityService.RULES.RESEND_EMAIL, email);
+    } catch (rateErr) {
+      await this.authSec.audit({ event: 'rate_limited', outcome: 'rate_limited', email, ip, userAgent: ua, reason: 'resend' });
+      throw rateErr;
+    }
     const origin = originHeader || this.deriveOriginFromRequest(req);
     const result = await this.signupSvc.resendVerification({
-      email: body.email,
+      email,
       requestOrigin: origin,
     });
+    await this.authSec.audit({ event: 'resend_verification', outcome: 'success', email, ip, userAgent: ua });
     return {
       status: 'ok',
       verificationRequired: isEmailVerificationRequired(),

@@ -277,7 +277,18 @@ export class IdentitySignupService {
     });
   }
 
-  private async signInWithPassword(email: string, password: string) {
+  /**
+   * Exchange email + password for a Supabase session via the public REST
+   * endpoint. Public so the new `/identity/login` controller route can
+   * reuse it from {@link IdentityController}.
+   *
+   * Throws BadRequestException with stable codes:
+   *   - signin_unavailable     (Supabase env not configured)
+   *   - email_not_confirmed    (verification required, user hasn't clicked link)
+   *   - invalid_credentials    (wrong email/password)
+   *   - signin_failed          (any other Supabase rejection)
+   */
+  async signInWithPassword(email: string, password: string) {
     const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
     const anon = (process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
     if (!url || !anon) {
@@ -292,12 +303,37 @@ export class IdentitySignupService {
       body: JSON.stringify({ email, password }),
     });
     const json = (await res.json().catch(() => null)) as
-      | { access_token?: string; refresh_token?: string; error_description?: string; msg?: string }
+      | {
+          access_token?: string;
+          refresh_token?: string;
+          error_description?: string;
+          msg?: string;
+          error?: string;
+          error_code?: string;
+        }
       | null;
     if (!res.ok || !json?.access_token || !json?.refresh_token) {
+      const raw = (json?.error_description || json?.msg || json?.error || '').toLowerCase();
+      const code = (json?.error_code || '').toLowerCase();
+      if (code === 'email_not_confirmed' || raw.includes('email not confirmed')) {
+        throw new BadRequestException({
+          code: 'email_not_confirmed',
+          message: 'Please verify your email before signing in.',
+        });
+      }
+      if (
+        code === 'invalid_credentials' ||
+        raw.includes('invalid login credentials') ||
+        raw.includes('invalid grant')
+      ) {
+        throw new BadRequestException({
+          code: 'invalid_credentials',
+          message: 'Invalid email or password.',
+        });
+      }
       throw new BadRequestException({
         code: 'signin_failed',
-        message: json?.error_description || json?.msg || 'Account created, but sign-in failed.',
+        message: json?.error_description || json?.msg || 'Sign in failed.',
       });
     }
     return { accessToken: json.access_token, refreshToken: json.refresh_token };

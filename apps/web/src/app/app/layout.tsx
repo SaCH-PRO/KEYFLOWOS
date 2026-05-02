@@ -60,6 +60,7 @@ import { AiContextProvider } from "@/contexts/ai-context";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
+import { RequireAuth } from "@/components/require-auth";
 
 function relativeTime(dateStr: string): string {
   const now = Date.now();
@@ -283,13 +284,15 @@ const mobileBottomNav = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense fallback={null}>
-      <NavigationContextProvider>
-        <AiContextProvider>
-          <AppLayoutInner>{children}</AppLayoutInner>
-        </AiContextProvider>
-      </NavigationContextProvider>
-    </Suspense>
+    <RequireAuth>
+      <Suspense fallback={null}>
+        <NavigationContextProvider>
+          <AiContextProvider>
+            <AppLayoutInner>{children}</AppLayoutInner>
+          </AiContextProvider>
+        </NavigationContextProvider>
+      </Suspense>
+    </RequireAuth>
   );
 }
 

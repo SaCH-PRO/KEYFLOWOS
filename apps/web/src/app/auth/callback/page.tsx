@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
+import { setStoredToken } from "@/lib/workspace";
 
 function AuthCallbackInner() {
   const router = useRouter();
@@ -26,7 +27,7 @@ function AuthCallbackInner() {
           throw new Error("No access token received");
         }
 
-        window.localStorage.setItem("kf_token", accessToken);
+        setStoredToken(accessToken);
 
         const userInfoRes = await fetch(
           `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/user`,
