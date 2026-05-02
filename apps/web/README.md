@@ -68,6 +68,7 @@ If the error ever resurfaces despite the rules above:
    ```
 2. Confirm `next-themes` (and any provider library used at the root) declares the React major in use under `peerDependencies`. With React 19 + Next 16 (Turbopack), `next-themes` must be `^0.4.x` or newer — older 0.3.x releases declare React 16-18 only and trigger spurious HMR failures.
 3. Re-check `apps/web/next.config.ts` for any newly added `turbopack.resolveAlias` entries pointing at workspace TypeScript sources, and remove them.
+4. As a last-resort hardening for the **root error boundaries only**, write `apps/web/src/app/error.tsx` and `apps/web/src/app/global-error.tsx` using `React.createElement` instead of JSX (see the comments at the top of those files). These boundaries are loaded on-demand — only when an error actually occurs — so by the time they instantiate, many HMR cycles have already happened and the `jsx-dev-runtime` factory is the most likely casualty. Avoiding JSX in these two files removes them as a possible weak link entirely. Do NOT apply this to ordinary route files; they re-render on every nav and JSX is fine.
 
 ## Learn More
 
