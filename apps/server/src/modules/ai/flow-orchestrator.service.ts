@@ -2136,6 +2136,137 @@ export class FlowOrchestratorService {
         return { note };
       }
 
+      // ========== SEO FAMILY (Phase 9) ==========
+
+      case 'fetch_seo_dashboard': {
+        const [pages, keywords, issues, briefs] = await Promise.all([
+          this.prisma.client.seoPage.aggregate({
+            where: { businessId },
+            _count: true,
+            _sum: { clicks: true, impressions: true, conversions: true, revenue: true },
+          }),
+          this.prisma.client.seoKeyword.count({ where: { businessId, isTracked: true } }),
+          this.prisma.client.seoIssue.count({ where: { businessId, status: 'open' } }),
+          this.prisma.client.contentBrief.count({ where: { businessId, status: 'draft' } }),
+        ]);
+        return {
+          totalPages: pages._count,
+          trackedKeywords: keywords,
+          openIssues: issues,
+          pendingBriefs: briefs,
+          totalClicks: pages._sum.clicks ?? 0,
+          totalImpressions: pages._sum.impressions ?? 0,
+          totalConversions: pages._sum.conversions ?? 0,
+          totalRevenue: pages._sum.revenue ?? 0,
+        };
+      }
+
+      case 'fetch_seo_keywords': {
+        const where: any = { businessId, isTracked: true };
+        if (args.trend) where.trend = args.trend;
+        const keywords = await this.prisma.client.seoKeyword.findMany({
+          where,
+          orderBy: { clicks: 'desc' },
+          take: 50,
+          select: {
+            id: true, keyword: true, currentPosition: true, previousPosition: true,
+            positionChange: true, trend: true, clicks: true, impressions: true, ctr: true,
+          },
+        });
+        return { keywords };
+      }
+
+      case 'fetch_seo_issues': {
+        const where: any = { businessId, status: 'open' };
+        if (args.severity) where.severity = args.severity;
+        const issues = await this.prisma.client.seoIssue.findMany({
+          where,
+          orderBy: [{ severity: 'asc' }, { detectedAt: 'desc' }],
+          take: 50,
+        });
+        return { issues };
+      }
+
+      case 'fetch_content_gaps': {
+        const trackedKeywords = await this.prisma.client.seoKeyword.findMany({
+          where: { businessId, isTracked: true },
+        });
+        const gaps = trackedKeywords
+          .map(kw => {
+            let opportunityScore = 0;
+            let reason = '';
+            if (!kw.pageId) {
+              opportunityScore = 80;
+              reason = 'No dedicated page targeting this keyword';
+            } else if (kw.currentPosition && kw.currentPosition > 10 && kw.currentPosition <= 30) {
+              opportunityScore = 70;
+              reason = `Ranking on page 2-3 (position ${kw.currentPosition})`;
+            } else if (kw.impressions > 100 && kw.ctr < 0.02) {
+              opportunityScore = 50;
+              reason = 'High impressions, low CTR — meta needs optimization';
+            }
+            return opportunityScore > 0
+              ? { keyword: kw.keyword, currentPosition: kw.currentPosition, opportunityScore, reason }
+              : null;
+          })
+          .filter(Boolean)
+          .sort((a: any, b: any) => b.opportunityScore - a.opportunityScore);
+        return { gaps };
+      }
+
+      case 'fetch_seo_revenue_attribution': {
+        const totals = await this.prisma.client.seoPage.aggregate({
+          where: { businessId },
+          _sum: { organicSessions: true, conversions: true, revenue: true },
+        });
+        const topRevenuePages = await this.prisma.client.seoPage.findMany({
+          where: { businessId, conversions: { gt: 0 } },
+          orderBy: { revenue: 'desc' },
+          take: 10,
+          select: {
+            id: true, url: true, path: true, title: true,
+            organicSessions: true, conversions: true, revenue: true,
+          },
+        });
+        return {
+          totalOrganicSessions: totals._sum.organicSessions ?? 0,
+          totalConversions: totals._sum.conversions ?? 0,
+          totalRevenue: totals._sum.revenue ?? 0,
+          topRevenuePages,
+        };
+      }
+
+      case 'sync_seo_pages': {
+        const business = await this.prisma.client.business.findFirst({
+          where: { id: businessId, deletedAt: null },
+          select: { slug: true, name: true },
+        });
+        if (!business?.slug) return { synced: 0 };
+        const baseUrl = `/book/${business.slug}`;
+        await this.prisma.client.seoPage.upsert({
+          where: { businessId_path: { businessId, path: baseUrl } },
+          create: { businessId, url: baseUrl, path: baseUrl, pageType: 'storefront', title: business.name ?? 'Storefront' },
+          update: { title: business.name ?? 'Storefront' },
+        });
+        return { synced: 1, message: 'Storefront page synced. Use the SEO workspace for full inventory sync.' };
+      }
+
+      case 'generate_content_brief': {
+        const brief = await this.prisma.client.contentBrief.create({
+          data: {
+            businessId,
+            title: `Content brief: ${args.targetKeyword}`,
+            targetKeyword: args.targetKeyword,
+            contentType: args.contentType ?? 'article',
+            status: 'draft',
+            priority: 'medium',
+            approvalStatus: 'pending',
+            contentGapSource: args.notes ?? null,
+          },
+        });
+        return { brief, message: 'Brief stub created. Use the SEO workspace to generate full AI brief.' };
+      }
+
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }

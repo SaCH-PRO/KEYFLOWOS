@@ -52,6 +52,7 @@ import {
   Brain,
   Radar,
   Award,
+  Search as SearchIcon2,
 } from "lucide-react";
 
 
@@ -220,6 +221,7 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Expenses", href: "/app/expenses", icon: Receipt },
     { label: "Reports", href: "/app/reports", icon: BarChart3 },
     { label: "Documents", href: "/app/documents", icon: FileText },
+    { label: "SEO", href: "/app/seo", icon: SearchIcon2 },
   ],
   studio: [
     { label: "Business", href: "/app/settings/business", icon: Building2 },
@@ -257,6 +259,7 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/expenses", "workspaces"],
   ["/app/reports", "workspaces"],
   ["/app/documents", "workspaces"],
+  ["/app/seo", "workspaces"],
   ["/app/onboarding", "tower"],
 ];
 

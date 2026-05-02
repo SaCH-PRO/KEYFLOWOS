@@ -1456,6 +1456,117 @@ export const FLOW_TOOLS: FlowTool[] = [
     },
     outputSchema: { type: 'object', description: 'Created note', fields: { note: { type: 'object', description: 'The persisted note' } } },
   },
+
+  // ================================================================
+  //  SEO FAMILY — Phase 9 SEO Operations
+  // ================================================================
+  {
+    name: 'fetch_seo_dashboard',
+    description: 'Get the SEO dashboard: pages indexed, tracked keywords, ranking trends, open issues, top traffic, and revenue from organic search.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
+    outputSchema: {
+      type: 'object',
+      description: 'SEO health snapshot',
+      fields: {
+        score: { type: 'number', description: 'Overall SEO score 0-100' },
+        overview: { type: 'object', description: 'Counts of pages, keywords, issues' },
+        traffic: { type: 'object', description: 'Clicks, impressions, conversions, revenue' },
+        topPages: { type: 'array', description: 'Top traffic pages' },
+        topKeywords: { type: 'array', description: 'Top keywords by clicks' },
+      },
+    },
+  },
+  {
+    name: 'fetch_seo_keywords',
+    description: 'List tracked SEO keywords with current ranking, position changes, trend (improving/declining/stable), and clicks.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        businessId: { type: 'string', description: 'The business ID' },
+        trend: { type: 'string', description: 'Filter by trend', enum: ['improving', 'declining', 'stable'] },
+      },
+      required: ['businessId'],
+    },
+    outputSchema: { type: 'object', description: 'Keyword list', fields: { keywords: { type: 'array', description: 'Tracked keyword records' } } },
+  },
+  {
+    name: 'fetch_seo_issues',
+    description: 'Show open SEO issues — missing titles, missing meta descriptions, thin content, indexing problems — sorted by severity.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: {
+      type: 'object',
+      properties: {
+        businessId: { type: 'string', description: 'The business ID' },
+        severity: { type: 'string', description: 'Filter by severity', enum: ['critical', 'high', 'medium', 'low'] },
+      },
+      required: ['businessId'],
+    },
+    outputSchema: { type: 'object', description: 'Issue list', fields: { issues: { type: 'array', description: 'Open SEO issues' } } },
+  },
+  {
+    name: 'fetch_content_gaps',
+    description: 'Detect content gaps — keywords with high opportunity (no page targeting them, ranking on page 2-3, or high impressions with low CTR).',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
+    outputSchema: { type: 'object', description: 'Content gap analysis', fields: { gaps: { type: 'array', description: 'Ranked content opportunities' } } },
+  },
+  {
+    name: 'fetch_seo_revenue_attribution',
+    description: 'Show revenue attributed to organic search traffic — top revenue pages, total organic sessions, conversion rate, and revenue.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
+    outputSchema: {
+      type: 'object',
+      description: 'Organic revenue attribution',
+      fields: {
+        totalOrganicSessions: { type: 'number', description: 'Total organic sessions' },
+        totalRevenue: { type: 'number', description: 'Revenue from organic in TTD' },
+        topRevenuePages: { type: 'array', description: 'Pages ranked by revenue' },
+      },
+    },
+  },
+  {
+    name: 'sync_seo_pages',
+    description: 'Crawl the storefront to refresh the SEO page inventory and re-detect issues. Safe and idempotent.',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    changedEntities: ['seoPage', 'seoIssue'],
+    parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
+    outputSchema: { type: 'object', description: 'Sync result', fields: { synced: { type: 'number', description: 'Pages synced' } } },
+  },
+  {
+    name: 'generate_content_brief',
+    description: 'Generate an AI-powered SEO content brief for a target keyword — outline, meta tags, search intent, internal links.',
+    family: 'draft',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    changedEntities: ['contentBrief'],
+    followOnSuggestions: ['fetch_content_briefs'],
+    parameters: {
+      type: 'object',
+      properties: {
+        businessId: { type: 'string', description: 'The business ID' },
+        targetKeyword: { type: 'string', description: 'Primary keyword to target' },
+        contentType: { type: 'string', description: 'Type of content (article, landing_page, product_page, etc.)' },
+        notes: { type: 'string', description: 'Additional context for the brief' },
+      },
+      required: ['businessId', 'targetKeyword'],
+    },
+    outputSchema: { type: 'object', description: 'Generated content brief', fields: { brief: { type: 'object', description: 'The content brief record' } } },
+  },
 ];
 
 export function getOpenAiToolDefinitions() {
