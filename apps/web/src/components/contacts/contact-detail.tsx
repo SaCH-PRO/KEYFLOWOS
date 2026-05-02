@@ -278,6 +278,7 @@ export function ContactDetail({
             onQuickAction={onQuickAction}
             onLogEvent={onLogEvent}
             onAddTask={onAddTask}
+            // eslint-disable-next-line react-hooks/purity -- audited: time-relative next booking lookup
             nextBookingDate={bookings?.find(b => new Date(b.startTime).getTime() > Date.now())?.startTime}
           />
         </div>

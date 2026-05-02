@@ -206,6 +206,7 @@ export function RecordRowCard({
   const urgency = (() => {
     if (status === "OVERDUE") return "overdue";
     if (status === "SENT" && dueDate) {
+      // eslint-disable-next-line react-hooks/purity -- audited: time-relative urgency badge
       const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
       if (daysLeft < 0) return "overdue";
       if (daysLeft <= 3) return "due-soon";
@@ -215,6 +216,7 @@ export function RecordRowCard({
 
   const dueLabel = (() => {
     if (!dueDate) return null;
+    // eslint-disable-next-line react-hooks/purity -- audited: time-relative due date label
     const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     if (daysLeft < 0) return `${Math.abs(daysLeft)}d overdue`;
     if (daysLeft === 0) return "Due today";

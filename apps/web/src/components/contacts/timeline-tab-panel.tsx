@@ -216,6 +216,7 @@ export function TimelineTabPanel({
                     );
                   })}
                 {journeyMilestones.filter((m) => m.isNext).map((nextM) => {
+                  // eslint-disable-next-line react-hooks/purity -- audited: time-relative countdown
                   const daysDiff = Math.ceil((new Date(nextM.date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
                   return (
                     <div key={nextM.id} className="relative flex gap-2.5">

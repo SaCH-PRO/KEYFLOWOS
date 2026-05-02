@@ -64,6 +64,17 @@ function getFileIcon(mimeType: string) {
   return File;
 }
 
+function FileIcon({ mimeType, className }: { mimeType: string; className?: string }) {
+  if (mimeType === "application/vnd.google-apps.folder") return <FolderOpen className={className} />;
+  if (mimeType === "application/vnd.google-apps.document") return <FileText className={className} />;
+  if (mimeType === "application/vnd.google-apps.spreadsheet") return <Table2 className={className} />;
+  if (mimeType === "application/vnd.google-apps.presentation") return <Presentation className={className} />;
+  if (mimeType.startsWith("image/")) return <Image className={className} />;
+  if (mimeType.startsWith("video/")) return <Video className={className} />;
+  if (mimeType === "application/pdf") return <FileText className={className} />;
+  return <File className={className} />;
+}
+
 function getFileColor(mimeType: string) {
   if (mimeType === "application/vnd.google-apps.folder") return "text-[hsl(var(--kf-warning))]";
   if (mimeType === "application/vnd.google-apps.document") return "text-blue-400";
@@ -218,10 +229,7 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            {(() => {
-              const Icon = getFileIcon(openFile.mimeType);
-              return <Icon className={`w-4 h-4 flex-shrink-0 ${getFileColor(openFile.mimeType)}`} />;
-            })()}
+            <FileIcon mimeType={openFile.mimeType} className={`w-4 h-4 flex-shrink-0 ${getFileColor(openFile.mimeType)}`} />
             <span className="font-medium text-sm truncate">{openFile.name}</span>
           </div>
           <a
@@ -372,7 +380,6 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
       ) : (
         <div className="rounded-xl border border-[hsl(var(--border))] overflow-hidden divide-y divide-[hsl(var(--border))]">
           {files.map((file) => {
-            const Icon = getFileIcon(file.mimeType);
             const embeddable = isEmbeddable(file.mimeType);
 
             return (
@@ -389,7 +396,7 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[hsl(var(--muted))]/50 transition-colors text-left group"
               >
                 <div className={`w-8 h-8 rounded-lg bg-[hsl(var(--muted))] flex items-center justify-center flex-shrink-0`}>
-                  <Icon className={`w-4 h-4 ${getFileColor(file.mimeType)}`} />
+                  <FileIcon mimeType={file.mimeType} className={`w-4 h-4 ${getFileColor(file.mimeType)}`} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">

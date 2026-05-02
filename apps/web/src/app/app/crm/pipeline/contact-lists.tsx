@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   List,
@@ -114,10 +115,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
   const [formFilterMinRevenue, setFormFilterMinRevenue] = useState<number | "">("");
   const [saving, setSaving] = useState(false);
 
-  const onListsLoadedRef = useRef(onListsLoaded);
-  onListsLoadedRef.current = onListsLoaded;
-  const onListsChangedRef = useRef(onListsChanged);
-  onListsChangedRef.current = onListsChanged;
+  const onListsLoadedRef = useLatestRef(onListsLoaded);
+  const onListsChangedRef = useLatestRef(onListsChanged);
 
   const notifyParent = useCallback((typed: ContactListData[], counts: Record<string, number>) => {
     onListsLoadedRef.current?.(typed.length);
@@ -129,7 +128,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
       contactCount: l.type === "SMART" ? (counts[l.id] ?? 0) : l.contactIds.length,
     }));
     onListsChangedRef.current?.(summaries);
-  }, []);
+  }, [onListsLoadedRef, onListsChangedRef]);
 
   const loadLists = useCallback(async () => {
     setLoading(true);

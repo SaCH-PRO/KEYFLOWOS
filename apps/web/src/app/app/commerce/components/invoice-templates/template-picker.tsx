@@ -130,6 +130,7 @@ export function TemplatePicker({
     number: "INV-001",
     status: "SENT",
     issueDate: new Date().toISOString(),
+    // eslint-disable-next-line react-hooks/purity -- audited: sample preview data with future due date
     dueDate: new Date(Date.now() + 30 * 86400000).toISOString(),
     contact: {
       firstName: "Jane",

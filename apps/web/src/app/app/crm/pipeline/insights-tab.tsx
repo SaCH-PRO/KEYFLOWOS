@@ -171,9 +171,11 @@ function InsightsTabInner({
   const filteredContacts = useMemo(() => {
     if (period === "custom") {
       const start = customStart ? new Date(customStart).getTime() : 0;
+      // eslint-disable-next-line react-hooks/purity -- audited: time-bounded filter, value should reflect current time
       const end = customEnd ? new Date(customEnd).getTime() + 86_400_000 : Date.now();
       return contacts.filter((c) => { const d = c.createdAt ? new Date(c.createdAt).getTime() : 0; return d >= start && d <= end; });
     }
+    // eslint-disable-next-line react-hooks/purity -- audited: time-bounded filter, value should reflect current time
     const cutoff = Date.now() - PERIOD_MS[period];
     return contacts.filter((c) => { const d = c.createdAt ? new Date(c.createdAt).getTime() : 0; return d >= cutoff; });
   }, [contacts, period, customStart, customEnd]);

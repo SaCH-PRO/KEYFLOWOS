@@ -82,6 +82,7 @@ export const ProductCard = React.memo(function ProductCard({
           {!isInactive && invoiceCount === 0 && quoteCount === 0 && (() => {
 
             const rawCreatedAt = (product as Record<string, unknown>)["createdAt"];
+            // eslint-disable-next-line react-hooks/purity -- audited: time-relative stale product indicator
             const daysSince = rawCreatedAt ? Math.floor((Date.now() - new Date(rawCreatedAt as string).getTime()) / (1000 * 60 * 60 * 24)) : 0;
             if (daysSince > 90) return (
               <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium bg-amber-500/20 text-amber-400 border border-amber-500/25 backdrop-blur-md">

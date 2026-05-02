@@ -177,6 +177,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
     ...Object.fromEntries(
       Object.entries(initialValues || {}).filter(([, v]) => v !== undefined && v !== null)
     ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- audited: intentionally only computed once on mount; later prop changes must not reset edited form
   }), []);
 
   const [form, setForm] = useState<ContactFormData>(initial);

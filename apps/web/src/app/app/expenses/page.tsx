@@ -115,11 +115,13 @@ export default function ExpensesPage() {
     if (actionKey.startsWith("switch_tab:")) {
       const tab = actionKey.replace("switch_tab:", "");
       if (["transactions", "budgets", "categories", "insights"].includes(tab)) setActiveTab(tab);
-    } else if (actionKey === "add_expense") {
+      return;
+    }
+    if (actionKey === "add_expense") {
       setEditingExpense(null);
       setShowModal(true);
     }
-  }, []);
+  }, [setActiveTab]);
 
   useEffect(() => {
     if (d.businessId) {

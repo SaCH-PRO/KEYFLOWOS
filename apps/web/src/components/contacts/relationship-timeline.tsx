@@ -58,6 +58,7 @@ export function RelationshipTimeline({ contactName, milestones, onAddMilestone }
 
   const daysUntilNext = useMemo(() => {
     if (!nextMilestone) return null;
+    // eslint-disable-next-line react-hooks/purity -- audited: time-relative countdown
     const diff = new Date(nextMilestone.date).getTime() - Date.now();
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
   }, [nextMilestone]);

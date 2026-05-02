@@ -170,7 +170,7 @@ export function ChannelsPanel() {
         const name = PLATFORMS.find((p) => p.key === platform)?.name || platform;
         setSuccess(`${name} connected successfully!`);
         setActionLoading(null);
-        try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
+      try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
       }
 
       if (type === "social-oauth-error" && platform) {
@@ -209,7 +209,7 @@ export function ChannelsPanel() {
       );
 
       if (!popup || popup.closed) {
-        window.location.href = data.authUrl;
+        window.location.assign(data.authUrl);
         return;
       }
 
@@ -284,6 +284,7 @@ export function ChannelsPanel() {
       const name = PLATFORMS.find((p) => p.key === platform)?.name || platform;
       setSuccess(`${name} connected!`);
       toast.success(`${name} connected!`);
+      // eslint-disable-next-line react-hooks/purity -- audited: timestamp written to localStorage to broadcast cross-tab connection-changed event
       try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
     }
     setActionLoading(null);

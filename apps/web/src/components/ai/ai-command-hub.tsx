@@ -102,6 +102,11 @@ function getToolIcon(iconName: string) {
   return TOOL_ICON_MAP[iconName] || TOOL_ICON_MAP.default;
 }
 
+function ToolIcon({ name, className }: { name: string; className?: string }) {
+  const Icon = TOOL_ICON_MAP[name] || TOOL_ICON_MAP.default;
+  return <Icon className={className} />;
+}
+
 function SuggestionCard({
   suggestion,
   onExecute,
@@ -190,7 +195,6 @@ function ToolCard({
   disabled: boolean;
   showSelectionHint?: boolean;
 }) {
-  const Icon = getToolIcon(tool.icon);
   const catMeta = CATEGORY_META[tool.category];
 
   return (
@@ -203,7 +207,7 @@ function ToolCard({
     >
       <div className="flex items-start gap-3">
         <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br from-[hsl(var(--kf-accent1))]/10 to-[hsl(var(--kf-accent2))]/10 group-hover:from-[hsl(var(--kf-accent1))]/20 group-hover:to-[hsl(var(--kf-accent2))]/20 transition-colors`}>
-          <Icon className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+          <ToolIcon name={tool.icon} className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-0.5">

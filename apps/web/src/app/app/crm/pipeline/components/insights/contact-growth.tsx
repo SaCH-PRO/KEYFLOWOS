@@ -10,6 +10,7 @@ interface GrowthBucket { label: string; count: number; }
 
 export const GrowthTrend = React.memo(function GrowthTrend({ contacts, period }: { contacts: Contact[]; period: Period }) {
   const buckets = useMemo(() => {
+    // eslint-disable-next-line react-hooks/purity -- audited: time-bucketed growth chart needs current time
     const now = Date.now();
     const effectivePeriod = period === "custom" ? "90d" : period;
     const ms = PERIOD_MS[effectivePeriod];

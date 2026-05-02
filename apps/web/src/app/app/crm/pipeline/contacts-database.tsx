@@ -78,7 +78,8 @@ export function ContactsDatabase({
   const [savingViewName, setSavingViewName] = useState("");
   const [showSaveInput, setShowSaveInput] = useState(false);
 
-  const handleClearSearch = useCallback(() => db.setSearchInput(""), [db.setSearchInput]);
+  const setSearchInput = db.setSearchInput;
+  const handleClearSearch = useCallback(() => setSearchInput(""), [setSearchInput]);
 
   useEffect(() => {
     if (!db.showExport) return;

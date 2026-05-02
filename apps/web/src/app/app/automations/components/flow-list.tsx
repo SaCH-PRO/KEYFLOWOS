@@ -183,7 +183,9 @@ export function FlowList({
   function getHealthIndicator(enabled: boolean, lastRunAt: string | null | undefined, runCount: number) {
     if (!enabled) return { label: "Paused", color: "hsl(var(--muted-foreground))", icon: PowerOff, score: 0, detail: "Flow is paused — enable to start processing" };
     if (runCount === 0 && !lastRunAt) return { label: "Never run", color: "hsl(var(--kf-warning))", icon: AlertTriangle, score: 15, detail: "Active but never triggered — verify trigger configuration" };
+    // eslint-disable-next-line react-hooks/purity -- audited: time-relative health computation
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    // eslint-disable-next-line react-hooks/purity -- audited: time-relative health computation
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
     let score = 40;
@@ -204,6 +206,7 @@ export function FlowList({
       warnings.push("This flow is active but has never run — check the trigger configuration");
     }
     if (enabled && lastRunAt) {
+      // eslint-disable-next-line react-hooks/purity -- audited: time-relative warning computation
       const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
       if (new Date(lastRunAt).getTime() < thirtyDaysAgo) {
         warnings.push("Has not run in over 30 days — ensure the trigger event is still occurring");

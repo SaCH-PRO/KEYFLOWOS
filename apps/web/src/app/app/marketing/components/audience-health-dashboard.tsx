@@ -41,11 +41,12 @@ export function AudienceHealthDashboard({ businessId, onCreateCampaign }: Audien
   useEffect(() => { void load(); }, [load]);
 
   const filteredSegments = useMemo(() => {
-    if (!data?.segments) return [];
-    if (!search.trim()) return data.segments;
+    const segments = data?.segments;
+    if (!segments) return [];
+    if (!search.trim()) return segments;
     const q = search.toLowerCase();
-    return data.segments.filter((s) => s.tag.toLowerCase().includes(q));
-  }, [data?.segments, search]);
+    return segments.filter((s) => s.tag.toLowerCase().includes(q));
+  }, [data, search]);
 
   if (loading) {
     return (

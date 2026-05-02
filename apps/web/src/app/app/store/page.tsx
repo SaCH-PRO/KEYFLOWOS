@@ -44,7 +44,7 @@ export default function StorePage() {
   const s = useStoreData();
   const ai = useStoreAiHub();
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
-  const dirRef = useRef(0);
+  const [dir, setDir] = useState(0);
   const initRef = useRef(false);
   const { setCurrentMeta } = useNavigationContext();
   useReturnNavigation({ restoreScrollOnMount: true });
@@ -98,26 +98,27 @@ export default function StorePage() {
     });
   }, [s.businessId, activeTab, productCount, serviceCount, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, deliveryCount, s.readiness, s.storeGraph]);
 
+  const emitEvent = s.emitEvent;
   const handleTabChange = useCallback((key: string) => {
     if (!TAB_KEYS.includes(key as TabKey)) return;
-    dirRef.current = TAB_KEYS.indexOf(key as TabKey) > TAB_KEYS.indexOf(activeTab) ? 1 : -1;
+    setDir(TAB_KEYS.indexOf(key as TabKey) > TAB_KEYS.indexOf(activeTab) ? 1 : -1);
     setActiveTab(key as TabKey);
     setCurrentMeta({ tab: key === "overview" ? null : key });
-    s.emitEvent("module:tab_changed", "store", { tab: key });
+    emitEvent("module:tab_changed", "store", { tab: key });
     const url = new URL(window.location.href);
     if (key === "overview") { url.searchParams.delete("tab"); } else { url.searchParams.set("tab", key); }
     window.history.replaceState({}, "", url.toString());
-  }, [activeTab, s.emitEvent, setCurrentMeta]);
+  }, [activeTab, emitEvent, setCurrentMeta]);
 
   const handleStoreAiAction = useCallback((actionKey: string) => {
-    if (actionKey.startsWith("switch_tab:")) {
-      const tab = actionKey.replace("switch_tab:", "");
-      if (TAB_KEYS.includes(tab as TabKey)) {
-        handleTabChange(tab);
-      }
+    if (!actionKey.startsWith("switch_tab:")) return;
+    const tab = actionKey.replace("switch_tab:", "");
+    if (TAB_KEYS.includes(tab as TabKey)) {
+      handleTabChange(tab);
     }
   }, [handleTabChange]);
 
+  const loadData = s.loadData;
   const shortcuts = useMemo<ShortcutGroup[]>(() => [{
     groupName: "Store",
     shortcuts: [
@@ -127,9 +128,9 @@ export default function StorePage() {
       { key: "4", description: "Catalog", action: () => handleTabChange("catalog") },
       { key: "5", description: "Operations", action: () => handleTabChange("operations") },
       { key: "6", description: "Launch", action: () => handleTabChange("launch") },
-      { key: "r", description: "Refresh", action: () => { void s.loadData(); } },
+      { key: "r", description: "Refresh", action: () => { void loadData(); } },
     ],
-  }], [handleTabChange, s.loadData]);
+  }], [handleTabChange, loadData]);
   useKeyboardShortcuts(shortcuts, !s.loading);
 
   if (s.loading) return <StoreSkeleton />;
@@ -241,10 +242,10 @@ export default function StorePage() {
       </div>
 
       <div className="touch-pan-y">
-        <AnimatePresence mode="wait" custom={dirRef.current}>
+        <AnimatePresence mode="wait" custom={dir}>
           <motion.div
             key={activeTab}
-            custom={dirRef.current}
+            custom={dir}
             variants={SLIDE}
             initial="enter"
             animate="center"

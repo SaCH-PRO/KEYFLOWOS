@@ -46,6 +46,7 @@ function SelectedContextStrip({ contact, invoices, bookings, notes, tasks }: {
   notes?: Array<{ id: string; body: string }>;
   tasks?: Array<{ id: string; status?: string | null }>;
 }) {
+  // eslint-disable-next-line react-hooks/purity -- audited: time-relative next booking lookup
   const latestBooking = bookings?.find(b => new Date(b.startTime).getTime() > Date.now());
   const pendingInvoice = invoices?.find(i => i.status === "SENT" || i.status === "OVERDUE");
   const latestNote = notes?.[0];
