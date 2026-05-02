@@ -80,7 +80,7 @@ export default function KeyflowCommandPage() {
   const pageContext = useMemo(() => {
     if (!d.data) return undefined;
     return {
-      page: "KEYFLOW COMMAND",
+      page: "KEYFLOW",
       summary: "Operator's flagship workspace with priorities, calendar, projections, and module health.",
       data: {
         momentumScore: d.data.snapshot.momentumScore,
@@ -185,12 +185,12 @@ export default function KeyflowCommandPage() {
     <>
       <WorkspaceShell
         icon={Sparkles}
-        title="KEYFLOW COMMAND"
+        title="KEYFLOW"
         subtitle="Operator headquarters · live brain across every module"
         iconColor="#F97316"
         ai={{
           hook: aiHub,
-          moduleName: "KEYFLOW COMMAND",
+          moduleName: "KEYFLOW",
           onAction: handleAiAction,
         }}
         metricStrip={

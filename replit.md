@@ -17,13 +17,13 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Compact listing/grid views with hover-revealed details and click-to-full-detail.
 - Standardized shared component library and consolidated shell design.
 - Simplified "Today" surface with greeting, cash flow forecast, priority queue, and AI briefing.
-- Tiered navigation with Primary Rail + Secondary Panel, featuring five master surfaces: Cockpit, KEYFLOW COMMAND, Workspaces, Studio, and Public.
+- Tiered navigation with Primary Rail + Secondary Panel, featuring five master surfaces: Cockpit, KEYFLOW (formerly "KEYFLOW COMMAND"; route still `/app/keyflow-command`), Workspaces, Studio, and Public.
 
 **Technical Implementations & Features:**
 - **AI-Powered Automation:** Implements a Business Autopilot System for archetype inference, revenue model detection, task orchestration, legal/compliance, and a global AI entry point with route-aware context detection. The AI Business Office Foundations layer utilizes an Intent → Plan → Execute → Log pipeline with a 4-tier governance engine and audit trail. An AI Copilot UX Shell provides a Global Copilot Panel (AI Command Center), module-contextual quick actions, and a Pro Auto Monitoring Engine scanning health domains for suggestions.
 - **Global AI Command Layer:** The Copilot Panel acts as the sole AI interaction surface across all workspaces, featuring plan-first chat execution, dynamic quick prompts, and unified cross-module queues with context awareness.
 - **Business Intelligence Context System:** Gathers comprehensive business context from 16 guidance sub-profiles with a 5-tier weighted completeness system and a Business Builder intake wizard.
-- **KEYFLOW COMMAND (Flagship Operator HQ):** The default home surface, centralizing Command Entry, Business Health overview, Priority Queue, Risk Alerts, Pending Approvals, AI Daily Plan, Storefront Intelligence, Growth Operations, and Module Health Grid. Includes a Unified Calendar, Keyflow Notes drawer, and Jarvis Voice surface with Whisper STT and GPT-4o-mini-TTS streaming.
+- **KEYFLOW (Flagship Operator HQ, formerly "KEYFLOW COMMAND"):** The default home surface, centralizing Command Entry, Business Health overview, Priority Queue, Risk Alerts, Pending Approvals, AI Daily Plan, Storefront Intelligence, Growth Operations, and Module Health Grid. Includes a Unified Calendar, Keyflow Notes drawer, and Jarvis Voice surface with Whisper STT and GPT-4o-mini-TTS streaming.
 - **Workspaces:** Dedicated workspaces for Revenue, Clients, Calendar, Content, Autopilot, Profile & Intelligence, Projects, and Expenses.
 - **Core Business Functions:** Incorporates Billing & Payment, User & Security (Multi-Tenant System, granular permissions, Team Activity Log), and a Financial Copilot Agent.
 - **Connector Framework & Event Normalization:** A unified connector framework providing a standard interface for integrations, including a `ConnectorRegistryService`, canonical event schema, `EntityResolutionService` for deduplicating external contacts, `ConnectorHealthMonitorService`, and a `ConnectorSyncSchedulerService` for nightly syncs.
