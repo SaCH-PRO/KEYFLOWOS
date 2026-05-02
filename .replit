@@ -63,8 +63,8 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["bash", "-c", "cd apps/server && node dist/src/main.js & cd apps/web && pnpm start"]
-build = ["bash", "-c", "pnpm --filter db exec prisma generate && cd apps/server && pnpm build && cd ../../apps/web && pnpm build"]
+run = ["bash", "scripts/start-prod.sh"]
+build = ["bash", "-c", "pnpm install --frozen-lockfile && pnpm --filter @keyflow/db run db:generate && pnpm --filter web build"]
 
 [postMerge]
 path = "scripts/post-merge.sh"

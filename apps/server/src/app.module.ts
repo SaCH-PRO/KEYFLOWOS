@@ -108,6 +108,9 @@ import { SeoModule } from './modules/seo/seo.module';
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply(CorrelationIdMiddleware).forRoutes('*');
-    consumer.apply(AuthMiddleware).forRoutes('*');
+    consumer
+      .apply(AuthMiddleware)
+      .exclude('healthz', 'readyz')
+      .forRoutes('*');
   }
 }

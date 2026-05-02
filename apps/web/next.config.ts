@@ -1,7 +1,35 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 import type { NextConfig } from "next";
+import { ensureValidWebEnv } from "./src/lib/env";
 
 const repoRoot = path.resolve(__dirname, "../../");
+
+// Next.js loads .env files itself, but only AFTER next.config.ts is
+// evaluated. Manually preload the repo-root .env(s) so the env validator
+// below sees them. Best-effort: never throw if dotenv isn't installed.
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const dotenv = require("dotenv");
+  for (const p of [
+    path.join(repoRoot, ".env.local"),
+    path.join(repoRoot, ".env"),
+    path.join(__dirname, ".env.local"),
+    path.join(__dirname, ".env"),
+  ]) {
+    if (existsSync(p)) {
+      dotenv.config({ path: p, override: false });
+    }
+  }
+} catch {
+  // dotenv missing — Next.js will still load .env at runtime; the in-app
+  // server-side validator (apps/web/src/app/api/healthz/route.ts) will
+  // surface any problems then.
+}
+
+// Fail fast on missing/malformed env at build time. Skipped for `next lint`
+// or other tooling that doesn't actually serve traffic via env-skip flag.
+ensureValidWebEnv(process.env);
 
 /**
  * Allowed dev origins for Next.js' anti-CSRF in dev mode.

@@ -6,8 +6,13 @@ import rateLimit from 'express-rate-limit';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './core/filters/http-exception.filter';
 import { allowedCorsOrigins } from './core/config/runtime-urls';
+import { ensureValidServerEnv } from './core/config/env';
 
 async function bootstrap() {
+  // Fail fast on missing/malformed env. Prints a single, readable list and
+  // exits non-zero before NestFactory tries to initialize anything.
+  ensureValidServerEnv(process.env);
+
   if (
     process.env.NODE_ENV === 'production' &&
     (process.env.KEYFLOW_DEV_AUTH_BYPASS === 'true' || process.env.KEYFLOW_DEV_AUTH_BYPASS === '1')
@@ -68,15 +73,18 @@ async function bootstrap() {
     crossOriginEmbedderPolicy: false,
   }));
 
-  app.use(
-    rateLimit({
-      windowMs: 60 * 1000,
-      max: 200,
-      standardHeaders: true,
-      legacyHeaders: false,
-      message: { statusCode: 429, message: 'Too many requests, please try again later', error: 'Too Many Requests' },
-    }),
-  );
+  // Rate limit everything EXCEPT the top-level health/readiness endpoints
+  // — load balancers and the workflow waitForPort probe must always be
+  // able to hit them.
+  const limiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 200,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { statusCode: 429, message: 'Too many requests, please try again later', error: 'Too Many Requests' },
+    skip: (req) => req.path === '/healthz' || req.path === '/readyz',
+  });
+  app.use(limiter);
 
   const allowedOrigins = allowedCorsOrigins();
   const replitSlug = process.env.REPL_SLUG;
@@ -99,6 +107,9 @@ async function bootstrap() {
   });
   const port = Number(process.env.PORT) || 3001;
   await app.listen(port, '0.0.0.0');
-  console.log(`Application is running on: http://localhost:${port}`);
+  // eslint-disable-next-line no-console
+  console.log(`[boot] API ready on http://localhost:${port} (commit=${(process.env.GIT_COMMIT || 'unknown').slice(0, 12)}, env=${process.env.NODE_ENV || 'development'})`);
+  // eslint-disable-next-line no-console
+  console.log(`[boot] Health: GET /healthz  Readiness: GET /readyz`);
 }
 bootstrap();
