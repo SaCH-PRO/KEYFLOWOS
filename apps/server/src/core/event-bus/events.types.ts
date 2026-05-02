@@ -435,6 +435,7 @@ export class SocialEngagementReceivedPayload implements ConnectorEventEnvelope {
   platform!: string;
   type!: string;
   postId?: string;
+  contactId?: string;
 }
 
 export class FormSubmittedPayload implements ConnectorEventEnvelope {

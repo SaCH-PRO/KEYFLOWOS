@@ -13,6 +13,16 @@ import {
   PayPalConnector,
   WiPayConnector,
   StripeConnector,
+  QuickbooksConnector,
+  XeroConnector,
+  MailchimpConnector,
+  KlaviyoConnector,
+  LinkedInConnector,
+  TikTokConnector,
+  TwitterConnector,
+  TypeformConnector,
+  JotformConnector,
+  WebhookFormConnector,
 } from './implementations';
 
 @Injectable()
@@ -34,21 +44,44 @@ export class ConnectorInitializerService implements OnModuleInit {
     @Inject(PayPalConnector) private readonly paypal: PayPalConnector,
     @Inject(WiPayConnector) private readonly wipay: WiPayConnector,
     @Inject(StripeConnector) private readonly stripe: StripeConnector,
+    @Inject(QuickbooksConnector) private readonly quickbooks: QuickbooksConnector,
+    @Inject(XeroConnector) private readonly xero: XeroConnector,
+    @Inject(MailchimpConnector) private readonly mailchimp: MailchimpConnector,
+    @Inject(KlaviyoConnector) private readonly klaviyo: KlaviyoConnector,
+    @Inject(LinkedInConnector) private readonly linkedin: LinkedInConnector,
+    @Inject(TikTokConnector) private readonly tiktok: TikTokConnector,
+    @Inject(TwitterConnector) private readonly twitter: TwitterConnector,
+    @Inject(TypeformConnector) private readonly typeform: TypeformConnector,
+    @Inject(JotformConnector) private readonly jotform: JotformConnector,
+    @Inject(WebhookFormConnector) private readonly webhookForm: WebhookFormConnector,
   ) {}
 
   onModuleInit() {
-    this.registry.register(this.gmail);
-    this.registry.register(this.calendar);
-    this.registry.register(this.drive);
-    this.registry.register(this.forms);
-    this.registry.register(this.contacts);
-    this.registry.register(this.businessProfile);
-    this.registry.register(this.maps);
-    this.registry.register(this.whatsapp);
-    this.registry.register(this.meta);
-    this.registry.register(this.paypal);
-    this.registry.register(this.wipay);
-    this.registry.register(this.stripe);
-    this.logger.log(`Initialized ${12} connectors in the registry`);
+    const all = [
+      this.gmail,
+      this.calendar,
+      this.drive,
+      this.forms,
+      this.contacts,
+      this.businessProfile,
+      this.maps,
+      this.whatsapp,
+      this.meta,
+      this.paypal,
+      this.wipay,
+      this.stripe,
+      this.quickbooks,
+      this.xero,
+      this.mailchimp,
+      this.klaviyo,
+      this.linkedin,
+      this.tiktok,
+      this.twitter,
+      this.typeform,
+      this.jotform,
+      this.webhookForm,
+    ];
+    for (const c of all) this.registry.register(c);
+    this.logger.log(`Initialized ${all.length} connectors in the registry`);
   }
 }
