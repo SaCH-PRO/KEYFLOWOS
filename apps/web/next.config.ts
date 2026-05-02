@@ -76,25 +76,29 @@ const nextConfig: NextConfig = {
   },
   allowedDevOrigins: buildAllowedDevOrigins(),
   async headers() {
-    // Static assets always get the immutable long-cache treatment so
-    // repeat-visit performance doesn't regress in production
-    // (security patch ported from develop 1c7e6f93).
-    const staticHeaders = {
-      source: "/_next/static/(.*)",
-      headers: [
-        {
-          key: "Cache-Control",
-          value: "public, max-age=31536000, immutable",
-        },
-      ],
-    };
-
+    // Production: long-cache /_next/static so repeat-visit performance
+    // doesn't regress (ported from develop 1c7e6f93).
     if (isProd) {
-      return [staticHeaders];
+      return [
+        {
+          source: "/_next/static/(.*)",
+          headers: [
+            {
+              key: "Cache-Control",
+              value: "public, max-age=31536000, immutable",
+            },
+          ],
+        },
+      ];
     }
 
+    // Dev: do NOT override Cache-Control on /_next/static — Next.js owns
+    // those headers for HMR module identity, and overriding them prints
+    // "Custom Cache-Control headers detected" and destabilizes Turbopack
+    // (workspace-root inference fails on the next config-change restart).
+    // Apply no-cache only to non-static routes so iframe previews see
+    // fresh code without breaking the dev pipeline.
     return [
-      staticHeaders,
       {
         source: "/((?!_next/static).*)",
         headers: [
