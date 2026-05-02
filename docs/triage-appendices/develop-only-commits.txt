@@ -1,0 +1,31 @@
+7c278e073c72aed231515cd57041dc0b98dc8198 | 2026-04-23 01:55:43 +0000 | Cursor Agent | Map Supabase env vars for web auth
+823561e876a34bfdc8ce4851aea1fc8868eec717 | 2026-04-23 02:20:41 +0000 | Cursor Agent | Use runtime origin for auth redirects
+e945807e68d4eb02a39c257c7b6b1109283534e4 | 2026-04-23 02:46:55 +0000 | Cursor Agent | test: reset mocks between AI spec cases
+d4b13c13c3149dfabae1267e6d54c5f7d6390cf2 | 2026-04-23 03:37:45 +0000 | Cursor Agent | Add cloud bootstrap workflow and backend proxy
+5649a79b05cca2ee11b4e20d74d12c4c5374466b | 2026-04-23 04:44:38 +0000 | Cursor Agent | Implement SWOT critical upgrades across auth onboarding and control tower
+91ba7c0c3e2404b9fe1fdd6f3083fa281e4dffb5 | 2026-04-23 05:03:25 +0000 | Cursor Agent | Fix follow-up typing regressions in onboarding and control tower
+862147e37d5850540162e43e22870c4320b8af2b | 2026-04-23 05:21:27 +0000 | Cursor Agent | Fix cross-module type regressions blocking builds
+8f1aa44553b721c97ecf9dd4202d0c3bcb8a4e98 | 2026-04-23 05:41:51 +0000 | Cursor Agent | Fix Next 16 search params SSR build blockers across app and auth
+670b86f4c73714e6435915df7d27cea4c071a2b2 | 2026-04-23 05:59:42 +0000 | Cursor Agent | Stabilize lint and remove Next 16 SSR search param blockers
+654068b3138aba02639972cbfc4fc1bb235dc9d5 | 2026-04-23 13:54:20 -0400 | SaCH-PRO | Merge pull request #10 from SaCH-PRO/cursor/fix-flaky-ai-tests-67d1
+93184e28bdc3f5b0af0280b39b68371c91559779 | 2026-04-23 13:58:32 -0400 | SaCH-PRO | Merge pull request #12 from SaCH-PRO/cursor/swot-critical-upgrades-c65f
+fb1d88f2698ff0ea3a6e86af40bbea8201bcbdd7 | 2026-04-23 14:21:58 -0400 | SaCH-PRO | Add auth start choice screen (#11)
+2d488ccf1595fc0e3e41ac99e840b0d195ea336d | 2026-04-24 00:27:21 +0000 | Cursor Agent | fix(web): handle oauth hash errors and verified banner
+1c358ae3e75e3f607ccb46550d29a4b535d80856 | 2026-04-24 00:57:04 +0000 | Cursor Agent | fix(web): keep ControlTowerPage hook order stable
+04de91febdc955b5673bc648a0d97c7848ca8380 | 2026-04-24 01:30:30 +0000 | Cursor Agent | chore: stabilize server vercel deploy and add repo health audit
+42d6ac8e31a704acf81fdbb9ac2c1df6a366cd7a | 2026-04-23 21:37:26 -0400 | Sachin Dookie | Merge pull request #17 from SaCH-PRO/cursor/consolidate-web-hotfixes-be97
+f5cf9cbdcd4cfb5bca06a8660d9633d794d67365 | 2026-04-24 02:07:22 +0000 | Cursor Agent | feat(web): overhaul onboarding and profile flow diagnostics
+e91d037985016e608d2bcecc2eff406318b3911c | 2026-04-24 03:38:17 +0000 | Claude | fix: enable mobile access and align PWA theme color
+1c7e6f93b060f572e9eb108b3977af250d30a965 | 2026-04-24 03:43:18 +0000 | Claude | fix(security): patch critical/high audit findings
+7be77c727c3a4143bb56d52aaf8121a6bcce3a61 | 2026-04-25 15:47:24 -0400 | Sachin Dookie | Merge pull request #18 from SaCH-PRO/cursor/onboarding-profile-overhaul-be97
+0d246e7530ddca27946ac7dc2c10e639de383690 | 2026-04-25 20:33:12 +0000 | Cursor Agent | feat(web): simplify onboarding checklist into compact square strip
+9f198a3102c809b5dbb0108947025d9f082ae475 | 2026-04-25 20:58:07 +0000 | Cursor Agent | fix(web): make onboarding checklist blocks clearly square
+94531dd81d3ed6754de37b53255531a420ff4c74 | 2026-04-25 21:09:08 +0000 | Cursor Agent | fix(web): prevent breadcrumb hydration mismatch on initial render
+67b9659acf028c27569843f379c1c5a04df7fdcd | 2026-04-25 17:26:15 -0400 | Sachin Dookie | Merge pull request #20 from SaCH-PRO/cursor/minimal-onboarding-checklist-be97
+59fe9d904b076e0117c6a1393a8f8b819567a082 | 2026-04-25 17:26:42 -0400 | Sachin Dookie | Merge pull request #21 from SaCH-PRO/cursor/fix-breadcrumb-hydration-be97
+7a7d0a21220a50350dcce6680be713bd12cbbfd3 | 2026-04-25 21:29:45 +0000 | Cursor Agent | fix(web): gate origin breadcrumb until client hydration
+906f6c838119f6e549a90678998a5567b8c8941f | 2026-04-25 17:40:03 -0400 | Sachin Dookie | Merge pull request #22 from SaCH-PRO/cursor/fix-breadcrumb-hydration-be97
+14718007aed3379af0120e5a6b2987f53e2e74e2 | 2026-04-30 18:39:29 -0400 | SACHIN | yes
+6fffcface8b0f054c18c37efeab67e75c3f5251e | 2026-04-30 20:42:10 -0400 | SACHIN | zin
+6b312e2c1733a8d9b056e37f2615ce766487f78b | 2026-04-30 20:44:15 -0400 | Sachin Dookie | Merge pull request #24 from SaCH-PRO/claude/audit-mobile-support-cPW7i
+1f39ce48a747c9f96c82beb71fba07e91a0fc5f4 | 2026-04-30 20:52:42 -0400 | Sachin Dookie | Merge pull request #25 from SaCH-PRO/claude/audit-mobile-support-cPW7i
