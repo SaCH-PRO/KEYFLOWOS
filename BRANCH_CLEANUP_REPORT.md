@@ -247,6 +247,26 @@ GitHub default branch confirmed = main on YYYY-MM-DD by ____
 GitHub branch protection on main updated on YYYY-MM-DD by ____
 ```
 
+#### 5.2.1 Re-verification log (Task #264, 2026-05-02, task-agent isolate)
+
+Task #264 picked this work back up to attempt the destructive run. The isolate
+re-checked the §1 preconditions against `origin` and confirmed the work
+remains **BLOCKED**. No tags were pushed, no branches were deleted, and no
+ref on origin was modified.
+
+| Check                                                             | Command                                                              | Result on 2026-05-02                  | Status   |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------- | -------- |
+| Push credentials to `https://github.com/SaCH-PRO/KEYFLOWOS`       | `git push --dry-run origin HEAD:refs/heads/main`                      | `fatal: Authentication failed … Password authentication is not supported for Git operations.` | NOT MET  |
+| Consolidation PR (#239) merged on `origin/main`                   | `git rev-list --left-right --count origin/main...origin/develop`      | `36 31` (unchanged from §1 snapshot)  | NOT MET  |
+| `pre-consolidation/{main,develop}-2026-05-02` tags exist on origin | `git ls-remote --tags origin 'pre-consolidation/*'`                   | empty                                 | NOT MET  |
+| Any `archive/*` tags already pushed                                | `git ls-remote --tags origin 'archive/*' \| wc -l`                    | `0`                                   | clean    |
+
+Conclusion: the destructive run still has to be executed by a human operator
+on a workstation that holds a GitHub PAT/SSH key with push rights to
+`SaCH-PRO/KEYFLOWOS`, and only **after** the Task #239 consolidation PR has
+landed on `origin/main`. The §3.1 / §4 / §5 commands are unchanged and
+remain the source of truth for the run.
+
 ---
 
 ## 6. What this task actually shipped
@@ -310,6 +330,12 @@ git checkout -b main-restore pre-consolidation/main-2026-05-02
 ```
 
 ### 6.3 Hand-off checklist for the operator
+
+> **Status as of 2026-05-02 (Task #264 re-verification, see §5.2.1):**
+> Steps 1 and 2 are still NOT done on `origin`. Steps 3–7 must not be
+> attempted until step 1 is true and step 2 has actually pushed both
+> `pre-consolidation/{main,develop}-2026-05-02` tags. Re-run the four
+> probe commands in §5.2.1 to re-confirm before starting.
 
 1. Confirm Task #239 (the consolidation PR) is merged into `origin/main`.
 2. Push `pre-consolidation/main-2026-05-02` and `pre-consolidation/develop-2026-05-02`
