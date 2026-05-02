@@ -1,0 +1,39 @@
+830db2af8864f60a59a700c336646120b6c51963 | 2026-05-01 21:55:27 +0000 | keyflowostt | Add pagination to Recent Endorsements section on community profile page
+d7de95a4bd4e77d0e963a314a35c0f3e0deb6728 | 2026-05-01 22:04:23 +0000 | keyflowostt | Add direct messaging and collaboration requests between businesses (Task #139)
+c28d16352cbddbddd14fea39d9965f6381606242 | 2026-05-01 22:04:46 +0000 | keyflowostt | Update documentation to refine AI command layer description
+573436f6c6ab882b6a858080ba1799980f289738 | 2026-05-01 22:10:52 +0000 | keyflowostt | feat: Add match feedback system for AI recommendation quality
+1df63bb702366a312f250e9ea9784ff939b0e4cd | 2026-05-01 22:20:22 +0000 | keyflowostt | Community Phase 2: Complete frontend UI for relationship & transaction actions
+5a687e7c4240cc6d0a6bae6ae5cd4b52f2366be8 | 2026-05-01 22:20:47 +0000 | keyflowostt | Improve design system consistency across the application
+ecb7bba71d5578fd5640c28c2d20566b89412383 | 2026-05-01 22:27:14 +0000 | keyflowostt | Task #174: Reality audit + Replit-independence pass
+fbd57d2ce2a0e06a24dbd784844e4f813b37380c | 2026-05-01 22:50:01 +0000 | keyflowostt | Build KEYFLOW COMMAND flagship page (Task #175)
+3f6c1092f0f035e3631f0fe5de75c188d3fdba2b | 2026-05-01 22:50:28 +0000 | keyflowostt | Update documentation to reflect host-agnostic platform and new AI features
+14f75a368912089282dddd063f3c6b7447ac68aa | 2026-05-01 22:50:43 +0000 | keyflowostt | Community Phase 3 — Trust & Reputation Engine
+2702aada8c276a71768e12af05dae4f93eb6ea7e | 2026-05-01 22:50:55 +0000 | keyflowostt | chore(.replit): drop hardcoded preview-domain URLs from [userenv.shared]
+a28ed78f09db8c628d8e88b598e75f9e2084c8b1 | 2026-05-01 22:51:18 +0000 | keyflowostt | Remove unused @replit/object-storage dependency
+8a87866207cda50a0174b08b014d149569736914 | 2026-05-01 22:52:28 +0000 | keyflowostt | Fix database type errors blocking server production builds
+cc9252c9386ed7fd4101c144f535d8196a77d9cf | 2026-05-01 22:54:00 +0000 | keyflowostt | KeyFlow Connect hub + full Google suite (T179)
+de616d76a5d8029c147664154347790906378211 | 2026-05-01 23:08:16 +0000 | keyflowostt | Task #188: Show real-time activity events as connectors run
+29991a9e5a16bf5c4bcdbe9c126084923e2791bf | 2026-05-01 23:08:20 +0000 | keyflowostt | Task #189: Send connection-health alerts before connectors silently break
+ebfbea2e00592669cb91b51cd28011525d96e7e9 | 2026-05-01 23:09:10 +0000 | keyflowostt | Community Phase 4: AI Matching & Partner Intelligence (Task #131)
+26b2f59ebd45636ecadb842a619d1e2f0f23ed8f | 2026-05-01 23:13:08 +0000 | keyflowostt | feat(connect): first-class screens for Forms, Contacts, Business Profile, Maps + reusable AddressAutocomplete
+5685a984c9de90249b6556354cbd88246d2ffc99 | 2026-05-01 23:23:10 +0000 | keyflowostt | Allow dismissing or snoozing relationship insight suggestions (Task #200)
+76b149fd615be7e1c6366eecec2cfbb4a4772c98 | 2026-05-01 23:25:56 +0000 | keyflowostt | Git commit prior to merge
+65ac939d429b60db146956bb1765dfacd3cacef2 | 2026-05-01 23:25:57 +0000 | keyflowostt | Add Playwright e2e tests for new Connect screens + address autocomplete
+e0ea10fe19de958fe94b996dc107c16d4e069699 | 2026-05-01 23:26:01 +0000 | keyflowostt | Replace booking notes "Location:" hack with real schema fields
+1544c89d1899c871971dc645c70fdd62b3dfaf6c | 2026-05-01 23:27:44 +0000 | keyflowostt | Task #132: Community Phase 5 — Network Activity & Growth Layer
+814bff67ecdf74277d88ead4421b7553d84858a7 | 2026-05-01 23:28:29 +0000 | keyflowostt | Use BusinessAddressAutocomplete in CRM contact/client form
+03e0851f79bbc7021e5b35e8d1fa4e12e7381dd8 | 2026-05-01 23:28:38 +0000 | keyflowostt | Show authors the providers matched to their need-style community posts
+ba401b4bfc81184dad242e737337c1d21efdf9b9 | 2026-05-01 23:35:55 +0000 | keyflowostt | Track AI partner suggestion conversions (Phase 4 feedback loop)
+ce242f9ba5b25161d7c242963486e42c022b9252 | 2026-05-01 23:35:57 +0000 | keyflowostt | Let staff edit a booking's location after creation
+26b146c82a5bef4467392182f9a846732bb35a49 | 2026-05-01 23:39:15 +0000 | keyflowostt | Show booking locations on the public booking + confirmation flow
+d9d6d3e36cc1b1a3e95eff0574cf335aee63ed1c | 2026-05-01 23:39:44 +0000 | keyflowostt | Show pending and empty match feedback on need-style community posts
+82a3821ff81373ac730d46780600b31fbef6118b | 2026-05-01 23:41:51 +0000 | keyflowostt | Fix Turbopack HMR error on ThemeProvider (Task #216)
+cc99554238eea06875c1ead7ecc479e61f8a71d2 | 2026-05-01 23:43:15 +0000 | keyflowostt | Surface AI match explanation to matched providers in community Notifications
+1d007832df95ecdeded10e0b4930af417fd5b7f4 | 2026-05-01 23:49:23 +0000 | keyflowostt | Stop Turbopack HMR error returning on ThemeProvider (Task #225)
+b2a8523e58825f419536943c9af8419350c8f27a | 2026-05-02 00:00:38 +0000 | keyflowostt | Task #226: Root-cause and fix recurring Turbopack HMR factory error
+4f2fedb9244b6ee720b38d896d4a8abe8ba57944 | 2026-05-02 00:00:57 +0000 | keyflowostt | Add development-only auth bypass for the seeded "keyflowdev" SUPER_ADMIN profile
+3b30d2bdaf3d92a227861890ad4e1611b3441213 | 2026-05-02 00:16:36 +0000 | keyflowostt | Rewrite error boundary components to use createElement for stability
+2c6ed60f7fd04c3f91511026cb062e78795f13ab | 2026-05-02 00:26:46 +0000 | keyflowostt | Remove root error handling file and adjust global error display
+493b1b948cfa92768ab08b98da6e5f014f06b7cc | 2026-05-02 00:30:50 +0000 | keyflowostt | Suppress a recurring development error that does not affect functionality
+e666b04820646a438cb9c945b628c8b87155b91e | 2026-05-02 00:38:50 +0000 | keyflowostt | Git commit prior to merge
+5f798bc51402a9508aebf3786e5d5cc2700bf76f | 2026-05-02 00:38:51 +0000 | keyflowostt | Merged changes from 6hjtri9o/main
