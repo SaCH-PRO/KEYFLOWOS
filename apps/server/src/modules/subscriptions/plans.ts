@@ -63,6 +63,7 @@ export const AI_CREDIT_COSTS: Record<string, number> = {
   relationship_insights: 1,
   seo_content_brief: 3,
   seo_gap_analysis: 2,
+  growth_insight: 3,
 };
 
 export const AI_OVERAGE_RATE_TTD = 2.50;

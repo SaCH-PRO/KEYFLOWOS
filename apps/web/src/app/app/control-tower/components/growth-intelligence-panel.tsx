@@ -65,6 +65,9 @@ type Insight = {
   title: string;
   description: string | null;
   recommendation: string | null;
+  rationale: string | null;
+  suggestedAction: string | null;
+  source: string | null;
   estimatedImpact: number | null;
   impactCurrency: string | null;
   actionLabel: string | null;
@@ -360,7 +363,19 @@ export function GrowthIntelligencePanel({ businessId }: { businessId: string }) 
                       style={{ background: SEVERITY_COLORS[ins.severity] ?? "#9CA3AF" }}
                     />
                     <div className="flex-1">
-                      <div className="text-sm font-semibold">{ins.title}</div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="text-sm font-semibold">{ins.title}</div>
+                        {ins.source === "ai" && (
+                          <span
+                            className="text-[9px] px-1.5 py-0.5 kf-radius-sm font-semibold uppercase tracking-wide flex items-center gap-1"
+                            style={{ background: "rgba(168, 85, 247, 0.15)", color: "#A855F7" }}
+                            title="Rationale and suggested action written by AI"
+                          >
+                            <Sparkles className="w-2.5 h-2.5" />
+                            AI
+                          </span>
+                        )}
+                      </div>
                       {ins.description && (
                         <div className="text-xs text-muted-foreground mt-0.5">{ins.description}</div>
                       )}
@@ -368,6 +383,18 @@ export function GrowthIntelligencePanel({ businessId }: { businessId: string }) 
                         <div className="text-xs mt-1.5 text-foreground/80">
                           <span className="font-medium">Recommendation: </span>
                           {ins.recommendation}
+                        </div>
+                      )}
+                      {ins.rationale && (
+                        <div className="text-xs mt-1.5 italic text-muted-foreground">
+                          <span className="font-medium not-italic text-foreground/70">Why it matters: </span>
+                          {ins.rationale}
+                        </div>
+                      )}
+                      {ins.suggestedAction && (
+                        <div className="text-xs mt-1.5 text-foreground/90">
+                          <span className="font-medium">Try first: </span>
+                          {ins.suggestedAction}
                         </div>
                       )}
                       {ins.estimatedImpact !== null && ins.estimatedImpact > 0 && (
