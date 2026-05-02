@@ -1,9 +1,28 @@
 "use client";
 
 /*
- * IMPORTANT: This file intentionally uses React.createElement instead of JSX.
- * Same reason as apps/web/src/app/error.tsx — see the comment at the top of
- * that file. Do NOT convert this back to JSX.
+ * IMPORTANT: This file uses the .ts extension (NOT .tsx) intentionally.
+ *
+ * Next 16 + Turbopack + React 19 has a recurring HMR bug where the
+ * `react/jsx-dev-runtime` module factory gets evicted from the dev cache
+ * during Fast Refresh cycles. Because root error boundaries are loaded
+ * on-demand (only when an error actually occurs), they almost always
+ * try to instantiate AFTER the runtime factory has been dropped,
+ * surfacing the dreaded "module factory is not available" error.
+ *
+ * SWC auto-injects `import "react/jsx-dev-runtime"` into every .tsx file
+ * (regardless of whether JSX is actually used in the source). Renaming
+ * the file to .ts disables that injection entirely, since .ts files do
+ * not support JSX syntax.
+ *
+ * As a result this file uses React.createElement directly.
+ *
+ * Do NOT rename back to .tsx. Do NOT add JSX. See apps/web/README.md
+ * Troubleshooting and Tasks #216, #225, #226.
+ *
+ * The root-level error.tsx file was deleted entirely for the same
+ * reason — global-error.ts (this file) catches all the cases it would
+ * have caught.
  */
 
 import { createElement as h, useEffect } from "react";
