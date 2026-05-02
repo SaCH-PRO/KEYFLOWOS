@@ -29,9 +29,10 @@ without losing work.
   with an `archive/develop-<date>` tag and a note in
   `BRANCH_CLEANUP_REPORT.md`). New work must not branch from `develop`.
 - **No new long-lived integration branches** (no `develop`, `staging`,
-  `next`, `v2`, etc.) without a written owner, a written sunset date, and a
-  weekly reconciliation run via `scripts/check-branch-divergence.sh main
-  <branch> --max-commits 50 --max-files 100`.
+  `next`, `v2`, etc.) without a written owner, a written sunset date,
+  and CI enforcement via the `Branch divergence` workflow (Rule 5).
+  Equivalent manual reconciliation: `scripts/check-branch-divergence.sh
+  main <branch> --max-commits 25 --max-files 50`.
 - **GitHub default branch and required-status-checks point at `main`.**
   Branch protection on origin enforces: PRs only, no force-push, no direct
   push from non-admin accounts.
@@ -83,11 +84,34 @@ without losing work.
 
 - Any branch that the team intends to keep alive longer than 7 days must
   be checked weekly with `scripts/check-branch-divergence.sh` against
-  `main`. Default thresholds: 50 commits / 100 files. Exceeding either is
-  a signal to either rebase, merge, or archive — not to continue
-  diverging silently.
-- CI integration is a follow-up; for now this is a manual maintenance
-  step run by the repo owner.
+  `main`. Default thresholds: **25 commits / 50 files** (lines disabled).
+  Exceeding either is a signal to either rebase, merge, or archive — not
+  to continue diverging silently.
+- **CI enforces this automatically** via
+  `.github/workflows/branch-divergence.yml`. The workflow runs on:
+  - every PR targeting `main` (compares the PR head against
+    `origin/main`), and
+  - every push to a known long-lived branch (`develop`, `staging`,
+    `next`, `release/**`, `long-lived/**`).
+
+  The job is `Branch divergence / Check divergence vs main`; mark it
+  **required** in GitHub branch protection for `main` so a drifting
+  branch cannot merge.
+- **Re-run the same check locally** before pushing:
+  ```bash
+  scripts/check-branch-divergence.sh main HEAD \
+    --max-commits 25 --max-files 50 --fetch
+  ```
+- **Need a temporary threshold bump?** Two options, in order of
+  preference:
+  1. Rebase or merge `main` into the branch, or split the work into
+     smaller PRs. This is almost always the right answer.
+  2. If a one-off bump is genuinely needed, dispatch the workflow
+     manually via GitHub Actions → **Branch divergence** → **Run
+     workflow** with elevated `max_commits` / `max_files` inputs, link
+     the run in the PR description, and explain why. Bumping the
+     defaults in `branch-divergence.yml` requires a PR that updates this
+     doc in the same change.
 
 ## Rule 6 — Mirror branches are not allowed
 
@@ -103,10 +127,12 @@ without losing work.
 | Cadence  | Action                                                                 |
 | -------- | ---------------------------------------------------------------------- |
 | Per PR   | Reviewer enforces Rule 2 (one scope per PR, no piggy-backed work).     |
+| Per PR   | CI runs `Branch divergence / Check divergence vs main` (Rule 5).       |
+| Per push | CI re-runs the divergence check on long-lived branches (Rule 5).       |
 | Daily    | Platform auto-archives `subrepl-*` branches on task merge (Rule 3).    |
 | Weekly   | Maintainer runs `scripts/archive-stale-subrepl-branches.sh --days 14`. |
-| Weekly   | Maintainer runs `scripts/check-branch-divergence.sh` for any branch    |
-|          | that still exists outside `main`.                                      |
+| Weekly   | Maintainer spot-checks `scripts/check-branch-divergence.sh` for any    |
+|          | branch that still exists outside `main` (CI is the primary gate).      |
 | Quarterly| Audit: `git for-each-ref refs/heads/ refs/remotes/origin/` plus a      |
 |          | manual scan of GitHub branches for anything missing an `archive/*` tag. |
 
