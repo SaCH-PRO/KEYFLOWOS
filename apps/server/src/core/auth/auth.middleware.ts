@@ -3,11 +3,12 @@ import { NextFunction, Request, Response } from 'express';
 import { SupabaseAuthService } from './supabase-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  KEYFLOW_DEV_BYPASS_TOKEN,
-  KEYFLOW_DEV_USER_EMAIL,
-  KEYFLOW_DEV_USER_ID,
-  KEYFLOW_DEV_USER_ROLE,
+  getDefaultDevProfile,
+  getDevProfileByKey,
+  getDevProfileByToken,
   isDevAuthBypassEnabled,
+  isDevBypassToken,
+  KeyflowDevProfile,
 } from './keyflow-dev-auth';
 
 @Injectable()
@@ -22,8 +23,9 @@ export class AuthMiddleware implements NestMiddleware {
   ) {
     if (isDevAuthBypassEnabled() && !AuthMiddleware.bypassAnnounced) {
       AuthMiddleware.bypassAnnounced = true;
+      const def = getDefaultDevProfile();
       this.logger.warn(
-        `[KEYFLOW_DEV_AUTH_BYPASS] Dev auth bypass is ENABLED — every unauthenticated request will be treated as the "${KEYFLOW_DEV_USER_EMAIL}" SUPER_ADMIN profile. NEVER enable this in production.`,
+        `[KEYFLOW_DEV_AUTH_BYPASS] Dev auth bypass is ENABLED — unauthenticated requests default to "${def.email}" (${def.userRole}). Switch profiles via ?as=<key> or sentinel token. NEVER enable this in production.`,
       );
     }
   }
@@ -34,6 +36,28 @@ export class AuthMiddleware implements NestMiddleware {
       this.supabaseAuthInstance = new SupabaseAuthService();
     }
     return this.supabaseAuthInstance;
+  }
+
+  private attachProfile(req: Request, profile: KeyflowDevProfile, source: string) {
+    (req as any).user = {
+      id: profile.userId,
+      email: profile.email,
+      role: profile.userRole,
+    };
+    this.logger.debug(`Attached dev profile "${profile.key}" (${profile.userRole}) via ${source}`);
+  }
+
+  private resolveAsOverride(req: Request): KeyflowDevProfile | undefined {
+    const raw =
+      (typeof req.query?.as === 'string' && req.query.as) ||
+      (typeof req.headers['x-keyflow-dev-as'] === 'string' && (req.headers['x-keyflow-dev-as'] as string)) ||
+      undefined;
+    if (!raw) return undefined;
+    const profile = getDevProfileByKey(raw);
+    if (!profile) {
+      this.logger.warn(`?as=${raw} did not match any seeded dev profile — ignoring`);
+    }
+    return profile;
   }
 
   async use(req: Request, _res: Response, next: NextFunction) {
@@ -47,21 +71,27 @@ export class AuthMiddleware implements NestMiddleware {
 
     const bypassEnabled = isDevAuthBypassEnabled();
 
-    // Dev bypass: accept the sentinel token as the dev profile up-front so we
-    // skip Supabase verification entirely. Real tokens are still verified below.
-    if (bypassEnabled && token === KEYFLOW_DEV_BYPASS_TOKEN) {
-      (req as any).user = {
-        id: KEYFLOW_DEV_USER_ID,
-        email: KEYFLOW_DEV_USER_EMAIL,
-        role: KEYFLOW_DEV_USER_ROLE,
-      };
-      this.logger.debug('Attached keyflowdev profile from sentinel dev token');
-      next();
-      return;
+    // Dev bypass: an explicit ?as=<key> override (when bypass is on) wins,
+    // followed by sentinel token lookup. Real Supabase tokens are still
+    // verified below.
+    if (bypassEnabled) {
+      const override = this.resolveAsOverride(req);
+      if (override) {
+        this.attachProfile(req, override, '?as= override');
+        next();
+        return;
+      }
+
+      const tokenProfile = getDevProfileByToken(token);
+      if (tokenProfile) {
+        this.attachProfile(req, tokenProfile, 'sentinel dev token');
+        next();
+        return;
+      }
     }
 
-    // Reject the sentinel token outright when the bypass flag is not on.
-    if (!bypassEnabled && token === KEYFLOW_DEV_BYPASS_TOKEN) {
+    // Reject any sentinel token outright when the bypass flag is not on.
+    if (!bypassEnabled && isDevBypassToken(token)) {
       this.logger.warn('Dev sentinel token presented but KEYFLOW_DEV_AUTH_BYPASS is off — ignoring');
       next();
       return;
@@ -82,15 +112,11 @@ export class AuthMiddleware implements NestMiddleware {
       this.logger.debug(`AuthMiddleware error: ${(err as Error).message}`);
     }
 
-    // Final dev-bypass fallback: any unauthenticated request becomes the dev
-    // profile. This is what makes the entire app usable with no login screen.
+    // Final dev-bypass fallback: any unauthenticated request becomes the
+    // default dev profile. This is what makes the entire app usable with no
+    // login screen.
     if (bypassEnabled && !(req as any).user) {
-      (req as any).user = {
-        id: KEYFLOW_DEV_USER_ID,
-        email: KEYFLOW_DEV_USER_EMAIL,
-        role: KEYFLOW_DEV_USER_ROLE,
-      };
-      this.logger.debug('Attached keyflowdev profile via dev bypass fallback');
+      this.attachProfile(req, getDefaultDevProfile(), 'dev bypass fallback');
     }
 
     next();

@@ -2,12 +2,7 @@ import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { DOCUMENT_CATEGORIES, DOCUMENT_TYPES } from '../../modules/documents/document-taxonomy';
 import {
-  KEYFLOW_DEV_BUSINESS_ID,
-  KEYFLOW_DEV_BUSINESS_NAME,
-  KEYFLOW_DEV_USER_EMAIL,
-  KEYFLOW_DEV_USER_ID,
-  KEYFLOW_DEV_USER_NAME,
-  KEYFLOW_DEV_USER_ROLE,
+  KEYFLOW_DEV_PROFILES,
   isDevAuthBypassEnabled,
 } from '../auth/keyflow-dev-auth';
 
@@ -32,54 +27,89 @@ export class SeedService implements OnApplicationBootstrap {
 
   private async seedKeyflowDevProfile() {
     try {
-      await this.prisma.client.user.upsert({
-        where: { id: KEYFLOW_DEV_USER_ID },
-        create: {
-          id: KEYFLOW_DEV_USER_ID,
-          email: KEYFLOW_DEV_USER_EMAIL,
-          name: KEYFLOW_DEV_USER_NAME,
-          firstName: 'Keyflow',
-          lastName: 'Dev',
-          role: KEYFLOW_DEV_USER_ROLE,
-        },
-        update: {
-          email: KEYFLOW_DEV_USER_EMAIL,
-          role: KEYFLOW_DEV_USER_ROLE,
-        },
-      });
-
-      await this.prisma.client.business.upsert({
-        where: { id: KEYFLOW_DEV_BUSINESS_ID },
-        create: {
-          id: KEYFLOW_DEV_BUSINESS_ID,
-          name: KEYFLOW_DEV_BUSINESS_NAME,
-          ownerId: KEYFLOW_DEV_USER_ID,
-          onboardingComplete: true,
-        },
-        update: {
-          ownerId: KEYFLOW_DEV_USER_ID,
-        },
-      });
-
-      await this.prisma.client.membership.upsert({
-        where: {
-          userId_businessId: {
-            userId: KEYFLOW_DEV_USER_ID,
-            businessId: KEYFLOW_DEV_BUSINESS_ID,
+      // Seed every user row first so businesses can safely reference them as
+      // ownerId.
+      for (const profile of KEYFLOW_DEV_PROFILES) {
+        await this.prisma.client.user.upsert({
+          where: { id: profile.userId },
+          create: {
+            id: profile.userId,
+            email: profile.email,
+            name: profile.name,
+            firstName: profile.firstName,
+            lastName: profile.lastName,
+            role: profile.userRole,
           },
-        },
-        create: {
-          userId: KEYFLOW_DEV_USER_ID,
-          businessId: KEYFLOW_DEV_BUSINESS_ID,
-          role: 'OWNER',
-        },
-        update: {
-          role: 'OWNER',
-        },
-      });
+          update: {
+            email: profile.email,
+            name: profile.name,
+            firstName: profile.firstName,
+            lastName: profile.lastName,
+            role: profile.userRole,
+          },
+        });
+      }
 
+      // The Business.ownerId is the first profile that owns each businessId
+      // (in profile-list order). This keeps the existing dev business owned
+      // by the SUPER_ADMIN "super" profile.
+      const businessOwners = new Map<string, string>();
+      const businessNames = new Map<string, string>();
+      for (const profile of KEYFLOW_DEV_PROFILES) {
+        if (!businessOwners.has(profile.businessId) && profile.membershipRole === 'OWNER') {
+          businessOwners.set(profile.businessId, profile.userId);
+          businessNames.set(profile.businessId, profile.businessName);
+        }
+      }
+      // Fall back: if no OWNER profile exists for some business, use the
+      // first profile that references it.
+      for (const profile of KEYFLOW_DEV_PROFILES) {
+        if (!businessOwners.has(profile.businessId)) {
+          businessOwners.set(profile.businessId, profile.userId);
+          businessNames.set(profile.businessId, profile.businessName);
+        }
+      }
+
+      for (const [businessId, ownerId] of businessOwners.entries()) {
+        await this.prisma.client.business.upsert({
+          where: { id: businessId },
+          create: {
+            id: businessId,
+            name: businessNames.get(businessId) ?? businessId,
+            ownerId,
+            onboardingComplete: true,
+          },
+          update: {
+            ownerId,
+          },
+        });
+      }
+
+      // Seed each profile's membership in its business with the configured role.
+      for (const profile of KEYFLOW_DEV_PROFILES) {
+        await this.prisma.client.membership.upsert({
+          where: {
+            userId_businessId: {
+              userId: profile.userId,
+              businessId: profile.businessId,
+            },
+          },
+          create: {
+            userId: profile.userId,
+            businessId: profile.businessId,
+            role: profile.membershipRole,
+          },
+          update: {
+            role: profile.membershipRole,
+          },
+        });
+      }
+
+      const summary = KEYFLOW_DEV_PROFILES
+        .map((p) => `${p.key}=${p.email}(${p.userRole}/${p.membershipRole})`)
+        .join(', ');
       this.logger.log(
-        `[KEYFLOW_DEV_AUTH_BYPASS] Seeded dev profile (${KEYFLOW_DEV_USER_EMAIL}) and business (${KEYFLOW_DEV_BUSINESS_NAME}) — id=${KEYFLOW_DEV_BUSINESS_ID}`,
+        `[KEYFLOW_DEV_AUTH_BYPASS] Seeded ${KEYFLOW_DEV_PROFILES.length} dev profiles — ${summary}`,
       );
     } catch (e) {
       this.logger.warn('Keyflow dev profile seed failed: ' + (e as Error).message);
