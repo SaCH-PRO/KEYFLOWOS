@@ -68,7 +68,7 @@ async function supabaseResetPassword(email: string) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, redirectTo: `${SITE_URL.replace(/\/$/, "")}/auth/login` }),
+    body: JSON.stringify({ email, redirectTo: `${SITE_URL.replace(/\/$/, "")}/auth/reset-password` }),
   });
   if (!res.ok) {
     const json = await res.json().catch(() => null);
