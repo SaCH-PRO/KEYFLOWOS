@@ -23,8 +23,11 @@ const RequiredSchema = z.object({
   NEXT_PUBLIC_API_BASE_URL: z
     .string()
     .trim()
-    .min(1, 'is required (e.g. http://localhost:3001)')
-    .refine((s) => /^https?:\/\//i.test(s), 'must start with http:// or https://'),
+    .min(1, 'is required (e.g. http://localhost:3001 or /__api for same-origin proxy)')
+    .refine(
+      (s) => /^https?:\/\//i.test(s) || s.startsWith('/'),
+      'must start with http://, https:// or "/" (same-origin proxy path)',
+    ),
 });
 
 const RecommendedSchema = z.object({

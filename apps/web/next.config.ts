@@ -75,6 +75,30 @@ const nextConfig: NextConfig = {
     root: repoRoot,
   },
   allowedDevOrigins: buildAllowedDevOrigins(),
+  /**
+   * Same-origin API proxy. Browsers running inside an iframe / behind a
+   * preview proxy (Replit dev domain, ngrok, custom hosting) cannot
+   * reach `http://localhost:3001` directly because "localhost" resolves
+   * to the *user's* machine, not the dev container. We rewrite every
+   * request hitting `/__api/*` on the Next dev/prod server through to
+   * the NestJS backend so the client only ever issues same-origin
+   * requests. The browser bundle then sets `NEXT_PUBLIC_API_BASE_URL=/__api`
+   * (see `apps/web` workflow command + `.env.example`) and stays
+   * host-agnostic.
+   *
+   * The upstream is read from `KEYFLOW_API_INTERNAL_URL` so deploys
+   * with a side-car backend on a different host can override it; falls
+   * back to localhost:3001 for the standard local dev setup.
+   */
+  async rewrites() {
+    const upstream = process.env.KEYFLOW_API_INTERNAL_URL?.trim() || "http://localhost:3001";
+    return [
+      {
+        source: "/__api/:path*",
+        destination: `${upstream}/:path*`,
+      },
+    ];
+  },
   async headers() {
     // Production: long-cache /_next/static so repeat-visit performance
     // doesn't regress (ported from develop 1c7e6f93).
