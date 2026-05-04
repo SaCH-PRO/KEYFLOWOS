@@ -6,7 +6,7 @@ import { MessageSquare, Sparkles, ChevronUp } from "lucide-react";
 import type { CrossJourneyResponse } from "@/lib/client";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContactDetailHeader } from "./contact-detail-header";
-import { ContactDetailStats } from "./contact-detail-stats";
+import { ContactDetailStats, MomentumPrimaryCTA } from "./contact-detail-stats";
 import { ContactDetailInfo } from "./contact-detail-info";
 import { ContactDetailTabs } from "./contact-detail-tabs";
 import { AiContactSummaryPanel } from "./ai-contact-summary";
@@ -273,6 +273,12 @@ export function ContactDetail({
           nextBookingDate={bookings?.find(b => new Date(b.startTime).getTime() > Date.now())?.startTime}
         />
 
+        <MomentumPrimaryCTA
+          contactId={contact.id}
+          contactName={`${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "client"}
+          onAddTask={onAddTask}
+        />
+
         {(aiInsight || onGenerateAiInsight) && (
           <NextBestActionCard
             aiInsight={aiInsight}
@@ -289,7 +295,12 @@ export function ContactDetail({
               onSetActiveTab={setActiveTab}
               onQuickAction={onQuickAction}
             />
-            <ContactDetailInfo contact={contact} relatedContacts={relatedContacts} onSelectRelatedContact={onSelectRelatedContact} />
+            <ContactDetailInfo
+              contact={contact}
+              relatedContacts={relatedContacts}
+              onSelectRelatedContact={onSelectRelatedContact}
+              onAddTask={onAddTask}
+            />
             {businessId && contact.id && (
               <CrossModuleEntityLinks
                 businessId={businessId}

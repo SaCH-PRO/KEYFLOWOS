@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   DollarSign,
   TrendingUp,
@@ -13,6 +15,8 @@ import {
   BarChart3,
   ChevronRight,
   HeartPulse,
+  Sparkles,
+  ListTodo,
 } from "lucide-react";
 import { fetchContactMomentum, fetchContactMomentumHistory, type MomentumScore, type MomentumHistory } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -23,6 +27,97 @@ interface ContactDetailStatsProps {
   events: ContactEvent[];
   onSetActiveTab: (tab: string) => void;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
+  onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
+}
+
+export function MomentumPrimaryCTA({
+  contactId,
+  contactName,
+  onAddTask,
+}: {
+  contactId: string;
+  contactName: string;
+  onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
+}) {
+  const [topRec, setTopRec] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const bid = getStoredBusinessId();
+    if (!bid) return;
+    let cancelled = false;
+    fetchContactMomentum(contactId, bid).then((res) => {
+      if (cancelled) return;
+      const recs = (res.data as { recommendations?: string[] } | null)?.recommendations;
+      if (recs && recs.length > 0) {
+        setTopRec(recs[0]);
+        return;
+      }
+      const score = res.data?.score;
+      const trend = res.data?.trend;
+      if (score != null && score < 40) {
+        setTopRec(trend === "down" ? "Re-engage to revive momentum" : "Reach out to build momentum");
+      }
+    });
+    return () => { cancelled = true; };
+  }, [contactId]);
+
+  if (!topRec) return null;
+
+  const handleCreateTask = async () => {
+    if (!onAddTask) return;
+    setBusy(true);
+    try {
+      const due = new Date();
+      due.setDate(due.getDate() + 1);
+      await onAddTask(`${topRec} — ${contactName}`, { dueDate: due.toISOString(), priority: "HIGH" });
+      toast.success("Task created from momentum recommendation");
+    } catch {
+      toast.error("Could not create task");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="rounded-xl p-3 flex items-start gap-2.5 border"
+      style={{
+        background: "hsl(var(--kf-accent1) / 0.06)",
+        borderColor: "hsl(var(--kf-accent1) / 0.25)",
+      }}
+    >
+      <div
+        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+        style={{ background: "hsl(var(--kf-accent1) / 0.15)" }}
+      >
+        <Sparkles className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+      </div>
+      <div className="flex-1 min-w-0 space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Momentum recommends</span>
+        </div>
+        <p className="text-sm font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>{topRec}</p>
+        {onAddTask && (
+          <button
+            onClick={handleCreateTask}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-60"
+            style={{
+              background: "hsl(var(--kf-accent1) / 0.15)",
+              color: "hsl(var(--kf-accent1))",
+              borderWidth: 1,
+              borderColor: "hsl(var(--kf-accent1) / 0.30)",
+            }}
+          >
+            <ListTodo className="w-3 h-3" />
+            {busy ? "Creating…" : "Create task"}
+            <ChevronRight className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const SCORE_FACTORS = [
@@ -305,6 +400,15 @@ function MomentumBadge({ contactId }: { contactId: string }) {
 }
 
 export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAction }: ContactDetailStatsProps) {
+  const router = useRouter();
+  const goInvoices = (status?: string) => {
+    const qs = new URLSearchParams({ tab: "invoices", contactId: contact.id });
+    if (status) qs.set("status", status);
+    router.push(`/app/commerce?${qs.toString()}`);
+  };
+  const goBookings = () => {
+    router.push(`/app/bookings?contactId=${encodeURIComponent(contact.id)}`);
+  };
   const hasAnyMetric = contact.meta?.leadScore != null ||
     (contact.meta?.outstandingBalance ?? 0) > 0 ||
     contact.meta?.lastInteractionAt ||
@@ -350,11 +454,18 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
                 <DollarSign className="w-3 h-3" />
                 Outstanding
               </div>
-              <div className="text-lg font-semibold" style={{ color: (contact.meta?.outstandingBalance ?? 0) > 0 ? "hsl(var(--kf-accent1))" : undefined }}>
-                {contact.meta?.outstandingBalance != null && contact.meta.outstandingBalance > 0
-                  ? `TTD ${contact.meta.outstandingBalance.toLocaleString()}`
-                  : <span className="text-sm font-normal text-muted-foreground">All clear</span>}
-              </div>
+              {contact.meta?.outstandingBalance != null && contact.meta.outstandingBalance > 0 ? (
+                <button
+                  onClick={() => goInvoices("UNPAID")}
+                  className="text-lg font-semibold hover:underline cursor-pointer"
+                  style={{ color: "hsl(var(--kf-accent1))" }}
+                  title="View unpaid invoices"
+                >
+                  TTD {contact.meta.outstandingBalance.toLocaleString()}
+                </button>
+              ) : (
+                <div className="text-sm font-normal text-muted-foreground">All clear</div>
+              )}
             </div>
             <div className="kf-stat-card p-3">
               <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
@@ -398,15 +509,36 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
       >
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
-            <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>
+            {(contact.meta?.totalRevenue ?? 0) > 0 ? (
+              <button
+                onClick={() => goInvoices("PAID")}
+                className="text-lg font-semibold hover:underline cursor-pointer"
+                style={{ color: "hsl(var(--kf-accent2))" }}
+                title="View paid invoices for this contact"
+              >
+                TTD {(contact.meta?.totalRevenue ?? 0).toLocaleString()}
+              </button>
+            ) : (
+              <p className="text-base font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>TTD 0</p>
+            )}
+            <p className="text-[10px] text-muted-foreground">
               {(contact.meta?.totalRevenue ?? 0) > 0
-                ? `TTD ${(contact.meta?.totalRevenue ?? 0).toLocaleString()}`
-                : <span className="text-base">TTD 0</span>}
+                ? <button onClick={() => goInvoices("PAID")} className="hover:text-foreground cursor-pointer">Total Revenue ›</button>
+                : "Total Revenue"}
             </p>
-            <p className="text-[10px] text-muted-foreground">Total Revenue</p>
           </div>
           <div>
-            <p className="text-lg font-semibold">{contact.meta?.invoiceCount ?? 0}</p>
+            {(contact.meta?.invoiceCount ?? 0) > 0 ? (
+              <button
+                onClick={() => goInvoices()}
+                className="text-lg font-semibold hover:underline cursor-pointer"
+                title="View invoices for this contact"
+              >
+                {contact.meta?.invoiceCount}
+              </button>
+            ) : (
+              <p className="text-lg font-semibold">0</p>
+            )}
             <p className="text-[10px] text-muted-foreground">
               {(contact.meta?.invoiceCount ?? 0) === 0 && onQuickAction ? (
                 <button
@@ -415,11 +547,23 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
                 >
                   Create first?
                 </button>
-              ) : "Invoices"}
+              ) : (
+                <button onClick={() => goInvoices()} className="hover:text-foreground cursor-pointer">Invoices ›</button>
+              )}
             </p>
           </div>
           <div>
-            <p className="text-lg font-semibold">{contact.meta?.bookingCount ?? 0}</p>
+            {(contact.meta?.bookingCount ?? 0) > 0 ? (
+              <button
+                onClick={goBookings}
+                className="text-lg font-semibold hover:underline cursor-pointer"
+                title="View bookings for this contact"
+              >
+                {contact.meta?.bookingCount}
+              </button>
+            ) : (
+              <p className="text-lg font-semibold">0</p>
+            )}
             <p className="text-[10px] text-muted-foreground">
               {(contact.meta?.bookingCount ?? 0) === 0 && onQuickAction ? (
                 <button
@@ -428,7 +572,9 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
                 >
                   Book one?
                 </button>
-              ) : "Bookings"}
+              ) : (
+                <button onClick={goBookings} className="hover:text-foreground cursor-pointer">Bookings ›</button>
+              )}
             </p>
           </div>
         </div>
