@@ -28,7 +28,7 @@ import { ApprovalsQueue } from "../control-tower/components/approvals-queue";
 import { RiskAlerts } from "../control-tower/components/risk-alerts";
 import { StorefrontIntel } from "../control-tower/components/storefront-intel";
 import UnifiedCalendar from "./components/unified-calendar";
-import JarvisVoice from "./components/jarvis-voice";
+import { AskKeyButton, KeyNoticedStream } from "@/components/key";
 import {
   KeyflowNotesDrawer,
   type KeyflowNotesTarget,
@@ -199,13 +199,21 @@ export default function KeyflowCommandPage() {
           ) : undefined
         }
         headerRight={
-          <button
-            onClick={d.refresh}
-            className="flex items-center justify-center w-9 h-9 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-w-[36px] min-h-[36px]"
-            aria-label="Refresh data"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <AskKeyButton
+              variant="primary"
+              label="Ask KEY about this"
+              module="cockpit"
+              context={pageContext as Record<string, unknown> | undefined}
+            />
+            <button
+              onClick={d.refresh}
+              className="flex items-center justify-center w-9 h-9 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-w-[36px] min-h-[36px]"
+              aria-label="Refresh data"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </div>
         }
       >
         {d.error && (
@@ -223,6 +231,8 @@ export default function KeyflowCommandPage() {
 
         {d.data && (
           <div className="space-y-4">
+            {d.businessId && <KeyNoticedStream businessId={d.businessId} />}
+
             <CommandEntry
               businessId={d.businessId}
               onActionExecuted={d.refreshSilent}
@@ -286,9 +296,6 @@ export default function KeyflowCommandPage() {
         )}
       </WorkspaceShell>
 
-      {d.businessId && (
-        <JarvisVoice businessId={d.businessId} pageContext={pageContext} />
-      )}
       <KeyflowNotesDrawer
         businessId={d.businessId}
         open={notesOpen}

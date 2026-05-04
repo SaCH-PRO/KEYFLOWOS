@@ -90,6 +90,23 @@ const nextConfig: NextConfig = {
    * with a side-car backend on a different host can override it; falls
    * back to localhost:3001 for the standard local dev setup.
    */
+  async redirects() {
+    // KEYFLOW unification (Task #292): the legacy "Control Tower" surface
+    // is now the KEY mainstay dashboard at /app/keyflow-command. Permanent
+    // 308 so external links and bookmarks survive.
+    return [
+      {
+        source: "/app/control-tower",
+        destination: "/app/keyflow-command",
+        permanent: true,
+      },
+      {
+        source: "/app/control-tower/:path*",
+        destination: "/app/keyflow-command",
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     const upstream = process.env.KEYFLOW_API_INTERNAL_URL?.trim() || "http://localhost:3001";
     return [

@@ -24,7 +24,7 @@ import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligen
 import type { RevenueData } from "@/components/contacts/predictive-revenue";
 import type { Contact } from "@/lib/client";
 import { exportInsightsReport, type InsightsExportFormat } from "@/lib/contacts-export";
-import { AiCommandCenter } from "./ai-command-center";
+import { AskKeyButton } from "@/components/key";
 import { type Period, PERIOD_LABELS, PERIOD_MS, stagger, formatTTD } from "./components/insights/insights-shared";
 import { LazyWidget } from "./components/insights/lazy-widget";
 import { HeroStats } from "./components/insights/hero-stats";
@@ -311,7 +311,19 @@ function InsightsTabInner({
       </motion.div>
 
       <LazyWidget height={100}>
-        <motion.div variants={stagger.item}><AiCommandCenter businessId={businessId} contactCount={contacts.length} /></motion.div>
+        <motion.div variants={stagger.item} className="flex items-center justify-between rounded-2xl border border-border/40 bg-card p-4">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground/90">Need an action across these {contacts.length} contacts?</h3>
+            <p className="text-[11px] text-muted-foreground/70">KEY can score, segment, draft outreach, or trigger flows for everything you see here.</p>
+          </div>
+          <AskKeyButton
+            variant="primary"
+            label="Ask KEY about this"
+            module="crm"
+            context={{ contactCount: contacts.length }}
+            prompt={`I'm looking at ${contacts.length} contacts in CRM insights. What's the most valuable next move?`}
+          />
+        </motion.div>
       </LazyWidget>
     </motion.div>
   );

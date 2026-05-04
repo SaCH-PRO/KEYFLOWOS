@@ -6,7 +6,7 @@ import Image from "next/image";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { CommandPalette } from "@/components/command-palette";
+import { KeyAgent } from "@/components/key";
 import { OriginAwareBreadcrumbs } from "@/components/ui/origin-aware-breadcrumbs";
 import { NavigationContextProvider, useNavigationContext } from "@/lib/navigation-context";
 import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDisplayName, getUserInitials, refreshWorkspace, getCachedBusiness, isSuperAdmin } from "@/lib/workspace";
@@ -55,7 +55,7 @@ import {
 } from "lucide-react";
 
 
-import { CopilotPanel, type CopilotModule } from "@/components/ai/copilot-panel";
+import type { CopilotModule } from "@/components/ai/copilot-panel";
 import { AiContextProvider } from "@/contexts/ai-context";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
@@ -346,7 +346,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     return pathname === basePath || pathname.startsWith(basePath + "/");
   }, [pathname, searchParams]);
 
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -364,7 +363,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [isAdminUser, setIsAdminUser] = useState(false);
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
-  const [copilotOpen, setCopilotOpen] = useState(false);
 
   useEffect(() => {
     setMobileDrawerOpen(false);
@@ -503,42 +501,18 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPaletteOpen((v) => !v);
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        setCopilotOpen((v) => !v);
-      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
         setAddMenuOpen((v) => !v);
       }
       if (e.key === "Escape") {
-        setPaletteOpen(false);
         setAddMenuOpen(false);
         setMobileDrawerOpen(false);
         setNotifOpen(false);
-        setCopilotOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
-
-  const [copilotInitialPrompt, setCopilotInitialPrompt] = useState<string | undefined>();
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.prompt) {
-        setCopilotInitialPrompt(detail.prompt);
-      }
-      setCopilotOpen(true);
-    };
-    window.addEventListener("kf:open-copilot", handler);
-    return () => window.removeEventListener("kf:open-copilot", handler);
   }, []);
 
   const handlePrimaryClick = (item: PrimaryNavItem) => {
@@ -605,17 +579,20 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
             <div className="mt-auto flex flex-col items-center gap-1">
               <button
-                onClick={() => setCopilotOpen(true)}
-                className={cn(
-                  "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group",
-                  copilotOpen
-                    ? "text-foreground bg-muted/50"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                )}
-                title="AI Copilot (⌘J)"
-                aria-label="AI Copilot"
+                onClick={() => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "chat" } }))}
+                className="w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                title="Ask KEY (⌘J)"
+                aria-label="Ask KEY"
               >
                 <Brain className="w-[18px] h-[18px]" />
+              </button>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "voice" } }))}
+                className="w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                title="Talk to KEY"
+                aria-label="Talk to KEY"
+              >
+                <MessageCircle className="w-[18px] h-[18px]" />
               </button>
               {isAdminUser && (
                 <Link
@@ -719,17 +696,17 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
               </div>
 
               <button
-                onClick={() => setCopilotOpen(true)}
+                onClick={() => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "chat" } }))}
                 className="hidden md:flex flex-1 min-w-0 max-w-lg items-center gap-2 rounded-lg border border-border/40 bg-muted/20 px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/30 hover:text-foreground/70 transition-colors cursor-pointer"
               >
                 <Brain className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
-                <span className="truncate">Ask AI anything...</span>
+                <span className="truncate">Ask KEY anything…</span>
                 <kbd className="ml-auto px-1 py-0.5 rounded bg-muted text-[10px] font-mono shrink-0">⌘J</kbd>
               </button>
               <button
-                onClick={() => setPaletteOpen(true)}
+                onClick={() => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "palette" } }))}
                 className="hidden md:flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:border-muted-foreground/30 transition-colors shrink-0"
-                title="Search (⌘K)"
+                title="Command palette (⌘K)"
               >
                 <Search className="w-3.5 h-3.5" />
                 <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono">⌘K</kbd>
@@ -738,7 +715,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
             <div className="flex items-center gap-1.5 sm:gap-2">
               <button
-                onClick={() => setPaletteOpen(true)}
+                onClick={() => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "palette" } }))}
                 className="lg:hidden p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
                 aria-label="Search"
               >
@@ -1122,10 +1099,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         </div>
       </nav>
 
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <PlanLimitDialog planLimit={planLimitHit} onClose={clearPlanLimit} />
       <KeyflowOSStoreDrawer open={kfStoreOpen} onClose={() => setKfStoreOpen(false)} />
-      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} currentModule={copilotModule} initialPrompt={copilotInitialPrompt} onInitialPromptConsumed={() => setCopilotInitialPrompt(undefined)} />
+      <KeyAgent currentModule={copilotModule} />
     </div>
   );
 }
