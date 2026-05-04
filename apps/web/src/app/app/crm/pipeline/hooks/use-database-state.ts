@@ -9,7 +9,7 @@ import { toast } from "sonner";
 
 export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt" | "lastActive" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl";
 export type SortDir = "asc" | "desc";
-export type BulkAction = "status" | "tags" | "addToList" | null;
+export type BulkAction = "status" | "tags" | "addToList" | "relationshipType" | "priority" | null;
 
 export interface ListSummary {
   id: string;
@@ -566,6 +566,96 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     }
   }, [businessId, availableLists]);
 
+  const handleBulkRelationshipTypeChange = useCallback(async (relationshipType: string | null) => {
+    setBulkActing(true);
+    try {
+      const ids = Array.from(selectedIdsRef.current);
+      const res = await bulkUpdateContacts({ businessId, contactIds: ids, relationshipType });
+      if (res.error) throw new Error(res.error);
+      toast.success(
+        relationshipType
+          ? `Updated ${ids.length} contacts to ${relationshipType}`
+          : `Cleared relationship type on ${ids.length} contacts`,
+      );
+      setSelectedIds(new Set());
+      setAllPagesSelected(false);
+      setActiveBulkAction(null);
+      onRefresh();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Bulk update failed";
+      toast.error(message);
+    } finally {
+      setBulkActing(false);
+    }
+  }, [businessId, onRefresh]);
+
+  const handleBulkPriorityChange = useCallback(async (priority: string | null) => {
+    setBulkActing(true);
+    try {
+      const ids = Array.from(selectedIdsRef.current);
+      const res = await bulkUpdateContacts({ businessId, contactIds: ids, priority });
+      if (res.error) throw new Error(res.error);
+      toast.success(
+        priority
+          ? `Set priority to ${priority} on ${ids.length} contacts`
+          : `Cleared priority on ${ids.length} contacts`,
+      );
+      setSelectedIds(new Set());
+      setAllPagesSelected(false);
+      setActiveBulkAction(null);
+      onRefresh();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Bulk update failed";
+      toast.error(message);
+    } finally {
+      setBulkActing(false);
+    }
+  }, [businessId, onRefresh]);
+
+  const handleBulkToggleFavorite = useCallback(async (favorite: boolean) => {
+    setBulkActing(true);
+    try {
+      const ids = Array.from(selectedIdsRef.current);
+      const res = await bulkUpdateContacts({ businessId, contactIds: ids, favorite });
+      if (res.error) throw new Error(res.error);
+      toast.success(
+        favorite
+          ? `Marked ${ids.length} contacts as favorite`
+          : `Removed favorite from ${ids.length} contacts`,
+      );
+      setSelectedIds(new Set());
+      setAllPagesSelected(false);
+      onRefresh();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Bulk update failed";
+      toast.error(message);
+    } finally {
+      setBulkActing(false);
+    }
+  }, [businessId, onRefresh]);
+
+  const handleBulkArchive = useCallback(async (archived: boolean) => {
+    setBulkActing(true);
+    try {
+      const ids = Array.from(selectedIdsRef.current);
+      const res = await bulkUpdateContacts({ businessId, contactIds: ids, archived });
+      if (res.error) throw new Error(res.error);
+      toast.success(
+        archived
+          ? `Archived ${ids.length} contacts`
+          : `Unarchived ${ids.length} contacts`,
+      );
+      setSelectedIds(new Set());
+      setAllPagesSelected(false);
+      onRefresh();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Bulk update failed";
+      toast.error(message);
+    } finally {
+      setBulkActing(false);
+    }
+  }, [businessId, onRefresh]);
+
   const handleBulkDelete = useCallback(() => {
     const ids = Array.from(selectedIdsRef.current);
     setConfirmState({
@@ -797,6 +887,10 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     handleBulkStatusChange,
     handleBulkAddTags,
     handleBulkAddToList,
+    handleBulkRelationshipTypeChange,
+    handleBulkPriorityChange,
+    handleBulkToggleFavorite,
+    handleBulkArchive,
     handleBulkDelete,
     clearSelection,
     toggleExport,

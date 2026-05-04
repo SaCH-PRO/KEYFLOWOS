@@ -639,6 +639,10 @@ export function ContactsDatabase({
         onBulkStatusChange={db.handleBulkStatusChange}
         onBulkAddTags={db.handleBulkAddTags}
         onBulkAddToList={db.handleBulkAddToList}
+        onBulkRelationshipTypeChange={db.handleBulkRelationshipTypeChange}
+        onBulkPriorityChange={db.handleBulkPriorityChange}
+        onBulkToggleFavorite={db.handleBulkToggleFavorite}
+        onBulkArchive={db.handleBulkArchive}
         onBulkDelete={db.handleBulkDelete}
         onClearSelection={db.clearSelection}
         availableLists={db.availableLists}

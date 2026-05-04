@@ -11,9 +11,19 @@ import {
   X,
   List,
   Loader2,
+  Users,
+  Flag,
+  Star,
+  Archive,
 } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import type { BulkAction, ListSummary } from "./hooks/use-database-state";
+import {
+  CONTACT_RELATIONSHIP_TYPES,
+  CONTACT_RELATIONSHIP_TYPE_LABELS,
+  CONTACT_PRIORITIES,
+  CONTACT_PRIORITY_LABELS,
+} from "@/lib/crm-constants";
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"];
 
@@ -34,6 +44,10 @@ interface DatabaseBulkBarProps {
   onBulkStatusChange: (status: string) => void;
   onBulkAddTags: (tagInput: string) => void;
   onBulkAddToList: (listId: string) => void;
+  onBulkRelationshipTypeChange: (relationshipType: string | null) => void;
+  onBulkPriorityChange: (priority: string | null) => void;
+  onBulkToggleFavorite: (favorite: boolean) => void;
+  onBulkArchive: (archived: boolean) => void;
   onBulkDelete: () => void;
   onClearSelection: () => void;
   availableLists: ListSummary[];
@@ -52,6 +66,10 @@ function DatabaseBulkBarInner({
   onBulkStatusChange,
   onBulkAddTags,
   onBulkAddToList,
+  onBulkRelationshipTypeChange,
+  onBulkPriorityChange,
+  onBulkToggleFavorite,
+  onBulkArchive,
   onBulkDelete,
   onClearSelection,
   availableLists,
@@ -98,6 +116,14 @@ function DatabaseBulkBarInner({
 
   const toggleAddToListAction = useCallback(() => {
     onSetBulkAction(activeBulkAction === "addToList" ? null : "addToList");
+  }, [activeBulkAction, onSetBulkAction]);
+
+  const toggleRelationshipTypeAction = useCallback(() => {
+    onSetBulkAction(activeBulkAction === "relationshipType" ? null : "relationshipType");
+  }, [activeBulkAction, onSetBulkAction]);
+
+  const togglePriorityAction = useCallback(() => {
+    onSetBulkAction(activeBulkAction === "priority" ? null : "priority");
   }, [activeBulkAction, onSetBulkAction]);
 
   const handleApplyTags = useCallback(() => {
@@ -278,6 +304,126 @@ function DatabaseBulkBarInner({
                 </div>
               )}
             </div>
+
+            <div className="relative">
+              <button
+                onClick={toggleRelationshipTypeAction}
+                disabled={bulkActing}
+                className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-border/50 bg-muted/10 hover:bg-muted/20 transition-all disabled:opacity-40"
+                aria-label="Set relationship type for selected contacts"
+                aria-haspopup="listbox"
+                aria-expanded={activeBulkAction === "relationshipType"}
+              >
+                {bulkActing && activeBulkAction === "relationshipType" ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Users className="w-3 h-3 text-muted-foreground/60" />
+                )}
+                Relationship
+                <ChevronDown className="w-2.5 h-2.5" />
+              </button>
+              {activeBulkAction === "relationshipType" && (
+                <div
+                  className="absolute bottom-full left-0 mb-2 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 w-44 z-50 max-h-64 overflow-y-auto"
+                  role="listbox"
+                  aria-label="Select relationship type"
+                >
+                  {CONTACT_RELATIONSHIP_TYPES.map((rt) => (
+                    <button
+                      key={rt}
+                      onClick={() => onBulkRelationshipTypeChange(rt)}
+                      disabled={bulkActing}
+                      className="w-full text-left px-3 min-h-[44px] flex items-center text-[11px] hover:bg-muted/30 transition-colors disabled:opacity-50"
+                      role="option"
+                      aria-selected={false}
+                    >
+                      {CONTACT_RELATIONSHIP_TYPE_LABELS[rt]}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => onBulkRelationshipTypeChange(null)}
+                    disabled={bulkActing}
+                    className="w-full text-left px-3 min-h-[44px] flex items-center text-[11px] text-muted-foreground/70 hover:bg-muted/30 transition-colors disabled:opacity-50 border-t border-border/30 mt-1 pt-2"
+                    role="option"
+                    aria-selected={false}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="relative">
+              <button
+                onClick={togglePriorityAction}
+                disabled={bulkActing}
+                className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-border/50 bg-muted/10 hover:bg-muted/20 transition-all disabled:opacity-40"
+                aria-label="Set priority for selected contacts"
+                aria-haspopup="listbox"
+                aria-expanded={activeBulkAction === "priority"}
+              >
+                {bulkActing && activeBulkAction === "priority" ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Flag className="w-3 h-3 text-muted-foreground/60" />
+                )}
+                Priority
+                <ChevronDown className="w-2.5 h-2.5" />
+              </button>
+              {activeBulkAction === "priority" && (
+                <div
+                  className="absolute bottom-full left-0 mb-2 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 w-36 z-50"
+                  role="listbox"
+                  aria-label="Select priority"
+                >
+                  {CONTACT_PRIORITIES.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => onBulkPriorityChange(p)}
+                      disabled={bulkActing}
+                      className="w-full text-left px-3 min-h-[44px] flex items-center text-[11px] hover:bg-muted/30 transition-colors disabled:opacity-50"
+                      role="option"
+                      aria-selected={false}
+                    >
+                      {CONTACT_PRIORITY_LABELS[p]}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => onBulkPriorityChange(null)}
+                    disabled={bulkActing}
+                    className="w-full text-left px-3 min-h-[44px] flex items-center text-[11px] text-muted-foreground/70 hover:bg-muted/30 transition-colors disabled:opacity-50 border-t border-border/30 mt-1 pt-2"
+                    role="option"
+                    aria-selected={false}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => onBulkToggleFavorite(true)}
+              disabled={bulkActing}
+              className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-yellow-500/30 bg-yellow-500/[0.08] text-yellow-300 hover:bg-yellow-500/15 transition-all disabled:opacity-40"
+              aria-label={`Toggle favorite for ${selectedCount} selected contacts`}
+              title="Mark as favorite (right-click to unfavorite)"
+              onContextMenu={(e) => { e.preventDefault(); onBulkToggleFavorite(false); }}
+            >
+              <Star className="w-3 h-3" />
+              Favorite
+            </button>
+
+            <button
+              onClick={() => onBulkArchive(true)}
+              disabled={bulkActing}
+              className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-slate-500/30 bg-slate-500/[0.08] text-slate-300 hover:bg-slate-500/15 transition-all disabled:opacity-40"
+              aria-label={`Archive ${selectedCount} selected contacts`}
+              title="Archive (right-click to unarchive)"
+              onContextMenu={(e) => { e.preventDefault(); onBulkArchive(false); }}
+            >
+              <Archive className="w-3 h-3" />
+              Archive
+            </button>
 
             <button
               onClick={() => setShowDeleteConfirm(true)}
