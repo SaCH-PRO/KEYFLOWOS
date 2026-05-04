@@ -45,11 +45,23 @@ export class GoogleCalendarConnector implements IConnector {
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { calendarAccessToken: true, calendarEmail: true },
+      select: {
+        calendarAccessToken: true,
+        calendarEmail: true,
+        calendarId: true,
+        calendarSyncDirection: true,
+        calendarSyncEnabled: true,
+      },
     });
     const realStatus = business?.calendarAccessToken ? 'connected' : 'disconnected';
 
     const stored = await this.getConnectorStatus(businessId);
+    const openConflicts = realStatus === 'connected'
+      ? await this.prisma.client.calendarSyncConflict.count({
+          where: { businessId, status: 'open' },
+        }).catch(() => 0)
+      : 0;
+
     return {
       status: realStatus,
       lastSyncAt: stored?.lastSyncAt ?? null,
@@ -59,6 +71,12 @@ export class GoogleCalendarConnector implements IConnector {
       syncCount: stored?.syncCount ?? 0,
       connectedAt: stored?.connectedAt ?? null,
       connectedAccount: business?.calendarEmail ?? stored?.connectedAccount ?? null,
+      metadata: {
+        calendarId: business?.calendarId ?? null,
+        syncDirection: business?.calendarSyncDirection ?? 'two_way',
+        syncEnabled: business?.calendarSyncEnabled ?? true,
+        openConflicts,
+      },
     };
   }
 

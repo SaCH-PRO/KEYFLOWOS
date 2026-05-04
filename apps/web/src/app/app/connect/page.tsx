@@ -63,6 +63,13 @@ interface ConnectorHealth {
   syncCount: number;
   connectedAt: string | null;
   connectedAccount: string | null;
+  metadata?: {
+    calendarId?: string | null;
+    syncDirection?: "push" | "pull" | "two_way" | "disabled";
+    syncEnabled?: boolean;
+    openConflicts?: number;
+    [key: string]: unknown;
+  };
 }
 
 interface DashboardEntry {
@@ -187,7 +194,7 @@ function ConnectorCard({
                 {entry.health.connectedAccount}
               </p>
             )}
-            <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground flex-wrap">
               {entry.meta.supportsSync && (
                 <span className="inline-flex items-center gap-1">
                   <RefreshCw className="h-3 w-3" />
@@ -200,6 +207,34 @@ function ConnectorCard({
                   {entry.health.errorCount} errs
                 </span>
               )}
+              {entry.meta.type === "google_calendar" && entry.health.metadata?.syncDirection && (
+                <Link
+                  href="/app/connect/calendar"
+                  className="inline-flex items-center gap-1 hover:text-foreground"
+                  title="Manage calendar sync"
+                >
+                  <Calendar className="h-3 w-3" />
+                  {entry.health.metadata.syncDirection === "two_way"
+                    ? "Two-way"
+                    : entry.health.metadata.syncDirection === "push"
+                      ? "Push only"
+                      : entry.health.metadata.syncDirection === "pull"
+                        ? "Pull only"
+                        : "Paused"}
+                </Link>
+              )}
+              {entry.meta.type === "google_calendar" &&
+                typeof entry.health.metadata?.openConflicts === "number" &&
+                entry.health.metadata.openConflicts > 0 && (
+                  <Link
+                    href="/app/connect/calendar"
+                    className="inline-flex items-center gap-1 text-amber-400 hover:text-amber-300"
+                  >
+                    <AlertCircle className="h-3 w-3" />
+                    {entry.health.metadata.openConflicts} conflict
+                    {entry.health.metadata.openConflicts === 1 ? "" : "s"}
+                  </Link>
+                )}
             </div>
             {testResult && (
               <p
@@ -754,6 +789,13 @@ export default function KeyFlowConnectPage() {
             title: "Contacts sync",
             desc: "Pull Google People",
             tone: "from-emerald-500/15 to-teal-500/15 text-emerald-200",
+          },
+          {
+            href: "/app/connect/calendar",
+            icon: Calendar,
+            title: "Calendar sync",
+            desc: "Direction & conflicts",
+            tone: "from-blue-500/15 to-indigo-500/15 text-blue-200",
           },
           {
             href: "/app/social",

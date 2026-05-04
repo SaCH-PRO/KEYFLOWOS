@@ -58,6 +58,11 @@ export interface ConnectorHealth {
   syncCount: number;
   connectedAt: Date | null;
   connectedAccount: string | null;
+  /**
+   * Connector-specific health details surfaced on the Connect hub card
+   * (e.g. open calendar conflicts, oauth scope warnings).
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface ConnectorStatusSummary {
