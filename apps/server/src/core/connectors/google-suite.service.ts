@@ -1,9 +1,9 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
-import { ConnectorType } from './connector.interface';
+import type { ConnectorType } from './connector.interface';
 
 interface OAuthState {
   businessId: string;
@@ -80,9 +80,9 @@ export class GoogleSuiteService {
     '';
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly registry: ConnectorRegistryService,
-    private readonly activity: ConnectorActivityService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ConnectorRegistryService) private readonly registry: ConnectorRegistryService,
+    @Inject(ConnectorActivityService) private readonly activity: ConnectorActivityService,
   ) {}
 
   buildAuthUrl(businessId: string, services: GoogleService[] = ALL_SERVICES): string {
