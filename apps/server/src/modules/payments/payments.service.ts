@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
@@ -83,7 +83,207 @@ export class PaymentsService {
       });
     }
 
+    const stripePub = meta.stripePublishableKey || process.env.STRIPE_PUBLISHABLE_KEY;
+    const stripeSecret = meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY;
+    const stripeWh = meta.stripeWebhookSecret || process.env.STRIPE_WEBHOOK_SECRET;
+    if (stripePub && stripeSecret && stripeWh) {
+      gateways.push({
+        id: 'stripe',
+        name: 'Stripe',
+        currencies: ['USD', 'EUR', 'GBP', 'CAD', 'AUD'],
+      });
+    }
+
     return gateways;
+  }
+
+  async createStripeCheckout(
+    invoiceId: string,
+    successUrl: string,
+    cancelUrl: string,
+  ): Promise<{ redirectUrl: string }> {
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      include: {
+        contact: { select: { email: true } },
+        business: { select: { id: true, name: true, metaData: true } },
+      },
+    });
+    if (!invoice) throw new BadRequestException('Invoice not found');
+    if (invoice.status === 'PAID') throw new BadRequestException('Invoice is already paid');
+
+    const meta = (invoice.business.metaData as Record<string, any>) || {};
+    const secretKey = meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY;
+    if (!secretKey) throw new BadRequestException('Stripe is not configured for this business');
+
+    const allowed = (process.env.PUBLIC_URL_ALLOWLIST || process.env.NEXT_PUBLIC_BASE_URL || process.env.REPLIT_DEV_DOMAIN || '')
+      .split(',').map((s) => s.trim()).filter(Boolean)
+      .map((s) => s.startsWith('http') ? s : `https://${s}`);
+    if (allowed.length === 0) {
+      this.logger.error('No PUBLIC_URL_ALLOWLIST configured; rejecting Stripe checkout for safety');
+      throw new BadRequestException('Server misconfigured: no allowed return-URL origins set');
+    }
+    const isAllowedUrl = (u: string): boolean => {
+      try {
+        const parsed = new URL(u);
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+        return allowed.some((a) => {
+          try { return new URL(a).origin === parsed.origin; } catch { return false; }
+        });
+      } catch { return false; }
+    };
+    if (!isAllowedUrl(successUrl) || !isAllowedUrl(cancelUrl)) {
+      throw new BadRequestException('Invalid success/cancel URL');
+    }
+
+    const currency = (invoice.currency || 'USD').toLowerCase();
+    const amount = Math.round(Number(invoice.total) * 100);
+    const description = `Invoice ${invoice.invoiceNumber || invoice.id} — ${invoice.business.name || ''}`.trim();
+
+    const body = new URLSearchParams();
+    body.append('mode', 'payment');
+    body.append('success_url', successUrl);
+    body.append('cancel_url', cancelUrl);
+    body.append('client_reference_id', invoiceId);
+    body.append('metadata[invoiceId]', invoiceId);
+    body.append('metadata[businessId]', invoice.business.id);
+    if (invoice.contact?.email) body.append('customer_email', invoice.contact.email);
+    body.append('line_items[0][quantity]', '1');
+    body.append('line_items[0][price_data][currency]', currency);
+    body.append('line_items[0][price_data][unit_amount]', String(amount));
+    body.append('line_items[0][price_data][product_data][name]', description);
+
+    const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      this.logger.error(`Stripe checkout creation failed: ${text}`);
+      throw new BadRequestException('Failed to create Stripe checkout session');
+    }
+
+    const session = (await res.json()) as { id: string; url: string };
+    return { redirectUrl: session.url };
+  }
+
+  private verifyStripeSignature(rawPayload: string, signatureHeader: string, secret: string): boolean {
+    if (!signatureHeader || !secret) return false;
+    const parts = signatureHeader.split(',').reduce<Record<string, string>>((acc, part) => {
+      const [k, v] = part.split('=');
+      if (k && v) acc[k.trim()] = (acc[k.trim()] ? acc[k.trim()] + ',' : '') + v.trim();
+      return acc;
+    }, {});
+    const timestamp = parts.t;
+    const provided = parts.v1;
+    if (!timestamp || !provided) return false;
+    const expected = createHmac('sha256', secret)
+      .update(`${timestamp}.${rawPayload}`)
+      .digest('hex');
+    const a = Buffer.from(expected, 'utf8');
+    const candidates = provided.split(',').map((s) => Buffer.from(s, 'utf8'));
+    return candidates.some((b) => b.length === a.length && timingSafeEqual(a, b));
+  }
+
+  async handleStripeWebhook(
+    rawPayload: string,
+    signatureHeader: string | undefined,
+  ): Promise<{ ok: true; received?: boolean }> {
+    if (!rawPayload) throw new BadRequestException('Missing Stripe webhook payload');
+
+    let event: { id?: string; type?: string; data?: { object?: any } };
+    try {
+      event = JSON.parse(rawPayload);
+    } catch {
+      throw new BadRequestException('Invalid Stripe webhook payload');
+    }
+
+    const obj = event.data?.object || {};
+    const invoiceId: string | undefined =
+      obj?.metadata?.invoiceId || obj?.client_reference_id;
+    if (!invoiceId) {
+      this.logger.warn('Stripe webhook missing invoiceId in metadata; ignoring');
+      return { ok: true, received: false };
+    }
+
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { business: { select: { id: true, metaData: true } } },
+    });
+    if (!invoice) throw new BadRequestException('Invoice not found for webhook');
+
+    const meta = (invoice.business.metaData as Record<string, any>) || {};
+    const webhookSecret =
+      meta.stripeWebhookSecret || process.env.STRIPE_WEBHOOK_SECRET;
+
+    if (!webhookSecret) {
+      this.logger.error('Stripe webhook secret not configured; rejecting webhook');
+      throw new BadRequestException('Stripe webhook secret not configured');
+    }
+    if (!signatureHeader || !this.verifyStripeSignature(rawPayload, signatureHeader, webhookSecret)) {
+      this.logger.warn(`Stripe webhook signature verification failed for invoice ${invoiceId}`);
+      throw new BadRequestException('Invalid Stripe webhook signature');
+    }
+
+    if (event.type !== 'checkout.session.completed') {
+      return { ok: true, received: true };
+    }
+
+    if (invoice.status === 'PAID') {
+      return { ok: true, received: true };
+    }
+
+    const providerPaymentId: string = obj.id || event.id || `stripe_${invoiceId}_${Date.now()}`;
+    const existing = await this.prisma.client.payment.findUnique({
+      where: { providerPaymentId },
+    }).catch(() => null);
+    if (existing) {
+      return { ok: true, received: true };
+    }
+    const existingForInvoice = await this.prisma.client.payment.findFirst({
+      where: { invoiceId, provider: 'stripe', status: 'SUCCESSFUL' },
+    });
+    if (existingForInvoice) {
+      return { ok: true, received: true };
+    }
+
+    const amountMinor: number = obj.amount_total ?? obj.amount_received ?? 0;
+    const amount = amountMinor / 100;
+    const currency = (obj.currency || invoice.currency || 'USD').toUpperCase();
+    const expectedAmount = Number(invoice.total);
+
+    if (currency !== invoice.currency.toUpperCase()) {
+      this.logger.warn(
+        `Stripe webhook currency mismatch for invoice ${invoiceId}: got ${currency}, expected ${invoice.currency}`,
+      );
+      throw new BadRequestException('Stripe webhook currency mismatch');
+    }
+    if (Math.abs(amount - expectedAmount) > 0.01) {
+      this.logger.warn(
+        `Stripe webhook amount mismatch for invoice ${invoiceId}: got ${amount}, expected ${expectedAmount}`,
+      );
+      throw new BadRequestException('Stripe webhook amount mismatch');
+    }
+
+    await this.prisma.client.payment.create({
+      data: {
+        provider: 'stripe',
+        providerPaymentId,
+        amount,
+        currency,
+        status: 'SUCCESSFUL',
+        invoiceId,
+        businessId: invoice.businessId,
+      },
+    });
+    await this.commerceService.markInvoicePaid(invoiceId);
+
+    return { ok: true, received: true };
   }
 
   async getInvoicePaymentStatus(invoiceId: string) {

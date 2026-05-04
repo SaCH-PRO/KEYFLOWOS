@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { motion, AnimatePresence } from "framer-motion";
@@ -394,6 +395,24 @@ export function BillingTab() {
           <button onClick={() => setMessage(null)} className="ml-auto"><X className="w-3 h-3" /></button>
         </motion.div>
       )}
+
+      {/* KeyflowOS Subscription Banner */}
+      <motion.div
+        variants={fadeUp}
+        className="flex items-start gap-3 rounded-xl border border-border/40 bg-muted/10 px-4 py-2.5"
+      >
+        <Crown className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold">Your KeyflowOS subscription</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            This is what <span className="font-medium text-foreground">you</span> pay KeyflowOS for the platform.
+            For payments <span className="font-medium text-foreground">your customers</span> send you, see{" "}
+            <Link href="/app/commerce?tab=payments" className="underline" style={{ color: "hsl(var(--kf-accent1))" }}>
+              Commerce → Collections
+            </Link>.
+          </p>
+        </div>
+      </motion.div>
 
       {/* Current Plan Header */}
       <motion.div variants={fadeUp} className={`rounded-2xl border border-border/40 bg-gradient-to-br ${detail.gradient} p-5 shadow-lg ${detail.glow}`}>

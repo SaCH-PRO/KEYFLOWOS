@@ -56,12 +56,16 @@ import PaymentsTab from "./payments/payments-tab";
 import { ProductsPanel } from "./products/products-panel";
 import { useProducts } from "./hooks/use-products";
 import { RevenueSetupDrawer } from "./components/revenue-setup-drawer";
+import { ServiceLinkWidget } from "./components/service-link-widget";
+import { CommerceInventoryWrapper } from "./components/commerce-inventory-wrapper";
+import { Warehouse } from "lucide-react";
 
-type RevenueMode = "operations" | "catalog" | "setup";
+type RevenueMode = "operations" | "catalog" | "inventory" | "setup";
 
 const MODE_TABS: { key: RevenueMode; label: string; icon: React.ElementType }[] = [
   { key: "operations", label: "Operations", icon: Zap },
   { key: "catalog", label: "Catalog", icon: Package },
+  { key: "inventory", label: "Inventory", icon: Warehouse },
   { key: "setup", label: "Setup", icon: Settings },
 ];
 
@@ -115,7 +119,7 @@ export default function CommercePage() {
   const handleCommerceAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
       const t = actionKey.replace("switch_tab:", "");
-      if (["operations", "catalog", "setup"].includes(t)) {
+      if (["operations", "catalog", "inventory", "setup"].includes(t)) {
         setMode(t as RevenueMode);
       } else if (["invoices", "quotes", "payments", "recurring"].includes(t)) {
         setMode("operations");
@@ -142,6 +146,8 @@ export default function CommercePage() {
     const paramTab = searchParams.get("tab");
     if (paramTab === "products") {
       setMode("catalog");
+    } else if (paramTab === "inventory") {
+      setMode("inventory");
     } else if (paramTab && ["invoices", "quotes", "payments", "recurring"].includes(paramTab)) {
       setMode("operations");
       setOpsSection(paramTab);
@@ -316,7 +322,8 @@ export default function CommercePage() {
         { key: "n", description: "New item", action: () => composer.handleNewItem() },
         { key: "1", description: "Operations", action: () => setMode("operations") },
         { key: "2", description: "Catalog", action: () => setMode("catalog") },
-        { key: "3", description: "Setup", action: () => setMode("setup") },
+        { key: "3", description: "Inventory", action: () => setMode("inventory") },
+        { key: "4", description: "Setup", action: () => setMode("setup") },
         { key: "r", description: "Refresh data", action: () => { shell.refreshProducts(); } },
         { key: "?", description: "Help", action: () => setHelpOpen(true) },
       ],
@@ -388,6 +395,7 @@ export default function CommercePage() {
       actionDataAttr="commerce-new"
       headerRight={
         <div className="flex items-center gap-2">
+          <ServiceLinkWidget compact />
           <PageGuideTrigger moduleKey="commerce" />
           <RichTooltip title="Revenue Pulse" description="Total payments collected this month across all invoices." side="bottom">
             <div
@@ -766,6 +774,25 @@ export default function CommercePage() {
             invoices={shell.invoices}
             quotes={shell.quotes}
           />
+        </div>
+      )}
+
+      {mode === "inventory" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Warehouse className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <h3 className="text-sm font-semibold">Inventory</h3>
+              <span className="text-[10px] text-muted-foreground">Stock, warehouses, purchase orders & alerts</span>
+            </div>
+            <Link
+              href="/app/marketplace?tab=listings"
+              className="text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+            >
+              Marketplace listings <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+          {businessId && <CommerceInventoryWrapper businessId={businessId} />}
         </div>
       )}
 

@@ -268,7 +268,7 @@ export class SubscriptionsService {
     const plan = PLANS[planId];
     if (!plan) throw new BadRequestException('Invalid plan');
     if (planId === 'FREE') throw new BadRequestException('Free plan does not require payment');
-    if (!['wipay', 'paypal'].includes(gateway)) throw new BadRequestException('Invalid gateway');
+    if (!['wipay', 'paypal', 'stripe'].includes(gateway)) throw new BadRequestException('Invalid gateway');
 
     const price = currency === 'USD' ? plan.priceUSD : plan.priceTTD;
 
