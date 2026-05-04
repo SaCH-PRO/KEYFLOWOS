@@ -1340,6 +1340,14 @@ export default function InvoicesPanel({
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[11px] font-medium">{formatAmount(p.amount, p.currency)}</span>
                         <span className="text-[10px] text-muted-foreground/40">{new Date(p.createdAt).toLocaleDateString()}</span>
+                        {p.providerPaymentId && (
+                          <a
+                            href={`/app/payments?tab=transactions&tx=${encodeURIComponent(p.providerPaymentId)}`}
+                            className="text-[10px] text-violet-400 hover:underline"
+                          >
+                            View in Payments
+                          </a>
+                        )}
                       </div>
                     </div>
                   ))}

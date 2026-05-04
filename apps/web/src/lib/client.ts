@@ -8954,3 +8954,94 @@ export async function triggerMarketingCampaign(provider: MarketingProvider, camp
     {},
   );
 }
+
+// ========== PAYMENTS OPERATIONS ==========
+export type PaymentsGatewayId = "stripe" | "paypal" | "wipay";
+
+export type PaymentsGatewayStatus = {
+  id: PaymentsGatewayId;
+  name: string;
+  connected: boolean;
+  supports: { transactions: boolean; paymentLinks: boolean; refunds: boolean };
+};
+
+export type PaymentsTransaction = {
+  id: string;
+  provider: PaymentsGatewayId;
+  type: "charge" | "refund";
+  status: string;
+  amount: number;
+  amountTtd: number | null;
+  currency: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  description: string | null;
+  invoiceId: string | null;
+  externalUrl: string | null;
+  createdAt: string;
+};
+
+export type PaymentsLink = {
+  id: string;
+  url: string;
+  provider: PaymentsGatewayId;
+  amount: number;
+  currency: string;
+  description: string;
+  active: boolean;
+  createdAt: string;
+};
+
+export type PaymentsRefund = {
+  id: string;
+  chargeId: string;
+  amount: number;
+  currency: string;
+  status: string;
+  provider: PaymentsGatewayId;
+  createdAt: string;
+};
+
+export async function fetchPaymentsGateways(businessId: string) {
+  return apiGetSimple<PaymentsGatewayStatus[]>(`/payments/businesses/${encodeURIComponent(businessId)}/gateways`);
+}
+
+export async function fetchPaymentsTransactions(businessId: string, opts: { limit?: number; q?: string } = {}) {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.q) params.set("q", opts.q);
+  const qs = params.toString();
+  return apiGetSimple<PaymentsTransaction[]>(
+    `/payments/businesses/${encodeURIComponent(businessId)}/transactions${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function fetchPaymentsLinks(businessId: string) {
+  return apiGetSimple<PaymentsLink[]>(`/payments/businesses/${encodeURIComponent(businessId)}/links`);
+}
+
+export async function createPaymentsLink(
+  businessId: string,
+  body: { gateway: PaymentsGatewayId; amount: number; currency: string; description: string; customerEmail?: string },
+) {
+  return apiPostSimple<PaymentsLink>(`/payments/businesses/${encodeURIComponent(businessId)}/links`, body);
+}
+
+export async function revokePaymentsLink(businessId: string, gateway: PaymentsGatewayId, linkId: string) {
+  return apiDelete<{ ok: true }>(
+    `/payments/businesses/${encodeURIComponent(businessId)}/links/${gateway}/${encodeURIComponent(linkId)}`,
+  );
+}
+
+export async function refundPaymentsCharge(
+  businessId: string,
+  body: { gateway: PaymentsGatewayId; chargeId: string; amount?: number; reason?: string },
+) {
+  return apiPostSimple<PaymentsRefund>(`/payments/businesses/${encodeURIComponent(businessId)}/refunds`, body);
+}
+
+export async function fetchTransactionLink(businessId: string, transactionId: string) {
+  return apiGetSimple<{ invoiceId: string | null; provider: string | null; externalUrl: string | null }>(
+    `/payments/businesses/${encodeURIComponent(businessId)}/transactions/${encodeURIComponent(transactionId)}/link`,
+  );
+}

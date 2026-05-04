@@ -234,6 +234,7 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Inbox", href: "/app/inbox", icon: Mail },
     { label: "Calendar", href: "/app/bookings", icon: Calendar },
     { label: "Revenue", href: "/app/commerce", icon: CreditCard },
+    { label: "Payments", href: "/app/payments", icon: CreditCard },
     { label: "Content", href: "/app/marketing", icon: Megaphone },
     { label: "Automations", href: "/app/automations", icon: Zap },
     { label: "Projects", href: "/app/projects", icon: FolderKanban },
@@ -271,6 +272,7 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/social", "workspaces"],
   ["/app/crm", "workspaces"],
   ["/app/commerce", "workspaces"],
+  ["/app/payments", "workspaces"],
   ["/app/bookings", "workspaces"],
   ["/app/marketing", "workspaces"],
   ["/app/automations", "workspaces"],
@@ -329,6 +331,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     if (pathname === "/app") return "cockpit";
     if (pathname.startsWith("/app/crm")) return "crm";
     if (pathname.startsWith("/app/commerce")) return "revenue";
+    if (pathname.startsWith("/app/payments")) return "revenue";
     if (pathname.startsWith("/app/bookings")) return "calendar";
     if (pathname.startsWith("/app/social") || pathname.startsWith("/app/marketing")) return "content";
     if (pathname.startsWith("/app/projects")) return "projects";
