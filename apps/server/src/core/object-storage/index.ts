@@ -16,5 +16,3 @@ export {
   getObjectAclPolicy,
   setObjectAclPolicy,
 } from "./objectAcl";
-
-export { registerObjectStorageRoutes } from "./routes";
