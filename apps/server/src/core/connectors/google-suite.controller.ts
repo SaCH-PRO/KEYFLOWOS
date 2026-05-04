@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Inject,
   Param,
   Post,
   Query,
@@ -12,11 +13,14 @@ import {
 import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { BusinessGuard } from '../auth/business.guard';
-import { GoogleSuiteService, GoogleService, ALL_SERVICES } from './google-suite.service';
+import { GoogleSuiteService, ALL_SERVICES } from './google-suite.service';
+import type { GoogleService } from './google-suite.service';
 
 @Controller('connect/google-suite')
 export class GoogleSuiteController {
-  constructor(private readonly suite: GoogleSuiteService) {}
+  constructor(
+    @Inject(GoogleSuiteService) private readonly suite: GoogleSuiteService,
+  ) {}
 
   @Post('businesses/:businessId/auth-url')
   @UseGuards(AuthGuard, BusinessGuard)
