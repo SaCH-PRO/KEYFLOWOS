@@ -199,7 +199,6 @@ export function useContactsPipeline() {
     showAddForm: actions.showAddForm, setShowAddForm: actions.setShowAddForm,
     editingContact: actions.editingContact, setEditingContact: actions.setEditingContact,
     showMobileDetail, setShowMobileDetail,
-    showAddMenu: actions.showAddMenu, setShowAddMenu: actions.setShowAddMenu,
     showBroadcast: actions.showBroadcast, setShowBroadcast: actions.setShowBroadcast,
     showGuide: actions.showGuide, setShowGuide: actions.setShowGuide,
     selectMode: contactsData.selectMode, selectedIds, setSelectedIds, setSelectMode,

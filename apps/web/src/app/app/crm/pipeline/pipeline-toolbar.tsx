@@ -23,7 +23,6 @@ import {
   Table as TableIcon,
   Upload,
   Loader2,
-  ArrowRight,
   UserPlus,
   Sparkles,
   ChevronDown,
@@ -32,6 +31,7 @@ import {
   Building2,
 } from "lucide-react";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
+import { ContactScanButton } from "@/components/contacts/contact-scan-button";
 
 export type SortOption = "name" | "newest" | "oldest" | "revenue" | "score";
 export type SmartSegment = "high-value" | "needs-followup" | "new-this-week" | "at-risk" | "stale";
@@ -86,6 +86,8 @@ export interface PipelineToolbarProps {
   onAddContact: () => void;
   onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string }) => Promise<void>;
   onImport?: () => void;
+  onScanSuccess?: () => void;
+  businessId?: string;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
 }
@@ -112,6 +114,8 @@ function PipelineToolbarInner({
   onAddContact,
   onQuickCreate,
   onImport,
+  onScanSuccess,
+  businessId,
   viewMode,
   onViewModeChange,
 }: PipelineToolbarProps) {
@@ -201,6 +205,7 @@ function PipelineToolbarInner({
             </button>
           )}
         </div>
+        <ContactScanButton businessId={businessId} onScanSuccess={onScanSuccess} />
         <AddContactControl
           onQuickCreate={onQuickCreate}
           onOpenFullForm={onAddContact}
@@ -513,11 +518,11 @@ function AddContactControl({
     }
   };
 
-  const handleOpenFull = () => {
-    setOpen(false);
-    reset();
-    onOpenFullForm();
-  };
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener("kf:open-quick-add-contact", onOpen as EventListener);
+    return () => window.removeEventListener("kf:open-quick-add-contact", onOpen as EventListener);
+  }, []);
 
   if (!onQuickCreate) {
     return <AddContactButton onClick={onOpenFullForm} />;
@@ -684,14 +689,7 @@ function AddContactControl({
             </button>
           </div>
 
-          <div className="px-5 py-3 border-t border-border/40 bg-white/[0.02] flex items-center justify-between gap-2">
-            <button
-              onClick={handleOpenFull}
-              className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors px-1 py-1"
-            >
-              Open full form
-              <ArrowRight className="w-3 h-3" />
-            </button>
+          <div className="px-5 py-3 border-t border-border/40 bg-white/[0.02] flex items-center justify-end gap-2">
             <div className="flex items-center gap-2">
               <span className="hidden sm:inline text-[10px] text-muted-foreground/50 mr-1">⌘ + ↵</span>
               <button
