@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { contactWhereBase } from './crm.helpers';
+import { CrmTimelineService } from './crm-timeline.service';
+import { CONTACT_EVENT } from '@keyflow/shared';
 
 type NextAction = {
   id: string;
@@ -44,6 +46,7 @@ export class CrmActionsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
   ) {}
 
   private get db() {
@@ -820,15 +823,13 @@ export class CrmActionsService {
           where: { id },
           data: { status: 'DONE', completedAt: new Date() },
         });
-        await this.db.contactEvent.create({
-          data: {
-            businessId,
-            contactId: task.contactId,
-            type: 'TASK_COMPLETED',
-            data: { source: 'engage', taskId: id, actionType: type },
-            source: 'system',
-          },
-        });
+        await this.timeline.logEvent(
+          businessId,
+          task.contactId,
+          CONTACT_EVENT.TASK_COMPLETED,
+          { source: 'engage', taskId: id, actionType: type },
+          { source: 'engage' },
+        );
         return { success: true, message: 'Task completed' };
       }
 
@@ -842,15 +843,13 @@ export class CrmActionsService {
           where: { ...contactWhereBase(businessId), id },
         });
         if (!contact) return { success: false, message: 'Contact not found' };
-        await this.db.contactEvent.create({
-          data: {
-            businessId,
-            contactId: id,
-            type: 'ACTION_COMPLETED',
-            data: { source: 'engage', actionType: type },
-            source: 'system',
-          },
-        });
+        await this.timeline.logEvent(
+          businessId,
+          id,
+          CONTACT_EVENT.ACTION_COMPLETED,
+          { source: 'engage', actionType: type },
+          { source: 'engage' },
+        );
         await this.db.contact.update({
           where: { id },
           data: { lastInteractionAt: new Date(), updatedAt: new Date() },
@@ -864,15 +863,13 @@ export class CrmActionsService {
         });
         if (!quote) return { success: false, message: 'Quote not found' };
         if (quote.contactId) {
-          await this.db.contactEvent.create({
-            data: {
-              businessId,
-              contactId: quote.contactId,
-              type: 'ACTION_COMPLETED',
-              data: { source: 'engage', actionType: `${type}_follow_up`, quoteId: id },
-              source: 'system',
-            },
-          });
+          await this.timeline.logEvent(
+            businessId,
+            quote.contactId,
+            CONTACT_EVENT.ACTION_COMPLETED,
+            { source: 'engage', actionType: `${type}_follow_up`, quoteId: id },
+            { source: 'engage' },
+          );
           await this.db.contact.update({
             where: { id: quote.contactId },
             data: { lastInteractionAt: new Date(), updatedAt: new Date() },
@@ -887,15 +884,13 @@ export class CrmActionsService {
         });
         if (!invoice) return { success: false, message: 'Invoice not found' };
         if (invoice.contactId) {
-          await this.db.contactEvent.create({
-            data: {
-              businessId,
-              contactId: invoice.contactId,
-              type: 'ACTION_COMPLETED',
-              data: { source: 'engage', actionType: 'payment_reminder', invoiceId: id },
-              source: 'system',
-            },
-          });
+          await this.timeline.logEvent(
+            businessId,
+            invoice.contactId,
+            CONTACT_EVENT.ACTION_COMPLETED,
+            { source: 'engage', actionType: 'payment_reminder', invoiceId: id },
+            { source: 'engage' },
+          );
         }
         return { success: true, message: 'Payment reminder marked complete' };
       }
@@ -915,15 +910,13 @@ export class CrmActionsService {
         });
         if (!booking) return { success: false, message: 'Booking not found' };
         if (booking.contactId) {
-          await this.db.contactEvent.create({
-            data: {
-              businessId,
-              contactId: booking.contactId,
-              type: 'ACTION_COMPLETED',
-              data: { source: 'engage', actionType: 'booking_prep' },
-              source: 'system',
-            },
-          });
+          await this.timeline.logEvent(
+            businessId,
+            booking.contactId,
+            CONTACT_EVENT.ACTION_COMPLETED,
+            { source: 'engage', actionType: 'booking_prep' },
+            { source: 'engage' },
+          );
         }
         return { success: true, message: 'Booking prep marked complete' };
       }
@@ -934,15 +927,13 @@ export class CrmActionsService {
         });
         if (!invoice) return { success: false, message: 'Invoice not found' };
         if (invoice.contactId) {
-          await this.db.contactEvent.create({
-            data: {
-              businessId,
-              contactId: invoice.contactId,
-              type: 'ACTION_COMPLETED',
-              data: { source: 'engage', actionType: 'thank_you_sent' },
-              source: 'system',
-            },
-          });
+          await this.timeline.logEvent(
+            businessId,
+            invoice.contactId,
+            CONTACT_EVENT.ACTION_COMPLETED,
+            { source: 'engage', actionType: 'thank_you_sent' },
+            { source: 'engage' },
+          );
         }
         return { success: true, message: 'Thank you marked complete' };
       }

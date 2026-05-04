@@ -1,5 +1,6 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { normalizeContactEventType } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 type TimelineEntry = {
@@ -16,6 +17,8 @@ type TimelineEntry = {
 
 @Injectable()
 export class CrmTimelineService {
+  private readonly logger = new Logger(CrmTimelineService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
@@ -52,7 +55,7 @@ export class CrmTimelineService {
     return contact;
   }
 
-  logEvent(
+  async logEvent(
     businessId: string,
     contactId: string,
     type: string,
@@ -61,17 +64,33 @@ export class CrmTimelineService {
     tx?: { contactEvent: { create: (args: any) => any } },
   ) {
     const client = tx ?? this.prisma.client;
-    return client.contactEvent.create({
+    const normalized = normalizeContactEventType(type);
+    if (!normalized.canonical) {
+      throw new BadRequestException(
+        `Unknown ContactEvent type "${type}". Use a canonical CONTACT_EVENT_TYPES value.`,
+      );
+    }
+    const created = await client.contactEvent.create({
       data: {
         businessId,
         contactId,
-        type,
-        data,
+        type: normalized.canonical,
+        data: data ?? {},
         actorType: meta?.actorType,
         actorId: meta?.actorId,
         source: meta?.source ?? 'system',
       },
     });
+    this.events.emit('crm.contact_event.logged', {
+      businessId,
+      contactId,
+      type: normalized.canonical,
+      eventId: (created as any)?.id,
+      source: meta?.source ?? 'system',
+      actorType: meta?.actorType,
+      actorId: meta?.actorId,
+    });
+    return created;
   }
 
   async listContactEvents(params: { businessId: string; contactId: string; limit?: number }) {
@@ -323,6 +342,60 @@ export class CrmTimelineService {
       actorId: input.actorId,
       source: input.source,
     });
+  }
+
+  /**
+   * One-shot idempotent backfill: rewrites legacy event types to canonical.
+   * Rows whose type is already canonical or legacy-flagged are skipped.
+   */
+  async backfillLegacyEvents(input: { businessId?: string; batchSize?: number } = {}) {
+    const batchSize = input.batchSize ?? 500;
+    let processed = 0;
+    let aliased = 0;
+    let flagged = 0;
+    let cursor: string | null = null;
+
+    while (true) {
+      const rows: Array<{ id: string; type: string; data: unknown }> =
+        await this.prisma.client.contactEvent.findMany({
+          where: input.businessId ? { businessId: input.businessId } : {},
+          select: { id: true, type: true, data: true },
+          orderBy: { id: 'asc' },
+          take: batchSize,
+          ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+        });
+      if (rows.length === 0) break;
+      cursor = rows[rows.length - 1].id;
+
+      for (const row of rows) {
+        processed++;
+        const normalized = normalizeContactEventType(row.type);
+        const existingData =
+          typeof row.data === 'object' && row.data !== null && !Array.isArray(row.data)
+            ? (row.data as Record<string, unknown>)
+            : {};
+        if (normalized.canonical && normalized.wasAliased) {
+          await this.prisma.client.contactEvent.update({
+            where: { id: row.id },
+            data: { type: normalized.canonical },
+          });
+          aliased++;
+        } else if (!normalized.canonical && existingData.is_legacy !== true) {
+          await this.prisma.client.contactEvent.update({
+            where: { id: row.id },
+            data: {
+              data: { ...existingData, is_legacy: true, legacy_type: row.type },
+            },
+          });
+          flagged++;
+        }
+      }
+
+      if (rows.length < batchSize) break;
+    }
+
+    this.logger.log(`[ContactEvent backfill] processed=${processed} aliased=${aliased} flagged=${flagged}`);
+    return { processed, aliased, flagged };
   }
 
   async dueTasks(input: { businessId: string; windowDays?: number }) {

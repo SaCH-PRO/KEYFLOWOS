@@ -1,6 +1,8 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CrmTimelineService } from '../crm/crm-timeline.service';
+import { CONTACT_EVENT } from '@keyflow/shared';
 
 interface AutopilotTaskInput {
   businessId: string;
@@ -57,7 +59,10 @@ const SETUP_TASKS: Record<string, TaskTemplate[]> = {
 
 @Injectable()
 export class AutopilotService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
+  ) {}
 
   async getTodaysTasks(businessId: string, limit: number = 3) {
     const today = new Date();
@@ -396,16 +401,13 @@ export class AutopilotService {
     };
 
     if (contactId) {
-      await this.prisma.client.contactEvent.create({
-        data: {
-          contactId,
-          businessId,
-          type: channel === 'whatsapp' ? 'whatsapp.sent' : channel === 'email' ? 'email.sent' : 'autopilot.executed',
-          data: { ...eventData as any, description: `Autopilot: ${message.slice(0, 200)}` },
-          actorType: 'AI',
-          actorId: 'autopilot',
-        },
-      });
+      await this.timeline.logEvent(
+        businessId,
+        contactId,
+        channel === 'whatsapp' ? CONTACT_EVENT.WHATSAPP_SENT : channel === 'email' ? CONTACT_EVENT.EMAIL_SENT : CONTACT_EVENT.AUTOPILOT_EXECUTED,
+        { ...eventData as any, description: `Autopilot: ${message.slice(0, 200)}` },
+        { actorType: 'AI', actorId: 'autopilot', source: 'autopilot' },
+      );
     }
 
     const realTaskId = actionId.replace(/^(auto_|pending_|overdue_inv_|checkin_|nudge_|postbooking_|autowelcome_|stalenudge_)/, '');

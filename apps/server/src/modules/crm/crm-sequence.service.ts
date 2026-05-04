@@ -1,9 +1,14 @@
 import { Inject, Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CrmTimelineService } from './crm-timeline.service';
+import { CONTACT_EVENT } from '@keyflow/shared';
 
 @Injectable()
 export class CrmSequenceService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
+  ) {}
 
   private get db() {
     return this.prisma.client as any;
@@ -181,15 +186,9 @@ export class CrmSequenceService {
     data: Record<string, unknown>,
   ) {
     try {
-      await this.db.contactEvent.create({
-        data: {
-          businessId,
-          contactId,
-          type,
-          data,
-          actorType: 'system',
-          source: 'sequence',
-        },
+      await this.timeline.logEvent(businessId, contactId, type, data, {
+        actorType: 'system',
+        source: 'sequence',
       });
     } catch (err) {
       console.warn(`[CrmSequenceService] Failed to log event ${type} for contact ${contactId}:`, err);
@@ -244,7 +243,7 @@ export class CrmSequenceService {
 
     await Promise.all(
       newContactIds.map((contactId) =>
-        this.logEvent(businessId, contactId, 'sequence_enrolled', {
+        this.logEvent(businessId, contactId, CONTACT_EVENT.SEQUENCE_ENROLLED, {
           sequenceId,
           sequenceName: sequence.name,
           firstStepType: steps?.[0]?.type ?? null,
@@ -281,7 +280,7 @@ export class CrmSequenceService {
         },
       });
 
-      await this.logEvent(businessId, enrollment.contactId, 'sequence_step_advanced', {
+      await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_ADVANCED, {
         sequenceId: enrollment.sequenceId,
         sequenceName: enrollment.sequence.name,
         fromStep: enrollment.currentStep,
@@ -305,7 +304,7 @@ export class CrmSequenceService {
       },
     });
 
-    await this.logEvent(businessId, enrollment.contactId, 'sequence_step_advanced', {
+    await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_ADVANCED, {
       sequenceId: enrollment.sequenceId,
       sequenceName: enrollment.sequence.name,
       fromStep: enrollment.currentStep,
@@ -367,7 +366,7 @@ export class CrmSequenceService {
     });
 
     const steps = enrollment.sequence.steps as any[];
-    await this.logEvent(businessId, enrollment.contactId, 'sequence_unenrolled', {
+    await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_UNENROLLED, {
       sequenceId: enrollment.sequenceId,
       sequenceName: enrollment.sequence.name,
       stoppedAtStep: enrollment.currentStep,

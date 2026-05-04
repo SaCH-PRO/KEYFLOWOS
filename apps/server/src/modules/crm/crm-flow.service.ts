@@ -78,7 +78,7 @@ export class CrmFlowService {
       this.db.contactEvent.count({
         where: {
           contact: contactWhereBase(businessId),
-          type: 'STATUS_CHANGED',
+          type: { in: ['status.changed', 'STATUS_CHANGED'] },
           createdAt: { gte: weekAgo },
         },
       }),

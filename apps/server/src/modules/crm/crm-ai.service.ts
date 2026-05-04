@@ -3,6 +3,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CrmSequenceService } from './crm-sequence.service';
 import { CrmListsService } from './crm-lists.service';
+import { CrmTimelineService } from './crm-timeline.service';
+import { normalizeContactEventType } from '@keyflow/shared';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactSummaryPrompt } from './prompts/contact-summary.prompt';
 import { buildLeadScoringPrompt } from './prompts/lead-scoring.prompt';
@@ -43,6 +45,7 @@ export class CrmAiService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(CrmSequenceService) private readonly sequences: CrmSequenceService,
     @Inject(CrmListsService) private readonly lists: CrmListsService,
+    @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
   ) {}
 
   private get db() {
@@ -1289,9 +1292,15 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
           const channel = (params?.channel as string) ?? 'call';
           const notes = (params?.notes as string) ?? '';
           const outcome = (params?.outcome as string) ?? 'completed';
-          await this.db.contactEvent.create({
-            data: { contactId, businessId, type: `${channel}.logged`, data: { channel, outcome, notes } },
-          });
+          const commType = normalizeContactEventType(`communication.${channel}`).canonical
+            ?? normalizeContactEventType('communication.call').canonical!;
+          await this.timeline.logEvent(
+            businessId,
+            contactId,
+            commType,
+            { channel, outcome, notes },
+            { source: 'crm-ai', actorType: 'AI' },
+          );
           await this.db.contact.updateMany({ where: { id: contactId, businessId }, data: { lastInteractionAt: new Date() } });
           return { success: true, message: `${channel} logged`, data: { channel, outcome } };
         }
