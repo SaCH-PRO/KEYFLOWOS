@@ -1,105 +1,148 @@
-import { useState } from "react";
-import type { ReactNode } from "react";
-import Uppy from "@uppy/core";
-import type { UppyFile, UploadResult } from "@uppy/core";
-import DashboardModal from "@uppy/react/dashboard-modal";
-import "@uppy/core/css/style.min.css";
-import "@uppy/dashboard/css/style.min.css";
-import AwsS3 from "@uppy/aws-s3";
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { Button } from "@keyflow/ui";
+
+export interface UploadedFileInfo {
+  name: string;
+  size: number;
+  type: string;
+  uploadURL: string;
+}
+
+export interface ObjectUploadResult {
+  successful: UploadedFileInfo[];
+  failed: { name: string; error: string }[];
+}
+
+export interface UploadParameters {
+  method: "PUT";
+  url: string;
+  headers?: Record<string, string>;
+}
 
 interface ObjectUploaderProps {
   maxNumberOfFiles?: number;
   maxFileSize?: number;
-  /**
-   * Function to get upload parameters for each file.
-   * IMPORTANT: This receives the file object - use file.name, file.size, file.type
-   * to request per-file presigned URLs from your backend.
-   */
-  onGetUploadParameters: (
-
-    file: UppyFile<Record<string, unknown>, Record<string, unknown>>
-  ) => Promise<{
-    method: "PUT";
-    url: string;
-    headers?: Record<string, string>;
-  }>;
-  onComplete?: (
-
-    result: UploadResult<Record<string, unknown>, Record<string, unknown>>
-  ) => void;
+  accept?: string;
+  onGetUploadParameters: (file: File) => Promise<UploadParameters>;
+  onComplete?: (result: ObjectUploadResult) => void;
   buttonClassName?: string;
   children: ReactNode;
 }
 
 /**
- * A file upload component that renders as a button and provides a modal interface for
- * file management.
+ * A file upload component that renders as a button and uploads files directly
+ * to object storage using presigned PUT URLs.
  *
- * Features:
- * - Renders as a customizable button that opens a file upload modal
- * - Provides a modal interface for:
- *   - File selection
- *   - File preview
- *   - Upload progress tracking
- *   - Upload status display
+ * This is a lightweight, dependency-free replacement for the previous Uppy-based
+ * implementation. The previous version transitively pulled in `lodash` 4.17.21
+ * via `@uppy/utils`, which carries unpatched advisories
+ * (GHSA-35jh-r3h4-6jhm `_.template` injection and `_.zipObjectDeep` prototype
+ * pollution). The advisories declare patched versions as `>=4.18.0`, but no such
+ * lodash exists on npm, so the only fix is to drop the Uppy dependency tree.
  *
- * The component uses Uppy v5 under the hood to handle all file upload functionality.
- * All file management features are automatically handled by the Uppy dashboard modal.
- *
- * @param props - Component props
- * @param props.maxNumberOfFiles - Maximum number of files allowed to be uploaded
- *   (default: 1)
- * @param props.maxFileSize - Maximum file size in bytes (default: 10MB)
- * @param props.onGetUploadParameters - Function to get upload parameters for each file.
- *   Receives the UppyFile object with file.name, file.size, file.type properties.
- *   Use these to request per-file presigned URLs from your backend. Returns method,
- *   url, and optional headers for the upload request.
- * @param props.onComplete - Callback function called when upload is complete. Typically
- *   used to make post-upload API calls to update server state and set object ACL
- *   policies.
- * @param props.buttonClassName - Optional CSS class name for the button
- * @param props.children - Content to be rendered inside the button
+ * The flow mirrors what the rest of the app already does (see
+ * `apps/web/src/app/app/profile/components/personal-info-section.tsx` and
+ * `apps/web/src/app/app/expenses/components/expense-form-modal.tsx`):
+ *   1. Ask the caller for presigned upload parameters per file.
+ *   2. PUT the file body directly to that URL.
+ *   3. Report results via `onComplete`.
  */
 export function ObjectUploader({
   maxNumberOfFiles = 1,
-  maxFileSize = 10485760, // 10MB default
+  maxFileSize = 10485760,
+  accept,
   onGetUploadParameters,
   onComplete,
   buttonClassName,
   children,
 }: ObjectUploaderProps) {
-  const [showModal, setShowModal] = useState(false);
-  const [uppy] = useState(() =>
-    new Uppy({
-      restrictions: {
-        maxNumberOfFiles,
-        maxFileSize,
-      },
-      autoProceed: false,
-    })
-      .use(AwsS3, {
-        shouldUseMultipart: false,
-        getUploadParameters: onGetUploadParameters,
-      })
-      .on("complete", (result) => {
-        onComplete?.(result);
-      })
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const uploadOne = useCallback(
+    async (file: File): Promise<UploadedFileInfo> => {
+      const params = await onGetUploadParameters(file);
+      const response = await fetch(params.url, {
+        method: params.method,
+        body: file,
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+          ...(params.headers ?? {}),
+        },
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Upload failed (${response.status} ${response.statusText})`,
+        );
+      }
+      return {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        uploadURL: params.url,
+      };
+    },
+    [onGetUploadParameters],
+  );
+
+  const handleChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const fileList = event.target.files;
+      if (!fileList || fileList.length === 0) return;
+
+      const files = Array.from(fileList).slice(0, maxNumberOfFiles);
+      const successful: UploadedFileInfo[] = [];
+      const failed: { name: string; error: string }[] = [];
+
+      setIsUploading(true);
+      try {
+        for (const file of files) {
+          if (file.size > maxFileSize) {
+            failed.push({
+              name: file.name,
+              error: `File exceeds maximum size of ${maxFileSize} bytes`,
+            });
+            continue;
+          }
+          try {
+            const info = await uploadOne(file);
+            successful.push(info);
+          } catch (err) {
+            failed.push({
+              name: file.name,
+              error: err instanceof Error ? err.message : "Upload failed",
+            });
+          }
+        }
+        onComplete?.({ successful, failed });
+      } finally {
+        setIsUploading(false);
+        if (inputRef.current) inputRef.current.value = "";
+      }
+    },
+    [maxFileSize, maxNumberOfFiles, onComplete, uploadOne],
   );
 
   return (
     <div>
-      <Button onClick={() => setShowModal(true)} className={buttonClassName}>
+      <Button
+        onClick={() => inputRef.current?.click()}
+        className={buttonClassName}
+        disabled={isUploading}
+      >
         {children}
       </Button>
-
-      <DashboardModal
-        uppy={uppy}
-        open={showModal}
-        onRequestClose={() => setShowModal(false)}
-        proudlyDisplayPoweredByUppy={false}
+      <input
+        ref={inputRef}
+        type="file"
+        multiple={maxNumberOfFiles > 1}
+        accept={accept}
+        onChange={handleChange}
+        style={{ display: "none" }}
       />
     </div>
   );
 }
-
