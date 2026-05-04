@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { randomBytes, createHash } from 'crypto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -24,11 +24,60 @@ export class SocialController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/posts')
-  listPosts(@Param('businessId') businessId: string) {
+  listPosts(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const where: Record<string, unknown> = { businessId, deletedAt: null };
+    if (status) where.status = status.toUpperCase();
     return this.prisma.client.socialPost.findMany({
-      where: { businessId, deletedAt: null },
+      where,
       orderBy: { createdAt: 'desc' },
+      take: limit ? Math.min(parseInt(limit, 10) || 50, 200) : undefined,
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/posts/now')
+  async postNow(
+    @Param('businessId') businessId: string,
+    @Body() body: { content: string; mediaUrls?: string[]; channelIds?: string[] },
+  ) {
+    if (!body.content || !body.content.trim()) {
+      throw new BadRequestException('Post content is required');
+    }
+    const created = await this.social.createDraft(businessId, body.content, body.mediaUrls ?? [], undefined, body.channelIds);
+    const result = await this.social.publishPost(businessId, created.id, body.channelIds);
+    return result;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/posts/schedule')
+  async schedulePost(
+    @Param('businessId') businessId: string,
+    @Body() body: { content: string; mediaUrls?: string[]; channelIds?: string[]; scheduleAt: string },
+  ) {
+    if (!body.content || !body.content.trim()) {
+      throw new BadRequestException('Post content is required');
+    }
+    if (!body.scheduleAt) {
+      throw new BadRequestException('scheduleAt is required');
+    }
+    const at = new Date(body.scheduleAt);
+    if (isNaN(at.getTime())) {
+      throw new BadRequestException('scheduleAt must be a valid ISO date');
+    }
+    if (at.getTime() <= Date.now()) {
+      throw new BadRequestException('scheduleAt must be in the future');
+    }
+    return this.social.createDraft(businessId, body.content, body.mediaUrls ?? [], at.toISOString(), body.channelIds);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/recent-posts')
+  async recentPosts(@Param('businessId') businessId: string, @Query('platform') platform?: string) {
+    return this.social.fetchRecentExternalPosts(businessId, platform);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

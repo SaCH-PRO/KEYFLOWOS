@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle, Music2, Image as ImageIcon, ImageOff } from "lucide-react";
+import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle, Music2, Image as ImageIcon, ImageOff, ExternalLink } from "lucide-react";
 import type { SocialPost } from "@/lib/client";
 import Image from "next/image";
 
@@ -80,7 +80,7 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
     : `Created ${new Date(post.createdAt).toLocaleDateString("en-TT", { month: "short", day: "numeric" })}`;
 
   const channelIds = post.channelIds ?? [];
-  const publishResults = (post.publishResults ?? []) as Array<{ platform: string; success: boolean; error?: string }>;
+  const publishResults = (post.publishResults ?? []) as Array<{ platform: string; success: boolean; error?: string; externalUrl?: string; platformPostId?: string }>;
 
   return (
     <motion.div
@@ -204,22 +204,56 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
               const plt = PLATFORM_ICONS[r.platform?.toUpperCase()];
               if (!plt) return null;
               const PIcon = plt.icon;
+              const inner = (
+                <>
+                  <PIcon className="w-3 h-3" style={{ color: plt.color }} />
+                  {r.success ? <CheckCircle2 className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
+                  {r.success && r.externalUrl && <ExternalLink className="w-2.5 h-2.5 opacity-70" />}
+                </>
+              );
+              const styleProps = {
+                borderColor: r.success ? "hsl(150 60% 40% / 0.3)" : "hsl(0 60% 40% / 0.3)",
+                background: r.success ? "hsl(150 60% 40% / 0.1)" : "hsl(0 60% 40% / 0.1)",
+                color: r.success ? "hsl(150 60% 60%)" : "hsl(0 60% 65%)",
+              } as const;
+              if (r.success && r.externalUrl) {
+                return (
+                  <a
+                    key={i}
+                    href={r.externalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10px] font-medium hover:opacity-80 transition-opacity"
+                    style={styleProps}
+                    title={`View on ${r.platform}`}
+                  >
+                    {inner}
+                  </a>
+                );
+              }
               return (
                 <span
                   key={i}
                   className="inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10px] font-medium"
-                  style={{
-                    borderColor: r.success ? "hsl(150 60% 40% / 0.3)" : "hsl(0 60% 40% / 0.3)",
-                    background: r.success ? "hsl(150 60% 40% / 0.1)" : "hsl(0 60% 40% / 0.1)",
-                    color: r.success ? "hsl(150 60% 60%)" : "hsl(0 60% 65%)",
-                  }}
+                  style={styleProps}
                   title={r.error || "Published successfully"}
                 >
-                  <PIcon className="w-3 h-3" style={{ color: plt.color }} />
-                  {r.success ? <CheckCircle2 className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
+                  {inner}
                 </span>
               );
             })}
+            {post.externalUrl && !publishResults.some((r) => r.externalUrl) && (
+              <a
+                href={post.externalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10px] font-medium text-emerald-400 hover:opacity-80"
+                style={{ borderColor: "hsl(150 60% 40% / 0.3)", background: "hsl(150 60% 40% / 0.1)" }}
+                title="View live post"
+              >
+                <ExternalLink className="w-3 h-3" /> View
+              </a>
+            )}
           </div>
         )}
 

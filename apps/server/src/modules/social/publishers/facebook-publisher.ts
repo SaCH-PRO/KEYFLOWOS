@@ -1,4 +1,4 @@
-import { BasePublisher, PublishResult } from './base-publisher';
+import { BasePublisher, PublishResult, RecentPost } from './base-publisher';
 
 export class FacebookPublisher extends BasePublisher {
   platform = 'FACEBOOK';
@@ -32,7 +32,8 @@ export class FacebookPublisher extends BasePublisher {
         if (!response.ok) {
           return { platform: this.platform, success: false, error: data?.error?.message || `Facebook photo error: ${response.status}` };
         }
-        return { platform: this.platform, success: true, platformPostId: data.post_id || data.id, publishedAt: new Date().toISOString() };
+        const fbId = data.post_id || data.id;
+        return { platform: this.platform, success: true, platformPostId: fbId, externalUrl: fbId ? `https://www.facebook.com/${fbId}` : undefined, publishedAt: new Date().toISOString() };
       }
 
       if (imageUrls.length > 1) {
@@ -76,7 +77,7 @@ export class FacebookPublisher extends BasePublisher {
         if (!feedRes.ok) {
           return { platform: this.platform, success: false, error: feedData?.error?.message || 'Facebook multi-photo post failed' };
         }
-        return { platform: this.platform, success: true, platformPostId: feedData.id, publishedAt: new Date().toISOString() };
+        return { platform: this.platform, success: true, platformPostId: feedData.id, externalUrl: feedData.id ? `https://www.facebook.com/${feedData.id}` : undefined, publishedAt: new Date().toISOString() };
       }
 
       const params = new URLSearchParams();
@@ -100,6 +101,7 @@ export class FacebookPublisher extends BasePublisher {
         platform: this.platform,
         success: true,
         platformPostId: data.id,
+        externalUrl: data.id ? `https://www.facebook.com/${data.id}` : undefined,
         publishedAt: new Date().toISOString(),
       };
     } catch (err) {
@@ -115,6 +117,27 @@ export class FacebookPublisher extends BasePublisher {
       return response.ok;
     } catch {
       return false;
+    }
+  }
+
+  async listRecentPosts(connection: any, limit = 25): Promise<RecentPost[]> {
+    try {
+      const pageId = connection.platformId;
+      if (!pageId) return [];
+      const res = await fetch(
+        `https://graph.facebook.com/v19.0/${pageId}/posts?fields=id,message,created_time,permalink_url&limit=${Math.min(limit, 50)}&access_token=${connection.token}`,
+      );
+      if (!res.ok) return [];
+      const data = (await res.json()) as { data?: Array<{ id: string; message?: string; created_time?: string; permalink_url?: string }> };
+      return (data.data ?? []).map((p) => ({
+        platform: this.platform,
+        platformPostId: p.id,
+        content: p.message,
+        publishedAt: p.created_time,
+        externalUrl: p.permalink_url || `https://www.facebook.com/${p.id}`,
+      }));
+    } catch {
+      return [];
     }
   }
 }

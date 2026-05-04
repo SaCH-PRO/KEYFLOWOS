@@ -110,4 +110,28 @@ export class SocialService {
     this.events.emit('post.published', payload);
     return updated;
   }
+
+  async fetchRecentExternalPosts(businessId: string, platformFilter?: string) {
+    const connections = await this.prisma.client.socialConnection.findMany({
+      where: { businessId, status: 'CONNECTED' },
+    });
+    const filtered = platformFilter
+      ? connections.filter((c) => c.platform.toUpperCase() === platformFilter.toUpperCase())
+      : connections;
+    const results = await Promise.all(
+      filtered.map(async (c) => {
+        try {
+          const recent = await this.publishingService.listRecentPosts(c.platform, c);
+          return recent;
+        } catch {
+          return [];
+        }
+      }),
+    );
+    return results.flat().sort((a, b) => {
+      const ta = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+      const tb = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+      return tb - ta;
+    });
+  }
 }

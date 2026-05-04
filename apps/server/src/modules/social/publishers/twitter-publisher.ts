@@ -1,4 +1,4 @@
-import { BasePublisher, PublishResult } from './base-publisher';
+import { BasePublisher, PublishResult, RecentPost } from './base-publisher';
 
 export class TwitterPublisher extends BasePublisher {
   platform = 'TWITTER';
@@ -43,10 +43,18 @@ export class TwitterPublisher extends BasePublisher {
         return { platform: this.platform, success: false, error: errorMsg };
       }
 
+      const tweetId = data?.data?.id as string | undefined;
+      const username = (connection.accountName || '').replace(/^@/, '');
+      const externalUrl = tweetId
+        ? username
+          ? `https://twitter.com/${username}/status/${tweetId}`
+          : `https://twitter.com/i/web/status/${tweetId}`
+        : undefined;
       return {
         platform: this.platform,
         success: true,
-        platformPostId: data?.data?.id,
+        platformPostId: tweetId,
+        externalUrl,
         publishedAt: new Date().toISOString(),
       };
     } catch (err) {
@@ -62,6 +70,32 @@ export class TwitterPublisher extends BasePublisher {
       return response.ok;
     } catch {
       return false;
+    }
+  }
+
+  async listRecentPosts(connection: any, limit = 25): Promise<RecentPost[]> {
+    try {
+      const userId = connection.platformId;
+      if (!userId) return [];
+      const max = Math.min(limit, 100);
+      const res = await fetch(
+        `https://api.twitter.com/2/users/${userId}/tweets?max_results=${Math.max(5, max)}&tweet.fields=created_at`,
+        { headers: { 'Authorization': `Bearer ${connection.token}` } },
+      );
+      if (!res.ok) return [];
+      const data = (await res.json()) as { data?: Array<{ id: string; text: string; created_at?: string }> };
+      const username = (connection.accountName || '').replace(/^@/, '');
+      return (data.data ?? []).map((t) => ({
+        platform: this.platform,
+        platformPostId: t.id,
+        content: t.text,
+        publishedAt: t.created_at,
+        externalUrl: username
+          ? `https://twitter.com/${username}/status/${t.id}`
+          : `https://twitter.com/i/web/status/${t.id}`,
+      }));
+    } catch {
+      return [];
     }
   }
 }

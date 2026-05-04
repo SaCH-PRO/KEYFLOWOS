@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SocialConnectionsService } from './social-connections.service';
-import { BasePublisher, PublishResult } from './publishers/base-publisher';
+import { BasePublisher, PublishResult, RecentPost } from './publishers/base-publisher';
 import { FacebookPublisher } from './publishers/facebook-publisher';
 import { InstagramPublisher } from './publishers/instagram-publisher';
 import { LinkedInPublisher } from './publishers/linkedin-publisher';
@@ -14,6 +14,12 @@ export class SocialPublishingService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(SocialConnectionsService) private readonly connectionsService: SocialConnectionsService,
   ) {}
+
+  async listRecentPosts(platform: string, connection: any, limit = 25): Promise<RecentPost[]> {
+    const publisher = this.publishers[platform.toUpperCase()];
+    if (!publisher) return [];
+    return publisher.listRecentPosts(connection, limit);
+  }
 
   private publishers: Record<string, BasePublisher> = {
     FACEBOOK: new FacebookPublisher(),
@@ -73,6 +79,8 @@ export class SocialPublishingService {
 
     const anySuccess = results.some((r) => r.success);
     const usedPlatforms = connections.map((c: any) => c.platform);
+    const firstSuccess = results.find((r) => r.success);
+    const firstError = results.find((r) => !r.success);
 
     await this.prisma.client.socialPost.update({
       where: { id: post.id },
@@ -81,6 +89,10 @@ export class SocialPublishingService {
         channelIds: usedPlatforms,
         status: anySuccess ? 'POSTED' : 'FAILED',
         postedAt: anySuccess ? new Date() : undefined,
+        failedAt: anySuccess ? null : new Date(),
+        externalPostId: firstSuccess?.platformPostId ?? null,
+        externalUrl: firstSuccess?.externalUrl ?? null,
+        lastError: anySuccess ? null : firstError?.error ?? null,
       },
     });
 
