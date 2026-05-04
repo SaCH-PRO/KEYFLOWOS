@@ -108,6 +108,8 @@ export function useContactActions({
       marketingOptIn: formData.marketingOptIn, doNotContact: formData.doNotContact,
       notesInternal: formData.notesInternal || undefined,
       ageGroup: formData.ageGroup || null,
+      relationshipType: formData.relationshipType || null,
+      priority: formData.priority || null,
       custom: Object.keys(customData).length > 0 ? customData : undefined,
     };
     try {
@@ -299,6 +301,8 @@ export function useContactActions({
       doNotContact: c.doNotContact ?? false,
       notesInternal: c.notesInternal || "",
       ageGroup: c.ageGroup || "",
+      relationshipType: c.relationshipType || "",
+      priority: c.priority || "",
       linkedinUrl: String(customObj.linkedinUrl ?? ""),
       instagramUrl: String(customObj.instagramUrl ?? ""),
       twitterUrl: String(customObj.twitterUrl ?? ""),

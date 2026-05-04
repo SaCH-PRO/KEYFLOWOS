@@ -24,12 +24,22 @@ import {
   Plus,
   Trash2,
   Users,
+  Heart,
+  Zap,
 } from "lucide-react";
 import { validateEmail, validatePhone } from "@/lib/validators";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { CONTACT_STATUSES, CONTACT_AGE_GROUPS, CONTACT_AGE_GROUP_LABELS } from "@/lib/crm-constants";
+import {
+  CONTACT_STATUSES,
+  CONTACT_AGE_GROUPS,
+  CONTACT_AGE_GROUP_LABELS,
+  CONTACT_RELATIONSHIP_TYPES,
+  CONTACT_RELATIONSHIP_TYPE_LABELS,
+  CONTACT_PRIORITIES,
+  CONTACT_PRIORITY_LABELS,
+} from "@/lib/crm-constants";
 
 const STATUSES = CONTACT_STATUSES;
 const CHANNELS = ["WhatsApp", "Email", "SMS", "Call", "Instagram DM"] as const;
@@ -78,6 +88,8 @@ export interface ContactFormData {
   doNotContact: boolean;
   notesInternal: string;
   ageGroup: string;
+  relationshipType: string;
+  priority: string;
   linkedinUrl: string;
   instagramUrl: string;
   twitterUrl: string;
@@ -153,6 +165,8 @@ function ContactFormInner({ onSubmit, onCancel, loading, initialValues }: Contac
     doNotContact: false,
     notesInternal: "",
     ageGroup: "",
+    relationshipType: "",
+    priority: "",
     linkedinUrl: "",
     instagramUrl: "",
     twitterUrl: "",
@@ -183,6 +197,7 @@ function ContactFormInner({ onSubmit, onCancel, loading, initialValues }: Contac
 
   const [sections, setSections] = useState({
     basic: true,
+    relationship: true,
     professional: isEditing,
     altContact: isEditing,
     address: isEditing,
@@ -415,6 +430,44 @@ function ContactFormInner({ onSubmit, onCancel, loading, initialValues }: Contac
                 className="kf-input w-full min-h-[80px] resize-none"
                 rows={3}
               />
+            </div>
+          </div>
+        )}
+
+        <SectionHeader label="Relationship" icon={Heart} open={sections.relationship} onToggle={() => toggle("relationship")} />
+        {sections.relationship && (
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Heart className="w-3 h-3" /> Relationship Type
+                </label>
+                <select
+                  value={form.relationshipType}
+                  onChange={(e) => setForm((p) => ({ ...p, relationshipType: e.target.value }))}
+                  className="kf-input w-full"
+                >
+                  <option value="">Not specified</option>
+                  {CONTACT_RELATIONSHIP_TYPES.map((t) => (
+                    <option key={t} value={t}>{CONTACT_RELATIONSHIP_TYPE_LABELS[t]}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Zap className="w-3 h-3" /> Priority
+                </label>
+                <select
+                  value={form.priority}
+                  onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))}
+                  className="kf-input w-full"
+                >
+                  <option value="">Not set</option>
+                  {CONTACT_PRIORITIES.map((p) => (
+                    <option key={p} value={p}>{CONTACT_PRIORITY_LABELS[p]}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
         )}

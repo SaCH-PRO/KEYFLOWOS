@@ -73,6 +73,12 @@ export class CrmController {
     @Query('newThisWeek') newThisWeek?: string,
     @Query('tags') tags?: string | string[],
     @Query('ageGroups') ageGroups?: string | string[],
+    @Query('relationshipTypes') relationshipTypes?: string | string[],
+    @Query('priorities') priorities?: string | string[],
+    @Query('relationshipHealth') relationshipHealth?: string | string[],
+    @Query('pipelineStages') pipelineStages?: string | string[],
+    @Query('favorite') favorite?: string,
+    @Query('includeArchived') includeArchived?: string,
     @Query('skip') skip?: string,
     @Query('take') take?: string,
     @Query('cursor') cursor?: string,
@@ -82,6 +88,7 @@ export class CrmController {
   ) {
     const validSortBy = ['name', 'newest', 'oldest', 'revenue', 'score', 'lastInteraction'];
     const validSortOrder = ['asc', 'desc'];
+    const toArr = (v?: string | string[]) => (Array.isArray(v) ? v : v ? [v] : undefined);
     return this.crm.listContacts({
       businessId,
       status,
@@ -90,8 +97,14 @@ export class CrmController {
       hasUpcomingBookings: hasUpcomingBookings === 'true',
       staleDays: staleDays ? Number(staleDays) : undefined,
       newThisWeek: newThisWeek === 'true',
-      tags: Array.isArray(tags) ? tags : tags ? [tags] : undefined,
-      ageGroups: Array.isArray(ageGroups) ? ageGroups : ageGroups ? [ageGroups] : undefined,
+      tags: toArr(tags),
+      ageGroups: toArr(ageGroups),
+      relationshipTypes: toArr(relationshipTypes),
+      priorities: toArr(priorities),
+      relationshipHealth: toArr(relationshipHealth),
+      pipelineStages: toArr(pipelineStages),
+      favorite: favorite === 'true' ? true : favorite === 'false' ? false : undefined,
+      includeArchived: includeArchived === 'true',
       skip: skip ? Number(skip) : undefined,
       take: take ? Number(take) : undefined,
       cursor: cursor || undefined,

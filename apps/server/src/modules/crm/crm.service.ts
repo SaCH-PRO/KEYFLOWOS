@@ -40,6 +40,12 @@ export type ContactListOptions = {
   segment?: string;
   doNotContact?: boolean;
   ageGroups?: string[];
+  relationshipTypes?: string[];
+  priorities?: string[];
+  relationshipHealth?: string[];
+  pipelineStages?: string[];
+  favorite?: boolean;
+  includeArchived?: boolean;
   skip?: number;
   take?: number;
   cursor?: string;
@@ -74,6 +80,14 @@ type ContactExtraAttributes = {
   doNotContact?: boolean | null;
   notesInternal?: string | null;
   ageGroup?: string | null;
+  relationshipType?: string | null;
+  pipelineStage?: string | null;
+  relationshipHealth?: string | null;
+  nextActionAt?: string | null;
+  nextActionType?: string | null;
+  priority?: string | null;
+  favorite?: boolean | null;
+  archivedAt?: string | null;
 };
 
 @Injectable()
@@ -208,6 +222,24 @@ export class CrmService {
     if (typeof input.doNotContact === 'boolean') where.doNotContact = input.doNotContact;
     if (input.ageGroups && input.ageGroups.length > 0) {
       where.ageGroup = { in: input.ageGroups };
+    }
+    if (input.relationshipTypes && input.relationshipTypes.length > 0) {
+      where.relationshipType = { in: input.relationshipTypes };
+    }
+    if (input.priorities && input.priorities.length > 0) {
+      where.priority = { in: input.priorities };
+    }
+    if (input.relationshipHealth && input.relationshipHealth.length > 0) {
+      where.relationshipHealth = { in: input.relationshipHealth };
+    }
+    if (input.pipelineStages && input.pipelineStages.length > 0) {
+      where.pipelineStage = { in: input.pipelineStages };
+    }
+    if (typeof input.favorite === 'boolean') {
+      where.favorite = input.favorite;
+    }
+    if (!input.includeArchived) {
+      where.archivedAt = null;
     }
 
     const take = Math.min(input.take ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
@@ -356,6 +388,14 @@ export class CrmService {
           doNotContact: input.doNotContact ?? null,
           notesInternal: sanitize(input.notesInternal ?? null),
           ageGroup: normalizeString(input.ageGroup),
+          relationshipType: normalizeString(input.relationshipType),
+          pipelineStage: normalizeString(input.pipelineStage),
+          relationshipHealth: normalizeString(input.relationshipHealth),
+          nextActionAt: this.parseDateOrNull(input.nextActionAt),
+          nextActionType: normalizeString(input.nextActionType),
+          priority: normalizeString(input.priority),
+          favorite: input.favorite ?? false,
+          archivedAt: this.parseDateOrNull(input.archivedAt),
         },
       });
 
@@ -573,6 +613,14 @@ export class CrmService {
       doNotContact: input.doNotContact ?? undefined,
       notesInternal: input.notesInternal !== undefined ? sanitize(input.notesInternal ?? null) ?? undefined : undefined,
       ageGroup: trimOptional(input.ageGroup),
+      relationshipType: trimOptional(input.relationshipType),
+      pipelineStage: trimOptional(input.pipelineStage),
+      relationshipHealth: trimOptional(input.relationshipHealth),
+      nextActionAt: input.nextActionAt !== undefined ? this.parseDateOrNull(input.nextActionAt) : undefined,
+      nextActionType: trimOptional(input.nextActionType),
+      priority: trimOptional(input.priority),
+      favorite: input.favorite ?? undefined,
+      archivedAt: input.archivedAt !== undefined ? this.parseDateOrNull(input.archivedAt) : undefined,
     };
 
     const { existing, updated } = await this.prisma.client.$transaction(async (tx) => {

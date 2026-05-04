@@ -59,7 +59,6 @@ export default function PaymentsPage() {
   const activeTab: TabKey = TABS.some((t) => t.key === tabParam) ? (tabParam as TabKey) : "transactions";
 
   const [businessId, setBusinessId] = useState<string | null>(null);
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- client-side hydration of stored value after mount
   useEffect(() => { const bid = getStoredBusinessId(); if (bid) setBusinessId(bid); }, []);
   const [gateways, setGateways] = useState<PaymentsGatewayStatus[]>([]);
   const [transactions, setTransactions] = useState<PaymentsTransaction[]>([]);
