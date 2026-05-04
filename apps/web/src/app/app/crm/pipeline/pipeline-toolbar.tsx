@@ -50,11 +50,11 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 ];
 
 const SMART_SEGMENTS: { key: SmartSegment; label: string; icon: typeof Flame; color: string; description: string }[] = [
-  { key: "high-value", label: "High Value", icon: TrendingUp, color: "hsl(142 76% 36%)", description: "Clients with high revenue potential or significant transaction history." },
-  { key: "needs-followup", label: "Needs Follow-up", icon: AlertTriangle, color: "hsl(var(--kf-accent1))", description: "Clients with pending tasks, unanswered messages, or overdue interactions." },
-  { key: "new-this-week", label: "New This Week", icon: CalendarPlus, color: "hsl(var(--kf-accent2))", description: "Clients added in the last 7 days — follow up quickly to build rapport." },
-  { key: "at-risk", label: "At Risk", icon: Flame, color: "hsl(0 70% 55%)", description: "Clients showing signs of churn — declining engagement or missed bookings." },
-  { key: "stale", label: "No Activity 30d", icon: Clock, color: "hsl(var(--kf-muted-foreground))", description: "Clients with no interaction in the last 30 days — consider a re-engagement campaign." },
+  { key: "high-value", label: "High Value", icon: TrendingUp, color: "hsl(142 76% 36%)", description: "Contacts with high revenue potential or significant transaction history." },
+  { key: "needs-followup", label: "Needs Follow-up", icon: AlertTriangle, color: "hsl(var(--kf-accent1))", description: "Contacts with pending tasks, unanswered messages, or overdue interactions." },
+  { key: "new-this-week", label: "New This Week", icon: CalendarPlus, color: "hsl(var(--kf-accent2))", description: "Contacts added in the last 7 days — follow up quickly to build rapport." },
+  { key: "at-risk", label: "At Risk", icon: Flame, color: "hsl(0 70% 55%)", description: "Contacts showing signs of churn — declining engagement or missed bookings." },
+  { key: "stale", label: "No Activity 30d", icon: Clock, color: "hsl(var(--kf-muted-foreground))", description: "Contacts with no interaction in the last 30 days — consider a re-engagement campaign." },
 ];
 
 export interface PipelineToolbarProps {
@@ -178,10 +178,10 @@ function PipelineToolbarInner({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
           <input
             type="text"
-            placeholder="Search clients..."
+            placeholder="Search contacts..."
             value={searchInput}
             onChange={(e) => onSearchChange(e.target.value)}
-            aria-label="Search clients"
+            aria-label="Search contacts"
             className="w-full pl-9 pr-8 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-xl focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
           />
           {searchInput && (
@@ -194,10 +194,21 @@ function PipelineToolbarInner({
             </button>
           )}
         </div>
-        <AddClientControl
+        <AddContactControl
           onQuickCreate={onQuickCreate}
           onOpenFullForm={onAddContact}
         />
+        {onImport && (
+          <button
+            onClick={onImport}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border/50 bg-white/[0.03] text-foreground hover:bg-white/[0.06] hover:border-border/70 text-xs font-medium transition-all flex-shrink-0"
+            aria-label="Import contacts"
+            title="Import contacts"
+          >
+            <Upload className="w-4 h-4" />
+            <span className="hidden sm:inline">Import</span>
+          </button>
+        )}
       </div>
 
       <div className="flex items-center justify-between gap-2">
@@ -214,7 +225,7 @@ function PipelineToolbarInner({
             <button
               onClick={handleToggleSort}
               className={`p-2 rounded-xl transition-all flex-shrink-0 ${showSort ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
-              aria-label="Sort clients"
+              aria-label="Sort contacts"
               aria-haspopup="listbox"
               aria-expanded={showSort}
               title="Sort"
@@ -246,21 +257,11 @@ function PipelineToolbarInner({
           <button
             onClick={onToggleSelectMode}
             className={`p-2 rounded-xl transition-all flex-shrink-0 ${selectMode ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
-            aria-label={selectMode ? "Exit select mode" : "Select clients"}
-            title={selectMode ? "Exit select mode" : "Select clients"}
+            aria-label={selectMode ? "Exit select mode" : "Select contacts"}
+            title={selectMode ? "Exit select mode" : "Select contacts"}
           >
             <CheckSquare className="w-4 h-4" />
           </button>
-          {onImport && (
-            <button
-              onClick={onImport}
-              className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all flex-shrink-0"
-              aria-label="Import clients"
-              title="Import clients"
-            >
-              <Upload className="w-4 h-4" />
-            </button>
-          )}
           <button
             onClick={onRefresh}
             disabled={loading}
@@ -368,7 +369,7 @@ function PipelineToolbarInner({
         )}
       </div>
 
-      <div role="tablist" aria-label="Client list views" className="flex gap-1 border-t border-border/30 pt-2.5">
+      <div role="tablist" aria-label="Contact list views" className="flex gap-1 border-t border-border/30 pt-2.5">
         {[
           { key: "all" as const, label: "All", count: allCount, icon: Users },
           { key: "pinned" as const, label: "Pinned", count: pinnedCount, icon: Star },
@@ -397,7 +398,7 @@ function PipelineToolbarInner({
 
 export const PipelineToolbar = React.memo(PipelineToolbarInner);
 
-function AddClientControl({
+function AddContactControl({
   onQuickCreate,
   onOpenFullForm,
 }: {
@@ -465,12 +466,12 @@ function AddClientControl({
       <button
         onClick={onOpenFullForm}
         className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[hsl(var(--kf-accent1))] text-white font-semibold text-xs shadow-sm hover:brightness-110 transition-all flex-shrink-0"
-        aria-label="Add client"
-        title="Add client"
+        aria-label="Add contact"
+        title="Add contact"
         data-walkthrough="crm-add"
       >
         <Plus className="w-4 h-4" />
-        <span className="hidden sm:inline">Add client</span>
+        <span className="hidden sm:inline">Add contact</span>
       </button>
     );
   }
@@ -480,14 +481,14 @@ function AddClientControl({
       <button
         onClick={() => setOpen((v) => !v)}
         className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[hsl(var(--kf-accent1))] text-white font-semibold text-xs shadow-sm hover:brightness-110 transition-all"
-        aria-label="Add client"
+        aria-label="Add contact"
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Add client"
+        title="Add contact"
         data-walkthrough="crm-add"
       >
         <Plus className="w-4 h-4" />
-        <span className="hidden sm:inline">Add client</span>
+        <span className="hidden sm:inline">Add contact</span>
       </button>
       <AnimatePresence>
         {open && (
@@ -497,7 +498,7 @@ function AddClientControl({
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.12 }}
             role="dialog"
-            aria-label="Quick add client"
+            aria-label="Add contact"
             className="absolute right-0 top-full mt-2 z-50 w-[min(92vw,360px)] rounded-2xl bg-popover/95 backdrop-blur-xl border border-border/60 shadow-2xl p-3 space-y-2"
           >
             <div className="flex items-center justify-between px-1">

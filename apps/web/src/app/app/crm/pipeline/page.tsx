@@ -94,10 +94,10 @@ export default function ContactsPage() {
     {
       groupName: "CRM Navigation",
       shortcuts: [
-        { key: "n", description: "New client", action: () => state.setShowAddMenu(true) },
-        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search clients"]'); el?.focus(); } },
-        { key: "1", description: "Clients tab", action: () => setCrmViewTab("contacts") },
-        { key: "r", description: "Refresh clients", action: () => { void loadContacts(); void loadFlowData(); } },
+        { key: "n", description: "New contact", action: () => state.setShowAddMenu(true) },
+        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search contacts"]'); el?.focus(); } },
+        { key: "1", description: "Contacts tab", action: () => setCrmViewTab("contacts") },
+        { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
         { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
       ],
     },
@@ -167,12 +167,12 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="space-y-4" aria-label="Clients Workspace">
+    <div className="space-y-4" aria-label="Contacts Workspace">
       <ResumePrompt module="crm" />
       <PageHeader
         icon={Users}
-        title="Clients"
-        subtitle={<span className="inline-flex items-center gap-1.5">Manage relationships, follow-ups, health, and client activity across your pipeline <InfoBadge title="Client Workspace" body="Your client workspace centralizes relationship intelligence, communication history, and AI-powered insights. Use Smart Segments to triage clients by engagement and health." side="bottom" iconSize={12} /></span>}
+        title="Contacts"
+        subtitle={<span className="inline-flex items-center gap-1.5">Manage relationships, follow-ups, health, and contact activity across your pipeline <InfoBadge title="Contact Workspace" body="Your contact workspace centralizes relationship intelligence, communication history, and AI-powered insights. Use Smart Segments to triage contacts by engagement and health." side="bottom" iconSize={12} /></span>}
         titleExtra={<NotesTrigger pageKey="crm" variant="header" />}
       />
 
@@ -242,10 +242,10 @@ export default function ContactsPage() {
 
       {!crmAi.aiHook.useGlobalCopilot && (
         <>
-          <AiHubTrigger ai={crmAi.aiHook} moduleName="Clients" />
+          <AiHubTrigger ai={crmAi.aiHook} moduleName="Contacts" />
           <AnimatePresence>
             {crmAi.aiHook.panelOpen && (
-              <AiCommandHub ai={crmAi.aiHook} moduleName="Clients" onAction={handleCrmAiAction} />
+              <AiCommandHub ai={crmAi.aiHook} moduleName="Contacts" onAction={handleCrmAiAction} />
             )}
           </AnimatePresence>
         </>

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Users, RefreshCw, AlertTriangle, X, Loader2, Mail, Phone, User } from "lucide-react";
+import { Users, RefreshCw, AlertTriangle } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CardListSkeleton } from "@/components/ui/skeleton";
 import { ContactCard, ContactCardData } from "@/components/contacts";
@@ -86,147 +86,6 @@ export interface PipelineContactListProps {
   onLoadMore: () => void;
   onRetry?: () => void;
   onAddContact: () => void;
-  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; status?: string; source?: string }) => Promise<void>;
-}
-
-const QUICK_STAGES = ["LEAD", "PROSPECT", "CLIENT"] as const;
-const QUICK_SOURCES = ["manual", "booking", "store", "lead-form", "import"] as const;
-
-function QuickAddRow({ onSubmit, onCancel }: { onSubmit: (data: { firstName: string; lastName?: string; email?: string; phone?: string; status?: string; source?: string }) => Promise<void>; onCancel: () => void }) {
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [stage, setStage] = useState("LEAD");
-  const [source, setSource] = useState("manual");
-  const [expanded, setExpanded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const firstRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { firstRef.current?.focus(); }, []);
-
-  const handleSubmit = async () => {
-    if (!firstName.trim()) return;
-    setSaving(true);
-    try {
-      await onSubmit({
-        firstName: firstName.trim(),
-        lastName: lastName.trim() || undefined,
-        email: email.trim() || undefined,
-        phone: phone.trim() || undefined,
-        status: stage,
-        source,
-      });
-      setFirstName("");
-      setLastName("");
-      setEmail("");
-      setPhone("");
-      setStage("LEAD");
-      setSource("manual");
-      firstRef.current?.focus();
-    } catch {
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const kd = (e: React.KeyboardEvent) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); };
-
-  return (
-    <div className="kf-card p-3 space-y-2" style={{ borderColor: "hsl(var(--kf-accent1) / 0.3)", background: "hsl(var(--kf-accent1) / 0.03)" }}>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: "hsl(var(--kf-accent1))" }}>
-          <Plus className="w-3 h-3" /> Quick Add Client
-        </span>
-        <button onClick={onCancel} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50">
-          <X className="w-3.5 h-3.5 text-muted-foreground" />
-        </button>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="relative">
-          <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-          <input
-            ref={firstRef}
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-            placeholder="First name *"
-            className="kf-input w-full text-xs pl-7"
-            onKeyDown={kd}
-          />
-        </div>
-        <input
-          value={lastName}
-          onChange={(e) => setLastName(e.target.value)}
-          placeholder="Last name"
-          className="kf-input w-full text-xs"
-          onKeyDown={kd}
-        />
-      </div>
-      {expanded && (
-        <>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="relative">
-              <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" className="kf-input w-full text-xs pl-7" onKeyDown={kd} />
-            </div>
-            <div className="relative">
-              <Phone className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" className="kf-input w-full text-xs pl-7" onKeyDown={kd} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <span className="text-[10px] text-muted-foreground mb-0.5 block">Stage</span>
-              <div className="flex gap-1">
-                {QUICK_STAGES.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setStage(s)}
-                    className={`flex-1 text-[10px] font-medium py-1.5 rounded-lg transition-all ${stage === s ? "text-white" : "bg-white/[0.04] text-muted-foreground hover:bg-white/[0.08]"}`}
-                    style={stage === s ? { backgroundColor: s === "LEAD" ? "hsl(var(--kf-accent1))" : s === "PROSPECT" ? "hsl(var(--kf-accent2))" : "hsl(142 76% 36%)" } : undefined}
-                  >
-                    {s.charAt(0) + s.slice(1).toLowerCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <span className="text-[10px] text-muted-foreground mb-0.5 block">Source</span>
-              <select
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-                className="kf-input w-full text-xs"
-              >
-                {QUICK_SOURCES.map((s) => (
-                  <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1).replace("-", " ")}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </>
-      )}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-[10px] text-[hsl(var(--kf-accent2))] hover:underline"
-          >
-            {expanded ? "Less fields" : "More fields"}
-          </button>
-          <span className="text-[10px] text-muted-foreground/40">Enter to save · Esc to cancel</span>
-        </div>
-        <button
-          onClick={handleSubmit}
-          disabled={!firstName.trim() || saving}
-          className="inline-flex items-center gap-1.5 px-3 min-h-[44px] text-xs font-medium rounded-lg text-white transition-all disabled:opacity-40"
-          style={{ background: firstName.trim() && !saving ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-accent1) / 0.4)" }}
-        >
-          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-          {saving ? "Adding..." : "Add"}
-        </button>
-      </div>
-    </div>
-  );
 }
 
 function PipelineContactListInner({
@@ -249,9 +108,7 @@ function PipelineContactListInner({
   onLoadMore,
   onRetry,
   onAddContact,
-  onQuickCreate,
 }: PipelineContactListProps) {
-  const [showQuickAdd, setShowQuickAdd] = useState(false);
   const enableVirtual = contacts.length >= VIRTUAL_SCROLL_THRESHOLD;
   const {
     containerRef,
@@ -331,7 +188,7 @@ function PipelineContactListInner({
         <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mx-auto mb-3">
           <AlertTriangle className="w-5 h-5 text-red-400/70" />
         </div>
-        <p className="text-sm font-semibold tracking-tight mb-1">Could not load clients</p>
+        <p className="text-sm font-semibold tracking-tight mb-1">Could not load contacts</p>
         <p className="text-xs text-muted-foreground/60 mb-4">{loadError}</p>
         {onRetry && (
           <button
@@ -346,38 +203,22 @@ function PipelineContactListInner({
     );
   }
 
-  const quickAddRow = onQuickCreate && activeListTab === "all" && (
-    showQuickAdd ? (
-      <QuickAddRow onSubmit={onQuickCreate} onCancel={() => setShowQuickAdd(false)} />
-    ) : (
-      <button
-        onClick={() => setShowQuickAdd(true)}
-        className="w-full kf-card p-2.5 flex items-center justify-center gap-1.5 text-xs font-medium transition-all hover:border-[hsl(var(--kf-accent1)/0.3)] min-h-[44px]"
-        style={{ color: "hsl(var(--kf-accent1))", borderStyle: "dashed" }}
-      >
-        <Plus className="w-3.5 h-3.5" />
-        Quick Add Client
-      </button>
-    )
-  );
-
   if (contacts.length === 0) {
     return (
       <div className="space-y-3">
-        {quickAddRow}
         <EmptyState
           icon={Users}
-          title={activeListTab === "pinned" ? "No pinned clients" : activeListTab === "recent" ? "No recent clients" : "No clients yet"}
+          title={activeListTab === "pinned" ? "No pinned contacts" : activeListTab === "recent" ? "No recent contacts" : "No contacts yet"}
           description={
             activeListTab === "pinned"
-              ? "Pin your most important clients for quick access"
+              ? "Pin your most important contacts for quick access"
               : activeListTab === "recent"
-              ? "Your recently viewed clients will appear here"
-              : "Add your first client to get started"
+              ? "Your recently viewed contacts will appear here"
+              : "Add your first contact to get started"
           }
-          actionLabel={activeListTab === "all" ? "Add Client" : undefined}
+          actionLabel={activeListTab === "all" ? "Add contact" : undefined}
           onAction={activeListTab === "all" ? onAddContact : undefined}
-          tip={activeListTab === "all" ? "Clients are the heart of your CRM — add clients, leads, and partners to track relationships and activity." : undefined}
+          tip={activeListTab === "all" ? "Contacts are the heart of your CRM — add contacts, leads, and partners to track relationships and activity." : undefined}
         />
       </div>
     );
@@ -427,13 +268,12 @@ function PipelineContactListInner({
   if (isVirtual) {
     return (
       <div className="space-y-3">
-        {quickAddRow}
         <div
           ref={containerRef}
           onScroll={handleScroll}
           onKeyDown={handleKeyDown}
           role="listbox"
-          aria-label="Clients list"
+          aria-label="Contacts list"
           tabIndex={0}
           className="max-h-[calc(100vh-16rem)] overflow-y-auto outline-none"
           style={{ willChange: "transform" }}
@@ -453,11 +293,10 @@ function PipelineContactListInner({
 
   return (
     <div className="space-y-3">
-      {quickAddRow}
       <div
         ref={listRef}
         role="listbox"
-        aria-label="Clients list"
+        aria-label="Contacts list"
         tabIndex={0}
         onKeyDown={handleKeyDown}
         className="space-y-3 outline-none"

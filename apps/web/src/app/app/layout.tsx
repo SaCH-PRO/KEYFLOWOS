@@ -230,7 +230,7 @@ const primaryNav: PrimaryNavItem[] = [
 
 const secondaryNav: Record<string, NavItem[]> = {
   workspaces: [
-    { label: "Clients", href: "/app/crm/pipeline", icon: Users },
+    { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
     { label: "Inbox", href: "/app/inbox", icon: Mail },
     { label: "Calendar", href: "/app/bookings", icon: Calendar },
     { label: "Revenue", href: "/app/commerce", icon: CreditCard },
@@ -387,7 +387,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         const isUuid = /^[0-9a-f-]{20,}$/i.test(last || "");
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
-          app: "KEYFLOW", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
+          app: "KEYFLOW", crm: "CRM", pipeline: "Contacts", commerce: "Revenue",
           bookings: "Calendar", marketing: "Content", expenses: "Expenses",
           projects: "Projects", documents: "Documents", automations: "Automations", reports: "Reports",
           store: "Store", settings: "Studio", learn: "Learn",
