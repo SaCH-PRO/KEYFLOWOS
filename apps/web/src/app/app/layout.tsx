@@ -420,17 +420,15 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           if (data.primaryColor) setAccent1(data.primaryColor);
           if (data.secondaryColor) setAccent2(data.secondaryColor);
 
-          if (data.onboardingComplete === false && !pathname.startsWith("/app/onboarding")) {
-            if (current) {
-              setTaskOrigin(current);
-            }
-            pushContext({
-              taskIntent: "onboarding-setup",
-              draftId: null,
-            });
-            router.push("/app/onboarding");
-            return;
-          }
+          // NOTE: The legacy multi-step onboarding wizard was removed in
+          // Task #293; the unified Notes drawer's "Get Started" entry is
+          // now the soft onboarding surface. We intentionally do NOT
+          // hard-redirect users with onboardingComplete=false anymore —
+          // doing so traps new Google sign-in users in a loop because the
+          // /app/onboarding route just bounces back to /app and opens the
+          // Notes drawer. Users can still open Get Started from any page
+          // via the "?" Notes button or keyboard shortcut.
+          void data.onboardingComplete;
         }
       }
       setOnboardingChecked(true);
