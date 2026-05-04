@@ -1,7 +1,13 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsEmail, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { sanitize } from '../../../core/utils/sanitize';
-import { CONTACT_AGE_GROUPS } from '../crm.constants';
+import {
+  CONTACT_AGE_GROUPS,
+  CONTACT_RELATIONSHIP_TYPES,
+  CONTACT_RELATIONSHIP_HEALTH_VALUES,
+  CONTACT_PRIORITIES,
+  CONTACT_NEXT_ACTION_TYPES,
+} from '../crm.constants';
 
 export class UpdateContactDto {
   @IsString()
@@ -173,4 +179,41 @@ export class UpdateContactDto {
   @IsOptional()
   @IsIn([...CONTACT_AGE_GROUPS])
   ageGroup?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn([...CONTACT_RELATIONSHIP_TYPES])
+  relationshipType?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  pipelineStage?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn([...CONTACT_RELATIONSHIP_HEALTH_VALUES])
+  relationshipHealth?: string;
+
+  @IsDateString()
+  @IsOptional()
+  nextActionAt?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn([...CONTACT_NEXT_ACTION_TYPES])
+  nextActionType?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn([...CONTACT_PRIORITIES])
+  priority?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  favorite?: boolean;
+
+  @IsDateString()
+  @IsOptional()
+  archivedAt?: string;
 }

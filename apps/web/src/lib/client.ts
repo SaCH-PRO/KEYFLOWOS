@@ -57,6 +57,15 @@ const contactSchema = z.object({
   doNotContact: z.boolean().nullable().optional(),
   notesInternal: z.string().nullable().optional(),
   ageGroup: z.string().nullable().optional(),
+  relationshipType: z.string().nullable().optional(),
+  pipelineStage: z.string().nullable().optional(),
+  relationshipHealth: z.string().nullable().optional(),
+  lastContactedAt: z.string().nullable().optional(),
+  nextActionAt: z.string().nullable().optional(),
+  nextActionType: z.string().nullable().optional(),
+  priority: z.string().nullable().optional(),
+  favorite: z.boolean().nullable().optional(),
+  archivedAt: z.string().nullable().optional(),
   createdAt: z.string().nullable().optional(),
   updatedAt: z.string().nullable().optional(),
   meta: contactMetaSchema.optional(),
@@ -308,6 +317,12 @@ export async function fetchContacts(
     newThisWeek?: boolean;
     tags?: string[];
     ageGroups?: string[];
+    relationshipTypes?: string[];
+    priorities?: string[];
+    relationshipHealth?: string[];
+    pipelineStages?: string[];
+    favorite?: boolean;
+    includeArchived?: boolean;
     skip?: number;
     take?: number;
     cursor?: string;
@@ -326,6 +341,12 @@ export async function fetchContacts(
   if (opts?.newThisWeek) params.set("newThisWeek", "true");
   if (opts?.tags?.length) opts.tags.forEach((t) => params.append("tags", t));
   if (opts?.ageGroups?.length) opts.ageGroups.forEach((g) => params.append("ageGroups", g));
+  if (opts?.relationshipTypes?.length) opts.relationshipTypes.forEach((g) => params.append("relationshipTypes", g));
+  if (opts?.priorities?.length) opts.priorities.forEach((g) => params.append("priorities", g));
+  if (opts?.relationshipHealth?.length) opts.relationshipHealth.forEach((g) => params.append("relationshipHealth", g));
+  if (opts?.pipelineStages?.length) opts.pipelineStages.forEach((g) => params.append("pipelineStages", g));
+  if (opts?.favorite !== undefined) params.set("favorite", String(opts.favorite));
+  if (opts?.includeArchived) params.set("includeArchived", "true");
   if (opts?.skip !== undefined) params.set("skip", String(opts.skip));
   if (opts?.take !== undefined) params.set("take", String(opts.take));
   if (opts?.cursor) params.set("cursor", opts.cursor);
@@ -567,6 +588,14 @@ export async function createContact(input: {
   marketingOptIn?: boolean;
   doNotContact?: boolean;
   ageGroup?: string | null;
+  relationshipType?: string | null;
+  pipelineStage?: string | null;
+  relationshipHealth?: string | null;
+  nextActionAt?: string | null;
+  nextActionType?: string | null;
+  priority?: string | null;
+  favorite?: boolean;
+  archivedAt?: string | null;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const body = {
@@ -601,6 +630,14 @@ export async function createContact(input: {
     marketingOptIn: input.marketingOptIn,
     doNotContact: input.doNotContact,
     ageGroup: input.ageGroup,
+    relationshipType: input.relationshipType,
+    pipelineStage: input.pipelineStage,
+    relationshipHealth: input.relationshipHealth,
+    nextActionAt: input.nextActionAt,
+    nextActionType: input.nextActionType,
+    priority: input.priority,
+    favorite: input.favorite,
+    archivedAt: input.archivedAt,
   };
 
   const res = await apiPost<Contact>({
@@ -1046,6 +1083,14 @@ export async function updateContact(input: {
   marketingOptIn?: boolean;
   doNotContact?: boolean;
   ageGroup?: string | null;
+  relationshipType?: string | null;
+  pipelineStage?: string | null;
+  relationshipHealth?: string | null;
+  nextActionAt?: string | null;
+  nextActionType?: string | null;
+  priority?: string | null;
+  favorite?: boolean;
+  archivedAt?: string | null;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPatch<Contact>(

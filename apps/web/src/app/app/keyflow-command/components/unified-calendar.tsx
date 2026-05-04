@@ -132,7 +132,6 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
       (res) => {
         if (cancelled) return;
         if (res.error) return;
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch hydration
         setCalendarConnected(res.data?.connected ?? false);
       },
     );

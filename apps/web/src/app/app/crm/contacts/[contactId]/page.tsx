@@ -25,7 +25,13 @@ import {
   fetchContactPlaybook,
   updateContactPlaybook,
 } from "@/lib/client";
-import { getContactAgeGroupLabel } from "@/lib/crm-constants";
+import {
+  getContactAgeGroupLabel,
+  getContactRelationshipTypeLabel,
+  getContactRelationshipHealthLabel,
+  getContactPriorityLabel,
+  getContactNextActionTypeLabel,
+} from "@/lib/crm-constants";
 import { loadInterruptedTasks, markSourceChanged } from "@/lib/resume-task-registry";
 
 type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[] };
@@ -474,6 +480,43 @@ export default function ContactDetailPage() {
             <div className="text-xs text-muted-foreground mt-1">
               Age group: {getContactAgeGroupLabel(c.ageGroup) ?? c.ageGroup}
             </div>
+          )}
+          {c.relationshipType && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Relationship: {getContactRelationshipTypeLabel(c.relationshipType)}
+            </div>
+          )}
+          {c.relationshipHealth && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Health: {getContactRelationshipHealthLabel(c.relationshipHealth)}
+            </div>
+          )}
+          {c.priority && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Priority: {getContactPriorityLabel(c.priority)}
+            </div>
+          )}
+          {c.pipelineStage && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Pipeline stage: {c.pipelineStage}
+            </div>
+          )}
+          {c.lastContactedAt && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Last contacted: {new Date(c.lastContactedAt).toLocaleString()}
+            </div>
+          )}
+          {c.nextActionAt && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Next action: {new Date(c.nextActionAt).toLocaleString()}
+              {c.nextActionType ? ` — ${getContactNextActionTypeLabel(c.nextActionType)}` : ""}
+            </div>
+          )}
+          {c.favorite && (
+            <div className="text-xs text-yellow-300 mt-1">★ Favorite</div>
+          )}
+          {c.archivedAt && (
+            <div className="text-xs text-amber-400 mt-1">Archived</div>
           )}
           <div className="mt-2 flex gap-2 text-xs text-muted-foreground flex-wrap">
             {c.tags?.map((t) => (

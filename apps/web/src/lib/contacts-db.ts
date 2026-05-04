@@ -35,6 +35,15 @@ export interface LocalContact {
   marketingOptIn?: boolean | null;
   doNotContact?: boolean | null;
   ageGroup?: string | null;
+  relationshipType?: string | null;
+  pipelineStage?: string | null;
+  relationshipHealth?: string | null;
+  lastContactedAt?: string | null;
+  nextActionAt?: string | null;
+  nextActionType?: string | null;
+  priority?: string | null;
+  favorite?: boolean | null;
+  archivedAt?: string | null;
 
   custom?: Record<string, unknown> | null;
 }

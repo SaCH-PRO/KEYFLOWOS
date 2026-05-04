@@ -146,7 +146,7 @@ export function ContactDetail({
   onEdit,
   onDelete,
   onQuickAction,
-  onLogEvent,
+  onLogEvent: _onLogEvent,
   healthMetrics,
   journeyMilestones,
   crossJourney,

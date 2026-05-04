@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { normalizeContactEventType } from '@keyflow/shared';
+import { normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 type TimelineEntry = {
@@ -61,7 +61,10 @@ export class CrmTimelineService {
     type: string,
     data: any,
     meta?: { actorType?: string; actorId?: string; source?: string },
-    tx?: { contactEvent: { create: (args: any) => any } },
+    tx?: {
+      contactEvent: { create: (args: any) => Promise<{ id: string }> };
+      contact?: { update: (args: any) => Promise<unknown> };
+    },
   ) {
     const client = tx ?? this.prisma.client;
     const normalized = normalizeContactEventType(type);
@@ -81,11 +84,24 @@ export class CrmTimelineService {
         source: meta?.source ?? 'system',
       },
     });
+    if (getContactEventCategory(normalized.canonical) === 'communication') {
+      const contactClient = tx?.contact ?? this.prisma.client.contact;
+      try {
+        await contactClient.update({
+          where: { id: contactId },
+          data: { lastContactedAt: new Date() },
+        });
+      } catch (err) {
+        this.logger.warn(
+          `[CRM] failed to update lastContactedAt for contact=${contactId}: ${(err as Error).message}`,
+        );
+      }
+    }
     this.events.emit('crm.contact_event.logged', {
       businessId,
       contactId,
       type: normalized.canonical,
-      eventId: (created as any)?.id,
+      eventId: created?.id,
       source: meta?.source ?? 'system',
       actorType: meta?.actorType,
       actorId: meta?.actorId,

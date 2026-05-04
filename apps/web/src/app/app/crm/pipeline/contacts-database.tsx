@@ -26,7 +26,15 @@ import type { ColumnKey } from "./hooks/use-database-state";
 import { DatabaseTable } from "./database-table";
 import { DatabaseBulkBar } from "./database-bulk-bar";
 import { ContactLists } from "./contact-lists";
-import { CONTACT_AGE_GROUPS, CONTACT_AGE_GROUP_LABELS, type ContactAgeGroup } from "@/lib/crm-constants";
+import {
+  CONTACT_AGE_GROUPS,
+  CONTACT_AGE_GROUP_LABELS,
+  type ContactAgeGroup,
+  CONTACT_RELATIONSHIP_TYPES,
+  CONTACT_RELATIONSHIP_TYPE_LABELS,
+  CONTACT_PRIORITIES,
+  CONTACT_PRIORITY_LABELS,
+} from "@/lib/crm-constants";
 
 interface ContactsDatabaseProps {
   businessId: string;
@@ -461,6 +469,104 @@ export function ContactsDatabase({
               Clear
             </button>
           )}
+        </div>
+
+        <div className="flex items-center gap-1.5 mb-3 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by relationship type">
+          <span className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider whitespace-nowrap shrink-0 pr-1">Rel</span>
+          {CONTACT_RELATIONSHIP_TYPES.map((g) => {
+            const isActive = db.relationshipTypeFilter.has(g);
+            return (
+              <button
+                key={g}
+                onClick={() => {
+                  db.setRelationshipTypeFilter((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(g)) next.delete(g);
+                    else next.add(g);
+                    return next;
+                  });
+                }}
+                className={`px-2 py-1 text-[11px] rounded-md transition-all inline-flex items-center gap-1 font-medium whitespace-nowrap shrink-0 ${
+                  isActive
+                    ? "bg-[hsl(var(--kf-accent2))]/15 border border-[hsl(var(--kf-accent2))]/40 text-[hsl(var(--kf-accent2))]"
+                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+                }`}
+                aria-pressed={isActive}
+              >
+                {CONTACT_RELATIONSHIP_TYPE_LABELS[g]}
+              </button>
+            );
+          })}
+          {db.relationshipTypeFilter.size > 0 && (
+            <button
+              onClick={() => db.setRelationshipTypeFilter(new Set())}
+              className="px-2 py-1 text-[11px] rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.05] inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+              aria-label="Clear relationship type filter"
+            >
+              <X className="w-3 h-3" />
+              Clear
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 mb-3 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by priority">
+          <span className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider whitespace-nowrap shrink-0 pr-1">Pri</span>
+          {CONTACT_PRIORITIES.map((g) => {
+            const isActive = db.priorityFilter.has(g);
+            return (
+              <button
+                key={g}
+                onClick={() => {
+                  db.setPriorityFilter((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(g)) next.delete(g);
+                    else next.add(g);
+                    return next;
+                  });
+                }}
+                className={`px-2 py-1 text-[11px] rounded-md transition-all inline-flex items-center gap-1 font-medium whitespace-nowrap shrink-0 ${
+                  isActive
+                    ? "bg-amber-500/15 border border-amber-500/40 text-amber-300"
+                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+                }`}
+                aria-pressed={isActive}
+              >
+                {CONTACT_PRIORITY_LABELS[g]}
+              </button>
+            );
+          })}
+          {db.priorityFilter.size > 0 && (
+            <button
+              onClick={() => db.setPriorityFilter(new Set())}
+              className="px-2 py-1 text-[11px] rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.05] inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+              aria-label="Clear priority filter"
+            >
+              <X className="w-3 h-3" />
+              Clear
+            </button>
+          )}
+          <button
+            onClick={() => db.setFavoriteFilter(!db.favoriteFilter)}
+            className={`ml-2 px-2 py-1 text-[11px] rounded-md transition-all whitespace-nowrap shrink-0 ${
+              db.favoriteFilter
+                ? "bg-yellow-500/15 border border-yellow-500/40 text-yellow-300"
+                : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+            }`}
+            aria-pressed={db.favoriteFilter}
+          >
+            ★ Favorites
+          </button>
+          <button
+            onClick={() => db.setIncludeArchived(!db.includeArchived)}
+            className={`px-2 py-1 text-[11px] rounded-md transition-all whitespace-nowrap shrink-0 ${
+              db.includeArchived
+                ? "bg-slate-500/15 border border-slate-500/40 text-slate-300"
+                : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+            }`}
+            aria-pressed={db.includeArchived}
+          >
+            Show archived
+          </button>
         </div>
 
         <DatabaseTable
