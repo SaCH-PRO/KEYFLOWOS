@@ -72,10 +72,12 @@ export default function MarketingListsPage() {
 
   useEffect(() => {
     if (!businessId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration of marketing lists
     void loadLists();
   }, [businessId, loadLists]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration of campaigns once providers are known
     if (providers.length > 0) void loadCampaigns(providers);
   }, [providers, loadCampaigns]);
 

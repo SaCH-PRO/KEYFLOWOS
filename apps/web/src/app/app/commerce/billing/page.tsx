@@ -1,20 +1,11 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-
-export default function LegacyBillingRedirect() {
-  const router = useRouter();
-  const params = useSearchParams();
-
-  useEffect(() => {
-    const tab = params.get("tab") || "payments";
-    router.replace(`/app/commerce/collections?tab=${encodeURIComponent(tab)}`);
-  }, [router, params]);
-
-  return (
-    <div className="p-6 text-sm text-muted-foreground">
-      Redirecting to Collections (Customer Payments)…
-    </div>
-  );
+export default async function LegacyBillingRedirect({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab } = await searchParams;
+  const sub = tab || "payments";
+  redirect(`/app/commerce/collections?tab=${encodeURIComponent(sub)}`);
 }

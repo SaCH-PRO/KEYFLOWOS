@@ -153,6 +153,7 @@ export default function ConnectContactsPage() {
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration via load() callback
     load();
   }, [load]);
 

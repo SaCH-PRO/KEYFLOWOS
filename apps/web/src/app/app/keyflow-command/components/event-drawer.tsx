@@ -123,6 +123,7 @@ export function EventDrawer({ open, businessId, initial, onClose, onSaved }: Pro
     const titleVal = initial?.summary ?? "";
     const attendeesVal = (initial?.attendees ?? []).join(", ");
     const notesVal = initial?.description ?? "";
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/modal mirror reset when `initial` changes
     setTitle(titleVal);
     setAllDay(allDayVal);
     setStart(startVal);

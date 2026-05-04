@@ -63,6 +63,7 @@ import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 import { RequireAuth } from "@/components/require-auth";
 import { NotesProvider } from "@/components/keyflow/notes-context";
 import { KeyflowNotesDrawer } from "@/components/keyflow/keyflow-notes-drawer";
+import { NotesQueryParamTrigger } from "@/components/keyflow/notes-query-param-trigger";
 
 function relativeTime(dateStr: string): string {
   const now = Date.now();
@@ -310,6 +311,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <NavigationContextProvider>
           <AiContextProvider>
             <NotesProvider>
+              <NotesQueryParamTrigger />
               <AppLayoutInner>{children}</AppLayoutInner>
               <KeyflowNotesDrawer />
             </NotesProvider>
