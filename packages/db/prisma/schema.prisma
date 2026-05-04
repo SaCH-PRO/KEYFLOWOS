@@ -3528,6 +3528,10 @@ model DocumentInstance {
   generationMeta    Json?   @map("generation_meta")
   effectiveDate     DateTime? @map("effective_date")
   expiryDate        DateTime? @map("expiry_date")
+  driveFileId       String? @map("drive_file_id")
+  driveFileName     String? @map("drive_file_name")
+  driveFileMimeType String? @map("drive_file_mime_type")
+  driveLastSyncedAt DateTime? @map("drive_last_synced_at")
 
   versions          DocumentVersion[]
   sections          DocumentSection[]

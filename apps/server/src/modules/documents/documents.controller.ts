@@ -86,6 +86,37 @@ export class DocumentsController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/instances/:instanceId/drive-link')
+  linkDriveFile(
+    @Param('businessId') businessId: string,
+    @Param('instanceId') instanceId: string,
+    @Body() body: { driveFileId: string | null; driveFileName?: string | null; driveFileMimeType?: string | null },
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.documentsService.linkDriveFile(businessId, instanceId, body, req.user?.id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/instances/:instanceId/import-from-drive')
+  importFromDrive(
+    @Param('businessId') businessId: string,
+    @Param('instanceId') instanceId: string,
+    @Body() body: { driveFileId: string; driveFileName: string; driveFileMimeType: string; content: string },
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.documentsService.importBodyFromDrive(businessId, instanceId, body, req.user?.id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/instances/:instanceId/drive-synced')
+  markDriveSynced(
+    @Param('businessId') businessId: string,
+    @Param('instanceId') instanceId: string,
+  ) {
+    return this.documentsService.markDriveSynced(businessId, instanceId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/instances/:instanceId/status')
   updateStatus(
     @Param('businessId') businessId: string,

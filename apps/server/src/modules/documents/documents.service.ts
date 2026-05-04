@@ -779,6 +779,107 @@ export class DocumentsService {
     return true;
   }
 
+  async linkDriveFile(
+    businessId: string,
+    instanceId: string,
+    body: { driveFileId: string | null; driveFileName?: string | null; driveFileMimeType?: string | null },
+    actorUserId?: string,
+  ) {
+    const inst = await this.getInstance(businessId, instanceId);
+    await this.prisma.client.documentInstance.update({
+      where: { id: inst.id },
+      data: {
+        driveFileId: body.driveFileId,
+        driveFileName: body.driveFileName ?? null,
+        driveFileMimeType: body.driveFileMimeType ?? null,
+        driveLastSyncedAt: body.driveFileId ? new Date() : null,
+      },
+    });
+    await this.logChange(
+      businessId,
+      instanceId,
+      body.driveFileId ? 'DRIVE_LINKED' : 'DRIVE_UNLINKED',
+      'CHANGE',
+      null,
+      inst.driveFileId || null,
+      body.driveFileId,
+      actorUserId || 'user',
+      body.driveFileName || undefined,
+    );
+    return this.getInstance(businessId, instanceId);
+  }
+
+  /**
+   * Replace the document body with content imported from a Drive file. We
+   * collapse all sections into a single "Imported Body" section that holds
+   * the converted plain-text content; existing sections are removed so the
+   * imported document becomes the source of truth for round-trip editing.
+   */
+  async importBodyFromDrive(
+    businessId: string,
+    instanceId: string,
+    body: {
+      driveFileId: string;
+      driveFileName: string;
+      driveFileMimeType: string;
+      content: string;
+    },
+    actorUserId?: string,
+  ) {
+    const inst = await this.getInstance(businessId, instanceId);
+    const previousSectionCount = inst.sections.length;
+
+    await this.prisma.client.$transaction(async (tx) => {
+      await tx.documentSection.deleteMany({ where: { instanceId: inst.id } });
+      await tx.documentSection.create({
+        data: {
+          instanceId: inst.id,
+          sectionKey: 'imported-body',
+          sectionName: body.driveFileName || 'Imported Body',
+          content: body.content,
+          contentSource: 'USER_EDITED',
+          editableMode: 'GUIDED',
+          riskScore: 'GREEN',
+          reviewRequired: false,
+          lastModifiedBy: actorUserId || 'drive-import',
+          sortOrder: 0,
+        },
+      });
+      await tx.documentInstance.update({
+        where: { id: inst.id },
+        data: {
+          driveFileId: body.driveFileId,
+          driveFileName: body.driveFileName,
+          driveFileMimeType: body.driveFileMimeType,
+          driveLastSyncedAt: new Date(),
+        },
+      });
+    });
+
+    await this.logChange(
+      businessId,
+      instanceId,
+      'DRIVE_IMPORTED',
+      'CHANGE',
+      null,
+      `${previousSectionCount} sections`,
+      body.driveFileName,
+      actorUserId || 'user',
+      `Imported from Drive file ${body.driveFileId}`,
+    );
+
+    return this.getInstance(businessId, instanceId);
+  }
+
+  async markDriveSynced(businessId: string, instanceId: string) {
+    const inst = await this.getInstance(businessId, instanceId);
+    await this.prisma.client.documentInstance.update({
+      where: { id: inst.id },
+      data: { driveLastSyncedAt: new Date() },
+    });
+    return this.getInstance(businessId, instanceId);
+  }
+
   private async logChange(
     businessId: string,
     instanceId: string | null,

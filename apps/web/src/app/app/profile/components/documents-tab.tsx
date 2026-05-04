@@ -217,6 +217,7 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
   const [generating, setGenerating] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [view, setView] = useState<"catalog" | "documents" | "drive">("catalog");
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showGenerator, setShowGenerator] = useState(false);
@@ -531,6 +532,17 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
 
       {view === "documents" && (
         <div className="space-y-2">
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => setShowDrivePicker(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-xs font-medium min-h-[40px] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] hover:border-[hsl(var(--kf-accent2))]/40 transition-colors"
+              title="Browse Google Drive to open a document"
+            >
+              <HardDrive className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
+              Open from Drive
+            </button>
+          </div>
           {instances.length === 0 ? (
             <div className="text-center py-12 bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))]">
               <FileText className="w-10 h-10 mx-auto text-[hsl(var(--muted-foreground))] mb-3" />
@@ -778,6 +790,49 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
                   Open Full Document
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDrivePicker && businessId && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowDrivePicker(false)}>
+          <div
+            className="bg-[hsl(var(--background))] rounded-2xl border border-[hsl(var(--border))] w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-[hsl(var(--border))]">
+              <div>
+                <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">Open from Google Drive</h3>
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">Pick a Google Doc, HTML, or text file to open in Drive.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDrivePicker(false)}
+                className="p-2 rounded-lg hover:bg-[hsl(var(--muted))]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              <GoogleDriveBrowser
+                businessId={businessId}
+                pickerTitle="Select a file"
+                allowedMimeTypes={[
+                  "application/vnd.google-apps.document",
+                  "text/html",
+                  "text/plain",
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ]}
+                onSelect={(file) => {
+                  setShowDrivePicker(false);
+                  if (file.webViewLink) {
+                    window.open(file.webViewLink, "_blank", "noopener,noreferrer");
+                  } else {
+                    setView("drive");
+                  }
+                }}
+              />
             </div>
           </div>
         </div>
