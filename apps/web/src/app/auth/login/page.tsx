@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Layers,
@@ -37,26 +37,6 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "");
 
-/**
- * Legacy direct-to-Supabase sign-in. Retained only so the
- * `?verified=1` callback can still light the success banner without
- * breaking existing tests. New auth flows go through the backend
- * `POST /identity/login` proxy (see `identityLogin` in `lib/client.ts`),
- * which adds rate-limiting, audit logging and CAPTCHA enforcement.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function _legacySupabaseSignIn(email: string, password: string) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, password }),
-  });
-  const json = await res.json().catch(() => null);
-  if (!res.ok || !json?.access_token) throw new Error(json?.error_description ?? json?.msg ?? "Sign in failed");
-  return json as { access_token: string };
-}
-
 function signInWithGoogle() {
   if (!SUPABASE_URL) return;
   const redirectTo = `${SITE_URL.replace(/\/$/, "")}/auth/callback`;
@@ -87,12 +67,18 @@ function AuthLoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const verified = useMemo(() => searchParams?.get("verified") === "1", [searchParams]);
+  const resetOk = useMemo(() => searchParams?.get("reset") === "1", [searchParams]);
   const fromPath = useMemo(() => safeFromParam(searchParams?.get("from")), [searchParams]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [banner, setBanner] = useState<string | null>(verified ? "Email verified! Sign in to continue." : null);
+  const initialBanner = verified
+    ? "Email verified! Sign in to continue."
+    : resetOk
+      ? "Password updated. Sign in with your new password."
+      : null;
+  const [banner, setBanner] = useState<string | null>(initialBanner);
   const [showPassword, setShowPassword] = useState(false);
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [resetSent, setResetSent] = useState(false);
@@ -121,7 +107,8 @@ function AuthLoginInner() {
     try {
       const result = await identityLogin({ email, password });
       if (result.error || !result.data?.accessToken) {
-        throw new Error(result.error || "Sign in failed.");
+        applyLoginError(result.error);
+        return;
       }
       setStoredToken(result.data.accessToken);
       const draft = JSON.parse(window.localStorage.getItem("kf_profile_draft") || "{}");
@@ -135,18 +122,35 @@ function AuthLoginInner() {
       else { throw new Error("Could not create workspace. Please try again."); }
       router.push(fromPath);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Login failed";
-      // Supabase returns "Email not confirmed" when the user exists but hasn't
-      // verified yet — surface a Resend affordance inline instead of a dead-end error.
-      const lower = message.toLowerCase();
-      if (lower.includes("email not confirmed") || lower.includes("not been confirmed") || lower.includes("not confirmed")) {
-        setNeedsVerification(true);
-        setError("Please verify your email before signing in.");
-      } else {
-        setError(message);
-      }
+      setError(error instanceof Error ? error.message : "Login failed");
     } finally { setLoading(false); }
   };
+
+  function applyLoginError(err: { code: string | null; message: string } | null) {
+    const code = err?.code ?? "";
+    const message = err?.message ?? "Sign in failed.";
+    switch (code) {
+      case "email_not_confirmed":
+        setNeedsVerification(true);
+        setError("Please verify your email before signing in.");
+        return;
+      case "invalid_credentials":
+        setError("That email and password don't match. Try again.");
+        return;
+      case "rate_limited":
+        setError("Too many attempts. Wait a few minutes and try again.");
+        return;
+      case "signin_unavailable":
+      case "signup_unavailable":
+        setError("Sign-in is temporarily unavailable. Please try again shortly.");
+        return;
+      case "signin_failed":
+        setError("Sign in failed. Please try again.");
+        return;
+      default:
+        setError(message);
+    }
+  }
 
   const handleResendVerification = async () => {
     if (!email.trim()) { setError("Enter your email address first."); return; }

@@ -5,8 +5,15 @@ import request from 'supertest';
 import { describe, beforeAll, afterAll, it, expect } from 'vitest';
 import { IdentityController } from '../src/modules/identity/identity.controller';
 import { IdentityService } from '../src/modules/identity/identity.service';
+import { IdentitySignupService } from '../src/modules/identity/identity-signup.service';
+import { BusinessContextService } from '../src/modules/identity/business-context.service';
+import { AiUsageService } from '../src/modules/ai/ai-usage.service';
+import { AuthSecurityService } from '../src/modules/identity/auth-security.service';
+import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
+import { OptionalAuthGuard } from '../src/core/auth/optional-auth.guard';
+import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
 
 const identityServiceMock = {
   items: [] as any[],
@@ -29,11 +36,20 @@ describe('Identity e2e', () => {
       controllers: [IdentityController],
       providers: [
         { provide: IdentityService, useValue: identityServiceMock },
+        { provide: IdentitySignupService, useValue: {} },
+        { provide: BusinessContextService, useValue: {} },
+        { provide: AiUsageService, useValue: {} },
+        { provide: AuthSecurityService, useValue: { enforce: async () => undefined, audit: async () => undefined } },
+        { provide: PrismaService, useValue: { client: {} } },
       ],
     })
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(BusinessGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(OptionalAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(ModuleScopeGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

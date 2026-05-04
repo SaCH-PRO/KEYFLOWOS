@@ -17,41 +17,67 @@ function clientPasswordIssue(pw: string): string | null {
   return null;
 }
 
+/**
+ * Pure helper extracted for testability + to keep the component body free
+ * of imperative URL parsing. Returns a tuple describing what the recovery
+ * link's URL fragment carried so the component can decide between
+ * "ready", "invalid", and the error copy to display.
+ */
+export function parseRecoveryHash(hash: string | undefined | null):
+  | { status: "ready"; token: string }
+  | { status: "invalid"; error: string } {
+  const raw = (hash ?? "").startsWith("#") ? (hash ?? "").slice(1) : (hash ?? "");
+  const params = new URLSearchParams(raw);
+  const errDesc = params.get("error_description");
+  if (errDesc) {
+    return { status: "invalid", error: decodeURIComponent(errDesc.replace(/\+/g, " ")) };
+  }
+  const token = params.get("access_token");
+  const type = params.get("type");
+  if (!token || type !== "recovery") {
+    return {
+      status: "invalid",
+      error: "This reset link is invalid or has expired. Request a new one from the sign-in page.",
+    };
+  }
+  return { status: "ready", token };
+}
+
 function ResetPasswordInner() {
   const router = useRouter();
-  const [status, setStatus] = useState<Status>("loading");
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  // Parse the recovery fragment synchronously during render so we don't
+  // setState inside an effect (cascading-renders lint rule). Window may
+  // not exist during SSR; guard with `typeof`.
+  const initial = useMemo(
+    () => (typeof window === "undefined" ? null : parseRecoveryHash(window.location.hash)),
+    [],
+  );
+  const [status, setStatus] = useState<Status>(
+    initial ? initial.status : "loading",
+  );
+  const [accessToken] = useState<string | null>(
+    initial && initial.status === "ready" ? initial.token : null,
+  );
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    initial && initial.status === "invalid" ? initial.error : null,
+  );
 
+  // After mount, scrub the hash from the URL so the access-token isn't
+  // visible in the location bar. Pure side-effect against the URL bar,
+  // no setState — belongs in useEffect.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
-    const params = new URLSearchParams(hash);
-    const errDesc = params.get("error_description");
-    const token = params.get("access_token");
-    const type = params.get("type");
-
-    if (errDesc) {
-      setError(decodeURIComponent(errDesc.replace(/\+/g, " ")));
-      setStatus("invalid");
-      return;
+    if (initial?.status === "ready") {
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {
+        /* ignore */
+      }
     }
-    if (!token || type !== "recovery") {
-      setError("This reset link is invalid or has expired. Request a new one from the sign-in page.");
-      setStatus("invalid");
-      return;
-    }
-    setAccessToken(token);
-    setStatus("ready");
-    try {
-      window.history.replaceState(null, "", window.location.pathname);
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  }, [initial]);
 
   const issue = useMemo(() => (password ? clientPasswordIssue(password) : null), [password]);
   const mismatch = confirm.length > 0 && confirm !== password;
@@ -107,7 +133,7 @@ function ResetPasswordInner() {
             </div>
             <div>
               <h1 className="text-xl font-semibold text-white">Set a new password</h1>
-              <p className="text-xs text-slate-400">Choose a password you haven't used before.</p>
+              <p className="text-xs text-slate-400">Choose a password you haven&apos;t used before.</p>
             </div>
           </div>
 
@@ -189,7 +215,7 @@ function ResetPasswordInner() {
                     disabled={status === "submitting"}
                   />
                 </div>
-                {mismatch && <p className="mt-1.5 text-xs text-amber-400">Passwords don't match.</p>}
+                {mismatch && <p className="mt-1.5 text-xs text-amber-400">Passwords don&apos;t match.</p>}
               </div>
 
               {error && (

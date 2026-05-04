@@ -5,6 +5,43 @@ import { Suspense, useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
 import { setStoredToken } from "@/lib/workspace";
 
+/**
+ * Derive (firstName, lastName) from a Supabase OAuth user_metadata payload.
+ *
+ * Google supplies first-class `given_name` / `family_name` fields that we
+ * always prefer when present. When only `full_name` / `name` is available
+ * (some IdPs / older accounts) we fall back to a naive whitespace split
+ * with the first token as the first name and the rest joined as the last.
+ *
+ * Extracted as a pure helper so the OAuth-callback page stays a thin
+ * controller around it AND so we can unit-test the edge cases (multi-word
+ * surnames, missing fields, mononyms, leading/trailing whitespace) without
+ * spinning up a browser.
+ */
+export function deriveOAuthName(meta: Record<string, unknown> | null | undefined): {
+  firstName: string;
+  lastName: string;
+  fullName: string;
+} {
+  const m = (meta ?? {}) as Record<string, unknown>;
+  const given = typeof m.given_name === "string" ? m.given_name.trim() : "";
+  const family = typeof m.family_name === "string" ? m.family_name.trim() : "";
+  const fullRaw =
+    (typeof m.full_name === "string" && m.full_name.trim()) ||
+    (typeof m.name === "string" && m.name.trim()) ||
+    "";
+  const fullName = fullRaw || [given, family].filter(Boolean).join(" ");
+
+  if (given || family) {
+    return { firstName: given, lastName: family, fullName };
+  }
+
+  const parts = fullName.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: "", lastName: "", fullName };
+  if (parts.length === 1) return { firstName: parts[0], lastName: "", fullName };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" "), fullName };
+}
+
 function AuthCallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -45,12 +82,8 @@ function AuthCallbackInner() {
         
         const userInfo = await userInfoRes.json();
         const email = userInfo.email;
-        const fullName = userInfo.user_metadata?.full_name || userInfo.user_metadata?.name || "";
         const avatarUrl = userInfo.user_metadata?.avatar_url || userInfo.user_metadata?.picture || "";
-        
-        const nameParts = fullName.split(" ");
-        const firstName = userInfo.user_metadata?.given_name || nameParts[0] || "";
-        const lastName = userInfo.user_metadata?.family_name || nameParts.slice(1).join(" ") || "";
+        const { firstName, lastName, fullName } = deriveOAuthName(userInfo.user_metadata);
         
         if (email) {
           window.localStorage.setItem("kf_email", email);

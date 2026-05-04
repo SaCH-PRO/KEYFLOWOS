@@ -498,7 +498,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
   const handleLogout = () => {
     clearStoredBusinessId();
-    router.push("/");
+    router.push("/auth/login");
   };
 
   useEffect(() => {
