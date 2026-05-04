@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Search,
   TrendingUp,
@@ -18,7 +19,9 @@ import {
 import { toast } from "sonner";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
-import { getStoredBusinessId } from "@/lib/workspace";
+import { getStoredBusinessId, getCachedUser } from "@/lib/workspace";
+
+const COMING_SOON_ADMIN_EMAIL = "keyflowos.tt@gmail.com";
 
 type TabKey = "overview" | "pages" | "keywords" | "issues" | "briefs" | "revenue" | "connectors";
 
@@ -125,8 +128,21 @@ const TREND_COLORS: Record<string, string> = {
 };
 
 export default function SeoPage() {
+  const router = useRouter();
+  const [accessChecked, setAccessChecked] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [businessId, setBusinessId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const user = getCachedUser();
+    const email = (user?.email ?? "").trim().toLowerCase();
+    if (email !== COMING_SOON_ADMIN_EMAIL) {
+      toast.info("SEO is coming soon");
+      router.replace("/app");
+      return;
+    }
+    setAccessChecked(true);
+  }, [router]);
   const [dashboard, setDashboard] = useState<SeoDashboard | null>(null);
   const [pages, setPages] = useState<SeoPage[]>([]);
   const [keywords, setKeywords] = useState<SeoKeyword[]>([]);
@@ -150,8 +166,9 @@ export default function SeoPage() {
   const [ga4Token, setGa4Token] = useState("");
 
   useEffect(() => {
+    if (!accessChecked) return;
     setBusinessId(getStoredBusinessId());
-  }, []);
+  }, [accessChecked]);
 
   const refresh = useCallback(async () => {
     if (!businessId) return;
@@ -300,6 +317,10 @@ export default function SeoPage() {
       {dashboard.overview.criticalIssues > 0 && <> · <span className="text-red-400">{dashboard.overview.criticalIssues} critical</span></>}
     </span>
   ) : "Search performance, content gaps, and organic revenue";
+
+  if (!accessChecked) {
+    return null;
+  }
 
   return (
     <WorkspaceShell
