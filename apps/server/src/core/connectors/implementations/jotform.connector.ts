@@ -41,25 +41,28 @@ export class JotformConnector extends FormPlatformConnector {
   }
 
   protected async pingProvider(apiKey: string): Promise<ConnectorSmokeResult> {
-    const res = await fetch('https://api.jotform.com/user', {
-      headers: { APIKEY: apiKey },
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      return { success: false, error: `Jotform API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+    const userRes = await fetch('https://api.jotform.com/user', { headers: { APIKEY: apiKey } });
+    if (!userRes.ok) {
+      const body = await userRes.text().catch(() => '');
+      return { success: false, error: `Jotform /user ${userRes.status}${body ? `: ${body}` : ''}` };
     }
-    const data = (await res.json()) as {
-      content?: { username?: string; email?: string; name?: string; account_type?: { name?: string } };
+    const userData = (await userRes.json()) as {
+      content?: { username?: string; email?: string; name?: string };
       message?: string;
     };
-    if (!data.content) {
-      return { success: false, error: data.message ?? 'Jotform returned no content' };
+    if (!userData.content) return { success: false, error: userData.message ?? 'Jotform returned no content' };
+    const formsRes = await fetch('https://api.jotform.com/user/forms?limit=1', { headers: { APIKEY: apiKey } });
+    if (!formsRes.ok) {
+      const body = await formsRes.text().catch(() => '');
+      return { success: false, error: `Jotform /user/forms ${formsRes.status}${body ? `: ${body}` : ''}` };
     }
+    const formsData = (await formsRes.json()) as { resultSet?: { count?: number; total?: number }; content?: unknown[] };
+    const total = formsData.resultSet?.total ?? formsData.resultSet?.count ?? formsData.content?.length ?? 0;
     return {
       success: true,
-      action: 'Fetched Jotform /user',
-      account: data.content.email ?? data.content.username ?? data.content.name ?? 'Jotform Account',
-      detail: data.content.account_type?.name ? `Plan: ${data.content.account_type.name}` : undefined,
+      action: 'Listed Jotform forms',
+      account: userData.content.email ?? userData.content.username ?? 'Jotform Account',
+      detail: `${total} form(s)`,
     };
   }
 }

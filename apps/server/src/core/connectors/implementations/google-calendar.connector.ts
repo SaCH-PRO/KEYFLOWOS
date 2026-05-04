@@ -149,11 +149,6 @@ export class GoogleCalendarConnector implements IConnector {
     }
   }
 
-  /**
-   * Real round-trip per Task #340 spec: insert a 15-min event on the primary
-   * calendar, then immediately delete it. Returns the htmlLink so the user can
-   * confirm the event existed (idempotent — nothing remains).
-   */
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -184,7 +179,8 @@ export class GoogleCalendarConnector implements IConnector {
         },
       );
       if (!insertRes.ok) {
-        return { success: false, error: `Calendar insert ${insertRes.status}` };
+        const body = await insertRes.text().catch(() => '');
+        return { success: false, error: `Calendar insert ${insertRes.status}${body ? `: ${body}` : ''}` };
       }
       const event = (await insertRes.json()) as { id?: string; htmlLink?: string };
       if (event.id) {
@@ -193,9 +189,10 @@ export class GoogleCalendarConnector implements IConnector {
           { method: 'DELETE', headers: { Authorization: `Bearer ${business.calendarAccessToken}` } },
         );
         if (!delRes.ok && delRes.status !== 410) {
+          const body = await delRes.text().catch(() => '');
           return {
             success: false,
-            error: `Inserted event ${event.id} but DELETE failed (${delRes.status}) — please remove manually`,
+            error: `Inserted event ${event.id} but DELETE failed (${delRes.status})${body ? `: ${body}` : ''} — please remove manually`,
             account: business.calendarEmail ?? undefined,
           };
         }

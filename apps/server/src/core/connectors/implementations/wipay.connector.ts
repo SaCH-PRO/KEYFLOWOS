@@ -84,12 +84,6 @@ export class WiPayConnector implements IConnector {
     return { success: true, itemsSynced: recentPayments, errors: [], duration: Date.now() - start };
   }
 
-  /**
-   * Real round-trip per Task #340 spec: WiPay does not expose a balance/ping
-   * endpoint, so we hit their documented payment-request endpoint with sentinel
-   * data. Their API responds with a structured JSON error or success — either
-   * proves the credentials reached WiPay's gateway and returned a real verdict.
-   */
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },

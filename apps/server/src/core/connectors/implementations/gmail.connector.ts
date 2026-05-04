@@ -121,10 +121,6 @@ export class GmailConnector implements IConnector {
     }
   }
 
-  /**
-   * Real round-trip per Task #340 spec: send a marked self-test email to the
-   * connected address, proving both `gmail.send` scope and live token validity.
-   */
   async smokeTest(businessId: string): Promise<import('../connector.interface').ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -137,7 +133,8 @@ export class GmailConnector implements IConnector {
       const headers = { Authorization: `Bearer ${business.gmailAccessToken}` };
       const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers });
       if (!profileRes.ok) {
-        return { success: false, error: `Gmail profile ${profileRes.status}` };
+        const body = await profileRes.text().catch(() => '');
+        return { success: false, error: `Gmail profile ${profileRes.status}${body ? `: ${body}` : ''}` };
       }
       const profile = (await profileRes.json()) as { emailAddress?: string };
       const address = profile.emailAddress ?? business.gmailEmail;
@@ -166,7 +163,8 @@ export class GmailConnector implements IConnector {
         body: JSON.stringify({ raw }),
       });
       if (!sendRes.ok) {
-        return { success: false, error: `Gmail send ${sendRes.status}` };
+        const body = await sendRes.text().catch(() => '');
+        return { success: false, error: `Gmail send ${sendRes.status}${body ? `: ${body}` : ''}` };
       }
       const sent = (await sendRes.json()) as { id?: string };
       return {

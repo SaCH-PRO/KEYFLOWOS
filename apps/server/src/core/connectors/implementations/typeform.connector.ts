@@ -41,19 +41,27 @@ export class TypeformConnector extends FormPlatformConnector {
   }
 
   protected async pingProvider(token: string): Promise<ConnectorSmokeResult> {
-    const res = await fetch('https://api.typeform.com/me', {
+    const meRes = await fetch('https://api.typeform.com/me', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      return { success: false, error: `Typeform API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+    if (!meRes.ok) {
+      const body = await meRes.text().catch(() => '');
+      return { success: false, error: `Typeform /me ${meRes.status}${body ? `: ${body}` : ''}` };
     }
-    const data = (await res.json()) as { alias?: string; email?: string; language?: string };
+    const me = (await meRes.json()) as { alias?: string; email?: string };
+    const formsRes = await fetch('https://api.typeform.com/forms?page_size=1', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!formsRes.ok) {
+      const body = await formsRes.text().catch(() => '');
+      return { success: false, error: `Typeform /forms ${formsRes.status}${body ? `: ${body}` : ''}` };
+    }
+    const forms = (await formsRes.json()) as { total_items?: number; page_count?: number };
     return {
       success: true,
-      action: 'Fetched Typeform /me',
-      account: data.email ?? data.alias ?? 'Typeform Account',
-      detail: data.language ? `Language: ${data.language}` : undefined,
+      action: 'Listed Typeform forms',
+      account: me.email ?? me.alias ?? 'Typeform Account',
+      detail: `${forms.total_items ?? 0} form(s)`,
     };
   }
 }

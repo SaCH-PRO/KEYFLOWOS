@@ -98,25 +98,31 @@ export class PayPalConnector implements IConnector {
     const base = isSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com';
     try {
       const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-      const res = await fetch(`${base}/v1/oauth2/token`, {
+      const tokenRes = await fetch(`${base}/v1/oauth2/token`, {
         method: 'POST',
-        headers: {
-          Authorization: `Basic ${auth}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
+        headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'grant_type=client_credentials',
       });
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        return { success: false, error: `PayPal OAuth ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      if (!tokenRes.ok) {
+        const body = await tokenRes.text().catch(() => '');
+        return { success: false, error: `PayPal /v1/oauth2/token ${tokenRes.status}${body ? `: ${body}` : ''}` };
       }
-      const data = (await res.json()) as { app_id?: string; expires_in?: number; scope?: string };
+      const token = (await tokenRes.json()) as { access_token?: string; app_id?: string; expires_in?: number };
+      if (!token.access_token) return { success: false, error: 'PayPal returned no access token' };
+      const userRes = await fetch(`${base}/v1/identity/oauth2/userinfo?schema=paypalv1.1`, {
+        headers: { Authorization: `Bearer ${token.access_token}`, Accept: 'application/json' },
+      });
+      if (!userRes.ok) {
+        const body = await userRes.text().catch(() => '');
+        return { success: false, error: `PayPal /v1/identity/oauth2/userinfo ${userRes.status}${body ? `: ${body}` : ''}` };
+      }
+      const user = (await userRes.json()) as { name?: string; email?: string; payer_id?: string };
       await this.trackActivity(businessId);
       return {
         success: true,
-        action: 'Issued PayPal OAuth client-credentials token',
-        account: data.app_id ?? clientId,
-        detail: `${isSandbox ? 'Sandbox' : 'Live'}${data.expires_in ? ` • expires in ${data.expires_in}s` : ''}`,
+        action: 'Fetched PayPal account profile',
+        account: user.email ?? user.name ?? user.payer_id ?? token.app_id ?? clientId,
+        detail: `${isSandbox ? 'Sandbox' : 'Live'}${user.payer_id ? ` • payer ${user.payer_id}` : ''}`,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
