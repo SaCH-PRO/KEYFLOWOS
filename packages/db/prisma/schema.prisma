@@ -135,6 +135,7 @@ model Business {
   emailContacts    EmailCampaignContact[]
   leadForms        LeadForm[]
   leadSubmissions  LeadFormSubmission[]
+  googleFormMappings GoogleFormMapping[]
   businessTemplates BusinessTemplateUsage[]
   courses          Course[]
   courseEnrollments CourseEnrollment[]
@@ -1823,6 +1824,30 @@ model LeadForm {
 
   @@index([businessId])
   @@map("lead_forms")
+}
+
+model GoogleFormMapping {
+  id                    String   @id @default(cuid())
+  businessId            String   @map("business_id")
+  business              Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  formId                String   @map("form_id")
+  formTitle             String?  @map("form_title")
+  fieldMappings         Json     @default("[]") @map("field_mappings")
+  opportunityDefaults   Json?    @map("opportunity_defaults")
+  autoCreate            Boolean  @default(true) @map("auto_create")
+  lastSeenResponseTime  DateTime? @map("last_seen_response_time")
+  lastBackfillAt        DateTime? @map("last_backfill_at")
+  responsesProcessed    Int      @default(0) @map("responses_processed")
+  contactsCreated       Int      @default(0) @map("contacts_created")
+  opportunitiesCreated  Int      @default(0) @map("opportunities_created")
+  processedResponseIds  String[] @default([]) @map("processed_response_ids")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, formId])
+  @@index([businessId])
+  @@map("google_form_mappings")
 }
 
 model LeadFormSubmission {
