@@ -30,6 +30,33 @@ export interface FlowTool {
   followOnSuggestions?: string[];
   parameters: ToolParamSchema;
   outputSchema: ToolOutputSchema;
+  /**
+   * Path to the in-app screen where a human can perform the equivalent
+   * action manually (no AI required). Required on every registered tool —
+   * KEY surfaces this as a "Do it yourself" link so the AI is never the
+   * only way to take an action. The CI check at
+   * `apps/web/scripts/check-tool-routes.ts` enforces this; the runtime
+   * helper `getManualEquivalentRoute(tool)` falls back to a family default
+   * for forward-compat only.
+   */
+  manualEquivalentRoute: string;
+}
+
+const FAMILY_FALLBACK_ROUTE: Record<ToolFamily, string> = {
+  read: '/app/keyflow-command',
+  draft: '/app/marketing',
+  organize: '/app/keyflow-command',
+  execute: '/app/automations',
+  crud: '/app/crm/pipeline',
+};
+
+/**
+ * Resolve the manual-equivalent route for any tool, even legacy ones added
+ * before the field was required. Prefer the explicit field; otherwise infer
+ * a sensible default from the tool family.
+ */
+export function getManualEquivalentRoute(tool: FlowTool): string {
+  return tool.manualEquivalentRoute || FAMILY_FALLBACK_ROUTE[tool.family] || '/app/keyflow-command';
 }
 
 export interface ToolExecutionEnvelope<T = any> {
@@ -61,6 +88,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/keyflow-command',
     parameters: {
       type: 'object',
       properties: {},
@@ -86,6 +114,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     parameters: {
       type: 'object',
       properties: {
@@ -111,6 +140,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/bookings',
     parameters: {
       type: 'object',
       properties: {
@@ -136,6 +166,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
     parameters: {
       type: 'object',
       properties: {},
@@ -161,6 +192,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/store',
     parameters: {
       type: 'object',
       properties: {},
@@ -184,6 +216,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
     parameters: {
       type: 'object',
       properties: {
@@ -206,6 +239,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/expenses',
     parameters: {
       type: 'object',
       properties: {},
@@ -234,6 +268,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'draft',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     parameters: {
       type: 'object',
       properties: {
@@ -260,6 +295,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'draft',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     parameters: {
       type: 'object',
       properties: {
@@ -286,6 +322,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'draft',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
     parameters: {
       type: 'object',
       properties: {
@@ -311,6 +348,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'draft',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/store',
     parameters: {
       type: 'object',
       properties: {
@@ -335,6 +373,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'draft',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
     parameters: {
       type: 'object',
       properties: {
@@ -364,6 +403,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
     changedEntities: ['contactTask'],
     parameters: {
       type: 'object',
@@ -391,6 +431,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['contactTask'],
     followOnSuggestions: ['fetch_client_health'],
     parameters: {
@@ -417,6 +458,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     changedEntities: ['contact'],
     parameters: {
       type: 'object',
@@ -441,6 +483,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     parameters: {
       type: 'object',
       properties: {
@@ -468,6 +511,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['scheduledAction'],
     parameters: {
       type: 'object',
@@ -500,6 +544,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     changedEntities: ['emailCampaign'],
     followOnSuggestions: ['marketing_list_campaigns'],
     parameters: {
@@ -527,6 +572,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     changedEntities: ['contactNote', 'activity'],
     parameters: {
       type: 'object',
@@ -555,6 +601,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/store',
     changedEntities: ['product'],
     followOnSuggestions: ['fetch_storefront_quality'],
     parameters: {
@@ -583,6 +630,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'high',
     riskTier: 4 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['automation'],
     parameters: {
       type: 'object',
@@ -607,6 +655,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     changedEntities: ['contact', 'invoice'],
     parameters: {
       type: 'object',
@@ -637,6 +686,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     parameters: {
       type: 'object',
       properties: {
@@ -652,6 +702,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     changedEntities: ['contact'],
     parameters: {
       type: 'object',
@@ -673,6 +724,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     changedEntities: ['contact'],
     parameters: {
       type: 'object',
@@ -695,6 +747,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     changedEntities: ['contactNote'],
     parameters: {
       type: 'object',
@@ -712,6 +765,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     changedEntities: ['contactTask'],
     parameters: {
       type: 'object',
@@ -731,6 +785,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     changedEntities: ['contact'],
     parameters: {
       type: 'object',
@@ -747,6 +802,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
     parameters: {
       type: 'object',
       properties: {
@@ -767,6 +823,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
     changedEntities: ['invoice'],
     parameters: {
       type: 'object',
@@ -791,6 +848,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
     parameters: {
       type: 'object',
       properties: {
@@ -806,6 +864,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
     changedEntities: ['invoice'],
     parameters: {
       type: 'object',
@@ -822,6 +881,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
     changedEntities: ['product'],
     parameters: {
       type: 'object',
@@ -842,6 +902,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
     changedEntities: ['quote'],
     parameters: {
       type: 'object',
@@ -865,6 +926,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
     changedEntities: ['invoice'],
     parameters: {
       type: 'object',
@@ -885,6 +947,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/bookings',
     changedEntities: ['booking'],
     parameters: {
       type: 'object',
@@ -906,6 +969,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/bookings',
     parameters: {
       type: 'object',
       properties: {
@@ -921,6 +985,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/bookings',
     changedEntities: ['booking'],
     parameters: {
       type: 'object',
@@ -938,6 +1003,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/bookings',
     changedEntities: ['booking'],
     parameters: {
       type: 'object',
@@ -954,6 +1020,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/bookings',
     parameters: {
       type: 'object',
       properties: {},
@@ -971,6 +1038,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     changedEntities: ['emailCampaign'],
     parameters: {
       type: 'object',
@@ -990,6 +1058,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'high',
     riskTier: 4 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     changedEntities: ['emailCampaign'],
     parameters: {
       type: 'object',
@@ -1006,6 +1075,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     parameters: {
       type: 'object',
       properties: {},
@@ -1023,6 +1093,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     changedEntities: ['socialPost'],
     parameters: {
       type: 'object',
@@ -1040,6 +1111,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'high',
     riskTier: 4 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     changedEntities: ['socialPost'],
     parameters: {
       type: 'object',
@@ -1056,6 +1128,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
     parameters: {
       type: 'object',
       properties: {},
@@ -1073,6 +1146,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['automation'],
     parameters: {
       type: 'object',
@@ -1091,6 +1165,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     parameters: {
       type: 'object',
       properties: {},
@@ -1104,6 +1179,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['automation'],
     parameters: {
       type: 'object',
@@ -1125,6 +1201,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['autopilotTask', 'invoice'],
     parameters: {
       type: 'object',
@@ -1141,6 +1218,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['autopilotTask', 'contact'],
     parameters: {
       type: 'object',
@@ -1157,6 +1235,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['autopilotTask'],
     parameters: {
       type: 'object',
@@ -1173,6 +1252,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'execute',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['autopilotTask'],
     parameters: {
       type: 'object',
@@ -1189,6 +1269,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/automations',
     changedEntities: ['autopilotTask'],
     parameters: {
       type: 'object',
@@ -1209,6 +1290,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
     parameters: {
       type: 'object',
       properties: {
@@ -1225,6 +1307,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
     parameters: {
       type: 'object',
       properties: {
@@ -1241,6 +1324,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
     changedEntities: ['projectTask'],
     parameters: {
       type: 'object',
@@ -1260,6 +1344,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
     changedEntities: ['projectTask'],
     parameters: {
       type: 'object',
@@ -1280,6 +1365,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/expenses',
     parameters: {
       type: 'object',
       properties: {
@@ -1296,6 +1382,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/expenses',
     changedEntities: ['expense'],
     parameters: {
       type: 'object',
@@ -1319,6 +1406,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/profile',
     parameters: {
       type: 'object',
       properties: {
@@ -1335,6 +1423,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/profile',
     parameters: {
       type: 'object',
       properties: {
@@ -1354,6 +1443,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/community',
     parameters: {
       type: 'object',
       properties: {
@@ -1373,6 +1463,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketplace',
     parameters: {
       type: 'object',
       properties: {
@@ -1389,6 +1480,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketplace',
     parameters: {
       type: 'object',
       properties: {
@@ -1408,6 +1500,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/store',
     parameters: {
       type: 'object',
       properties: {
@@ -1423,6 +1516,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/store',
     parameters: {
       type: 'object',
       properties: {
@@ -1442,6 +1536,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/keyflow-command',
     changedEntities: ['keyflowNote'],
     parameters: {
       type: 'object',
@@ -1466,6 +1561,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing/seo',
     parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
     outputSchema: {
       type: 'object',
@@ -1485,6 +1581,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing/seo',
     parameters: {
       type: 'object',
       properties: {
@@ -1501,6 +1598,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing/seo',
     parameters: {
       type: 'object',
       properties: {
@@ -1517,6 +1615,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing/seo',
     parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
     outputSchema: { type: 'object', description: 'Content gap analysis', fields: { gaps: { type: 'array', description: 'Ranked content opportunities' } } },
   },
@@ -1526,6 +1625,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing/seo',
     parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
     outputSchema: {
       type: 'object',
@@ -1543,6 +1643,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'low',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/marketing/seo',
     changedEntities: ['seoPage', 'seoIssue'],
     parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
     outputSchema: { type: 'object', description: 'Sync result', fields: { synced: { type: 'number', description: 'Pages synced' } } },
@@ -1553,6 +1654,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'draft',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/marketing/seo',
     changedEntities: ['contentBrief'],
     followOnSuggestions: ['fetch_content_briefs'],
     parameters: {

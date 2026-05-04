@@ -82,6 +82,13 @@ interface CopilotPanelProps {
   currentModule?: CopilotModule;
   initialPrompt?: string;
   onInitialPromptConsumed?: () => void;
+  /**
+   * Optional structured page context that the KEY agent can use to scope
+   * its reasoning to whatever the user is currently looking at (counts,
+   * filter state, selected ids, etc). Forwarded from `<AskKeyButton>` /
+   * `openKey({ context })` calls.
+   */
+  pageContext?: Record<string, unknown>;
 }
 
 interface QuickPrompt {
@@ -418,7 +425,7 @@ function getTimeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onInitialPromptConsumed }: CopilotPanelProps) {
+export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onInitialPromptConsumed, pageContext }: CopilotPanelProps) {
   const aiContext = useAiContext();
   const [tab, setTab] = useState<Tab>("chat");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -692,8 +699,15 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     if (contextSummary) {
       parts.push(`[Module context:\n${contextSummary}]`);
     }
+    if (pageContext && Object.keys(pageContext).length > 0) {
+      try {
+        parts.push(`[Page context:\n${JSON.stringify(pageContext, null, 2)}]`);
+      } catch {
+        // ignore non-serializable context
+      }
+    }
     return parts.length > 0 ? parts.join("\n") + "\n\n" : "";
-  }, [currentModule, aiContext]);
+  }, [currentModule, aiContext, pageContext]);
 
   const handleSend = useCallback(async (text?: string) => {
     const msg = text || input.trim();
