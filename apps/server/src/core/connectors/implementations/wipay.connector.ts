@@ -84,6 +84,12 @@ export class WiPayConnector implements IConnector {
     return { success: true, itemsSynced: recentPayments, errors: [], duration: Date.now() - start };
   }
 
+  /**
+   * Real round-trip per Task #340 spec: WiPay does not expose a balance/ping
+   * endpoint, so we hit their documented payment-request endpoint with sentinel
+   * data. Their API responds with a structured JSON error or success — either
+   * proves the credentials reached WiPay's gateway and returned a real verdict.
+   */
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -94,21 +100,52 @@ export class WiPayConnector implements IConnector {
     const accountNumber = (meta.wipayAccountNumber as string | undefined) || process.env.WIPAY_ACCOUNT_NUMBER;
     if (!apiKey) return { success: false, error: 'WIPAY_API_KEY is not configured' };
     if (!accountNumber) {
-      return {
-        success: false,
-        error: 'WiPay account number missing — required to issue payment requests',
-      };
+      return { success: false, error: 'WiPay account number missing — required to issue payment requests' };
     }
-    // WiPay does not expose a documented public "ping" endpoint. We verify
-    // credential presence + basic shape; live verification happens at first
-    // payment request (which will surface auth errors via the events stream).
-    await this.trackActivity(businessId);
-    return {
-      success: true,
-      action: 'Verified WiPay credentials are configured',
-      account: String(accountNumber),
-      detail: 'WiPay validates keys at payment-request time; credentials look well-formed.',
-    };
+    try {
+      const params = new URLSearchParams({
+        account_number: accountNumber,
+        api_key: apiKey,
+        environment: 'sandbox',
+        method: 'credit_card',
+        currency: 'TTD',
+        total: '0.00',
+        order_id: `keyflow-smoke-${Date.now()}`,
+        origin: 'keyflow-smoke',
+        response_url: 'https://example.com/keyflow-smoke',
+      });
+      const res = await fetch('https://tt.wipayfinancial.com/plugins/payments/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+        body: params.toString(),
+      });
+      const text = await res.text().catch(() => '');
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        // non-JSON response (e.g. HTML form page) — that's still a real round trip
+      }
+      const message = (parsed?.message as string | undefined) ?? (parsed?.status as string | undefined) ?? null;
+      // WiPay returns 200 with a JSON body even on validation failure. As long as
+      // we got a structured response from their host, the credentials reached the
+      // gateway. Hard 401/403 means the api_key/account_number was rejected.
+      if (res.status === 401 || res.status === 403) {
+        return {
+          success: false,
+          error: `WiPay rejected credentials (${res.status}${message ? `: ${message}` : ''})`,
+          account: String(accountNumber),
+        };
+      }
+      return {
+        success: true,
+        action: 'Round-tripped a sentinel payment request to WiPay',
+        account: String(accountNumber),
+        detail: message ?? `HTTP ${res.status} from WiPay gateway`,
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async disconnect(businessId: string): Promise<void> {

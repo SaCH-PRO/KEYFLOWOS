@@ -149,6 +149,11 @@ export class GoogleCalendarConnector implements IConnector {
     }
   }
 
+  /**
+   * Real round-trip per Task #340 spec: insert a 15-min event on the primary
+   * calendar, then immediately delete it. Returns the htmlLink so the user can
+   * confirm the event existed (idempotent — nothing remains).
+   */
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -158,22 +163,48 @@ export class GoogleCalendarConnector implements IConnector {
       return { success: false, error: 'Google Calendar is not connected' };
     }
     try {
-      const headers = { Authorization: `Bearer ${business.calendarAccessToken}` };
-      const res = await fetch(
-        'https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=3&fields=items(id,summary,start)&orderBy=updated&singleEvents=true',
-        { headers },
+      const headers = {
+        Authorization: `Bearer ${business.calendarAccessToken}`,
+        'Content-Type': 'application/json',
+      };
+      const start = new Date(Date.now() + 60 * 60 * 1000); // 1h from now
+      const end = new Date(start.getTime() + 15 * 60 * 1000);
+      const insertRes = await fetch(
+        'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            summary: 'Keyflow connection test (auto-delete)',
+            description: 'Automated Keyflow Google Calendar smoke test — safe to ignore.',
+            start: { dateTime: start.toISOString() },
+            end: { dateTime: end.toISOString() },
+            transparency: 'transparent',
+          }),
+        },
       );
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        return { success: false, error: `Calendar API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      if (!insertRes.ok) {
+        return { success: false, error: `Calendar insert ${insertRes.status}` };
       }
-      const data = (await res.json()) as { items?: Array<{ id: string; summary?: string }> };
-      await this.trackActivity(businessId);
+      const event = (await insertRes.json()) as { id?: string; htmlLink?: string };
+      if (event.id) {
+        const delRes = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(event.id)}`,
+          { method: 'DELETE', headers: { Authorization: `Bearer ${business.calendarAccessToken}` } },
+        );
+        if (!delRes.ok && delRes.status !== 410) {
+          return {
+            success: false,
+            error: `Inserted event ${event.id} but DELETE failed (${delRes.status}) — please remove manually`,
+            account: business.calendarEmail ?? undefined,
+          };
+        }
+      }
       return {
         success: true,
-        action: 'Listed primary calendar events',
+        action: 'Inserted and immediately deleted a 15-minute primary calendar event',
         account: business.calendarEmail ?? undefined,
-        detail: `${data.items?.length ?? 0} recent event(s)${data.items?.[0]?.summary ? ` • latest: "${data.items[0].summary.slice(0, 40)}"` : ''}`,
+        detail: event.htmlLink ?? undefined,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };

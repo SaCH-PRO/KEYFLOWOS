@@ -122,8 +122,8 @@ export class GmailConnector implements IConnector {
   }
 
   /**
-   * Real round-trip: hit Gmail's profile endpoint AND read the latest message metadata
-   * to confirm both read scope + token freshness end-to-end.
+   * Real round-trip per Task #340 spec: send a marked self-test email to the
+   * connected address, proving both `gmail.send` scope and live token validity.
    */
   async smokeTest(businessId: string): Promise<import('../connector.interface').ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
@@ -137,21 +137,43 @@ export class GmailConnector implements IConnector {
       const headers = { Authorization: `Bearer ${business.gmailAccessToken}` };
       const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers });
       if (!profileRes.ok) {
-        const body = await profileRes.text().catch(() => '');
-        return { success: false, error: `Gmail profile ${profileRes.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+        return { success: false, error: `Gmail profile ${profileRes.status}` };
       }
-      const profile = await profileRes.json() as { emailAddress?: string; messagesTotal?: number };
-      const listRes = await fetch(
-        'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=1',
-        { headers },
-      );
-      const list = listRes.ok ? (await listRes.json()) as { messages?: Array<{ id: string }> } : { messages: [] };
-      await this.trackActivity(businessId);
+      const profile = (await profileRes.json()) as { emailAddress?: string };
+      const address = profile.emailAddress ?? business.gmailEmail;
+      if (!address) {
+        return { success: false, error: 'Gmail account has no email address' };
+      }
+      const stamp = new Date().toISOString();
+      const subject = `Keyflow connection test — ${stamp}`;
+      const rfc822 =
+        `From: ${address}\r\n` +
+        `To: ${address}\r\n` +
+        `Subject: ${subject}\r\n` +
+        `X-Keyflow-Smoke-Test: 1\r\n` +
+        `Content-Type: text/plain; charset="UTF-8"\r\n` +
+        `\r\n` +
+        `This is an automated Keyflow connector smoke test sent at ${stamp}. Safe to delete.\r\n`;
+      // Gmail API expects base64url-encoded RFC 822 message
+      const raw = Buffer.from(rfc822, 'utf8')
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw }),
+      });
+      if (!sendRes.ok) {
+        return { success: false, error: `Gmail send ${sendRes.status}` };
+      }
+      const sent = (await sendRes.json()) as { id?: string };
       return {
         success: true,
-        action: 'Fetched Gmail profile and most recent message',
-        account: profile.emailAddress ?? business.gmailEmail ?? undefined,
-        detail: `${profile.messagesTotal ?? 0} total messages • latest id ${list.messages?.[0]?.id ?? 'none'}`,
+        action: 'Sent a marked self-test email',
+        account: address,
+        detail: `Delivered to ${address} • id ${sent.id ?? 'unknown'}`,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };

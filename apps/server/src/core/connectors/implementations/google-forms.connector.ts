@@ -120,23 +120,26 @@ export class GoogleFormsConnector implements IConnector {
     });
     if (!business?.formsAccessToken) return { success: false, error: 'Google Forms is not connected' };
     try {
-      const res = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
-        headers: { Authorization: `Bearer ${business.formsAccessToken}` },
-      });
+      // Forms-owned files live in Drive; list mimeType=application/vnd.google-apps.form
+      // using the user's drive scope (granted alongside the Forms OAuth in this app).
+      const res = await fetch(
+        "https://www.googleapis.com/drive/v3/files?q=" +
+          encodeURIComponent("mimeType='application/vnd.google-apps.form' and trashed=false") +
+          '&pageSize=10&fields=files(id,name)',
+        { headers: { Authorization: `Bearer ${business.formsAccessToken}` } },
+      );
       if (!res.ok) {
-        return { success: false, error: `Google userinfo ${res.status}` };
+        return { success: false, error: `Drive listing for forms ${res.status}` };
       }
-      const data = (await res.json()) as { email?: string; email_verified?: boolean; name?: string };
-      await this.prisma.client.connectorStatus.upsert({
-        where: { businessId_connectorType: { businessId, connectorType: 'google_forms' } },
-        create: { businessId, connectorType: 'google_forms', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
-        update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
-      }).catch(() => undefined);
+      const data = (await res.json()) as { files?: Array<{ id: string; name?: string }> };
+      const count = data.files?.length ?? 0;
       return {
         success: true,
-        action: 'Validated OAuth token via /userinfo',
-        account: data.email ?? business.formsEmail ?? undefined,
-        detail: data.email_verified ? 'Email verified' : undefined,
+        action: 'Listed Google Forms via Drive',
+        account: business.formsEmail ?? undefined,
+        detail: count
+          ? `${count} form(s)${data.files?.[0]?.name ? ` • latest: "${data.files[0].name.slice(0, 40)}"` : ''}`
+          : 'No forms found in this account',
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
