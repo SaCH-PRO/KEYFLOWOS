@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { sanitize } from '../../../core/utils/sanitize';
+import { CONTACT_AGE_GROUPS } from '../crm.constants';
 
 export class UpdateContactDto {
   @IsString()
@@ -167,4 +168,9 @@ export class UpdateContactDto {
   @MaxLength(10000)
   @Transform(({ value }) => sanitize(value))
   notesInternal?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn([...CONTACT_AGE_GROUPS])
+  ageGroup?: string;
 }

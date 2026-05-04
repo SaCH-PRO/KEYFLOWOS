@@ -19,7 +19,7 @@ export interface ListSummary {
   contactCount: number;
 }
 
-export type ColumnKey = SortField | "tags" | "jobTitle" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl" | "customFields";
+export type ColumnKey = SortField | "tags" | "jobTitle" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl" | "customFields" | "ageGroup";
 
 export interface ColumnDef {
   key: ColumnKey;
@@ -36,6 +36,7 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: "status", label: "Status", width: "w-[90px]" },
   { key: "companyName", label: "Company", width: "w-[160px]", mobileHidden: true },
   { key: "jobTitle", label: "Job Title", width: "w-[140px]", mobileHidden: true },
+  { key: "ageGroup", label: "Age Group", width: "w-[120px]", mobileHidden: true },
   { key: "city", label: "City", width: "w-[110px]", mobileHidden: true },
   { key: "country", label: "Country", width: "w-[110px]", mobileHidden: true },
   { key: "source", label: "Source", width: "w-[100px]", mobileHidden: true },

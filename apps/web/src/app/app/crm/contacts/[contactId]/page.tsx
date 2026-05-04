@@ -25,6 +25,7 @@ import {
   fetchContactPlaybook,
   updateContactPlaybook,
 } from "@/lib/client";
+import { getContactAgeGroupLabel } from "@/lib/crm-constants";
 import { loadInterruptedTasks, markSourceChanged } from "@/lib/resume-task-registry";
 
 type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[] };
@@ -469,6 +470,11 @@ export default function ContactDetailPage() {
           <div className="text-sm text-muted-foreground">
             {c.email || c.phone || "No contact info"} | Status: {c.status ?? "LEAD"}
           </div>
+          {c.ageGroup && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Age group: {getContactAgeGroupLabel(c.ageGroup) ?? c.ageGroup}
+            </div>
+          )}
           <div className="mt-2 flex gap-2 text-xs text-muted-foreground flex-wrap">
             {c.tags?.map((t) => (
               <Badge key={t} className="border border-border/60 px-2 py-0.5">

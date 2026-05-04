@@ -72,6 +72,7 @@ type ContactExtraAttributes = {
   marketingOptIn?: boolean | null;
   doNotContact?: boolean | null;
   notesInternal?: string | null;
+  ageGroup?: string | null;
 };
 
 @Injectable()
@@ -350,6 +351,7 @@ export class CrmService {
           marketingOptIn: input.marketingOptIn ?? null,
           doNotContact: input.doNotContact ?? null,
           notesInternal: sanitize(input.notesInternal ?? null),
+          ageGroup: normalizeString(input.ageGroup),
         },
       });
 
@@ -566,6 +568,7 @@ export class CrmService {
       marketingOptIn: input.marketingOptIn ?? undefined,
       doNotContact: input.doNotContact ?? undefined,
       notesInternal: input.notesInternal !== undefined ? sanitize(input.notesInternal ?? null) ?? undefined : undefined,
+      ageGroup: trimOptional(input.ageGroup),
     };
 
     const { existing, updated } = await this.prisma.client.$transaction(async (tx) => {

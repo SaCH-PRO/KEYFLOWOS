@@ -107,6 +107,7 @@ export function useContactActions({
       postalCode: formData.postalCode || undefined, timezone: formData.timezone || undefined,
       marketingOptIn: formData.marketingOptIn, doNotContact: formData.doNotContact,
       notesInternal: formData.notesInternal || undefined,
+      ageGroup: formData.ageGroup || null,
       custom: Object.keys(customData).length > 0 ? customData : undefined,
     };
     try {
@@ -297,6 +298,7 @@ export function useContactActions({
       marketingOptIn: c.marketingOptIn ?? false,
       doNotContact: c.doNotContact ?? false,
       notesInternal: c.notesInternal || "",
+      ageGroup: c.ageGroup || "",
       linkedinUrl: String(customObj.linkedinUrl ?? ""),
       instagramUrl: String(customObj.instagramUrl ?? ""),
       twitterUrl: String(customObj.twitterUrl ?? ""),

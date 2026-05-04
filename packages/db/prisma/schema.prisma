@@ -440,6 +440,7 @@ model Contact {
   marketingOptIn Boolean? @map("marketing_opt_in")
   doNotContact   Boolean? @map("do_not_contact")
   notesInternal  String?  @map("notes_internal")
+  ageGroup       String?  @map("age_group")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)

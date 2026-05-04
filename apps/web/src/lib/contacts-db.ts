@@ -34,6 +34,7 @@ export interface LocalContact {
   postalCode?: string | null;
   marketingOptIn?: boolean | null;
   doNotContact?: boolean | null;
+  ageGroup?: string | null;
 
   custom?: Record<string, unknown> | null;
 }

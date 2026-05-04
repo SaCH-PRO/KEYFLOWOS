@@ -30,6 +30,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { buildWhatsAppLink } from "@/lib/whatsapp";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { ContactDetailData } from "./contact-detail";
+import { getContactAgeGroupLabel } from "@/lib/crm-constants";
 
 function buildMapsUrl(parts: Array<string | null | undefined>): string {
   const query = parts.filter(Boolean).join(", ");
@@ -270,6 +271,7 @@ export function ContactDetailInfo({
   const hasMoreDetails = !!(
     contact.department ||
     contact.industry ||
+    contact.ageGroup ||
     contact.addressLine1 ||
     contact.addressLine2 ||
     contact.postalCode ||
@@ -443,10 +445,11 @@ export function ContactDetailInfo({
           </button>
           {moreOpen && (
             <div className="px-2.5 pb-2.5 space-y-2">
-              {(contact.department || contact.industry) && (
+              {(contact.department || contact.industry || contact.ageGroup) && (
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                   {contact.department && <div><span className="text-muted-foreground text-[10px] block">Department</span>{contact.department}</div>}
                   {contact.industry && <div><span className="text-muted-foreground text-[10px] block">Industry</span>{contact.industry}</div>}
+                  {contact.ageGroup && <div><span className="text-muted-foreground text-[10px] block">Age Group</span>{getContactAgeGroupLabel(contact.ageGroup)}</div>}
                 </div>
               )}
               {(contact.addressLine1 || contact.addressLine2 || contact.state || contact.postalCode) && (
