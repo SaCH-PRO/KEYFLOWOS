@@ -274,6 +274,9 @@ model Business {
   calendarRefreshToken String?   @map("calendar_refresh_token")
   calendarTokenExpiry  DateTime? @map("calendar_token_expiry")
   calendarId           String?   @map("calendar_id")
+  calendarSyncDirection String   @default("two_way") @map("calendar_sync_direction")
+  calendarSyncEnabled   Boolean  @default(true) @map("calendar_sync_enabled")
+  calendarSyncConflicts CalendarSyncConflict[]
 
   // Google Drive Integration for document viewing/editing
   driveEmail        String?   @map("drive_email")
@@ -494,6 +497,30 @@ model ContactExternalMapping {
   @@unique([businessId, source, externalId])
   @@index([contactId])
   @@map("contact_external_mappings")
+}
+
+model CalendarSyncConflict {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookingId       String?  @map("booking_id")
+  externalEventId String?  @map("external_event_id")
+  conflictType    String   @map("conflict_type") // overlap | external_only | booking_only | mismatch
+  summary         String
+  externalSummary String?  @map("external_summary")
+  bookingStart    DateTime? @map("booking_start")
+  bookingEnd      DateTime? @map("booking_end")
+  externalStart   DateTime? @map("external_start")
+  externalEnd     DateTime? @map("external_end")
+  status          String   @default("open") // open | resolved | dismissed
+  resolution      String?  // keep_keyflow | keep_external | dismissed
+  resolvedAt      DateTime? @map("resolved_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("calendar_sync_conflicts")
 }
 
 model ConnectorStatus {

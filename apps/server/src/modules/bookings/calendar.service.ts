@@ -164,16 +164,256 @@ export class CalendarService {
     this.logger.log(`Connected Google Calendar for business ${businessId}: ${email}`);
   }
 
-  async getCalendarStatus(businessId: string): Promise<{ connected: boolean; email?: string }> {
+  async getCalendarStatus(businessId: string): Promise<{ connected: boolean; email?: string; calendarId?: string; syncDirection?: string; syncEnabled?: boolean }> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { calendarEmail: true, calendarAccessToken: true },
+      select: {
+        calendarEmail: true,
+        calendarAccessToken: true,
+        calendarId: true,
+        calendarSyncDirection: true,
+        calendarSyncEnabled: true,
+      },
     });
 
     return {
       connected: !!(business?.calendarAccessToken && business?.calendarEmail),
       email: business?.calendarEmail || undefined,
+      calendarId: business?.calendarId || undefined,
+      syncDirection: business?.calendarSyncDirection || 'two_way',
+      syncEnabled: business?.calendarSyncEnabled ?? true,
     };
+  }
+
+  async listAvailableCalendars(
+    businessId: string,
+  ): Promise<Array<{ id: string; summary: string; primary: boolean; accessRole: string; backgroundColor?: string }>> {
+    const accessToken = await this.refreshAccessToken(businessId);
+    const res = await fetch(
+      'https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer&maxResults=100',
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) {
+      this.logger.error(`Failed to list calendars: ${res.status}`);
+      throw new BadRequestException('Could not load Google calendars');
+    }
+    const data = await res.json();
+    const items: any[] = data.items ?? [];
+    return items.map((c) => ({
+      id: c.id,
+      summary: c.summaryOverride ?? c.summary ?? c.id,
+      primary: !!c.primary,
+      accessRole: c.accessRole,
+      backgroundColor: c.backgroundColor,
+    }));
+  }
+
+  async updateSyncSettings(
+    businessId: string,
+    settings: { calendarId?: string | null; syncDirection?: string; syncEnabled?: boolean },
+  ): Promise<{ calendarId: string | null; syncDirection: string; syncEnabled: boolean }> {
+    const direction = settings.syncDirection;
+    if (direction && !['push', 'pull', 'two_way', 'disabled'].includes(direction)) {
+      throw new BadRequestException('Invalid sync direction');
+    }
+    const updated = await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: {
+        ...(settings.calendarId !== undefined ? { calendarId: settings.calendarId } : {}),
+        ...(direction ? { calendarSyncDirection: direction } : {}),
+        ...(settings.syncEnabled !== undefined ? { calendarSyncEnabled: settings.syncEnabled } : {}),
+      },
+      select: { calendarId: true, calendarSyncDirection: true, calendarSyncEnabled: true },
+    });
+    return {
+      calendarId: updated.calendarId,
+      syncDirection: updated.calendarSyncDirection,
+      syncEnabled: updated.calendarSyncEnabled,
+    };
+  }
+
+  async scanForConflicts(
+    businessId: string,
+    horizonDays = 30,
+  ): Promise<{ created: number; total: number }> {
+    const status = await this.getCalendarStatus(businessId);
+    if (!status.connected) {
+      throw new BadRequestException('Google Calendar is not connected');
+    }
+    const now = new Date();
+    const horizon = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000);
+    const events = await this.listCalendarEvents(
+      businessId,
+      now.toISOString(),
+      horizon.toISOString(),
+    );
+
+    const bookings = await this.prisma.client.booking.findMany({
+      where: {
+        businessId,
+        status: { in: ['CONFIRMED', 'PENDING'] },
+        startTime: { gte: now, lte: horizon },
+      },
+      select: {
+        id: true,
+        startTime: true,
+        endTime: true,
+        calendarEventId: true,
+        service: { select: { name: true } },
+        contact: { select: { firstName: true, lastName: true, displayName: true, email: true } },
+      },
+    });
+
+    const existing = await this.prisma.client.calendarSyncConflict.findMany({
+      where: { businessId, status: 'open' },
+      select: { id: true, bookingId: true, externalEventId: true, conflictType: true },
+    });
+    const existingKey = new Set(
+      existing.map((c) => `${c.conflictType}:${c.bookingId ?? ''}:${c.externalEventId ?? ''}`),
+    );
+
+    const toCreate: Array<{
+      businessId: string;
+      bookingId: string;
+      externalEventId: string | null;
+      conflictType: string;
+      summary: string;
+      externalSummary?: string;
+      bookingStart: Date;
+      bookingEnd: Date;
+      externalStart?: Date;
+      externalEnd?: Date;
+    }> = [];
+    for (const booking of bookings) {
+      for (const ev of events) {
+        if (ev.id === booking.calendarEventId) continue;
+        if (ev.allDay) continue;
+        const evStart = new Date(ev.start).getTime();
+        const evEnd = new Date(ev.end).getTime();
+        const bStart = booking.startTime.getTime();
+        const bEnd = booking.endTime.getTime();
+        if (evStart < bEnd && evEnd > bStart) {
+          const key = `overlap:${booking.id}:${ev.id}`;
+          if (existingKey.has(key)) continue;
+          const contactName = booking.contact
+            ? booking.contact.displayName ||
+              [booking.contact.firstName, booking.contact.lastName].filter(Boolean).join(' ') ||
+              booking.contact.email ||
+              'Client'
+            : 'Client';
+          toCreate.push({
+            businessId,
+            bookingId: booking.id,
+            externalEventId: ev.id,
+            conflictType: 'overlap',
+            summary: `${booking.service?.name ?? 'Booking'} — ${contactName}`,
+            externalSummary: ev.summary,
+            bookingStart: booking.startTime,
+            bookingEnd: booking.endTime,
+            externalStart: new Date(ev.start),
+            externalEnd: new Date(ev.end),
+          });
+        }
+      }
+    }
+
+    for (const booking of bookings) {
+      if (!booking.calendarEventId) continue;
+      const found = events.find((e) => e.id === booking.calendarEventId);
+      if (!found) {
+        const key = `external_only:${booking.id}:${booking.calendarEventId}`;
+        if (existingKey.has(key)) continue;
+        const contactName = booking.contact
+          ? booking.contact.displayName ||
+            [booking.contact.firstName, booking.contact.lastName].filter(Boolean).join(' ') ||
+            'Client'
+          : 'Client';
+        toCreate.push({
+          businessId,
+          bookingId: booking.id,
+          externalEventId: booking.calendarEventId,
+          conflictType: 'external_only',
+          summary: `${booking.service?.name ?? 'Booking'} — ${contactName}`,
+          externalSummary: 'External event was deleted',
+          bookingStart: booking.startTime,
+          bookingEnd: booking.endTime,
+        });
+      }
+    }
+
+    if (toCreate.length > 0) {
+      await this.prisma.client.calendarSyncConflict.createMany({ data: toCreate, skipDuplicates: true });
+    }
+
+    const total = await this.prisma.client.calendarSyncConflict.count({
+      where: { businessId, status: 'open' },
+    });
+    return { created: toCreate.length, total };
+  }
+
+  async listConflicts(businessId: string, status: string = 'open') {
+    return this.prisma.client.calendarSyncConflict.findMany({
+      where: { businessId, status },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+  }
+
+  async resolveConflict(
+    businessId: string,
+    conflictId: string,
+    resolution: 'keep_keyflow' | 'keep_external' | 'dismissed',
+  ) {
+    const conflict = await this.prisma.client.calendarSyncConflict.findFirst({
+      where: { id: conflictId, businessId },
+    });
+    if (!conflict) throw new BadRequestException('Conflict not found');
+    if (conflict.status !== 'open') {
+      return conflict;
+    }
+
+    if (resolution === 'keep_keyflow') {
+      // Push the KeyFlow booking to the calendar (re-create or update event).
+      if (conflict.bookingId) {
+        await this.syncBookingToCalendar(conflict.bookingId, businessId);
+      }
+      // If there's an overlapping external event, remove it so the KeyFlow
+      // booking wins the slot.
+      if (conflict.conflictType === 'overlap' && conflict.externalEventId) {
+        await this.deleteCalendarEvent(businessId, conflict.externalEventId);
+      }
+    } else if (resolution === 'keep_external') {
+      // Cancel the KeyFlow booking. For overlap conflicts the external event
+      // is the winner so we keep it; for external_only (booking points at a
+      // deleted external event) there's nothing to delete. In other cases
+      // remove any duplicate Google event the booking previously created so
+      // the external event isn't shadowed.
+      if (conflict.bookingId) {
+        const booking = await this.prisma.client.booking.findUnique({
+          where: { id: conflict.bookingId },
+          select: { calendarEventId: true },
+        });
+        if (
+          booking?.calendarEventId &&
+          booking.calendarEventId !== conflict.externalEventId
+        ) {
+          await this.deleteCalendarEvent(businessId, booking.calendarEventId);
+        }
+        await this.prisma.client.booking.update({
+          where: { id: conflict.bookingId },
+          data: { status: 'CANCELLED', calendarEventId: null },
+        });
+      }
+    }
+
+    return this.prisma.client.calendarSyncConflict.update({
+      where: { id: conflictId },
+      data: {
+        status: resolution === 'dismissed' ? 'dismissed' : 'resolved',
+        resolution,
+        resolvedAt: new Date(),
+      },
+    });
   }
 
   async disconnectCalendar(businessId: string): Promise<void> {
@@ -243,15 +483,24 @@ export class CalendarService {
     return newAccessToken;
   }
 
+  private async getActiveCalendarId(businessId: string): Promise<string> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { calendarId: true },
+    });
+    return business?.calendarId || 'primary';
+  }
+
   async createCalendarEvent(
     businessId: string,
     event: CalendarEvent,
   ): Promise<string | null> {
     try {
       const accessToken = await this.refreshAccessToken(businessId);
+      const calendarId = encodeURIComponent(await this.getActiveCalendarId(businessId));
 
       const res = await fetch(
-        'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+        `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`,
         {
           method: 'POST',
           headers: {
@@ -284,8 +533,9 @@ export class CalendarService {
     try {
       const accessToken = await this.refreshAccessToken(businessId);
 
+      const calendarId = encodeURIComponent(await this.getActiveCalendarId(businessId));
       const res = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+        `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${eventId}`,
         {
           method: 'PUT',
           headers: {
@@ -307,8 +557,9 @@ export class CalendarService {
     try {
       const accessToken = await this.refreshAccessToken(businessId);
 
+      const calendarId = encodeURIComponent(await this.getActiveCalendarId(businessId));
       const res = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+        `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${eventId}`,
         {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -338,10 +589,16 @@ export class CalendarService {
       return null;
     }
 
-    const { connected } = await this.getCalendarStatus(booking.businessId);
+    const { connected, syncDirection, syncEnabled } = await this.getCalendarStatus(booking.businessId);
     if (!connected) {
       this.logger.debug(`Calendar not connected for business ${booking.businessId}`);
       return null;
+    }
+    if (!syncEnabled || syncDirection === 'disabled' || syncDirection === 'pull') {
+      this.logger.debug(
+        `Calendar push skipped for business ${booking.businessId} (direction=${syncDirection}, enabled=${syncEnabled})`,
+      );
+      return booking.calendarEventId ?? null;
     }
 
     const contactName = booking.contact
@@ -426,8 +683,9 @@ export class CalendarService {
         maxResults: '250',
       });
 
+      const calendarId = encodeURIComponent(await this.getActiveCalendarId(businessId));
       const res = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
+        `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events?${params.toString()}`,
         {
           headers: { Authorization: `Bearer ${accessToken}` },
         },

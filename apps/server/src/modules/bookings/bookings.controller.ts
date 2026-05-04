@@ -396,6 +396,49 @@ export class BookingsController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/calendar/list')
+  async listAvailableCalendars(@Param('businessId') businessId: string) {
+    return this.calendar.listAvailableCalendars(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/calendar/settings')
+  async updateCalendarSettings(
+    @Param('businessId') businessId: string,
+    @Body() body: { calendarId?: string | null; syncDirection?: string; syncEnabled?: boolean },
+  ) {
+    return this.calendar.updateSyncSettings(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/calendar/conflicts')
+  async listCalendarConflicts(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+  ) {
+    return this.calendar.listConflicts(businessId, status || 'open');
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/calendar/conflicts/scan')
+  async scanCalendarConflicts(@Param('businessId') businessId: string) {
+    return this.calendar.scanForConflicts(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/calendar/conflicts/:conflictId/resolve')
+  async resolveCalendarConflict(
+    @Param('businessId') businessId: string,
+    @Param('conflictId') conflictId: string,
+    @Body() body: { resolution: 'keep_keyflow' | 'keep_external' | 'dismissed' },
+  ) {
+    if (!body?.resolution || !['keep_keyflow', 'keep_external', 'dismissed'].includes(body.resolution)) {
+      throw new BadRequestException('Invalid resolution');
+    }
+    return this.calendar.resolveConflict(businessId, conflictId, body.resolution);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/bookings/:bookingId/sync-calendar')
   async syncBookingToCalendar(
     @Param('businessId') businessId: string,
