@@ -28,8 +28,8 @@ import {
 import { deleteExpense, getExpenseExportUrl, Expense } from "@/lib/client";
 import { getAuthHeaders } from "@/lib/api";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
-import { EXPENSES_WALKTHROUGH } from "@/lib/walkthrough-definitions";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
+import { PageNotesMount } from "@/components/keyflow/page-notes-mount";
 import { formatCurrency } from "./components/expense-utils";
 import { useExpensesData } from "./components/use-expenses-data";
 import { useExpensesAiHub } from "./hooks/use-expenses-ai-hub";
@@ -265,7 +265,7 @@ export default function ExpensesPage() {
         <>
           <ResumePrompt module="expenses" onResume={handleResumeExpenseTask} />
           <div className="flex items-center gap-2">
-            <PageGuideTrigger moduleKey="expenses" />
+            <NotesTrigger pageKey="expenses" variant="header" />
           </div>
         </>
       }
@@ -335,7 +335,7 @@ export default function ExpensesPage() {
       <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} projects={d.projects} contacts={d.contacts} services={d.services} onClose={() => setShowModal(false)} onSaved={() => { if (expenseTaskIdRef.current) { markTaskCompleted(expenseTaskIdRef.current); expenseTaskIdRef.current = null; } void d.loadData(); }} />}</AnimatePresence>
       <AnimatePresence>{detailExpense && <ExpenseDetailModal expense={detailExpense} onClose={() => setDetailExpense(null)} onEdit={openEditModal} />}</AnimatePresence>
 
-      <PageGuide moduleKey="expenses" walkthroughSteps={EXPENSES_WALKTHROUGH} />
+      <PageNotesMount pageKey="expenses" />
     </WorkspaceShell>
   );
 }

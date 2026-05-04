@@ -57,11 +57,10 @@ import { ScheduleHints } from "./components/schedule-hints";
 import ScheduleFilters from "./components/schedule-filters";
 import CatalogCapacityTab from "./components/catalog-capacity-tab";
 import PerformanceView from "./components/performance-view";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
-import { BOOKINGS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
@@ -543,7 +542,7 @@ export default function BookingsPage() {
       enableSlideAnimation
       headerRight={
         <div className="flex items-center gap-1">
-          <PageGuideTrigger moduleKey="bookings" />
+          <NotesTrigger pageKey="bookings" variant="header" />
           {businessSlug && services.length > 0 && (
             <>
               <button
@@ -779,10 +778,6 @@ export default function BookingsPage() {
         />
       )}
 
-      <PageGuide
-        moduleKey="bookings"
-        walkthroughSteps={BOOKINGS_WALKTHROUGH}
-      />
     </WorkspaceShell>
   );
 }

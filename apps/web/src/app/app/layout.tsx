@@ -61,6 +61,8 @@ import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 import { RequireAuth } from "@/components/require-auth";
+import { NotesProvider } from "@/components/keyflow/notes-context";
+import { KeyflowNotesDrawer } from "@/components/keyflow/keyflow-notes-drawer";
 
 function relativeTime(dateStr: string): string {
   const now = Date.now();
@@ -299,7 +301,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Suspense fallback={null}>
         <NavigationContextProvider>
           <AiContextProvider>
-            <AppLayoutInner>{children}</AppLayoutInner>
+            <NotesProvider>
+              <AppLayoutInner>{children}</AppLayoutInner>
+              <KeyflowNotesDrawer />
+            </NotesProvider>
           </AiContextProvider>
         </NavigationContextProvider>
       </Suspense>

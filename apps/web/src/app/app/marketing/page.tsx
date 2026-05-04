@@ -41,9 +41,9 @@ import { useMarketing } from "./hooks/use-marketing";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
+import { PageNotesMount } from "@/components/keyflow/page-notes-mount";
 import { AiBadge } from "@/components/ui/ai-badge";
-import { MARKETING_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { CampaignsPanel } from "./components/campaigns-panel";
 import { LeadFormsPanel } from "./components/lead-forms-panel";
 import { CampaignActionQueue } from "./components/campaign-action-queue";
@@ -789,7 +789,7 @@ export default function ContentPage() {
       }
       headerRight={
         <div className="flex items-center gap-1.5">
-          <PageGuideTrigger moduleKey="marketing" />
+          <NotesTrigger pageKey="marketing" variant="header" />
           {showSearch ? (
             <div className="flex items-center gap-1 bg-muted/30 border border-border/30 rounded-md px-2 py-1">
               <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
@@ -1087,10 +1087,7 @@ export default function ContentPage() {
             )}
       <ProgressivePrompts moduleFilter={["marketingStrategy", "growth"]} />
 
-      <PageGuide
-        moduleKey="marketing"
-        walkthroughSteps={MARKETING_WALKTHROUGH}
-      />
+      <PageNotesMount pageKey="marketing" />
     </WorkspaceShell>
   );
 }

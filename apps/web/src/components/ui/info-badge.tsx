@@ -2,12 +2,18 @@
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Info, X } from "lucide-react";
+import { Info, X, BookOpen } from "lucide-react";
+import { dispatchOpenNotes } from "@/components/keyflow/notes-context";
 
 interface InfoBadgeProps {
   title: string;
   body: string;
   learnMoreHref?: string;
+  /**
+   * When set, renders a "Read more in Notes" link that opens the unified Notes
+   * drawer scoped to the given page key.
+   */
+  notesPageKey?: string;
   side?: "top" | "bottom" | "left" | "right";
   iconSize?: number;
   children?: ReactNode;
@@ -17,6 +23,7 @@ export function InfoBadge({
   title,
   body,
   learnMoreHref,
+  notesPageKey,
   side = "bottom",
   iconSize = 14,
   children,
@@ -111,6 +118,24 @@ export function InfoBadge({
                 >
                   Learn more →
                 </a>
+              )}
+              {notesPageKey && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpen(false);
+                    dispatchOpenNotes({
+                      scope: { kind: "page", pageKey: notesPageKey },
+                      tab: "page",
+                    });
+                  }}
+                  className="inline-flex items-center gap-1 mt-2 text-[11px] font-medium transition-colors hover:underline"
+                  style={{ color: "hsl(var(--kf-accent1))" }}
+                >
+                  <BookOpen className="w-3 h-3" />
+                  Read more in Notes
+                </button>
               )}
             </span>
           </motion.span>

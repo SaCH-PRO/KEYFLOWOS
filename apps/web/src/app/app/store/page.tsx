@@ -10,8 +10,8 @@ import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { WorkspaceError } from "@/components/ui/workspace-error";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
-import { STORE_WALKTHROUGH } from "@/lib/walkthrough-definitions";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
+import { PageNotesMount } from "@/components/keyflow/page-notes-mount";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
 import { AiHubTrigger, AiCommandHub } from "@/components/ai/ai-command-hub";
 import { useStoreData } from "./hooks/use-store-data";
@@ -195,7 +195,7 @@ export default function StorePage() {
                     }} />
                     {s.storeEnabled ? "Live" : "Draft"}
                   </div>
-                  <PageGuideTrigger moduleKey="store" />
+                  <NotesTrigger pageKey="store" variant="header" />
                 </div>
                 <p className="text-xs mt-0.5 truncate" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
                   {s.storeEnabled && s.getPublicBookingUrl() ? s.getPublicBookingUrl().replace("https://", "") : "Presence Studio — your storefront workspace"}
@@ -369,7 +369,7 @@ export default function StorePage() {
         </AnimatePresence>
       </div>
 
-      <PageGuide moduleKey="store" walkthroughSteps={STORE_WALKTHROUGH} />
+      <PageNotesMount pageKey="store" />
 
       {!ai.aiHook.useGlobalCopilot && (
         <>

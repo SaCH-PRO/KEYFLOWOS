@@ -15,9 +15,8 @@ import { WorkspaceError } from "@/components/ui/workspace-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ProgressivePrompts } from "../../profile/components/progressive-prompts";
 import { PageHeader } from "@/components/ui/page-header";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { InfoBadge } from "@/components/ui/info-badge";
-import { CRM_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { PipelineTabContent } from "./pipeline-tab-content";
 import { ClientsMetricsStrip } from "./clients-metrics-strip";
 import { useContactsPipeline } from "./use-contacts-pipeline";
@@ -174,7 +173,7 @@ export default function ContactsPage() {
         icon={Users}
         title="Clients"
         subtitle={<span className="inline-flex items-center gap-1.5">Manage relationships, follow-ups, health, and client activity across your pipeline <InfoBadge title="Client Workspace" body="Your client workspace centralizes relationship intelligence, communication history, and AI-powered insights. Use Smart Segments to triage clients by engagement and health." side="bottom" iconSize={12} /></span>}
-        titleExtra={<PageGuideTrigger moduleKey="crm" />}
+        titleExtra={<NotesTrigger pageKey="crm" variant="header" />}
       />
 
 
@@ -240,10 +239,6 @@ export default function ContactsPage() {
 
       <ProgressivePrompts moduleFilter={["customer", "sales", "partnerships"]} />
 
-      <PageGuide
-        moduleKey="crm"
-        walkthroughSteps={CRM_WALKTHROUGH}
-      />
 
       {!crmAi.aiHook.useGlobalCopilot && (
         <>

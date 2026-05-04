@@ -31,6 +31,7 @@ export default function DocumentHealthSection({ businessId }: { businessId: stri
       .finally(() => setLoading(false));
   }, [businessId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchHealth is wrapped in useCallback; setState happens inside the async fetcher to mirror server data
   useEffect(() => { fetchHealth(); }, [fetchHealth]);
 
   if (loading) {

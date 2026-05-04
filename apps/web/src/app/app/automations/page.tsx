@@ -4,11 +4,10 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { LayoutGrid, Clock, Workflow, Bot } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { AiBadge } from "@/components/ui/ai-badge";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 
-import { AUTOMATIONS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import { FlowList } from "./components/flow-list";
@@ -252,7 +251,7 @@ export default function FlowsPage() {
           <ResumePrompt module="automations" />
           {upgradeBanner}
           <div className="flex items-center gap-2">
-            <PageGuideTrigger moduleKey="automations" />
+            <NotesTrigger pageKey="automations" variant="header" />
           </div>
         </>
       }
@@ -302,10 +301,6 @@ export default function FlowsPage() {
         )}
       </div>
 
-      <PageGuide
-        moduleKey="automations"
-        walkthroughSteps={AUTOMATIONS_WALKTHROUGH}
-      />
     </WorkspaceShell>
   );
 }

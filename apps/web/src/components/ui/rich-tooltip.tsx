@@ -7,6 +7,8 @@ interface RichTooltipProps {
   title: string;
   description?: string;
   shortcut?: string;
+  /** Optional page key for a "Read more in Notes" deep-link inside the tooltip body. */
+  notesPageKey?: string;
   children: ReactNode;
   side?: "top" | "bottom" | "left" | "right";
   align?: "start" | "center" | "end";
@@ -18,6 +20,7 @@ export function RichTooltip({
   title,
   description,
   shortcut,
+  notesPageKey,
   children,
   side = "top",
   align = "center",
@@ -125,6 +128,11 @@ export function RichTooltip({
               {description && (
                 <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
                   {description}
+                </p>
+              )}
+              {notesPageKey && (
+                <p className="text-[10px] mt-1" style={{ color: "hsl(var(--kf-accent1))" }}>
+                  Press <kbd className="font-mono">?</kbd> to read more in Notes
                 </p>
               )}
             </div>

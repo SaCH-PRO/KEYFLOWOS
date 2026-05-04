@@ -105,6 +105,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors latest products list into the currently selected product
     setSelectedProduct(prev => {
       if (!prev) return prev;
       const updated = products.find(p => p.id === prev.id);

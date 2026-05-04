@@ -2,13 +2,16 @@
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { HelpCircle } from "lucide-react";
+import { BookOpen, HelpCircle } from "lucide-react";
+import { dispatchOpenNotes } from "@/components/keyflow/notes-context";
 
 interface MetricExplainerProps {
   label: string;
   explanation: string;
   formula?: string;
   goodValue?: string;
+  /** Optional page key for a "Read more in Notes" deep-link. */
+  notesPageKey?: string;
   children: ReactNode;
 }
 
@@ -17,6 +20,7 @@ export function MetricExplainer({
   explanation,
   formula,
   goodValue,
+  notesPageKey,
   children,
 }: MetricExplainerProps) {
   const [open, setOpen] = useState(false);
@@ -79,6 +83,25 @@ export function MetricExplainer({
                   <span className="font-medium" style={{ color: "hsl(var(--kf-success))" }}>Good: </span>
                   {goodValue}
                 </p>
+              )}
+              {notesPageKey && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpen(false);
+                    dispatchOpenNotes({
+                      scope: { kind: "page", pageKey: notesPageKey },
+                      tab: "page",
+                      section: "terms",
+                    });
+                  }}
+                  className="inline-flex items-center gap-1 mt-1.5 text-[10px] font-medium hover:underline"
+                  style={{ color: "hsl(var(--kf-accent1))" }}
+                >
+                  <BookOpen className="w-3 h-3" />
+                  Read more in Notes
+                </button>
               )}
             </div>
           </motion.div>

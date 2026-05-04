@@ -10,7 +10,6 @@ import {
   DollarSign,
   RefreshCw,
   Plus,
-  BookOpen,
   Clock,
   AlertTriangle,
   Settings,
@@ -35,11 +34,9 @@ import { useCommerceOverview } from "./hooks/use-commerce-overview";
 import { useCommerceCopilot } from "./hooks/use-commerce-copilot";
 import { useCommerceComposer } from "./hooks/use-commerce-composer";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
-import { SearchableHelpDrawer } from "./components/contextual-onboarding";
 import { ProgressivePrompts } from "../profile/components/progressive-prompts";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
-import { COMMERCE_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -105,7 +102,6 @@ export default function CommercePage() {
   const _emitEvent = useModuleEmit();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [helpOpen, setHelpOpen] = useState(false);
   const [mode, setMode] = useState<RevenueMode>("operations");
   const [opsSection, setOpsSection] = useState<string>("invoices");
   const [setupDrawer, setSetupDrawer] = useState<"billing" | "payments" | "branding" | null>(null);
@@ -325,7 +321,6 @@ export default function CommercePage() {
         { key: "3", description: "Inventory", action: () => setMode("inventory") },
         { key: "4", description: "Setup", action: () => setMode("setup") },
         { key: "r", description: "Refresh data", action: () => { shell.refreshProducts(); } },
-        { key: "?", description: "Help", action: () => setHelpOpen(true) },
       ],
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed to the specific methods used; including the full `composer`/`shell` bags would re-create shortcuts on every commerce state change and re-bind keyboard handlers.
@@ -396,7 +391,7 @@ export default function CommercePage() {
       headerRight={
         <div className="flex items-center gap-2">
           <ServiceLinkWidget compact />
-          <PageGuideTrigger moduleKey="commerce" />
+          <NotesTrigger pageKey="commerce" variant="header" />
           <RichTooltip title="Revenue Pulse" description="Total payments collected this month across all invoices." side="bottom">
             <div
               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 kf-radius-md cursor-help kf-text-body"
@@ -407,20 +402,6 @@ export default function CommercePage() {
               <span className="kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>collected</span>
             </div>
           </RichTooltip>
-          <div className="flex items-center gap-0.5">
-            <RichTooltip title="Help" description="Revenue workspace guide" shortcut="?">
-              <button
-                onClick={() => setHelpOpen(true)}
-                className="min-w-[44px] min-h-[44px] kf-radius-md flex items-center justify-center transition-colors"
-                style={{ color: "hsl(var(--kf-muted-foreground))" }}
-                aria-label="Help"
-                title="Help (?)"
-                data-walkthrough="commerce-help"
-              >
-                <BookOpen className="w-4 h-4 text-muted-foreground/60" />
-              </button>
-            </RichTooltip>
-          </div>
         </div>
       }
       banners={
@@ -889,12 +870,6 @@ export default function CommercePage() {
         </div>
       )}
 
-      <SearchableHelpDrawer
-        isOpen={helpOpen}
-        onClose={() => setHelpOpen(false)}
-        onNavigate={(navTab: string) => handleTabChange(navTab)}
-      />
-
       <RevenueSetupDrawer
         open={setupDrawer !== null}
         onClose={() => setSetupDrawer(null)}
@@ -903,10 +878,6 @@ export default function CommercePage() {
 
       <ProgressivePrompts moduleFilter={["sales", "revenue", "finance"]} />
 
-      <PageGuide
-        moduleKey="commerce"
-        walkthroughSteps={COMMERCE_WALKTHROUGH}
-      />
     </WorkspaceShell>
   );
 }

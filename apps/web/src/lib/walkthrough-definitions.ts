@@ -23,7 +23,12 @@ import {
   Target,
   Sparkles,
 } from "lucide-react";
-import type { WalkthroughStep } from "@/components/ui/module-walkthrough";
+export interface WalkthroughStep {
+  target?: string;
+  title: string;
+  description: string;
+  icon?: React.ElementType;
+}
 
 export const COMMERCE_WALKTHROUGH: WalkthroughStep[] = [
   {

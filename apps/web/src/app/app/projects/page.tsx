@@ -5,11 +5,10 @@ import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-re
 import { FolderKanban, Send, LayoutGrid, List, FileStack } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useSearchParams, useRouter } from "next/navigation";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { AiBadge } from "@/components/ui/ai-badge";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { PROJECTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { fetchProjects, Project } from "@/lib/client";
 import { ProjectBoard } from "./components/project-board";
@@ -201,7 +200,7 @@ export default function ProjectsPage() {
             </div>
           )}
           <div className="flex items-center gap-2">
-            <PageGuideTrigger moduleKey="projects" />
+            <NotesTrigger pageKey="projects" variant="header" />
           </div>
         </>
       }
@@ -252,10 +251,6 @@ export default function ProjectsPage() {
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
 
-      <PageGuide
-        moduleKey="projects"
-        walkthroughSteps={PROJECTS_WALKTHROUGH}
-      />
     </WorkspaceShell>
   );
 }
