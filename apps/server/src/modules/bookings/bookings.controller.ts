@@ -406,20 +406,13 @@ export class BookingsController {
       location?: string;
       start: string;
       end: string;
+      allDay?: boolean;
       attendees?: Array<string | { email: string; displayName?: string }>;
       timeZone?: string;
     },
   ) {
     if (!body?.start || !body?.end) {
       throw new BadRequestException('start and end are required');
-    }
-    const startDate = new Date(body.start);
-    const endDate = new Date(body.end);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-      throw new BadRequestException('Invalid start or end date');
-    }
-    if (endDate.getTime() <= startDate.getTime()) {
-      throw new BadRequestException('end must be after start');
     }
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -429,12 +422,38 @@ export class BookingsController {
     const attendees = (body.attendees ?? [])
       .map((a) => (typeof a === 'string' ? { email: a.trim() } : { email: a.email?.trim() ?? '', displayName: a.displayName }))
       .filter((a) => a.email && /.+@.+\..+/.test(a.email));
+
+    const dateOnlyRe = /^\d{4}-\d{2}-\d{2}$/;
+    let startSpec: { dateTime: string; timeZone: string } | { date: string };
+    let endSpec: { dateTime: string; timeZone: string } | { date: string };
+    if (body.allDay) {
+      if (!dateOnlyRe.test(body.start) || !dateOnlyRe.test(body.end)) {
+        throw new BadRequestException('All-day events require start and end as YYYY-MM-DD');
+      }
+      if (body.end <= body.start) {
+        throw new BadRequestException('end must be after start');
+      }
+      startSpec = { date: body.start };
+      endSpec = { date: body.end };
+    } else {
+      const startDate = new Date(body.start);
+      const endDate = new Date(body.end);
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+        throw new BadRequestException('Invalid start or end date');
+      }
+      if (endDate.getTime() <= startDate.getTime()) {
+        throw new BadRequestException('end must be after start');
+      }
+      startSpec = { dateTime: startDate.toISOString(), timeZone: tz };
+      endSpec = { dateTime: endDate.toISOString(), timeZone: tz };
+    }
+
     const eventId = await this.calendar.createCalendarEvent(businessId, {
       summary: body.summary?.trim() || '(No title)',
       description: body.description,
       location: body.location,
-      start: { dateTime: startDate.toISOString(), timeZone: tz },
-      end: { dateTime: endDate.toISOString(), timeZone: tz },
+      start: startSpec,
+      end: endSpec,
       attendees: attendees.length ? attendees : undefined,
     });
     if (!eventId) {
@@ -455,6 +474,7 @@ export class BookingsController {
       location?: string;
       start?: string;
       end?: string;
+      allDay?: boolean;
       attendees?: Array<string | { email: string; displayName?: string }>;
       timeZone?: string;
     },
@@ -466,6 +486,11 @@ export class BookingsController {
     });
     const tz = body.timeZone || business?.timezone || 'America/Port_of_Spain';
     const patch: Record<string, unknown> = {};
+    const dateOnlyRe = /^\d{4}-\d{2}-\d{2}$/;
+    const isAllDay = body.allDay === true
+      || (body.allDay === undefined
+          && ((body.start !== undefined && dateOnlyRe.test(body.start))
+              || (body.end !== undefined && dateOnlyRe.test(body.end))));
 
     if (body.summary !== undefined) {
       patch.summary = body.summary.trim() || '(No title)';
@@ -477,21 +502,40 @@ export class BookingsController {
       patch.location = body.location;
     }
     if (body.start !== undefined) {
-      const startDate = new Date(body.start);
-      if (Number.isNaN(startDate.getTime())) {
-        throw new BadRequestException('Invalid start date');
+      if (isAllDay) {
+        if (!dateOnlyRe.test(body.start)) {
+          throw new BadRequestException('All-day start must be YYYY-MM-DD');
+        }
+        // Switching to all-day: send date and explicitly clear dateTime/timeZone
+        patch.start = { date: body.start, dateTime: null, timeZone: null };
+      } else {
+        const startDate = new Date(body.start);
+        if (Number.isNaN(startDate.getTime())) {
+          throw new BadRequestException('Invalid start date');
+        }
+        patch.start = { dateTime: startDate.toISOString(), timeZone: tz, date: null };
       }
-      patch.start = { dateTime: startDate.toISOString(), timeZone: tz };
     }
     if (body.end !== undefined) {
-      const endDate = new Date(body.end);
-      if (Number.isNaN(endDate.getTime())) {
-        throw new BadRequestException('Invalid end date');
+      if (isAllDay) {
+        if (!dateOnlyRe.test(body.end)) {
+          throw new BadRequestException('All-day end must be YYYY-MM-DD');
+        }
+        patch.end = { date: body.end, dateTime: null, timeZone: null };
+      } else {
+        const endDate = new Date(body.end);
+        if (Number.isNaN(endDate.getTime())) {
+          throw new BadRequestException('Invalid end date');
+        }
+        patch.end = { dateTime: endDate.toISOString(), timeZone: tz, date: null };
       }
-      patch.end = { dateTime: endDate.toISOString(), timeZone: tz };
     }
     if (body.start !== undefined && body.end !== undefined) {
-      if (new Date(body.end).getTime() <= new Date(body.start).getTime()) {
+      if (isAllDay) {
+        if (body.end <= body.start) {
+          throw new BadRequestException('end must be after start');
+        }
+      } else if (new Date(body.end).getTime() <= new Date(body.start).getTime()) {
         throw new BadRequestException('end must be after start');
       }
     }
