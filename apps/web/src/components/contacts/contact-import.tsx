@@ -67,6 +67,7 @@ const CONTACT_FIELDS = [
   { key: "preferredChannel", label: "Preferred Channel" },
   { key: "language", label: "Language" },
   { key: "lifecycleStage", label: "Lifecycle Stage" },
+  { key: "ageGroup", label: "Age Group" },
   { key: "tags", label: "Tags" },
   { key: "marketingOptIn", label: "Marketing Opt-In" },
   { key: "doNotContact", label: "Do Not Contact" },
@@ -171,6 +172,14 @@ const HEADER_ALIASES: Record<string, string> = {
   "lifecycle_stage": "lifecycleStage",
   "lifecyclestage": "lifecycleStage",
   "stage": "lifecycleStage",
+  "age group": "ageGroup",
+  "age_group": "ageGroup",
+  "agegroup": "ageGroup",
+  "age": "ageGroup",
+  "age range": "ageGroup",
+  "age_range": "ageGroup",
+  "agerange": "ageGroup",
+  "age bracket": "ageGroup",
   "tags": "tags",
   "tag": "tags",
   "labels": "tags",
@@ -195,9 +204,9 @@ interface MappingState {
   mapping: Record<string, string>;
 }
 
-const CSV_TEMPLATE = `firstName,lastName,displayName,email,secondaryEmail,phone,secondaryPhone,whatsapp,status,companyName,jobTitle,department,industry,segment,address,addressLine2,city,state,postalCode,country,timezone,preferredChannel,language,lifecycleStage,tags,marketingOptIn,doNotContact,notes
-John,Doe,Johnny D,john@example.com,john.personal@mail.com,+1868123456,+1868111222,+1868123456,LEAD,Acme Corp,Marketing Manager,Marketing,Technology,Enterprise,123 Main Street,Suite 4,Port of Spain,Trinidad,00100,Trinidad,America/Port_of_Spain,whatsapp,en,Awareness,"vip,tech",Yes,No,Key decision maker
-Jane,Smith,,jane@example.com,,+1868654321,,,PROSPECT,Tech Inc,CEO,,Services,SMB,456 Oak Avenue,,San Fernando,Trinidad,,Trinidad,,email,en,Consideration,local,Yes,No,`;
+const CSV_TEMPLATE = `firstName,lastName,displayName,email,secondaryEmail,phone,secondaryPhone,whatsapp,status,companyName,jobTitle,department,industry,segment,address,addressLine2,city,state,postalCode,country,timezone,preferredChannel,language,lifecycleStage,ageGroup,tags,marketingOptIn,doNotContact,notes
+John,Doe,Johnny D,john@example.com,john.personal@mail.com,+1868123456,+1868111222,+1868123456,LEAD,Acme Corp,Marketing Manager,Marketing,Technology,Enterprise,123 Main Street,Suite 4,Port of Spain,Trinidad,00100,Trinidad,America/Port_of_Spain,whatsapp,en,Awareness,35-44,"vip,tech",Yes,No,Key decision maker
+Jane,Smith,,jane@example.com,,+1868654321,,,PROSPECT,Tech Inc,CEO,,Services,SMB,456 Oak Avenue,,San Fernando,Trinidad,,Trinidad,,email,en,Consideration,25-34,local,Yes,No,`;
 
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
