@@ -1,4 +1,4 @@
-import { BasePublisher, PublishResult } from './base-publisher';
+import { BasePublisher, PublishResult, RecentPost } from './base-publisher';
 
 export class LinkedInPublisher extends BasePublisher {
   platform = 'LINKEDIN';
@@ -48,10 +48,14 @@ export class LinkedInPublisher extends BasePublisher {
 
       if (response.status === 201 || response.status === 200) {
         const postUrn = response.headers.get('x-restli-id') || response.headers.get('X-RestLi-Id');
+        const externalUrl = postUrn
+          ? `https://www.linkedin.com/feed/update/${encodeURIComponent(postUrn)}`
+          : undefined;
         return {
           platform: this.platform,
           success: true,
           platformPostId: postUrn || undefined,
+          externalUrl,
           publishedAt: new Date().toISOString(),
         };
       }
@@ -72,6 +76,32 @@ export class LinkedInPublisher extends BasePublisher {
       return response.ok;
     } catch {
       return false;
+    }
+  }
+
+  async listRecentPosts(connection: any, limit = 25): Promise<RecentPost[]> {
+    try {
+      const author = connection.platformId;
+      if (!author) return [];
+      const url = `https://api.linkedin.com/rest/posts?author=${encodeURIComponent(author)}&q=author&count=${Math.min(limit, 50)}`;
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${connection.token}`,
+          'LinkedIn-Version': '202401',
+          'X-Restli-Protocol-Version': '2.0.0',
+        },
+      });
+      if (!res.ok) return [];
+      const data = (await res.json()) as { elements?: Array<{ id: string; commentary?: string; createdAt?: number; publishedAt?: number }> };
+      return (data.elements ?? []).map((el) => ({
+        platform: this.platform,
+        platformPostId: el.id,
+        content: el.commentary,
+        publishedAt: el.publishedAt ? new Date(el.publishedAt).toISOString() : el.createdAt ? new Date(el.createdAt).toISOString() : undefined,
+        externalUrl: `https://www.linkedin.com/feed/update/${encodeURIComponent(el.id)}`,
+      }));
+    } catch {
+      return [];
     }
   }
 }

@@ -1054,8 +1054,12 @@ model SocialPost {
   status      String   @default("DRAFT") // DRAFT, SCHEDULED, POSTED, FAILED
   scheduledAt DateTime? @map("scheduled_at")
   postedAt    DateTime? @map("posted_at")
+  failedAt    DateTime? @map("failed_at")
   channelIds  String[] @default([]) @map("channel_ids")
   publishResults Json?  @map("publish_results")
+  externalPostId String? @map("external_post_id")
+  externalUrl    String? @map("external_url")
+  lastError      String? @map("last_error")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)

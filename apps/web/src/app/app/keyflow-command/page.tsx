@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiGet } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { Sparkles, RefreshCw, Plug, Pencil } from "lucide-react";
+import { Sparkles, RefreshCw, Plug, Pencil, Share2 } from "lucide-react";
 import { useCompose } from "@/components/email/compose-context";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
@@ -239,6 +239,15 @@ export default function KeyflowCommandPage() {
             >
               <Pencil className="w-3.5 h-3.5" />
               <span>Compose</span>
+            </button>
+            <button
+              onClick={() => router.push("/app/social")}
+              className="flex items-center gap-1.5 h-9 px-3 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-h-[36px]"
+              aria-label="Compose social post"
+              title="Compose social post"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span className="text-xs font-medium">Compose post</span>
             </button>
             <button
               onClick={() => router.push("/app/connect")}

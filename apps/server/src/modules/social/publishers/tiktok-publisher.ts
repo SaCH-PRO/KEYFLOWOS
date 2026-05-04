@@ -1,4 +1,4 @@
-import { BasePublisher, PublishResult } from './base-publisher';
+import { BasePublisher, PublishResult, RecentPost } from './base-publisher';
 
 export class TikTokPublisher extends BasePublisher {
   platform = 'TIKTOK';
@@ -154,6 +154,33 @@ export class TikTokPublisher extends BasePublisher {
       return response.ok;
     } catch {
       return false;
+    }
+  }
+
+  async listRecentPosts(connection: any, limit = 25): Promise<RecentPost[]> {
+    try {
+      const res = await fetch(
+        'https://open.tiktokapis.com/v2/video/list/?fields=id,title,create_time,share_url,video_description',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${connection.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ max_count: Math.min(limit, 20) }),
+        },
+      );
+      if (!res.ok) return [];
+      const data = (await res.json()) as { data?: { videos?: Array<{ id: string; title?: string; video_description?: string; create_time?: number; share_url?: string }> } };
+      return (data.data?.videos ?? []).map((v) => ({
+        platform: this.platform,
+        platformPostId: v.id,
+        content: v.title || v.video_description,
+        publishedAt: v.create_time ? new Date(v.create_time * 1000).toISOString() : undefined,
+        externalUrl: v.share_url,
+      }));
+    } catch {
+      return [];
     }
   }
 }

@@ -6,12 +6,13 @@ import {
   Share2,
   PenSquare,
   CalendarDays,
-  LayoutList,
   BarChart3,
   Plus,
   Plug,
   RefreshCw,
   Loader2,
+  Clock,
+  CheckCircle2,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -39,18 +40,19 @@ import { PostsFeed } from "../marketing/components/social/posts-feed";
 import { ContentCalendar } from "../marketing/components/social/content-calendar";
 import { AnalyticsPanel } from "../marketing/components/social/analytics-stub";
 
-type View = "feed" | "calendar" | "drafts" | "analytics";
+type View = "composer" | "scheduled" | "posted" | "calendar" | "analytics";
 
 const VIEWS: { key: View; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { key: "feed", label: "Feed", icon: LayoutList },
+  { key: "composer", label: "Composer", icon: PenSquare },
+  { key: "scheduled", label: "Scheduled", icon: Clock },
+  { key: "posted", label: "Posted", icon: CheckCircle2 },
   { key: "calendar", label: "Calendar", icon: CalendarDays },
-  { key: "drafts", label: "Drafts", icon: PenSquare },
   { key: "analytics", label: "Analytics", icon: BarChart3 },
 ];
 
 export default function SocialComposerPage() {
   const businessId = getStoredBusinessId();
-  const [view, setView] = useState<View>("feed");
+  const [view, setView] = useState<View>("composer");
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [connections, setConnections] = useState<SocialConnection[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -174,8 +176,8 @@ export default function SocialComposerPage() {
   };
 
   const drafts = posts.filter((p) => p.status === "DRAFT");
-  const visiblePosts =
-    view === "drafts" ? drafts : posts;
+  const scheduled = posts.filter((p) => p.status === "SCHEDULED");
+  const posted = posts.filter((p) => p.status === "POSTED" || p.status === "FAILED");
   const connectedCount = connections.filter((c) => c.status === "CONNECTED").length;
 
   return (
@@ -219,11 +221,18 @@ export default function SocialComposerPage() {
         </div>
       </motion.div>
 
-      <div className="flex items-center gap-1 border-b border-border/40">
+      <div className="flex items-center gap-1 border-b border-border/40 overflow-x-auto">
         {VIEWS.map((v) => {
           const Icon = v.icon;
           const active = view === v.key;
-          const count = v.key === "drafts" ? drafts.length : undefined;
+          const count =
+            v.key === "scheduled"
+              ? scheduled.length
+              : v.key === "posted"
+              ? posted.length
+              : v.key === "composer"
+              ? drafts.length
+              : undefined;
           return (
             <button
               key={v.key}
@@ -271,20 +280,59 @@ export default function SocialComposerPage() {
         </div>
       ) : (
         <>
-          {(view === "feed" || view === "drafts") && (
+          {view === "composer" && (
+            <div className="space-y-4">
+              <PostComposer
+                key={editingPost?.id ?? "new"}
+                mode={editingPost ? "edit" : "create"}
+                initial={
+                  editingPost
+                    ? {
+                        content: editingPost.content,
+                        scheduledFor: editingPost.scheduledFor ?? editingPost.scheduledAt ?? undefined,
+                        channelIds: editingPost.channelIds ?? [],
+                        mediaUrls: editingPost.mediaUrls ?? [],
+                      }
+                    : undefined
+                }
+                connections={connections}
+                submitting={submitting}
+                onClose={() => setEditingPost(null)}
+                onSubmit={handleSubmit}
+              />
+              {drafts.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Drafts</h3>
+                  <PostsFeed
+                    posts={drafts}
+                    loading={false}
+                    onPublish={handlePublish}
+                    onEdit={(post) => { setEditingPost(post); setView("composer"); }}
+                    onDelete={handleDelete}
+                    onNewPost={() => { setEditingPost(null); setShowComposer(true); }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          {view === "scheduled" && (
             <PostsFeed
-              posts={visiblePosts}
+              posts={scheduled}
               loading={loading}
               onPublish={handlePublish}
-              onEdit={(post) => {
-                setEditingPost(post);
-                setShowComposer(true);
-              }}
+              onEdit={(post) => { setEditingPost(post); setView("composer"); }}
               onDelete={handleDelete}
-              onNewPost={() => {
-                setEditingPost(null);
-                setShowComposer(true);
-              }}
+              onNewPost={() => { setEditingPost(null); setView("composer"); }}
+            />
+          )}
+          {view === "posted" && (
+            <PostsFeed
+              posts={posted}
+              loading={loading}
+              onPublish={handlePublish}
+              onEdit={(post) => { setEditingPost(post); setView("composer"); }}
+              onDelete={handleDelete}
+              onNewPost={() => { setEditingPost(null); setView("composer"); }}
             />
           )}
           {view === "calendar" && (

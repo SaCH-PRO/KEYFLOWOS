@@ -85,6 +85,14 @@ const PLATFORM_ICONS: Record<string, { label: string; color: string }> = {
   TIKTOK: { label: "TikTok", color: "#00F2EA" },
 };
 
+const ALL_PLATFORMS: Array<{ key: string; label: string; color: string }> = [
+  { key: "FACEBOOK", label: "Facebook", color: "#1877F2" },
+  { key: "INSTAGRAM", label: "Instagram", color: "#E4405F" },
+  { key: "LINKEDIN", label: "LinkedIn", color: "#0A66C2" },
+  { key: "TWITTER", label: "Twitter", color: "#1DA1F2" },
+  { key: "TIKTOK", label: "TikTok", color: "#00F2EA" },
+];
+
 type MediaFile = {
   id: string;
   file?: File;
@@ -485,49 +493,65 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
           ))}
         </div>
 
-        {connectedChannels.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                <Globe className="w-3 h-3" />
-                Publish to channels
-              </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <Globe className="w-3 h-3" />
+              Publish to channels
+            </div>
+            {connectedChannels.length > 0 && (
               <button
                 onClick={selectAllChannels}
                 className="text-[10px] font-medium transition-colors"
                 style={{ color: "hsl(var(--kf-accent1))" }}
               >
-                {selectedChannels.size === connectedChannels.length ? "Deselect all" : "Select all"}
+                {selectedChannels.size === connectedChannels.length ? "Deselect all" : "Select all connected"}
               </button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {connectedChannels.map((conn) => {
-                const selected = selectedChannels.has(conn.platform);
-                const plt = PLATFORM_ICONS[conn.platform];
-                return (
-                  <button
-                    key={conn.platform}
-                    onClick={() => toggleChannel(conn.platform)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
-                      selected
-                        ? "border-[hsl(var(--kf-accent1)/0.5)] bg-[hsl(var(--kf-accent1)/0.12)] text-[hsl(var(--kf-accent1))] shadow-sm"
-                        : "border-[hsl(var(--kf-border))] text-muted-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
-                    }`}
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{ background: selected ? (plt?.color || "hsl(var(--kf-accent1))") : "hsl(var(--kf-muted-foreground))" }}
-                      />
-                      {plt?.label || conn.platform.charAt(0) + conn.platform.slice(1).toLowerCase()}
-                      {conn.accountName ? ` · ${conn.accountName}` : ""}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            )}
           </div>
-        )}
+          <div className="flex flex-wrap gap-2">
+            {ALL_PLATFORMS.map((plt) => {
+              const conn = connectedChannels.find((c) => c.platform === plt.key);
+              const isConnected = !!conn;
+              const selected = selectedChannels.has(plt.key);
+              if (!isConnected) {
+                return (
+                  <a
+                    key={plt.key}
+                    href={`/app/connect#social-${plt.key.toLowerCase()}`}
+                    className="px-3 py-1.5 rounded-xl text-xs font-medium border border-dashed inline-flex items-center gap-1.5 text-muted-foreground/70 hover:text-foreground hover:border-[hsl(var(--kf-accent1)/0.5)] transition-all"
+                    style={{ borderColor: "hsl(var(--kf-border))" }}
+                    title={`${plt.label} not connected — click to connect`}
+                  >
+                    <span className="w-2 h-2 rounded-full opacity-40" style={{ background: plt.color }} />
+                    {plt.label}
+                    <span className="text-[9px] uppercase tracking-wider opacity-60">Connect</span>
+                  </a>
+                );
+              }
+              return (
+                <button
+                  key={plt.key}
+                  onClick={() => toggleChannel(plt.key)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                    selected
+                      ? "border-[hsl(var(--kf-accent1)/0.5)] bg-[hsl(var(--kf-accent1)/0.12)] text-[hsl(var(--kf-accent1))] shadow-sm"
+                      : "border-[hsl(var(--kf-border))] text-muted-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ background: selected ? plt.color : "hsl(var(--kf-muted-foreground))" }}
+                    />
+                    {plt.label}
+                    {conn.accountName ? ` · ${conn.accountName}` : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t pt-3" style={{ borderColor: "hsl(var(--kf-border))" }}>
           <input

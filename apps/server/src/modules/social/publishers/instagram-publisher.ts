@@ -1,4 +1,4 @@
-import { BasePublisher, PublishResult } from './base-publisher';
+import { BasePublisher, PublishResult, RecentPost } from './base-publisher';
 
 export class InstagramPublisher extends BasePublisher {
   platform = 'INSTAGRAM';
@@ -53,10 +53,18 @@ export class InstagramPublisher extends BasePublisher {
         return { platform: this.platform, success: false, error: errorMsg };
       }
 
+      let permalink: string | undefined;
+      try {
+        const linkRes = await fetch(`https://graph.facebook.com/v19.0/${publishData.id}?fields=permalink&access_token=${accessToken}`);
+        const linkData = await linkRes.json() as any;
+        permalink = linkData?.permalink;
+      } catch { /* swallow */ }
+
       return {
         platform: this.platform,
         success: true,
         platformPostId: publishData.id,
+        externalUrl: permalink,
         publishedAt: new Date().toISOString(),
       };
     } catch (err) {
@@ -72,6 +80,27 @@ export class InstagramPublisher extends BasePublisher {
       return response.ok;
     } catch {
       return false;
+    }
+  }
+
+  async listRecentPosts(connection: any, limit = 25): Promise<RecentPost[]> {
+    try {
+      const igUserId = connection.platformId;
+      if (!igUserId) return [];
+      const res = await fetch(
+        `https://graph.facebook.com/v19.0/${igUserId}/media?fields=id,caption,timestamp,permalink&limit=${Math.min(limit, 50)}&access_token=${connection.token}`,
+      );
+      if (!res.ok) return [];
+      const data = (await res.json()) as { data?: Array<{ id: string; caption?: string; timestamp?: string; permalink?: string }> };
+      return (data.data ?? []).map((p) => ({
+        platform: this.platform,
+        platformPostId: p.id,
+        content: p.caption,
+        publishedAt: p.timestamp,
+        externalUrl: p.permalink,
+      }));
+    } catch {
+      return [];
     }
   }
 }

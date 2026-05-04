@@ -1783,13 +1783,24 @@ export type SocialPost = {
   status: string;
   scheduledAt?: string | null;
   postedAt?: string | null;
+  failedAt?: string | null;
   scheduledFor?: string | null;
   publishedAt?: string | null;
   channelIds?: string[];
   mediaUrls?: string[];
-
+  externalUrl?: string | null;
+  externalPostId?: string | null;
+  lastError?: string | null;
   publishResults?: Record<string, unknown>[] | null;
   createdAt: string;
+};
+
+export type RecentExternalPost = {
+  platform: string;
+  platformPostId: string;
+  content?: string;
+  externalUrl?: string;
+  publishedAt?: string;
 };
 
 export type SocialConnection = {
@@ -1896,20 +1907,60 @@ export async function deleteStaff(staffId: string, businessId: string = DEFAULT_
   }
 }
 
-export async function fetchPosts(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchPosts(businessId: string = DEFAULT_BUSINESS_ID, opts?: { status?: string; limit?: number }) {
+  const params = new URLSearchParams();
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
   return apiGet(
-    `/social/businesses/${encodeURIComponent(businessId)}/posts`,
+    `/social/businesses/${encodeURIComponent(businessId)}/posts${qs ? `?${qs}` : ""}`,
     z.array(z.object({
       id: z.string(),
       content: z.string(),
       status: z.string(),
       scheduledAt: z.string().nullable().optional(),
       postedAt: z.string().nullable().optional(),
+      failedAt: z.string().nullable().optional(),
       scheduledFor: z.string().nullable().optional(),
       publishedAt: z.string().nullable().optional(),
       channelIds: z.array(z.string()).optional(),
+      mediaUrls: z.array(z.string()).optional(),
+      externalUrl: z.string().nullable().optional(),
+      externalPostId: z.string().nullable().optional(),
+      lastError: z.string().nullable().optional(),
       publishResults: z.array(z.record(z.unknown())).nullable().optional(),
       createdAt: z.string(),
+    })),
+    [],
+  );
+}
+
+export async function postNow(input: { businessId?: string; content: string; mediaUrls?: string[]; channelIds?: string[] }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ post: SocialPost; results: Array<Record<string, unknown>> }>({
+    path: `/social/businesses/${encodeURIComponent(businessId)}/posts/now`,
+    body: { content: input.content, mediaUrls: input.mediaUrls, channelIds: input.channelIds },
+  });
+}
+
+export async function schedulePost(input: { businessId?: string; content: string; mediaUrls?: string[]; channelIds?: string[]; scheduleAt: string }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<SocialPost>({
+    path: `/social/businesses/${encodeURIComponent(businessId)}/posts/schedule`,
+    body: { content: input.content, mediaUrls: input.mediaUrls, channelIds: input.channelIds, scheduleAt: input.scheduleAt },
+  });
+}
+
+export async function fetchRecentExternalPosts(businessId: string = DEFAULT_BUSINESS_ID, platform?: string) {
+  const qs = platform ? `?platform=${encodeURIComponent(platform)}` : "";
+  return apiGet(
+    `/social/businesses/${encodeURIComponent(businessId)}/recent-posts${qs}`,
+    z.array(z.object({
+      platform: z.string(),
+      platformPostId: z.string(),
+      content: z.string().optional(),
+      externalUrl: z.string().optional(),
+      publishedAt: z.string().optional(),
     })),
     [],
   );
