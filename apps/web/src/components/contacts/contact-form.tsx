@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import {
   X,
@@ -103,7 +104,17 @@ function FieldError({ error }: { error?: string }) {
   return <p className="text-xs text-destructive mt-0.5">{error}</p>;
 }
 
-export function ContactForm({ onSubmit, onCancel, loading, initialValues }: ContactFormProps) {
+export function ContactForm(props: ContactFormProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time client mount flag for SSR-safe portal
+    setMounted(true);
+  }, []);
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(<ContactFormInner {...props} />, document.body);
+}
+
+function ContactFormInner({ onSubmit, onCancel, loading, initialValues }: ContactFormProps) {
   const isEditing = !!initialValues;
   const isMobile = useIsMobile();
 
