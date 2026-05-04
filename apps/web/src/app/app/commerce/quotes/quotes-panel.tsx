@@ -1382,7 +1382,7 @@ export default function QuotesPanel({
                     </p>
                   </div>
                   <button
-                    onClick={() => window.location.href = "/app/settings/connections"}
+                    onClick={() => window.location.href = "/app/connect"}
                     className="w-full rounded-xl bg-primary text-primary-foreground py-3 text-sm font-medium hover:bg-primary/90 flex items-center justify-center gap-2"
                   >
                     <Mail className="w-4 h-4" />
