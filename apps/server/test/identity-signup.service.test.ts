@@ -57,11 +57,15 @@ describe('IdentitySignupService — verification-required path', () => {
       sendTransactional: vi.fn(async () => ({ id: 'email-1', provider: 'resend' as const })),
       ...overrides?.systemEmail,
     };
+    const passwordPolicy = {
+      validate: vi.fn(async () => undefined),
+    };
     const svc = new IdentitySignupService(
       supabaseAdmin as never,
       systemEmail as never,
+      passwordPolicy as never,
     );
-    return { svc, supabaseAdmin, systemEmail };
+    return { svc, supabaseAdmin, systemEmail, passwordPolicy };
   }
 
   it('drives the full verification flow: creates unconfirmed user, generates link, and sends email', async () => {

@@ -1594,16 +1594,50 @@ export async function identitySignup(input: {
  * via the standard `ApiResponse.error` channel; recognised codes include
  * `invalid_credentials`, `email_not_confirmed`, `rate_limited`.
  */
-export async function identityLogin(input: { email: string; password: string }) {
-  return apiPost<{
-    status: "authenticated";
-    email: string;
-    accessToken: string;
-    refreshToken: string;
-  }>({
-    path: `/identity/login`,
-    body: input,
-  });
+export type IdentityLoginError = { code: string | null; message: string };
+export type IdentityLoginResult = {
+  data:
+    | { status: "authenticated"; email: string; accessToken: string; refreshToken: string }
+    | null;
+  error: IdentityLoginError | null;
+};
+
+// Intentionally bypasses the shared `apiPost` helper: the login page
+// needs the backend's structured `{ code, message }` error body so it
+// can switch on the stable code (invalid_credentials, rate_limited,
+// email_not_confirmed, …). The shared helper coerces errors to a
+// flat string, which would force fragile substring matching.
+export async function identityLogin(input: {
+  email: string;
+  password: string;
+}): Promise<IdentityLoginResult> {
+  try {
+    const res = await fetch(`${API_BASE}/identity/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      const obj = (typeof json === "object" && json !== null ? (json as Record<string, unknown>) : null);
+      return {
+        data: null,
+        error: {
+          code: obj && typeof obj.code === "string" ? obj.code : null,
+          message:
+            obj && typeof obj.message === "string"
+              ? obj.message
+              : res.statusText || "Sign-in failed",
+        },
+      };
+    }
+    return { data: json as IdentityLoginResult["data"], error: null };
+  } catch (err: unknown) {
+    return {
+      data: null,
+      error: { code: null, message: err instanceof Error ? err.message : "Network error" },
+    };
+  }
 }
 
 export async function identityResendVerification(email: string) {
