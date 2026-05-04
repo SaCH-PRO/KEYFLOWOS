@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useCallback, useRef, useState } from "react";
+import { useCompose } from "@/components/email/compose-context";
 import { motion } from "framer-motion";
 import { InfoBadge } from "@/components/ui/info-badge";
 import {
@@ -182,6 +183,7 @@ export function BillingDetailModal({
   allInvoices = [],
 }: BillingDetailModalProps) {
   const theme = BILLING_DOC_THEME[type];
+  const compose = useCompose();
   const panelRef = useRef<HTMLDivElement>(null);
   const printTemplateRef = useRef<HTMLDivElement>(null);
   const dialogId = `billing-detail-${type}-${number}`;
@@ -395,14 +397,15 @@ export function BillingDetailModal({
                 </div>
                 <div className="flex items-center border-t border-border/30">
                   {contact.email && (
-                    <a
-                      href={`mailto:${contact.email}`}
+                    <button
+                      type="button"
+                      onClick={() => compose.open({ to: contact.email! })}
                       className="flex-1 flex items-center justify-center gap-1.5 py-2.5 hover:bg-blue-500/10 transition-colors text-xs text-blue-400"
                       title={`Email ${contact.email}`}
                     >
                       <Mail className="w-3.5 h-3.5" />
                       Email
-                    </a>
+                    </button>
                   )}
                   {contact.phone && (
                     <>
@@ -809,12 +812,13 @@ export function BillingDetailModal({
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {contact.email && (
-                    <a
-                      href={`mailto:${contact.email}`}
+                    <button
+                      type="button"
+                      onClick={() => compose.open({ to: contact.email! })}
                       className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors"
                     >
                       <Mail className="w-4 h-4 text-blue-400" />
-                    </a>
+                    </button>
                   )}
                   {contact.phone && (
                     <a

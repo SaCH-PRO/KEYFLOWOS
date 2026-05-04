@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useCompose } from "@/components/email/compose-context";
 import { motion } from "framer-motion";
 import {
   MessageSquare,
@@ -201,6 +202,7 @@ export function TimelineTabPanel({
   onAddNote, onAddTask,
 }: TimelineTabPanelProps) {
   void _journeyMilestones;
+  const compose = useCompose();
   const [expanded, setExpanded] = useState(false);
   const [filter, setFilter] = useState<ModuleFilter>("all");
   const [limit, setLimit] = useState(25);
@@ -238,7 +240,11 @@ export function TimelineTabPanel({
 
   const handleShareEmail = (text: string) => {
     if (!contact.email) return;
-    window.open(`mailto:${contact.email}?subject=${encodeURIComponent(`Following up — ${contact.firstName || "contact"}`)}&body=${encodeURIComponent(text)}`, "_blank");
+    compose.open({
+      to: contact.email,
+      subject: `Following up — ${contact.firstName || "contact"}`,
+      body: `<p>${text.replace(/\n/g, "<br/>")}</p>`,
+    });
   };
 
   const entries = useMemo<UnifiedEntry[]>(() => {

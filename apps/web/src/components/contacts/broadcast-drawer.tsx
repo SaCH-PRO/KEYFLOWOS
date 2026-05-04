@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useCompose } from "@/components/email/compose-context";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
 import { X, MessageCircle, Mail, Send, Copy, Check, AlertCircle } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
@@ -23,6 +24,7 @@ interface BroadcastDrawerProps {
 }
 
 export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectAll: _onDeselectAll }: BroadcastDrawerProps) {
+  const compose = useCompose();
   const [message, setMessage] = useState("");
   const [channel, setChannel] = useState<"whatsapp" | "email">("whatsapp");
   const [sending, setSending] = useState(false);
@@ -47,10 +49,13 @@ export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectA
         await new Promise((r) => setTimeout(r, 800));
       }
     } else {
-      const emails = contactsWithEmail.map((c) => c.email).filter(Boolean).join(",");
-      const subject = encodeURIComponent("Message from your service provider");
-      const body = encodeURIComponent(message.replace(/\{name\}/g, "Valued Customer"));
-      window.open(`mailto:${emails}?subject=${subject}&body=${body}`, "_blank");
+      const emails = contactsWithEmail.map((c) => c.email).filter(Boolean).join(", ");
+      const personalised = message.replace(/\{name\}/g, "Valued Customer");
+      compose.open({
+        to: emails,
+        subject: "Message from your service provider",
+        body: `<p>${personalised.replace(/\n/g, "<br/>")}</p>`,
+      });
     }
 
     setSending(false);
