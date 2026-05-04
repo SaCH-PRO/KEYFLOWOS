@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CrmTimelineService } from './crm-timeline.service';
+import { CONTACT_EVENT } from '@keyflow/shared';
 
 const MAX_RETRIES = 3;
 
@@ -13,6 +15,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
   ) {}
 
   private get db() {
@@ -120,7 +123,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
           },
         });
 
-        await this.logEvent(businessId, enrollment.contactId, 'sequence_step_failed', {
+        await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_FAILED, {
           sequenceId: enrollment.sequenceId,
           sequenceName: enrollment.sequence.name,
           stepIndex: currentStepIndex,
@@ -154,7 +157,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
           },
         });
 
-        await this.logEvent(businessId, enrollment.contactId, 'sequence_step_retry', {
+        await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_RETRY, {
           sequenceId: enrollment.sequenceId,
           sequenceName: enrollment.sequence.name,
           stepIndex: currentStepIndex,
@@ -204,7 +207,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
         });
       }
 
-      await this.logEvent(businessId, enrollment.contactId, 'sequence_step_due', {
+      await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_DUE, {
         sequenceId: enrollment.sequenceId,
         sequenceName: enrollment.sequence.name,
         stepIndex: currentStepIndex,
@@ -216,7 +219,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
     }
 
     if (step.type === 'email' || step.type === 'whatsapp') {
-      await this.logEvent(businessId, enrollment.contactId, 'sequence_step_due', {
+      await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_DUE, {
         sequenceId: enrollment.sequenceId,
         sequenceName: enrollment.sequence.name,
         stepIndex: currentStepIndex,
@@ -240,7 +243,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
         },
       });
 
-      await this.logEvent(businessId, enrollment.contactId, 'sequence_step_due', {
+      await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_DUE, {
         sequenceId: enrollment.sequenceId,
         sequenceName: enrollment.sequence.name,
         stepIndex: currentStepIndex,
@@ -283,15 +286,9 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
     data: Record<string, unknown>,
   ) {
     try {
-      await this.db.contactEvent.create({
-        data: {
-          businessId,
-          contactId,
-          type,
-          data,
-          actorType: 'system',
-          source: 'sequence_scheduler',
-        },
+      await this.timeline.logEvent(businessId, contactId, type, data, {
+        actorType: 'system',
+        source: 'sequence_scheduler',
       });
     } catch (err) {
       this.logger.warn(`Failed to log event ${type} for contact ${contactId}`, err);

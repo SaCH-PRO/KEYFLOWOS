@@ -7,9 +7,10 @@ import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { MomentumModule } from '../momentum/momentum.module';
+import { CrmModule } from '../crm/crm.module';
 
 @Module({
-  imports: [PrismaModule, AiModule, NotificationsModule, forwardRef(() => MomentumModule)],
+  imports: [PrismaModule, AiModule, NotificationsModule, forwardRef(() => MomentumModule), forwardRef(() => CrmModule)],
   controllers: [AutopilotController],
   providers: [AutopilotService, AutopilotAiService, DelegationLoopService],
   exports: [AutopilotService, AutopilotAiService, DelegationLoopService],

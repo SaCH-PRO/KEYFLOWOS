@@ -16,6 +16,7 @@ import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-
 import { CreateContactDto } from './dto/create-contact.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
+import { LogContactEventDto } from './dto/log-contact-event.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
@@ -541,7 +542,7 @@ export class CrmController {
   createEvent(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
-    @Body() body: { type: string; description?: string; data?: any },
+    @Body() body: LogContactEventDto,
     @Req() req: any,
   ) {
     return this.crm.logContactEvent({

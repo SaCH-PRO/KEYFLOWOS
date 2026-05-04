@@ -6,6 +6,8 @@ import { AiExecutionLogService } from '../ai/ai-execution-log.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { ClientMomentumService } from '../momentum/client-momentum.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { CrmTimelineService } from '../crm/crm-timeline.service';
+import { CONTACT_EVENT } from '@keyflow/shared';
 
 const MOMENTUM_SWEEP_HOUR = 6;
 
@@ -100,6 +102,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
     @Optional() @Inject(ClientMomentumService) private readonly momentumService: ClientMomentumService | null,
   ) {}
 
@@ -589,15 +592,13 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         },
       });
 
-      await this.prisma.client.contactEvent.create({
-        data: {
-          contactId: invoice.contact.id,
-          businessId,
-          type: 'autopilot.payment_recovery',
-          data: { description: `${cadenceLabel} created for invoice ${invoice.invoiceNumber} (${daysPastDue} days overdue)`, taskId: task.id, invoiceId: invoice.id, daysPastDue, cadence: cadenceLabel, milestone: currentMilestone },
-          source: 'delegation_loop',
-        },
-      });
+      await this.timeline.logEvent(
+        businessId,
+        invoice.contact.id,
+        CONTACT_EVENT.AUTOPILOT_PAYMENT_RECOVERY,
+        { description: `${cadenceLabel} created for invoice ${invoice.invoiceNumber} (${daysPastDue} days overdue)`, taskId: task.id, invoiceId: invoice.id, daysPastDue, cadence: cadenceLabel, milestone: currentMilestone },
+        { source: 'delegation_loop' },
+      );
 
       this.events.emit('autopilot.task.created', {
         businessId,
@@ -753,15 +754,13 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         },
       });
 
-      await this.prisma.client.contactEvent.create({
-        data: {
-          contactId: lead.id,
-          businessId,
-          type: 'autopilot.lead_reactivation',
-          data: { description: `Re-engagement task created — ${daysSince} days inactive, score: ${lead.leadScore ?? 'unscored'}`, taskId: task.id, daysSince, leadScore: lead.leadScore },
-          source: 'delegation_loop',
-        },
-      });
+      await this.timeline.logEvent(
+        businessId,
+        lead.id,
+        CONTACT_EVENT.AUTOPILOT_LEAD_REACTIVATION,
+        { description: `Re-engagement task created — ${daysSince} days inactive, score: ${lead.leadScore ?? 'unscored'}`, taskId: task.id, daysSince, leadScore: lead.leadScore },
+        { source: 'delegation_loop' },
+      );
 
       this.events.emit('autopilot.task.created', {
         businessId,
