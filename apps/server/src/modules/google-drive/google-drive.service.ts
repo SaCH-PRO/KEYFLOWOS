@@ -587,6 +587,139 @@ export class GoogleDriveService {
       .replace(/"/g, '&quot;');
   }
 
+  /**
+   * Fetch a Drive file's content as HTML (or text). For Google Docs, uses
+   * the export API to get HTML. For native binary files (.html, .txt) we
+   * download via alt=media. .docx is exported by uploading to Google's
+   * conversion endpoint indirectly: we currently surface a friendly error
+   * for binary docx until a converter is wired in.
+   */
+  async getFileContent(
+    businessId: string,
+    fileId: string,
+  ): Promise<{ html: string; mimeType: string; name: string }> {
+    const accessToken = await this.getValidAccessToken(businessId);
+
+    const meta = await this.getFile(businessId, fileId);
+    const mimeType = meta.mimeType;
+
+    if (mimeType === 'application/vnd.google-apps.document') {
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/html`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!res.ok) {
+        const err = await res.text();
+        this.logger.error('Failed to export Google Doc', err);
+        throw new BadRequestException('Failed to load Google Doc contents');
+      }
+      const html = await res.text();
+      return { html, mimeType, name: meta.name };
+    }
+
+    if (mimeType === 'text/html' || mimeType === 'text/plain') {
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!res.ok) {
+        throw new BadRequestException('Failed to download Drive file');
+      }
+      const body = await res.text();
+      const html =
+        mimeType === 'text/plain'
+          ? `<div style="white-space:pre-wrap;">${this.escapeHtml(body)}</div>`
+          : body;
+      return { html, mimeType, name: meta.name };
+    }
+
+    if (
+      mimeType ===
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ) {
+      // .docx — Google Drive can convert by re-uploading with the Doc mime type,
+      // but inline parsing requires mammoth which isn't installed yet. Surface
+      // a clear message so the UI can prompt the user to convert in Drive first.
+      throw new BadRequestException(
+        'Word documents (.docx) cannot be opened directly yet — open the file in Google Docs first, then re-import.',
+      );
+    }
+
+    throw new BadRequestException(
+      `Unsupported file type for editing: ${mimeType}. Only Google Docs, HTML, and text files can be opened in the editor.`,
+    );
+  }
+
+  /**
+   * Write a new HTML body back to an existing Drive file. For Google Docs we
+   * upload as text/html and Drive performs the server-side conversion.
+   */
+  async updateFileContent(
+    businessId: string,
+    fileId: string,
+    html: string,
+  ): Promise<{ fileId: string; webViewLink?: string; modifiedTime?: string }> {
+    const accessToken = await this.getValidAccessToken(businessId);
+
+    const meta = await this.getFile(businessId, fileId);
+    const targetMime = meta.mimeType;
+
+    // Google Docs: send as text/html and Drive will convert.
+    // text/html and text/plain: send as-is.
+    const uploadMime =
+      targetMime === 'application/vnd.google-apps.document'
+        ? 'text/html'
+        : targetMime === 'text/plain'
+          ? 'text/plain'
+          : 'text/html';
+
+    const body =
+      uploadMime === 'text/plain'
+        ? this.htmlToPlainText(html)
+        : html;
+
+    const res = await fetch(
+      `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,webViewLink,modifiedTime`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': uploadMime,
+        },
+        body,
+      },
+    );
+
+    if (!res.ok) {
+      const err = await res.text();
+      this.logger.error('Failed to update Drive file content', err);
+      throw new BadRequestException('Failed to save changes back to Google Drive');
+    }
+
+    const data = await res.json();
+    return {
+      fileId: data.id || fileId,
+      webViewLink: data.webViewLink,
+      modifiedTime: data.modifiedTime,
+    };
+  }
+
+  private htmlToPlainText(html: string): string {
+    return html
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
+      .replace(/<br\s*\/?>(?!\n)/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
   getEmbedUrl(fileId: string, mimeType: string): string {
     if (mimeType === 'application/vnd.google-apps.document') {
       return `https://docs.google.com/document/d/${fileId}/preview`;

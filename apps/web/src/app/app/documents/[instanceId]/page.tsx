@@ -38,7 +38,12 @@ import {
   HardDrive,
   ExternalLink,
   Loader2,
+  FolderOpen,
+  Link2,
+  Link2Off,
+  X,
 } from "lucide-react";
+import GoogleDriveBrowser from "@/app/app/profile/components/google-drive-browser";
 
 interface DocumentSection {
   id: string;
@@ -96,11 +101,31 @@ interface DocInstance {
   generationMeta: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
+  driveFileId: string | null;
+  driveFileName: string | null;
+  driveFileMimeType: string | null;
+  driveLastSyncedAt: string | null;
   documentType: { name: string; slug: string; riskTier: string; category: { name: string } };
   sections: DocumentSection[];
   versions: DocumentVersion[];
   reviewTasks: ReviewTask[];
   changeLogs: ChangeLog[];
+}
+
+function stripHtmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
+    .replace(/<br\s*\/?>(?!\n)/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function RiskBadge({ tier }: { tier: string }) {
@@ -358,6 +383,10 @@ export default function DocumentDetailPage() {
   const [driveResult, setDriveResult] = useState<{ fileId: string; webViewLink: string } | null>(null);
   const [emailing, setEmailing] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [driveStatus, setDriveStatus] = useState<{ connected: boolean; email?: string } | null>(null);
+  const [importingFromDrive, setImportingFromDrive] = useState(false);
+  const [savingBackToDrive, setSavingBackToDrive] = useState(false);
 
   const loadDoc = useCallback(async () => {
     const bid = getStoredBusinessId();
@@ -371,6 +400,15 @@ export default function DocumentDetailPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { loadDoc(); }, [loadDoc]);
+
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    apiGet<{ connected: boolean; email?: string }>(`/drive/businesses/${businessId}/status`).then((res) => {
+      if (!cancelled && res.data) setDriveStatus(res.data);
+    });
+    return () => { cancelled = true; };
+  }, [businessId]);
 
   useEffect(() => {
     if (doc?.title) {
@@ -511,6 +549,83 @@ export default function DocumentDetailPage() {
     setStatusMsg({ type: "success", message: "Document downloaded" });
   };
 
+  const handlePickFromDrive = async (file: { id: string; name: string; mimeType: string; webViewLink?: string }) => {
+    if (!businessId || !doc) return;
+    setShowDrivePicker(false);
+    setImportingFromDrive(true);
+    setStatusMsg(null);
+    try {
+      const contentRes = await apiGet<{ html: string; mimeType: string; name: string }>(
+        `/drive/businesses/${businessId}/files/${file.id}/content?as=html`,
+      );
+      if (!contentRes.data) {
+        setStatusMsg({ type: "error", message: contentRes.error || "Failed to load Drive file content" });
+        setImportingFromDrive(false);
+        return;
+      }
+
+      const text = stripHtmlToText(contentRes.data.html);
+
+      const importRes = await apiPostSimple<DocInstance>(
+        `/documents/businesses/${businessId}/instances/${doc.id}/import-from-drive`,
+        {
+          driveFileId: file.id,
+          driveFileName: file.name,
+          driveFileMimeType: file.mimeType,
+          content: text,
+        },
+      );
+      if (importRes.data) {
+        setDoc(importRes.data);
+        setStatusMsg({ type: "success", message: `Loaded "${file.name}" from Drive` });
+      } else {
+        setStatusMsg({ type: "error", message: importRes.error || "Failed to import Drive file" });
+      }
+    } catch (err) {
+      setStatusMsg({ type: "error", message: err instanceof Error ? err.message : "Failed to import" });
+    }
+    setImportingFromDrive(false);
+  };
+
+  const handleSaveBackToDrive = async () => {
+    if (!businessId || !doc?.driveFileId) return;
+    setSavingBackToDrive(true);
+    const payload = getDocPayload();
+    const htmlRes = await apiPostSimple<{ html: string }>(
+      `/drive/businesses/${businessId}/export-html`,
+      payload,
+    );
+    if (!htmlRes.data?.html) {
+      setStatusMsg({ type: "error", message: htmlRes.error || "Could not build HTML" });
+      setSavingBackToDrive(false);
+      return;
+    }
+    const writeRes = await apiPatch<{ fileId: string; webViewLink?: string }>(
+      `/drive/businesses/${businessId}/files/${doc.driveFileId}/content`,
+      { html: htmlRes.data.html },
+    );
+    if (writeRes.data) {
+      await apiPatch(`/documents/businesses/${businessId}/instances/${doc.id}/drive-synced`, {});
+      loadDoc();
+      setStatusMsg({ type: "success", message: "Changes saved back to Google Drive" });
+    } else {
+      setStatusMsg({ type: "error", message: writeRes.error || "Failed to save back to Drive" });
+    }
+    setSavingBackToDrive(false);
+  };
+
+  const handleUnlinkDrive = async () => {
+    if (!businessId || !doc) return;
+    const res = await apiPatch<DocInstance>(
+      `/documents/businesses/${businessId}/instances/${doc.id}/drive-link`,
+      { driveFileId: null, driveFileName: null, driveFileMimeType: null },
+    );
+    if (res.data) {
+      setDoc(res.data);
+      setStatusMsg({ type: "success", message: "Unlinked from Drive" });
+    }
+  };
+
   const handlePrint = async () => {
     if (!businessId || !doc) return;
     setPrinting(true);
@@ -632,7 +747,82 @@ export default function DocumentDetailPage() {
         </div>
       )}
 
+      {driveStatus && !driveStatus.connected && (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[hsl(var(--kf-warning))]/10 border border-[hsl(var(--kf-warning))]/30">
+          <div className="flex items-center gap-2 min-w-0">
+            <HardDrive className="w-4 h-4 text-[hsl(var(--kf-warning))] flex-shrink-0" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-[hsl(var(--foreground))]">Google Drive isn&apos;t connected</div>
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">Connect your Drive account to open and round-trip documents from Drive.</p>
+            </div>
+          </div>
+          <a
+            href="/app/connect"
+            className="flex-shrink-0 px-3 py-2 text-xs font-medium rounded-lg bg-[hsl(var(--kf-warning))]/20 text-[hsl(var(--kf-warning))] hover:bg-[hsl(var(--kf-warning))]/30 transition-colors min-h-[36px] inline-flex items-center"
+          >
+            Connect Google Drive
+          </a>
+        </div>
+      )}
+
+      {doc.driveFileId && (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[hsl(var(--kf-accent2))]/10 border border-[hsl(var(--kf-accent2))]/30">
+          <div className="flex items-center gap-2 min-w-0">
+            <Link2 className="w-4 h-4 text-[hsl(var(--kf-accent2))] flex-shrink-0" />
+            <span className="text-sm font-medium text-[hsl(var(--foreground))] truncate">
+              Linked to Drive: {doc.driveFileName || doc.driveFileId}
+            </span>
+            {doc.driveLastSyncedAt && (
+              <span className="text-xs text-[hsl(var(--muted-foreground))] truncate">
+                · Last synced {new Date(doc.driveLastSyncedAt).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <a
+              href={`https://drive.google.com/file/d/${doc.driveFileId}/view`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg hover:bg-[hsl(var(--kf-accent2))]/20 text-[hsl(var(--kf-accent2))] transition-colors"
+              title="Open in Google Drive"
+            >
+              <ExternalLink className="w-3 h-3" /> Open in Drive
+            </a>
+            <button
+              type="button"
+              onClick={handleUnlinkDrive}
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg hover:bg-[hsl(var(--kf-error))]/10 text-[hsl(var(--kf-error))] transition-colors"
+              title="Unlink from Drive"
+            >
+              <Link2Off className="w-3 h-3" /> Unlink
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setShowDrivePicker(true)}
+          disabled={importingFromDrive || (driveStatus !== null && !driveStatus.connected)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-sm min-h-[44px] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] hover:border-[hsl(var(--kf-accent1))]/40 transition-colors disabled:opacity-50"
+          title="Open a document from Google Drive"
+        >
+          {importingFromDrive ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />}
+          Open from Drive
+        </button>
+        {doc.driveFileId && (
+          <button
+            type="button"
+            onClick={handleSaveBackToDrive}
+            disabled={savingBackToDrive}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[hsl(var(--kf-accent2))]/15 border border-[hsl(var(--kf-accent2))]/30 text-sm min-h-[44px] text-[hsl(var(--kf-accent2))] hover:bg-[hsl(var(--kf-accent2))]/25 transition-colors disabled:opacity-50"
+            title="Save changes back to the linked Drive file"
+          >
+            {savingBackToDrive ? <Loader2 className="w-4 h-4 animate-spin" /> : <HardDrive className="w-4 h-4" />}
+            Save to linked Drive
+          </button>
+        )}
         <button
           type="button"
           onClick={handleSaveToDrive}
@@ -898,6 +1088,42 @@ export default function DocumentDetailPage() {
       )}
 
       {doc.generationMeta && <AiInsightsPanel meta={doc.generationMeta} createdAt={doc.createdAt} />}
+
+      {showDrivePicker && businessId && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setShowDrivePicker(false)}>
+          <div
+            className="bg-[hsl(var(--background))] rounded-2xl border border-[hsl(var(--border))] w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-[hsl(var(--border))]">
+              <div>
+                <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">Open from Google Drive</h3>
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">Pick a Google Doc, HTML, or text file. Its contents will replace the current document body.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDrivePicker(false)}
+                className="p-2 rounded-lg hover:bg-[hsl(var(--muted))]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              <GoogleDriveBrowser
+                businessId={businessId}
+                pickerTitle="Select a file to open"
+                onSelect={handlePickFromDrive}
+                allowedMimeTypes={[
+                  "application/vnd.google-apps.document",
+                  "text/html",
+                  "text/plain",
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ]}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

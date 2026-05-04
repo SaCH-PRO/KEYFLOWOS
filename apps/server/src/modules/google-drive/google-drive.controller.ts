@@ -172,6 +172,28 @@ export class GoogleDriveController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/files/:fileId/content')
+  getFileContent(
+    @Param('businessId') businessId: string,
+    @Param('fileId') fileId: string,
+    @Query('as') as?: string,
+  ) {
+    // `as` reserved for future formats; only HTML is supported today.
+    void as;
+    return this.driveService.getFileContent(businessId, fileId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/files/:fileId/content')
+  updateFileContent(
+    @Param('businessId') businessId: string,
+    @Param('fileId') fileId: string,
+    @Body() body: { html: string },
+  ) {
+    return this.driveService.updateFileContent(businessId, fileId, body.html || '');
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/files/:fileId/embed-url')
   getEmbedUrl(
     @Param('businessId') businessId: string,

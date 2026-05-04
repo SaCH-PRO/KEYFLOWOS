@@ -42,6 +42,14 @@ interface DriveFile {
 
 interface GoogleDriveBrowserProps {
   businessId: string;
+  /**
+   * When set, the browser becomes a single-select picker: clicking a file
+   * fires `onSelect` instead of opening an inline preview, and only files
+   * whose mime type is in `allowedMimeTypes` (if provided) are shown/clickable.
+   */
+  onSelect?: (file: DriveFile) => void;
+  allowedMimeTypes?: string[];
+  pickerTitle?: string;
 }
 
 const MIME_TYPE_FILTERS = [
@@ -120,7 +128,8 @@ function formatSize(bytes?: string) {
   return `${(num / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserProps) {
+export default function GoogleDriveBrowser({ businessId, onSelect, allowedMimeTypes, pickerTitle }: GoogleDriveBrowserProps) {
+  const isPicker = !!onSelect;
   const [connected, setConnected] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -213,7 +222,7 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
     );
   }
 
-  if (openFile) {
+  if (openFile && !isPicker) {
     return (
       <div className="flex flex-col h-[calc(100vh-240px)] min-h-[500px]">
         <div className="flex items-center gap-3 px-4 py-3 bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-t-xl">
@@ -286,7 +295,7 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <HardDrive className="w-4 h-4 text-[hsl(var(--kf-accent1))] flex-shrink-0" />
-          <span className="text-sm font-medium truncate">Google Drive</span>
+          <span className="text-sm font-medium truncate">{pickerTitle || "Google Drive"}</span>
           {email && (
             <span className="text-xs text-[hsl(var(--muted-foreground))] truncate">({email})</span>
           )}
@@ -301,15 +310,17 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
           >
             <RefreshCw className={`w-4 h-4 ${filesLoading ? "animate-spin" : ""}`} />
           </button>
-          <button
-            type="button"
-            onClick={handleDisconnect}
-            disabled={disconnecting}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-[hsl(var(--kf-error))]/10 text-[hsl(var(--kf-error))] transition-colors"
-          >
-            {disconnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
-            Disconnect
-          </button>
+          {!isPicker && (
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-[hsl(var(--kf-error))]/10 text-[hsl(var(--kf-error))] transition-colors"
+            >
+              {disconnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
+              Disconnect
+            </button>
+          )}
         </div>
       </div>
 
@@ -375,7 +386,11 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
         </div>
       ) : (
         <div className="rounded-xl border border-[hsl(var(--border))] overflow-hidden divide-y divide-[hsl(var(--border))]">
-          {files.map((file) => {
+          {files
+            .filter((file) =>
+              !isPicker || !allowedMimeTypes || allowedMimeTypes.includes(file.mimeType),
+            )
+            .map((file) => {
             const embeddable = isEmbeddable(file.mimeType);
 
             return (
@@ -383,6 +398,10 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
                 key={file.id}
                 type="button"
                 onClick={() => {
+                  if (isPicker) {
+                    onSelect!(file);
+                    return;
+                  }
                   if (embeddable) {
                     setOpenFile(file);
                   } else if (file.webViewLink) {
