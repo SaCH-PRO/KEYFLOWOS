@@ -216,6 +216,10 @@ model Business {
   channelConnections   ChannelConnection[]
   outboundContent      OutboundContent[]
 
+  // WhatsApp Inbox
+  whatsappContacts     WhatsAppContact[]
+  whatsappMessages     WhatsAppMessage[]
+
   // SEO Operations Engine
   seoPages          SeoPage[]
   seoKeywords       SeoKeyword[]
@@ -459,6 +463,7 @@ model Contact {
   externalMappings    ContactExternalMapping[]
   customerJourney     CustomerJourney?
   journeyTouchpoints  JourneyTouchpoint[]
+  whatsappContacts    WhatsAppContact[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
@@ -1236,6 +1241,67 @@ model DeliveryEvent {
   @@index([deliveryId])
   @@index([deliveryId, eventType])
   @@map("delivery_events")
+}
+
+// ---
+// WhatsApp Business Inbox
+// ---
+model WhatsAppContact {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  phoneNumber     String   @map("phone_number")
+  displayName     String?  @map("display_name")
+  contactId       String?  @map("contact_id")
+  contact         Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  lastMessageAt   DateTime? @map("last_message_at")
+  lastMessageSnippet String? @map("last_message_snippet")
+
+  messages        WhatsAppMessage[]
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, phoneNumber])
+  @@index([businessId, lastMessageAt])
+  @@index([contactId])
+  @@map("whatsapp_contacts")
+}
+
+model WhatsAppMessage {
+  id                 String   @id @default(cuid())
+  businessId         String   @map("business_id")
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  whatsappContactId  String   @map("whatsapp_contact_id")
+  whatsappContact    WhatsAppContact @relation(fields: [whatsappContactId], references: [id], onDelete: Cascade)
+
+  direction          String   // INBOUND | OUTBOUND
+  body               String?
+  templateName       String?  @map("template_name")
+  templateLanguage   String?  @map("template_language")
+  templateParams     Json?    @map("template_params")
+
+  status             String   @default("RECEIVED") // RECEIVED | SENT | SCHEDULED | SENDING | FAILED
+  scheduledAt        DateTime? @map("scheduled_at")
+  sentAt             DateTime? @map("sent_at")
+
+  wamid              String?  @unique
+  destinationId      String?  @map("destination_id")
+  deliveryId         String?  @unique @map("delivery_id")
+  errorMessage       String?  @map("error_message")
+
+  mediaUrls          String[] @default([]) @map("media_urls")
+
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, whatsappContactId, createdAt])
+  @@index([businessId, createdAt])
+  @@index([status, scheduledAt])
+  @@map("whatsapp_messages")
 }
 
 // ---

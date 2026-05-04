@@ -44,6 +44,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { GoogleDriveModule } from './modules/google-drive/google-drive.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { CommunicationsModule } from './modules/communications/communications.module';
+import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { ConnectorModule } from './core/connectors/connector.module';
 import { KeyflowCommandModule } from './modules/keyflow-command/keyflow-command.module';
 import { ConnectModule } from './modules/connect/connect.module';
@@ -95,6 +96,7 @@ import { GrowthIntelligenceModule } from './modules/growth-intelligence/growth-i
     GoogleDriveModule,
     DiagnosticsModule,
     CommunicationsModule,
+    WhatsAppModule,
     KeyflowCommandModule,
     ConnectModule,
     SeoModule,
