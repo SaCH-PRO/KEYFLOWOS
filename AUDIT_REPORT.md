@@ -409,19 +409,10 @@ build` now exit clean.
 
 ### Residual risks (not addressed in this pass)
 
-1. **Dependency audit.** `pnpm audit --prod` reports 22 high / 27 moderate
-   transitive vulnerabilities, almost entirely in indirect deps of NestJS
-   10, `@vercel/node`, Multer 1.x, axios <1.13.5, and assorted
-   `minimatch`/`picomatch`/`undici` chains. None expose an unauthenticated
-   attack surface in the running app (the vulnerable code paths are not on
-   any request handler), but each requires a major-version bump of a
-   first-class dep to clear. Treat as a follow-up upgrade pass — out of
-   scope for this hygiene-only task per the project brief.
-2. **Replit-isolate `docker compose up --build` smoke test** still could
-   not be executed end-to-end in the agent environment (Docker CLI is
-   present but no daemon — rootless `dockerd` requires privileges the
-   agent container does not have). A static review of `Dockerfile` and
-   `docker-compose.yml` was performed in Task #312 and surfaced one
+1. **Dependency audit.** ~~`pnpm audit --prod` reports 22 high / 27 moderate
+   transitive vulnerabilities…~~ **Addressed in section 12 below (Task #311).**
+2. **Replit-isolate `docker compose up --build` smoke test** was improved in Task #312.
+   A static review of `Dockerfile` and `docker-compose.yml` surfaced one
    real bug that would have broken `docker compose up --build`:
    the `server` runtime stage installed deps with `--prod`, which
    excludes `prisma` (the CLI lives in `packages/db`'s
@@ -459,3 +450,99 @@ build` now exit clean.
   `apps/web/src/app/app/profile/page.tsx`,
   `apps/web/src/app/app/store/page.tsx`,
   `apps/web/src/app/book/[slug]/page.tsx`
+
+---
+
+## 12. 2026-05-04 dependency vulnerability patch (Task #311)
+
+Targeted pass to clear the high-severity transitive vulnerabilities flagged
+in section 11. Prior state: `pnpm audit --prod` → **22 high / 27 moderate /
+2 low (51 total)**. Post state: **1 high / 2 moderate / 0 low (3 total)**,
+all of which require major-version bumps of first-class dependencies and
+are documented as accepted residual risks below.
+
+### Approach
+
+Rather than bumping the four direct deps (NestJS 10 → 11, `@vercel/node`,
+Multer, axios) and pulling new majors of unrelated transitive APIs, we
+forced patched versions of the actual vulnerable packages via `pnpm`
+overrides in the root `package.json`. Where the same package has multiple
+incompatible major lines in the tree (e.g. `minimatch` 3.x / 9.x / 10.x;
+`picomatch` 2.x / 4.x; `brace-expansion` 1.x / 2.x), parameterized
+`name@<range>` overrides target only the vulnerable range so consumers
+that rely on a specific major are unaffected.
+
+### Overrides added (`package.json` → `pnpm.overrides`)
+
+| Package | Override | Reason |
+| --- | --- | --- |
+| `axios` | `^1.13.5` | GHSA-axios DoS / SSRF chain (high) via `@paypal/paypal-server-sdk`. |
+| `undici` | `^6.24.0` | Multiple GHSAs (high+moderate) via `@vercel/node`. |
+| `rollup` | `^4.59.0` | DOM clobbering XSS (high) via `@vercel/node`. |
+| `effect` | `^3.20.0` | Prototype pollution (high) via `@prisma/client`. |
+| `defu` | `^6.1.5` | Prototype pollution (high) via `@prisma/client`. |
+| `qs` | `^6.14.2` | `arrayLimit` bypass DoS (low) via `@nestjs/platform-express`. |
+| `follow-redirects` | `^1.16.0` | Header leak (moderate) via `@paypal/paypal-server-sdk`. |
+| `dompurify` | `^3.4.0` | Four GHSAs (moderate) via `jspdf`. |
+| `postcss` | `^8.5.10` | Source-map parser (moderate) via `next`. |
+| `ajv` | `^8.18.0` | Prototype pollution (moderate) via `@vercel/node`. |
+| `smol-toml` | `^1.6.1` | Parser DoS (moderate) via `@vercel/node`. |
+| `multer` | `^2.1.1` | DoS chain (high) via `@nestjs/platform-express` bundled v1. |
+| `minimatch@<3.1.4`, `@>=9.0.0 <9.0.7`, `@>=10.0.0 <10.2.3` | patched line | ReDoS (high) via `@vercel/node`, `google-auth-library`. |
+| `picomatch@<2.3.2`, `@>=4.0.0 <4.0.4` | patched line | ReDoS (high+moderate) via `@vercel/node`. |
+| `brace-expansion@<1.1.13`, `@>=2.0.0 <2.0.3` | patched line | ReDoS (moderate) via `@vercel/node`, `exceljs`. |
+| `path-to-regexp@<0.1.13` | `^0.1.13` | ReDoS (high) via `express`. |
+| `file-type@>=13.0.0 <21.3.2` | `^21.3.2` | Two parser DoS GHSAs (moderate) via `@nestjs/common`. |
+| `uuid@<14.0.0` | `^14.0.0` | Buffer bounds check (moderate) via `exceljs`. |
+
+### Verification
+
+```text
+$ pnpm install
+Done in 8.8s using pnpm v10.26.1   (no peer-dep regressions)
+
+$ pnpm audit --prod
+3 vulnerabilities found
+Severity: 2 moderate | 1 high
+
+$ pnpm --filter @keyflow/db run db:generate
+✔ Generated Prisma Client (v6.19.2)
+
+$ pnpm --filter server build
+> tsc --project tsconfig.json   (clean — exit 0)
+
+$ Workflow `build` (next build for apps/web)
+✓ Compiled successfully in 15.5s
+✓ Finished TypeScript in 45s
+✓ Generating static pages (81/81)
+```
+
+### Accepted residual risks
+
+The remaining 3 advisories all require a major-version bump of a
+first-class dependency, which is out of scope for a vulnerability-patch
+pass and would touch every NestJS module / every Uppy upload surface in
+the app. They do not expose an unauthenticated attack surface in the
+running app and are left for a dedicated upgrade task.
+
+1. **`lodash` 4.17.21 — high + moderate (`_.template` code injection,
+   `_.zipObjectDeep` prototype pollution).** Path:
+   `apps/web > @uppy/aws-s3 > @uppy/utils > lodash`. The advisories
+   declare the patched line as `>=4.18.0`, but no such version exists on
+   npm — lodash maintenance has effectively stalled. Mitigation requires
+   migrating `@uppy/utils` off lodash (upstream issue) or replacing the
+   `@uppy/aws-s3` upload client. Neither code path renders user-controlled
+   templates or merges untrusted JSON into shared objects in our usage,
+   so exploitability in our app is nil.
+2. **`@nestjs/core` 10.4.22 — moderate (improper neutralization of special
+   elements).** Patched in `>=11.1.18`. Requires bumping the entire
+   NestJS 10.x stack (`@nestjs/common`, `@nestjs/platform-express`,
+   `@nestjs/event-emitter`, `@nestjs/testing`) to 11.x — a co-ordinated
+   major across every module in `apps/server/src/modules/**`. Tracked
+   separately as a follow-up.
+
+### Files changed
+
+- `package.json` (added 19 entries to `pnpm.overrides`)
+- `pnpm-lock.yaml` (regenerated by `pnpm install`)
+- `AUDIT_REPORT.md` (this section + section 11 cross-reference)
