@@ -7,6 +7,7 @@ import { SeoGoogleSearchConsoleService } from './seo-gsc.service';
 import { SeoGoogleAnalyticsService } from './seo-ga4.service';
 import { SeoContentService } from './seo-content.service';
 import { SeoListener } from './seo.listener';
+import { SeoAdminGuard } from './seo-admin.guard';
 
 @Module({
   imports: [PrismaModule, AiModule],
@@ -17,6 +18,7 @@ import { SeoListener } from './seo.listener';
     SeoGoogleAnalyticsService,
     SeoContentService,
     SeoListener,
+    SeoAdminGuard,
   ],
   exports: [
     SeoService,
