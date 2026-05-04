@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useCallback } from "react";
+import { useCompose } from "@/components/email/compose-context";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot,
@@ -188,6 +189,7 @@ const ApprovalCard = React.memo(function ApprovalCard({
   const isApproving = approving === action.id;
   const draft = drafts[action.id];
   const isLoadingDraft = draftLoading[action.id];
+  const compose = useCompose();
   const [expanded, setExpanded] = useState(false);
   const [sending, setSending] = useState(false);
   const [, setCopied] = useState(false);
@@ -214,14 +216,15 @@ const ApprovalCard = React.memo(function ApprovalCard({
   const handleSendEmail = useCallback(async () => {
     if (!draft) return;
     setSending(true);
-    const email = action.contactEmail || "";
-    const subject = encodeURIComponent(draft.subject);
-    const body = encodeURIComponent(draft.message);
-    window.open(`mailto:${email}?subject=${subject}&body=${body}`, "_blank");
+    compose.open({
+      to: action.contactEmail || "",
+      subject: draft.subject,
+      body: `<p>${draft.message.replace(/\n/g, "<br/>")}</p>`,
+    });
     onExecute(action, "email", draft.message);
     setSending(false);
     setDone(true);
-  }, [action, draft, onExecute]);
+  }, [action, draft, onExecute, compose]);
 
   const handleMarkDone = useCallback(async () => {
     if (!draft) return;

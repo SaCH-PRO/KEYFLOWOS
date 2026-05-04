@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useCompose } from "@/components/email/compose-context";
 import { toast } from "sonner";
 import {
   Plus,
@@ -38,6 +39,7 @@ interface NotesTabPanelProps {
 }
 
 export function NotesTabPanel({ contact, notes, onAddNote, onAddTask, onDeleteNote, onUpdateNote }: NotesTabPanelProps) {
+  const compose = useCompose();
   const [newNote, setNewNote] = useState("");
   const [noteCategory, setNoteCategory] = useState<NoteCategory>("general");
   const [composerOpen, setComposerOpen] = useState(false);
@@ -123,9 +125,11 @@ export function NotesTabPanel({ contact, notes, onAddNote, onAddTask, onDeleteNo
 
   const handleShareEmail = (body: string) => {
     if (!contact.email) return;
-    const subject = encodeURIComponent(`Note re: ${contact.firstName || "contact"}`);
-    const encodedBody = encodeURIComponent(body);
-    window.open(`mailto:${contact.email}?subject=${subject}&body=${encodedBody}`, "_blank");
+    compose.open({
+      to: contact.email,
+      subject: `Note re: ${contact.firstName || "contact"}`,
+      body: `<p>${body.replace(/\n/g, "<br/>")}</p>`,
+    });
   };
 
   const handleCreateTaskFromNote = async (noteId: string, body: string) => {

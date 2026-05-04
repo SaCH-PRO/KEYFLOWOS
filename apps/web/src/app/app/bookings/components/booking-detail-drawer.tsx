@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useCompose } from "@/components/email/compose-context";
 import { motion } from "framer-motion";
 import {
   CalendarDays,
@@ -201,10 +202,10 @@ export default function BookingDetailDrawer({
   const canReschedule = selectedBooking.status === "PENDING" || selectedBooking.status === "CONFIRMED";
   const canInvoice = selectedBooking.status === "COMPLETED" || selectedBooking.status === "CONFIRMED";
 
+  const compose = useCompose();
   const contactPhone = selectedBooking.contact?.phone;
   const contactEmail = selectedBooking.contact?.email;
   const whatsappLink = contactPhone ? `https://wa.me/${contactPhone.replace(/[^0-9]/g, "")}` : null;
-  const mailtoLink = contactEmail ? `mailto:${contactEmail}` : null;
 
   return (
     <motion.div
@@ -322,14 +323,15 @@ export default function BookingDetailDrawer({
                   <MessageCircle className="w-3 h-3" /> WhatsApp
                 </a>
               )}
-              {mailtoLink && (
-                <a
-                  href={mailtoLink}
+              {contactEmail && (
+                <button
+                  type="button"
+                  onClick={() => compose.open({ to: contactEmail })}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-colors hover:bg-muted/20"
                   style={{ color: "hsl(var(--kf-info))" }}
                 >
                   <Mail className="w-3 h-3" /> Email
-                </a>
+                </button>
               )}
             </div>
           </div>

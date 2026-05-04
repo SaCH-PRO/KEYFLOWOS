@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useCompose } from "@/components/email/compose-context";
 import React from "react";
 import { motion } from "framer-motion";
 import { Mail, Phone, Tag, Trash2, MessageCircle, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock, AlertCircle, DollarSign } from "lucide-react";
@@ -70,6 +71,7 @@ interface ContactCardProps {
 }
 
 function ContactCardInner({ contact, isSelected, selectable, selected, onToggleSelect, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
+  const compose = useCompose();
   const [showActions, setShowActions] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
@@ -200,15 +202,15 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
 
         <div className="flex items-center gap-0.5 flex-shrink-0">
           {contact.email && (
-            <a
-              href={`mailto:${contact.email}`}
-              onClick={(e) => e.stopPropagation()}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); compose.open({ to: contact.email! }); }}
               className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:w-7 sm:h-7 sm:min-w-0 sm:min-h-0 rounded-lg hover:bg-blue-500/10 transition-colors"
               title={`Email ${contact.email}`}
               aria-label={`Email ${contact.email}`}
             >
               <Mail className="w-3.5 h-3.5 text-blue-400" />
-            </a>
+            </button>
           )}
           {contact.phone && (
             <a

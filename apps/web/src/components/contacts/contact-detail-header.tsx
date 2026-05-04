@@ -28,6 +28,7 @@ import {
   Zap,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
+import { useCompose } from "@/components/email/compose-context";
 import type { ContactDetailData, DetailQuickAction } from "./contact-detail";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -159,6 +160,7 @@ export function ContactDetailHeader({
   const sourceInfo = SOURCE_CONFIG[sourceKey] || { label: contact.source || "Unknown", icon: Globe };
   const SourceIcon = sourceInfo.icon;
 
+  const composeEmail = useCompose();
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeMessage, setComposeMessage] = useState("");
   const [copied, setCopied] = useState(false);
@@ -201,9 +203,11 @@ export function ContactDetailHeader({
 
   const handleSendEmail = async () => {
     if (!contact.email) return;
-    const subject = encodeURIComponent("Following up");
-    const body = encodeURIComponent(composeMessage);
-    window.open(`mailto:${contact.email}?subject=${subject}&body=${body}`, "_blank");
+    composeEmail.open({
+      to: contact.email,
+      subject: "Following up",
+      body: composeMessage ? `<p>${composeMessage.replace(/\n/g, "<br/>")}</p>` : "",
+    });
     onLogEvent?.("email.sent", composeMessage.slice(0, 200));
     setShowFollowUp(true);
   };
@@ -288,9 +292,14 @@ export function ContactDetailHeader({
             )}
             <div className="flex items-center gap-2 mt-0.5">
               {contact.email && (
-                <a href={`mailto:${contact.email}`} className="text-xs text-blue-400 hover:underline truncate max-w-[180px]" title={contact.email}>
+                <button
+                  type="button"
+                  onClick={() => composeEmail.open({ to: contact.email! })}
+                  className="text-xs text-blue-400 hover:underline truncate max-w-[180px] text-left"
+                  title={`Email ${contact.email}`}
+                >
                   {contact.email}
-                </a>
+                </button>
               )}
               {contact.email && contact.phone && <span className="text-muted-foreground text-[10px]">·</span>}
               {contact.phone && (
@@ -467,14 +476,15 @@ export function ContactDetailHeader({
       <div className="rounded-xl bg-muted/30 border border-border/50 overflow-hidden">
         <div className="flex items-center gap-2 p-3">
           {contact.email && (
-            <a
-              href={`mailto:${contact.email}`}
+            <button
+              type="button"
+              onClick={() => composeEmail.open({ to: contact.email! })}
               className={`${channelStyles("email", primaryChannel === "email")} hover:bg-blue-500/10 ${primaryChannel === "email" ? `bg-blue-500/5 ${channelRingColor("email")}` : ""}`}
               title={`Email ${contact.email}`}
             >
               <Mail className="w-4 h-4 text-blue-400" />
               <span className="hidden sm:inline text-blue-400 text-xs">Email</span>
-            </a>
+            </button>
           )}
           {contact.phone ? (
             <a

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useCompose } from "@/components/email/compose-context";
 import { toast } from "sonner";
 import {
   Plus,
@@ -48,6 +49,7 @@ interface TasksTabPanelProps {
 }
 
 export function TasksTabPanel({ contact, tasks, onAddTask, onAddNote, onCompleteTask, onDeleteTask, onUpdateTask }: TasksTabPanelProps) {
+  const compose = useCompose();
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDue, setNewTaskDue] = useState("");
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>("NORMAL");
@@ -153,11 +155,14 @@ export function TasksTabPanel({ contact, tasks, onAddTask, onAddNote, onComplete
 
   const handleShareTaskEmail = (title: string, dueDate?: string | null) => {
     if (!contact.email) return;
-    const subject = encodeURIComponent(`Task: ${title}`);
-    const body = dueDate
-      ? encodeURIComponent(`Task: ${title}\nDue: ${formatDateTimeTZ(dueDate)}`)
-      : encodeURIComponent(`Task: ${title}`);
-    window.open(`mailto:${contact.email}?subject=${subject}&body=${body}`, "_blank");
+    const bodyText = dueDate
+      ? `Task: ${title}<br/>Due: ${formatDateTimeTZ(dueDate)}`
+      : `Task: ${title}`;
+    compose.open({
+      to: contact.email,
+      subject: `Task: ${title}`,
+      body: `<p>${bodyText}</p>`,
+    });
   };
 
   const handleCreateNoteFromTask = async (taskId: string, title: string) => {
