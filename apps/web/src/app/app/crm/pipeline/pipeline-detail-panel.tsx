@@ -43,7 +43,6 @@ export interface PipelineDetailPanelProps {
   onEdit: () => void;
   onDelete: () => void;
   onLogEvent: (type: string, description?: string) => Promise<void>;
-  onLogCommunication?: (data: { channelType: string; outcome: string; duration?: number; notes?: string }) => Promise<void>;
   onGenerateAiInsight: () => Promise<void>;
   onRefreshConversationContext: () => Promise<void>;
   onClose?: () => void;
@@ -82,7 +81,6 @@ function PipelineDetailPanelInner({
   onEdit,
   onDelete,
   onLogEvent,
-  onLogCommunication,
   onGenerateAiInsight,
   onRefreshConversationContext,
   onClose,
@@ -135,7 +133,6 @@ function PipelineDetailPanelInner({
         onEdit={onEdit}
         onDelete={onDelete}
         onLogEvent={onLogEvent}
-        onLogCommunication={onLogCommunication}
         onClose={onClose}
         healthMetrics={healthMetrics}
         journeyMilestones={journeyMilestones}

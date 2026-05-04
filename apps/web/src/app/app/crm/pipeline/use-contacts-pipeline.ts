@@ -161,7 +161,6 @@ export function useContactsPipeline() {
     onEdit: actions.handleEditContact,
     onDelete: handleDeleteForPanel,
     onLogEvent: actions.handleLogEvent,
-    onLogCommunication: actions.handleLogCommunication,
     onGenerateAiInsight: detail.handleGenerateAiInsight,
     onRefreshConversationContext: detail.handleRefreshConversationContext,
     relatedContacts,
@@ -176,7 +175,7 @@ export function useContactsPipeline() {
     contactsData.handleTogglePin, actions.handleAddNote, actions.handleAddTask, relatedContacts, selectContact,
     actions.handleCompleteTask, actions.handleDeleteNote, actions.handleDeleteTask,
     actions.handleUpdateNote, actions.handleUpdateTask, actions.handleUpdateStatus,
-    actions.handleEditContact, handleDeleteForPanel, actions.handleLogEvent, actions.handleLogCommunication,
+    actions.handleEditContact, handleDeleteForPanel, actions.handleLogEvent,
     detail.handleGenerateAiInsight, detail.handleRefreshConversationContext,
     detail.detailInvoices, detail.detailBookings, businessId,
   ]);
