@@ -179,12 +179,29 @@ export class CrmController {
   @Patch('businesses/:businessId/contacts/bulk')
   bulkUpdateContacts(
     @Param('businessId') businessId: string,
-    @Body() body: { contactIds: string[]; status?: string; addTags?: string[] },
+    @Body() body: {
+      contactIds: string[];
+      status?: string;
+      addTags?: string[];
+      relationshipType?: string | null;
+      priority?: string | null;
+      favorite?: boolean;
+      archived?: boolean;
+    },
   ) {
     if (!Array.isArray(body.contactIds) || body.contactIds.length > 100) {
       throw new HttpException('contactIds must be an array of at most 100 items', 400);
     }
-    return this.crm.bulkUpdateContacts({ businessId, contactIds: body.contactIds, status: body.status, addTags: body.addTags });
+    return this.crm.bulkUpdateContacts({
+      businessId,
+      contactIds: body.contactIds,
+      status: body.status,
+      addTags: body.addTags,
+      relationshipType: body.relationshipType,
+      priority: body.priority,
+      favorite: body.favorite,
+      archived: body.archived,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

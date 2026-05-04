@@ -701,12 +701,33 @@ export class CrmService {
     return deleted;
   }
 
-  async bulkUpdateContacts(input: { businessId: string; contactIds: string[]; status?: string; addTags?: string[] }) {
+  async bulkUpdateContacts(input: {
+    businessId: string;
+    contactIds: string[];
+    status?: string;
+    addTags?: string[];
+    relationshipType?: string | null;
+    priority?: string | null;
+    favorite?: boolean;
+    archived?: boolean;
+  }) {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
     }
-    const data: Record<string, string> = {};
+    const data: Record<string, unknown> = {};
     if (input.status) data.status = input.status;
+    if (input.relationshipType !== undefined) {
+      data.relationshipType = input.relationshipType ?? null;
+    }
+    if (input.priority !== undefined) {
+      data.priority = input.priority ?? null;
+    }
+    if (typeof input.favorite === 'boolean') {
+      data.favorite = input.favorite;
+    }
+    if (typeof input.archived === 'boolean') {
+      data.archivedAt = input.archived ? new Date() : null;
+    }
     if (input.addTags && input.addTags.length > 0) {
       const contacts = await this.prisma.client.contact.findMany({
         where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
@@ -721,6 +742,10 @@ export class CrmService {
           await this.timeline.logEvent(input.businessId, c.id, 'bulk.updated', {
             ...(input.status ? { status: input.status } : {}),
             ...(input.addTags ? { addedTags: input.addTags } : {}),
+            ...(input.relationshipType !== undefined ? { relationshipType: input.relationshipType } : {}),
+            ...(input.priority !== undefined ? { priority: input.priority } : {}),
+            ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
+            ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
           }, undefined, tx);
         }
         return updated;
@@ -738,7 +763,13 @@ export class CrmService {
         data,
       });
       for (const cid of input.contactIds) {
-        await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', { status: input.status }, undefined, tx);
+        await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', {
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.relationshipType !== undefined ? { relationshipType: input.relationshipType } : {}),
+          ...(input.priority !== undefined ? { priority: input.priority } : {}),
+          ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
+          ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
+        }, undefined, tx);
       }
       return res;
     });

@@ -909,11 +909,23 @@ export async function bulkUpdateContacts(input: {
   contactIds: string[];
   status?: string;
   addTags?: string[];
+  relationshipType?: string | null;
+  priority?: string | null;
+  favorite?: boolean;
+  archived?: boolean;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPatch<{ updated: number }>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk`,
-    { contactIds: input.contactIds, status: input.status, addTags: input.addTags },
+    {
+      contactIds: input.contactIds,
+      status: input.status,
+      addTags: input.addTags,
+      relationshipType: input.relationshipType,
+      priority: input.priority,
+      favorite: input.favorite,
+      archived: input.archived,
+    },
   );
 }
 
