@@ -165,7 +165,7 @@ export function ContactDetail({
   bookings,
   businessId,
 }: ContactDetailProps) {
-  const [activeTab, setActiveTab] = useState<string>("activity");
+  const [activeTab, setActiveTab] = useState<string>("timeline");
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({
     open: false,
     action: () => {},
