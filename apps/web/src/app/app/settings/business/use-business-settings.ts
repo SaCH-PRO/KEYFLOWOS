@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { apiPatch, apiGet, getAuthHeaders, API_BASE } from "@/lib/api";
+import { apiPatch, apiGet, API_BASE } from "@/lib/api";
 import { useThemeColors } from "@/lib/theme-context";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { useUpload } from "@/hooks/use-upload";
 import { toast } from "sonner";
 
 export type Business = {
@@ -113,8 +114,8 @@ export function useBusinessSettings() {
   const [business, setBusiness] = useState<Business | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const { uploadFile, isUploading: uploading } = useUpload();
   const [form, setForm] = useState<FormState>(emptyForm);
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm);
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
@@ -170,28 +171,14 @@ export function useBusinessSettings() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploading(true);
     setStatus(null);
     try {
-      const urlRes = await fetch(`${API_BASE}/uploads/request-url`, {
-        method: "POST",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
-      });
-      if (!urlRes.ok) throw new Error("Failed to get upload URL");
-      const { uploadURL, objectPath } = await urlRes.json();
-      const uploadRes = await fetch(uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-      });
-      if (!uploadRes.ok) throw new Error("Failed to upload file");
-      setForm((f) => ({ ...f, logoUrl: objectPath }));
+      const uploaded = await uploadFile(file);
+      if (!uploaded) throw new Error("Upload failed");
+      setForm((f) => ({ ...f, logoUrl: uploaded.objectPath }));
       setStatus({ type: "success", message: "Logo uploaded successfully" });
     } catch (err) {
       setStatus({ type: "error", message: err instanceof Error ? err.message : "Upload failed" });
-    } finally {
-      setUploading(false);
     }
   };
 
