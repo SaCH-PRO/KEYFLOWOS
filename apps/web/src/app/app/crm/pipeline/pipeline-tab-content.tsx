@@ -136,7 +136,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
 
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
   const [showImport, setShowImport] = useState(false);
-  const [showEngageSection, setShowEngageSection] = useState(true);
+  const [showEngageSection, setShowEngageSection] = useState(false);
   const [pipelineLists, setPipelineLists] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
@@ -470,7 +470,6 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
               onLoadMore={handleLoadMore}
               onRetry={handleRetry}
               onAddContact={handleOpenAddForm}
-              onQuickCreate={handleQuickCreate}
             />
           </div>
 
