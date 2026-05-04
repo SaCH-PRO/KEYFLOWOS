@@ -19,6 +19,7 @@ import {
   CheckSquare,
   LayoutGrid,
   List,
+  Table as TableIcon,
   Upload,
 } from "lucide-react";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
@@ -26,7 +27,7 @@ import { RichTooltip } from "@/components/ui/rich-tooltip";
 export type SortOption = "name" | "newest" | "oldest" | "revenue" | "score";
 export type SmartSegment = "high-value" | "needs-followup" | "new-this-week" | "at-risk" | "stale";
 export type ListTab = "all" | "pinned" | "recent";
-export type ViewMode = "list" | "kanban";
+export type ViewMode = "list" | "kanban" | "table";
 
 const STATUSES = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 
@@ -288,6 +289,14 @@ function PipelineToolbarInner({
               title="Kanban view"
             >
               <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onViewModeChange("table")}
+              className={`p-2 rounded-xl transition-all ${viewMode === "table" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label="Table view"
+              title="Table view"
+            >
+              <TableIcon className="w-4 h-4" />
             </button>
           </div>
         )}

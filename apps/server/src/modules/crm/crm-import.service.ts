@@ -1,9 +1,21 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
+import OpenAI from 'openai';
 import pdfParse from 'pdf-parse';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from './crm.service';
+
+interface ExtractedContact {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  companyName?: string;
+  jobTitle?: string;
+  address?: string;
+  website?: string;
+}
 
 type FieldMapping = {
   firstName?: string;
@@ -42,6 +54,16 @@ type ParsedRow = Record<string, string | null>;
 @Injectable()
 export class CrmImportService {
   private readonly logger = new Logger(CrmImportService.name);
+  private _openai: OpenAI | null = null;
+  private get openai(): OpenAI {
+    if (!this._openai) {
+      this._openai = new OpenAI({
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      });
+    }
+    return this._openai;
+  }
   private readonly synonymMap: Record<string, string> = {
     firstname: 'firstName',
     fname: 'firstName',
@@ -412,6 +434,80 @@ export class CrmImportService {
     });
 
     return record;
+  }
+
+  async extractContactFromImage(imageBase64: string): Promise<ExtractedContact> {
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a contact information extractor. Analyze the image (likely a business card or contact info) and extract any contact details you can find. Return a JSON object with these fields (use null for missing fields):
+- firstName: string or null
+- lastName: string or null
+- email: string or null
+- phone: string or null (include country code if visible)
+- companyName: string or null
+- jobTitle: string or null
+- address: string or null
+- website: string or null
+
+Only return the JSON object, no markdown or explanation.`,
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: imageBase64.startsWith('data:')
+                    ? imageBase64
+                    : `data:image/jpeg;base64,${imageBase64}`,
+                },
+              },
+              { type: 'text', text: 'Extract contact information from this image.' },
+            ],
+          },
+        ],
+        max_tokens: 500,
+      });
+
+      const content = response.choices[0]?.message?.content || '{}';
+      const cleanJson = content.replace(/```json\n?|\n?```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+      return {
+        firstName: parsed.firstName || undefined,
+        lastName: parsed.lastName || undefined,
+        email: parsed.email || undefined,
+        phone: parsed.phone || undefined,
+        companyName: parsed.companyName || undefined,
+        jobTitle: parsed.jobTitle || undefined,
+        address: parsed.address || undefined,
+        website: parsed.website || undefined,
+      };
+    } catch (error) {
+      this.logger.error('Failed to extract contact from image', error as Error);
+      throw error;
+    }
+  }
+
+  async scanContactImage(businessId: string, buffer: Buffer, mimetype?: string) {
+    const base64 = `data:${mimetype || 'image/jpeg'};base64,${buffer.toString('base64')}`;
+    const extracted = await this.extractContactFromImage(base64);
+    if (!extracted.firstName && !extracted.lastName && !extracted.email && !extracted.phone) {
+      throw new BadRequestException('Could not extract any contact information from this image. Try a clearer photo.');
+    }
+    const contact = await this.crm.findOrCreateContact(businessId, {
+      firstName: extracted.firstName,
+      lastName: extracted.lastName,
+      email: extracted.email,
+      phone: extracted.phone,
+      companyName: extracted.companyName,
+      source: 'scan',
+      sourceDetail: 'business_card',
+    });
+    return { contact, extracted };
   }
 
   async createContactFromOcr(params: {
