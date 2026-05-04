@@ -7,6 +7,20 @@ import { CrmController } from '../src/modules/crm/crm.controller';
 import { CrmService } from '../src/modules/crm/crm.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
+import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
+import { CrmRateLimitGuard } from '../src/modules/crm/guards/rate-limit.guard';
+import { PlanLimitGuard } from '../src/modules/subscriptions/plan-limit.guard';
+import { FeatureFlagGuard } from '../src/modules/crm/guards/feature-flag.guard';
+import { TeamAuditInterceptor } from '../src/core/interceptors/team-audit.interceptor';
+import { PrismaService } from '../src/core/prisma/prisma.service';
+import { CrmTimelineService } from '../src/modules/crm/crm-timeline.service';
+import { CrmStatsService } from '../src/modules/crm/crm-stats.service';
+import { CrmImportService } from '../src/modules/crm/crm-import.service';
+import { CrmPlaybookService } from '../src/modules/crm/crm-playbook.service';
+import { CrmFlowService } from '../src/modules/crm/crm-flow.service';
+import { CrmActionsService } from '../src/modules/crm/crm-actions.service';
+import { CrmRevenueService } from '../src/modules/crm/crm-revenue.service';
+import { CrmJourneyService } from '../src/modules/crm/crm-journey.service';
 
 const crmServiceMock = {
   contacts: [] as any[],
@@ -39,12 +53,32 @@ describe('CRM e2e', () => {
       controllers: [CrmController],
       providers: [
         { provide: CrmService, useValue: crmServiceMock },
+        { provide: PrismaService, useValue: { client: {} } },
+        { provide: TeamAuditInterceptor, useValue: { intercept: (_ctx: any, next: any) => next.handle() } },
+        { provide: CrmTimelineService, useValue: { addTask: vi.fn().mockResolvedValue({ id: 'task_1' }) } },
+        { provide: CrmStatsService, useValue: { getCacheMetrics: () => ({}) } },
+        { provide: CrmImportService, useValue: {} },
+        { provide: CrmPlaybookService, useValue: {} },
+        { provide: CrmFlowService, useValue: {} },
+        { provide: CrmActionsService, useValue: {} },
+        { provide: CrmRevenueService, useValue: {} },
+        { provide: CrmJourneyService, useValue: {} },
       ],
     })
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(BusinessGuard)
       .useValue({ canActivate: () => true })
+      .overrideGuard(ModuleScopeGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(CrmRateLimitGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(PlanLimitGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(FeatureFlagGuard)
+      .useValue({ canActivate: () => true })
+      .overrideInterceptor(TeamAuditInterceptor)
+      .useValue({ intercept: (_ctx: any, next: any) => next.handle() })
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -84,9 +118,9 @@ describe('CRM e2e', () => {
     const agent = request(app.getHttpServer());
     crmServiceMock.updateContact.mockResolvedValue({ id: 'contact_99', status: 'CLIENT' });
     await agent
-      .post('/crm/businesses/biz_2/contacts/contact_99')
+      .patch('/crm/businesses/biz_2/contacts/contact_99')
       .send({ status: 'CLIENT' })
-      .expect(201);
+      .expect(200);
     expect(crmServiceMock.updateContact).toHaveBeenCalledWith(
       expect.objectContaining({ businessId: 'biz_2', contactId: 'contact_99', status: 'CLIENT' }),
     );
@@ -94,12 +128,13 @@ describe('CRM e2e', () => {
 
   it('adds tasks with priority and reminder', async () => {
     const agent = request(app.getHttpServer());
-    crmServiceMock.addTask.mockResolvedValue({ id: 'task_1', title: 'Follow up' });
+    const timelineMock = (app.get(CrmController) as any).timeline as { addTask: ReturnType<typeof vi.fn> };
+    timelineMock.addTask = vi.fn().mockResolvedValue({ id: 'task_1', title: 'Follow up' });
     await agent
       .post('/crm/businesses/biz_3/contacts/contact_3/tasks')
       .send({ title: 'Follow up', priority: 'HIGH', remindAt: '2024-01-01T00:00:00.000Z' })
       .expect(201);
-    expect(crmServiceMock.addTask).toHaveBeenCalledWith(
+    expect(timelineMock.addTask).toHaveBeenCalledWith(
       expect.objectContaining({
         businessId: 'biz_3',
         contactId: 'contact_3',
