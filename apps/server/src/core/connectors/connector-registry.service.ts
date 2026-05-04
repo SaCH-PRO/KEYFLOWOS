@@ -1,6 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { IConnector, ConnectorType, ConnectorHealth, ConnectorMeta, ConnectorCategory, ConnectorStatusSummary } from './connector.interface';
+import type {
+  IConnector,
+  ConnectorType,
+  ConnectorHealth,
+  ConnectorMeta,
+  ConnectorCategory,
+  ConnectorStatusSummary,
+  ConnectorSmokeResult,
+} from './connector.interface';
 
 export interface ConnectorDashboardEntry {
   meta: ConnectorMeta;
@@ -163,6 +171,53 @@ export class ConnectorRegistryService {
       businessId,
       timestamp: new Date(),
       success: result.success,
+      error: result.error,
+      duration: Date.now() - startedAt,
+    });
+    return result;
+  }
+
+  async smokeTestConnector(
+    type: ConnectorType,
+    businessId: string,
+  ): Promise<ConnectorSmokeResult> {
+    const connector = this.connectors.get(type);
+    if (!connector) throw new Error(`Connector ${type} not found`);
+
+    const startedAt = Date.now();
+    let result: ConnectorSmokeResult;
+    try {
+      if (typeof connector.smokeTest === 'function') {
+        result = await connector.smokeTest(businessId);
+      } else if (typeof connector.testConnection === 'function') {
+        const t = await connector.testConnection(businessId);
+        result = {
+          success: t.success,
+          account: t.account,
+          error: t.error,
+          action: 'Verified credentials with provider',
+        };
+      } else {
+        const isConn = await connector.isConnected(businessId);
+        result = isConn
+          ? { success: true, action: 'Verified stored connection' }
+          : { success: false, error: 'Not connected' };
+      }
+    } catch (err) {
+      result = {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    this.events.emit('connector.smoke_tested', {
+      connectorType: type,
+      businessId,
+      timestamp: new Date(),
+      success: result.success,
+      action: result.action,
+      account: result.account,
+      detail: result.detail,
       error: result.error,
       duration: Date.now() - startedAt,
     });

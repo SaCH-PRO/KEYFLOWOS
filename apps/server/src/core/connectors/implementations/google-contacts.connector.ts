@@ -7,6 +7,7 @@ import {
   ConnectorHealth,
   ConnectorSyncResult,
   ConnectorStatusSummary,
+  ConnectorSmokeResult,
 } from '../connector.interface';
 
 @Injectable()
@@ -116,6 +117,38 @@ export class GoogleContactsConnector implements IConnector {
       );
       if (!res.ok) return { success: false, error: `People API returned ${res.status}` };
       return { success: true, account: business.contactsEmail ?? undefined };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { contactsAccessToken: true, contactsEmail: true },
+    });
+    if (!business?.contactsAccessToken) return { success: false, error: 'Google Contacts is not connected' };
+    try {
+      const res = await fetch(
+        'https://people.googleapis.com/v1/people/me/connections?personFields=names,emailAddresses&pageSize=3',
+        { headers: { Authorization: `Bearer ${business.contactsAccessToken}` } },
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `People API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { connections?: unknown[]; totalPeople?: number };
+      await this.prisma.client.connectorStatus.upsert({
+        where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+        create: { businessId, connectorType: 'google_contacts', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
+        update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
+      }).catch(() => undefined);
+      return {
+        success: true,
+        action: 'Listed Google contacts',
+        account: business.contactsEmail ?? undefined,
+        detail: `${data.connections?.length ?? 0} returned${typeof data.totalPeople === 'number' ? ` of ${data.totalPeople} total` : ''}`,
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }

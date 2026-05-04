@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { ConnectorCredentialsService } from '../connector-credentials.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorType } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorType, ConnectorSmokeResult } from '../connector.interface';
 
 /**
  * Base for form/landing-page connectors. Credentials are stored encrypted in
@@ -94,6 +94,31 @@ export abstract class FormPlatformConnector implements IConnector {
     );
     if (!credential) return { success: false, error: `${this.meta.name} not configured` };
     return { success: true, account: this.meta.name };
+  }
+
+  /**
+   * Subclasses override to call the platform's "who am I" endpoint with the stored
+   * primary credential. Default implementation just verifies the credential exists.
+   */
+  protected async pingProvider(_credential: string): Promise<ConnectorSmokeResult> {
+    return { success: true, action: 'Verified stored credential is present' };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const credential = await this.credentials.readCredential(
+      businessId,
+      this.connectorType,
+      this.primaryCredentialKey,
+      this.legacyCredentialKey,
+    );
+    if (!credential) return { success: false, error: `${this.meta.name} not configured` };
+    try {
+      const result = await this.pingProvider(credential);
+      if (result.success) await this.trackActivity(businessId);
+      return result;
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   /**

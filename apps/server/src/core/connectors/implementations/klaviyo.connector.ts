@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { ConnectorCredentialsService } from '../connector-credentials.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 const CONNECTOR_TYPE = 'klaviyo' as const;
 
@@ -22,6 +22,7 @@ export class KlaviyoConnector implements IConnector {
     supportsWebhook: true,
     authType: 'api_key',
     connectMode: 'dialog',
+    externalUrl: 'https://www.klaviyo.com/dashboard',
     connectInstructions:
       'In Klaviyo go to Settings → API keys to generate a Private API key (full access). Paste it below.',
     credentialFields: [
@@ -87,6 +88,36 @@ export class KlaviyoConnector implements IConnector {
     if (!apiKey) return { success: false, error: 'No Klaviyo API key configured' };
     const accountName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accountName', 'klaviyoAccount');
     return { success: true, account: accountName ?? 'Klaviyo Account' };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'klaviyoApiKey');
+    if (!apiKey) return { success: false, error: 'No Klaviyo API key configured' };
+    try {
+      const res = await fetch('https://a.klaviyo.com/api/accounts/', {
+        headers: {
+          Authorization: `Klaviyo-API-Key ${apiKey}`,
+          Accept: 'application/vnd.api+json',
+          revision: '2024-10-15',
+        },
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Klaviyo API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { data?: Array<{ id?: string; attributes?: { contact_information?: { organization_name?: string }; preferred_currency?: string } }> };
+      const first = data.data?.[0];
+      const accountName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accountName', 'klaviyoAccount');
+      await this.trackActivity(businessId);
+      return {
+        success: true,
+        action: 'Fetched Klaviyo /api/accounts',
+        account: first?.attributes?.contact_information?.organization_name ?? accountName ?? first?.id ?? 'Klaviyo Account',
+        detail: first?.attributes?.preferred_currency ? `Currency: ${first.attributes.preferred_currency}` : undefined,
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async emitCampaignSent(businessId: string, opts: { campaignId: string; campaignName: string; recipientCount: number; externalId?: string }) {

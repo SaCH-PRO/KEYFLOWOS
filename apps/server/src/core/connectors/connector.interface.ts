@@ -168,7 +168,26 @@ export interface IConnector {
    */
   testConnection?(businessId: string): Promise<{ success: boolean; error?: string; account?: string }>;
 
+  /**
+   * Optional: perform a real round-trip "Try it live" call against the provider — heavier than
+   * `testConnection` (e.g. send a self test email, create+delete a calendar event, hit a real
+   * provider /me endpoint with the stored token). Returns a human-readable `action` describing
+   * what was attempted plus an optional `detail` shown in the connector card.
+   */
+  smokeTest?(businessId: string): Promise<ConnectorSmokeResult>;
+
   getAuthUrl?(businessId: string): Promise<string>;
+}
+
+export interface ConnectorSmokeResult {
+  success: boolean;
+  /** Short past-tense description of what was attempted (e.g. "Sent self test email"). */
+  action?: string;
+  /** Account / identity returned by the provider (email, page name, realm, …). */
+  account?: string;
+  /** Optional secondary detail line (e.g. "Created and deleted draft event '…'"). */
+  detail?: string;
+  error?: string;
 }
 
 export interface ConnectorEvent<T = Record<string, unknown>> {

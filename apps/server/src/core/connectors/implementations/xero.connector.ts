@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { ConnectorCredentialsService } from '../connector-credentials.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 const CONNECTOR_TYPE = 'xero' as const;
 
@@ -22,6 +22,7 @@ export class XeroConnector implements IConnector {
     supportsWebhook: true,
     authType: 'oauth2',
     connectMode: 'dialog',
+    externalUrl: 'https://go.xero.com/',
     connectInstructions:
       'Generate an access token from your Xero developer portal and paste it below along with your Xero tenant ID.',
     credentialFields: [
@@ -103,6 +104,31 @@ export class XeroConnector implements IConnector {
     if (!tenantId) return { success: false, error: 'Missing Xero tenant ID' };
     const tenantName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'tenantName', 'xeroTenantName');
     return { success: true, account: tenantName ?? `Tenant ${tenantId}` };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const accessToken = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accessToken', 'xeroAccessToken');
+    if (!accessToken) return { success: false, error: 'No Xero access token configured' };
+    try {
+      const res = await fetch('https://api.xero.com/connections', {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Xero API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as Array<{ tenantId?: string; tenantName?: string; tenantType?: string }>;
+      await this.trackActivity(businessId);
+      const first = data[0];
+      return {
+        success: true,
+        action: 'Listed Xero connections',
+        account: first?.tenantName ?? undefined,
+        detail: `${data.length} tenant(s)${first?.tenantType ? ` • ${first.tenantType}` : ''}`,
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async emitContactSynced(businessId: string, opts: { externalId: string; email?: string; firstName?: string; lastName?: string; companyName?: string }) {

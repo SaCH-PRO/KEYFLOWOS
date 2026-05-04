@@ -110,6 +110,19 @@ export class ConnectorController {
     }
   }
 
+  @Post('businesses/:businessId/smoke/:type')
+  async smoke(
+    @Param('businessId') businessId: string,
+    @Param('type') type: string,
+  ) {
+    try {
+      return await this.registry.smokeTestConnector(type as ConnectorType, businessId);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Smoke test failed';
+      throw new BadRequestException(message);
+    }
+  }
+
   @Get('businesses/:businessId/needs-attention')
   async needsAttention(@Param('businessId') businessId: string) {
     return this.healthMonitor.needsAttention(businessId);

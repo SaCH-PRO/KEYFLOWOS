@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { ConnectorCredentialsService } from '../connector-credentials.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 const CONNECTOR_TYPE = 'mailchimp' as const;
 
@@ -22,6 +22,7 @@ export class MailchimpConnector implements IConnector {
     supportsWebhook: true,
     authType: 'api_key',
     connectMode: 'dialog',
+    externalUrl: 'https://admin.mailchimp.com/',
     connectInstructions:
       'In Mailchimp go to Account → Extras → API keys to generate a key. Paste the key (it ends with the data-center, e.g. "-us21") below.',
     credentialFields: [
@@ -92,6 +93,34 @@ export class MailchimpConnector implements IConnector {
     if (!apiKey) return { success: false, error: 'No Mailchimp API key configured' };
     const accountName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accountName', 'mailchimpAccount');
     return { success: true, account: accountName ?? 'Mailchimp Account' };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'mailchimpApiKey');
+    if (!apiKey) return { success: false, error: 'No Mailchimp API key configured' };
+    const dc = apiKey.split('-')[1];
+    if (!dc) return { success: false, error: 'Mailchimp API key is missing the data-center suffix (e.g. "-us21")' };
+    try {
+      const auth = Buffer.from(`anystring:${apiKey}`).toString('base64');
+      const res = await fetch(`https://${dc}.api.mailchimp.com/3.0/ping`, {
+        headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Mailchimp API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { health_status?: string };
+      const accountName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accountName', 'mailchimpAccount');
+      await this.trackActivity(businessId);
+      return {
+        success: true,
+        action: 'Pinged Mailchimp /3.0/ping',
+        account: accountName ?? `Mailchimp (${dc})`,
+        detail: data.health_status ?? 'OK',
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async emitCampaignSent(businessId: string, opts: { campaignId: string; campaignName: string; recipientCount: number; externalId?: string }) {

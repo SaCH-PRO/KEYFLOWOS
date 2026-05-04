@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { ConnectorCredentialsService } from '../connector-credentials.service';
-import { ConnectorMeta } from '../connector.interface';
+import { ConnectorMeta, ConnectorSmokeResult } from '../connector.interface';
 import { FormPlatformConnector } from './form-platform.base';
 
 /**
@@ -27,6 +27,7 @@ export class WebhookFormConnector extends FormPlatformConnector {
     supportsWebhook: true,
     authType: 'api_key',
     connectMode: 'webhook',
+    externalUrl: 'https://docs.replit.com',
     connectInstructions:
       'Copy your unique webhook URL and secret. Configure your form builder (Webflow, Framer, custom HTML) to POST submissions to that URL with the secret in the "x-keyflow-signature" header.',
     credentialFields: [
@@ -44,5 +45,38 @@ export class WebhookFormConnector extends FormPlatformConnector {
     @Inject(ConnectorCredentialsService) credentials: ConnectorCredentialsService,
   ) {
     super(prisma, events, entityResolution, credentials);
+  }
+
+  /**
+   * No remote provider for the generic webhook connector. We verify the per-business
+   * webhook secret is configured and report recent submission counts so the operator
+   * can confirm real traffic has been arriving.
+   */
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const secret = await this.credentials.readCredential(
+      businessId,
+      this.connectorType,
+      this.primaryCredentialKey,
+      this.legacyCredentialKey,
+    );
+    if (!secret) {
+      return { success: false, error: 'Webhook secret has not been generated yet — open "Webhook URL" first.' };
+    }
+    if (secret.length < 16) {
+      return { success: false, error: 'Webhook secret is too short (need ≥ 16 chars)' };
+    }
+    const recent = await this.prisma.client.leadFormSubmission.count({
+      where: {
+        businessId,
+        source: this.source,
+        createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+      },
+    }).catch(() => 0);
+    return {
+      success: true,
+      action: 'Verified webhook URL + secret are configured',
+      account: 'Generic webhook',
+      detail: `${recent} submission(s) received in the last 30 days`,
+    };
   }
 }

@@ -7,6 +7,7 @@ import {
   ConnectorHealth,
   ConnectorSyncResult,
   ConnectorStatusSummary,
+  ConnectorSmokeResult,
 } from '../connector.interface';
 
 @Injectable()
@@ -107,6 +108,36 @@ export class GoogleFormsConnector implements IConnector {
       const res = await fetch('https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=' + business.formsAccessToken);
       if (!res.ok) return { success: false, error: `Token check returned ${res.status}` };
       return { success: true, account: business.formsEmail ?? undefined };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { formsAccessToken: true, formsEmail: true },
+    });
+    if (!business?.formsAccessToken) return { success: false, error: 'Google Forms is not connected' };
+    try {
+      const res = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+        headers: { Authorization: `Bearer ${business.formsAccessToken}` },
+      });
+      if (!res.ok) {
+        return { success: false, error: `Google userinfo ${res.status}` };
+      }
+      const data = (await res.json()) as { email?: string; email_verified?: boolean; name?: string };
+      await this.prisma.client.connectorStatus.upsert({
+        where: { businessId_connectorType: { businessId, connectorType: 'google_forms' } },
+        create: { businessId, connectorType: 'google_forms', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
+        update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
+      }).catch(() => undefined);
+      return {
+        success: true,
+        action: 'Validated OAuth token via /userinfo',
+        account: data.email ?? business.formsEmail ?? undefined,
+        detail: data.email_verified ? 'Email verified' : undefined,
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
