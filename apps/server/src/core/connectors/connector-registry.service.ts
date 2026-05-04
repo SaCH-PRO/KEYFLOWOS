@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { IConnector, ConnectorType, ConnectorHealth, ConnectorMeta, ConnectorCategory, ConnectorStatusSummary } from './connector.interface';
+import type { IConnector, ConnectorType, ConnectorHealth, ConnectorMeta, ConnectorCategory, ConnectorStatusSummary } from './connector.interface';
 
 export interface ConnectorDashboardEntry {
   meta: ConnectorMeta;
@@ -12,7 +12,7 @@ export class ConnectorRegistryService {
   private readonly logger = new Logger(ConnectorRegistryService.name);
   private readonly connectors = new Map<ConnectorType, IConnector>();
 
-  constructor(private readonly events: EventEmitter2) {}
+  constructor(@Inject(EventEmitter2) private readonly events: EventEmitter2) {}
 
   register(connector: IConnector): void {
     this.connectors.set(connector.meta.type, connector);

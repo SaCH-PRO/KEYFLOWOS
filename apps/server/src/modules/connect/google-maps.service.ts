@@ -1,13 +1,22 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { ConnectorCredentialsService } from '../../core/connectors/connector-credentials.service';
 
 @Injectable()
 export class GoogleMapsService {
   private readonly logger = new Logger(GoogleMapsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
+  ) {}
 
   private async apiKey(businessId: string): Promise<string> {
+    // Prefer the unified encrypted credentials store; fall back to the legacy
+    // Business.googleMapsApiKey column for businesses that haven't re-saved
+    // through the new connect dialog yet.
+    const creds = await this.credentials.getCredentials(businessId, 'google_maps');
+    if (creds?.apiKey?.trim()) return creds.apiKey.trim();
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { googleMapsApiKey: true },
@@ -19,13 +28,20 @@ export class GoogleMapsService {
   }
 
   async setApiKey(businessId: string, key: string) {
+    const trimmed = key.trim();
+    // Write to both stores so existing read paths and the new connector
+    // dashboard stay in sync.
+    await this.credentials.setCredentials(businessId, 'google_maps', { apiKey: trimmed }, {
+      accountLabel: 'API key configured',
+    });
     await this.prisma.client.business.update({
       where: { id: businessId },
-      data: { googleMapsApiKey: key.trim() },
+      data: { googleMapsApiKey: trimmed },
     });
   }
 
   async clearApiKey(businessId: string) {
+    await this.credentials.clearCredentials(businessId, 'google_maps');
     await this.prisma.client.business.update({
       where: { id: businessId },
       data: { googleMapsApiKey: null },

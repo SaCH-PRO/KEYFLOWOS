@@ -6,9 +6,10 @@ import { GoogleContactsSyncService } from './google-contacts-sync.service';
 import { GoogleBusinessProfileService } from './google-business-profile.service';
 import { GoogleMapsService } from './google-maps.service';
 import { CrmModule } from '../crm/crm.module';
+import { ConnectorModule } from '../../core/connectors/connector.module';
 
 @Module({
-  imports: [CrmModule],
+  imports: [CrmModule, ConnectorModule],
   controllers: [ConnectController],
   providers: [
     GoogleFormsService,
