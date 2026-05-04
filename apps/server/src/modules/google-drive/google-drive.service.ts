@@ -1,7 +1,12 @@
 import { Injectable, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
+import * as mammoth from 'mammoth';
 import { GoogleDriveConnector } from '../../core/connectors/implementations/google-drive.connector';
+
+const DOCX_MIME =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const GDOC_MIME = 'application/vnd.google-apps.document';
 
 interface OAuthState {
   businessId: string;
@@ -589,10 +594,9 @@ export class GoogleDriveService {
 
   /**
    * Fetch a Drive file's content as HTML (or text). For Google Docs, uses
-   * the export API to get HTML. For native binary files (.html, .txt) we
-   * download via alt=media. .docx is exported by uploading to Google's
-   * conversion endpoint indirectly: we currently surface a friendly error
-   * for binary docx until a converter is wired in.
+   * the export API to get HTML. For text/html and text/plain files we
+   * download via alt=media. For .docx (Word) files we download the binary
+   * via alt=media and convert to HTML with `mammoth`.
    */
   async getFileContent(
     businessId: string,
@@ -633,16 +637,37 @@ export class GoogleDriveService {
       return { html, mimeType, name: meta.name };
     }
 
-    if (
-      mimeType ===
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    ) {
-      // .docx — Google Drive can convert by re-uploading with the Doc mime type,
-      // but inline parsing requires mammoth which isn't installed yet. Surface
-      // a clear message so the UI can prompt the user to convert in Drive first.
-      throw new BadRequestException(
-        'Word documents (.docx) cannot be opened directly yet — open the file in Google Docs first, then re-import.',
+    if (mimeType === DOCX_MIME) {
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
       );
+      if (!res.ok) {
+        const err = await res.text();
+        this.logger.error('Failed to download .docx file', err);
+        throw new BadRequestException('Failed to download Word document');
+      }
+      const arrayBuf = await res.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      try {
+        const result = await mammoth.convertToHtml({ buffer });
+        const body = result.value || '';
+        const html = `<div class="docx-body">${body}</div>`;
+        if (result.messages?.length) {
+          this.logger.debug(
+            `mammoth conversion notes for ${fileId}: ${result.messages
+              .slice(0, 5)
+              .map((m) => m.message)
+              .join('; ')}`,
+          );
+        }
+        return { html, mimeType, name: meta.name };
+      } catch (err) {
+        this.logger.error('Failed to convert .docx with mammoth', err as Error);
+        throw new BadRequestException(
+          'Could not read this Word document. It may be password-protected or corrupted.',
+        );
+      }
     }
 
     throw new BadRequestException(
@@ -664,10 +689,54 @@ export class GoogleDriveService {
     const meta = await this.getFile(businessId, fileId);
     const targetMime = meta.mimeType;
 
+    // .docx: re-upload as HTML and ask Drive to convert the file in place to
+    // a native Google Doc. This "upgrades" the file so subsequent edits
+    // round-trip cleanly through the Google Docs export pipeline.
+    if (targetMime === DOCX_MIME) {
+      const boundary = '-----keyflowos_docx_upgrade_boundary';
+      const metadata = { mimeType: GDOC_MIME };
+      const multipart = [
+        `--${boundary}`,
+        'Content-Type: application/json; charset=UTF-8',
+        '',
+        JSON.stringify(metadata),
+        `--${boundary}`,
+        'Content-Type: text/html; charset=UTF-8',
+        '',
+        html,
+        `--${boundary}--`,
+      ].join('\r\n');
+
+      const upgradeRes = await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=id,webViewLink,modifiedTime,mimeType`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`,
+          },
+          body: multipart,
+        },
+      );
+
+      if (!upgradeRes.ok) {
+        const err = await upgradeRes.text();
+        this.logger.error('Failed to upgrade .docx to Google Doc', err);
+        throw new BadRequestException('Failed to save Word document changes back to Google Drive');
+      }
+
+      const data = await upgradeRes.json();
+      return {
+        fileId: data.id || fileId,
+        webViewLink: data.webViewLink,
+        modifiedTime: data.modifiedTime,
+      };
+    }
+
     // Google Docs: send as text/html and Drive will convert.
     // text/html and text/plain: send as-is.
     const uploadMime =
-      targetMime === 'application/vnd.google-apps.document'
+      targetMime === GDOC_MIME
         ? 'text/html'
         : targetMime === 'text/plain'
           ? 'text/plain'
