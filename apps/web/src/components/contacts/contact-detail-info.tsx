@@ -204,6 +204,17 @@ export function ContactDetailInfo({
       ),
     });
   }
+  if (contact.ageGroup) {
+    identityBits.push({
+      key: "age",
+      node: (
+        <span className="inline-flex items-center gap-1" title="Age group">
+          <Users className="w-3 h-3" />
+          {getContactAgeGroupLabel(contact.ageGroup) ?? contact.ageGroup}
+        </span>
+      ),
+    });
+  }
   if (contact.city || contact.country) {
     const loc = [contact.city, contact.country].filter(Boolean).join(", ");
     identityBits.push({
@@ -271,7 +282,6 @@ export function ContactDetailInfo({
   const hasMoreDetails = !!(
     contact.department ||
     contact.industry ||
-    contact.ageGroup ||
     contact.addressLine1 ||
     contact.addressLine2 ||
     contact.postalCode ||
@@ -445,11 +455,10 @@ export function ContactDetailInfo({
           </button>
           {moreOpen && (
             <div className="px-2.5 pb-2.5 space-y-2">
-              {(contact.department || contact.industry || contact.ageGroup) && (
+              {(contact.department || contact.industry) && (
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                   {contact.department && <div><span className="text-muted-foreground text-[10px] block">Department</span>{contact.department}</div>}
                   {contact.industry && <div><span className="text-muted-foreground text-[10px] block">Industry</span>{contact.industry}</div>}
-                  {contact.ageGroup && <div><span className="text-muted-foreground text-[10px] block">Age Group</span>{getContactAgeGroupLabel(contact.ageGroup)}</div>}
                 </div>
               )}
               {(contact.addressLine1 || contact.addressLine2 || contact.state || contact.postalCode) && (

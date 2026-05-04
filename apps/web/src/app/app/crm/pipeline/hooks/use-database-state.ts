@@ -52,7 +52,7 @@ export const ALL_COLUMNS: ColumnDef[] = [
 
 const DEFAULT_VISIBLE_KEYS: ColumnKey[] = [
   "firstName", "lastName", "email", "phone", "status",
-  "companyName", "jobTitle", "city", "country", "source",
+  "companyName", "jobTitle", "ageGroup", "city", "country", "source",
   "tags", "createdAt", "lastActive",
 ];
 
