@@ -62,7 +62,10 @@ COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.ya
 COPY --from=builder /app/apps/server/package.json ./apps/server/
 COPY --from=builder /app/packages/api/package.json ./packages/api/
 COPY --from=builder /app/packages/db/package.json  ./packages/db/
-RUN pnpm install --frozen-lockfile --prod --filter server... --ignore-scripts
+# NOTE: we intentionally do NOT pass --prod here. The server runs from
+# TypeScript source via `tsx` (no compiled dist/), and `prisma` (the CLI
+# used by the db:generate step below) is a devDependency of @keyflow/db.
+RUN pnpm install --frozen-lockfile --filter server... --ignore-scripts
 COPY --from=builder /app/apps/server/src       ./apps/server/src
 COPY --from=builder /app/apps/server/tsconfig.json ./apps/server/
 COPY --from=builder /app/tsconfig.base.json    ./
