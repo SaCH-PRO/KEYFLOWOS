@@ -132,12 +132,16 @@ export class GoogleCalendarConnector implements IConnector {
       return { success: false, error: 'Google Calendar is not connected' };
     }
     try {
+      // We only request the `calendar.events` scope, which does NOT cover
+      // `calendarList`. Probe the primary calendar's events list — that
+      // endpoint is authorized by `calendar.events` alone.
       const res = await fetch(
-        'https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1',
+        'https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=1&fields=items(id)',
         { headers: { Authorization: `Bearer ${business.calendarAccessToken}` } },
       );
       if (!res.ok) {
-        return { success: false, error: `Calendar API returned ${res.status}` };
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Calendar API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
       }
       return { success: true, account: business.calendarEmail ?? undefined };
     } catch (err) {

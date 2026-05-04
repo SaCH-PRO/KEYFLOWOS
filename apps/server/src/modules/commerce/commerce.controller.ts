@@ -573,6 +573,21 @@ export class CommerceController {
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/gmail/messages/send')
+  sendGmailMessage(
+    @Param('businessId') businessId: string,
+    @Body() body: { to: string; subject: string; htmlBody: string },
+  ) {
+    return this.gmail.sendEmail({
+      businessId,
+      to: body.to,
+      subject: body.subject,
+      htmlBody: body.htmlBody,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/gmail/threads/:threadId/reply')
   replyGmailThread(
     @Param('businessId') businessId: string,
