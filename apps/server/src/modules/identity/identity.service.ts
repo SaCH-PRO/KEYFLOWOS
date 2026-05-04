@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
 
@@ -605,6 +605,93 @@ export class IdentityService {
     return user;
   }
 
+  /**
+   * Migrate an existing local User row from `oldId` to the new Supabase auth id
+   * `input.userId`, in a single transaction.
+   *
+   * Why this exists: Supabase auth.users.id is the source of truth — every
+   * subsequent authenticated request will arrive with the Supabase id, so the
+   * local row's primary key must match it. We can't simply `UPDATE users SET
+   * id = …` because Postgres FKs in this schema are not declared
+   * `ON UPDATE CASCADE` and the unique-email constraint blocks creating a
+   * second row with the same email. We therefore: (1) park the old user under
+   * a placeholder email to free the unique-email slot, (2) create the new
+   * user with the desired id and original email, (3) re-point all child
+   * references (FK and non-FK), (4) delete the parked row.
+   */
+  private async reconcileUserId(
+    oldId: string,
+    input: {
+      userId: string;
+      email: string;
+      username?: string;
+      name?: string;
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+      avatarUrl?: string;
+    },
+  ) {
+    const newId = input.userId;
+    const desiredName = input.username ?? input.name;
+    this.logger.warn(
+      `Reconciling User id ${oldId} -> ${newId} for email=${input.email} (Supabase auth id changed).`,
+    );
+
+    try {
+      return await this.prisma.client.$transaction(async (tx) => {
+        const placeholderEmail = `__migrated_${oldId}_${Date.now()}@local.invalid`;
+        const oldUser = await tx.user.update({
+          where: { id: oldId },
+          data: { email: placeholderEmail },
+        });
+
+        const newUser = await tx.user.create({
+          data: {
+            id: newId,
+            email: input.email,
+            name: oldUser.name ?? desiredName?.trim() ?? input.email,
+            role: oldUser.role ?? 'USER',
+            firstName: oldUser.firstName ?? input.firstName?.trim() ?? null,
+            lastName: oldUser.lastName ?? input.lastName?.trim() ?? null,
+            phone: oldUser.phone ?? input.phone?.trim() ?? null,
+            avatarUrl: oldUser.avatarUrl ?? input.avatarUrl?.trim() ?? null,
+          },
+        });
+
+        // FK references to User.id (must be re-pointed before old user delete).
+        // These match the relations declared in packages/db/prisma/schema.prisma:
+        // Membership.userId, Session.userId, AiExecutionLog.userId,
+        // AiApprovalItem.userId, AiApprovalItem.resolvedByUserId, AiPlan.userId.
+        await tx.membership.updateMany({ where: { userId: oldId }, data: { userId: newId } });
+        await tx.session.updateMany({ where: { userId: oldId }, data: { userId: newId } });
+        await tx.aiExecutionLog.updateMany({ where: { userId: oldId }, data: { userId: newId } });
+        await tx.aiApprovalItem.updateMany({ where: { userId: oldId }, data: { userId: newId } });
+        await tx.aiApprovalItem.updateMany({
+          where: { resolvedByUserId: oldId },
+          data: { resolvedByUserId: newId },
+        });
+        await tx.aiPlan.updateMany({ where: { userId: oldId }, data: { userId: newId } });
+
+        // Non-FK references (no constraint declared in schema, but data
+        // integrity still matters): Business.ownerId, TeamActivityLog.userId.
+        await tx.business.updateMany({ where: { ownerId: oldId }, data: { ownerId: newId } });
+        await tx.teamActivityLog.updateMany({ where: { userId: oldId }, data: { userId: newId } });
+
+        await tx.user.delete({ where: { id: oldId } });
+        return newUser;
+      });
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'P2002') {
+        throw new ConflictException(
+          'A user with this email already exists and could not be reconciled. Please contact support.',
+        );
+      }
+      throw err;
+    }
+  }
+
   async bootstrapUser(input: {
     userId: string;
     email: string;
@@ -650,21 +737,48 @@ export class IdentityService {
         user = existingUser;
       }
     } else {
-      const userData: Record<string, unknown> = {};
-      if (input.firstName) userData.firstName = input.firstName.trim();
-      if (input.lastName) userData.lastName = input.lastName.trim();
-      if (input.phone) userData.phone = input.phone.trim();
-      if (input.avatarUrl) userData.avatarUrl = input.avatarUrl.trim();
-
-      user = await this.prisma.client.user.create({
-        data: {
-          id: input.userId,
-          email: input.email,
-          name: desiredName?.trim() ?? input.email,
-          role: 'USER',
-          ...userData,
-        },
+      // Look up by email before creating, to handle the case where a local User
+      // row already exists under a different id (e.g. earlier email/password
+      // signup, or a Supabase user that was recreated with a different id).
+      // Without this, the prisma.user.create below would crash with a
+      // "Unique constraint failed on (email)" 500 and the OAuth callback page
+      // would render "Internal Server Error". See task #308.
+      const collidingByEmail = await this.prisma.client.user.findUnique({
+        where: { email: input.email },
       });
+
+      if (collidingByEmail && collidingByEmail.id !== input.userId) {
+        user = await this.reconcileUserId(collidingByEmail.id, input);
+      } else {
+        const userData: Record<string, unknown> = {};
+        if (input.firstName) userData.firstName = input.firstName.trim();
+        if (input.lastName) userData.lastName = input.lastName.trim();
+        if (input.phone) userData.phone = input.phone.trim();
+        if (input.avatarUrl) userData.avatarUrl = input.avatarUrl.trim();
+
+        try {
+          user = await this.prisma.client.user.create({
+            data: {
+              id: input.userId,
+              email: input.email,
+              name: desiredName?.trim() ?? input.email,
+              role: 'USER',
+              ...userData,
+            },
+          });
+        } catch (err) {
+          // Defence-in-depth: if a race created a colliding row between the
+          // findUnique above and the create here, surface a clean 409 instead
+          // of an opaque Prisma 500.
+          const code = (err as { code?: string })?.code;
+          if (code === 'P2002') {
+            throw new ConflictException(
+              'A user with this email already exists. Please contact support to reconcile your account.',
+            );
+          }
+          throw err;
+        }
+      }
     }
 
     const existingBusiness = await this.prisma.client.business.findFirst({

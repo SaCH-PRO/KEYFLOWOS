@@ -136,3 +136,52 @@ pure helpers in node):
 4. Trust-proxy is set in `app-bootstrap.ts` from `TRUST_PROXY` so
    `req.ip` is correct behind the load balancer; the rate limiter
    depends on this.
+
+## Google OAuth (Supabase)
+
+The Google sign-in button at `apps/web/src/app/auth/login/page.tsx`
+redirects the browser to
+`${NEXT_PUBLIC_SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${NEXT_PUBLIC_SITE_URL}/auth/callback`.
+Supabase performs the OAuth handshake with Google and bounces the
+browser back to `<SITE_URL>/auth/callback#access_token=…`. The callback
+page at `apps/web/src/app/auth/callback/page.tsx` reads the access
+token from the URL fragment, calls Supabase `/auth/v1/user` to enrich
+profile fields, then `POST`s `/identity/bootstrap` against our NestJS
+API with `Authorization: Bearer <supabase token>`. `AuthMiddleware`
+verifies the token via `SupabaseAuthService`, attaches `{ id, email,
+role }` to the request, and `IdentityService.bootstrapUser` either
+reuses the local `User` row, reconciles a row that already exists with
+the same email under a different id (see task #308 —
+`reconcileUserId`), or creates a fresh row, then ensures a default
+`Business` + `Membership` exist.
+
+### Required dashboard configuration
+
+Both registrations must be in place or the handshake breaks before our
+code ever runs. None of these are secrets, only URIs.
+
+| Where | Setting | Value |
+|-------|---------|-------|
+| Google Cloud Console → OAuth 2.0 Client | Authorized redirect URI | `<SUPABASE_URL>/auth/v1/callback` |
+| Supabase → Authentication → URL Configuration | Site URL | `<NEXT_PUBLIC_SITE_URL>` |
+| Supabase → Authentication → URL Configuration | Additional redirect URLs | `<NEXT_PUBLIC_SITE_URL>/auth/callback` |
+| Supabase → Authentication → Providers → Google | Enabled + client id/secret from Google Cloud | (managed in dashboard) |
+
+### Required env var names (values live in Replit Secrets)
+
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `NEXT_PUBLIC_SITE_URL` — used by the browser for the redirect and
+  the Supabase user-info call.
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — used server-side by
+  `SupabaseAuthService` to verify tokens.
+
+### Failure modes worth knowing
+
+- `400 redirect_uri_mismatch` from Google ⇒ the Cloud Console redirect
+  URI does not exactly match `<SUPABASE_URL>/auth/v1/callback`.
+- Callback page renders "Internal Server Error" after "Signing you
+  in…" ⇒ historically this was the email-collision 500 fixed in task
+  #308 (`bootstrapUser` now reconciles by email before creating).
+- `AuthMiddleware` log `Token provided but Supabase verification
+  failed` ⇒ the access token is expired or signed by a different
+  Supabase project than `SUPABASE_URL` points at.
