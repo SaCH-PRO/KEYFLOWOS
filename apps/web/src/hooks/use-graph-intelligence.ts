@@ -53,7 +53,8 @@ export function useGraphIntelligence({ businessId, module, enabled = true }: Use
 
   const visibleRecs = recommendations.filter((r) => !dismissed.has(r.id));
 
-  const moduleCoverage = coverage?.modules.find((m) => m.module === module) ?? null;
+  const moduleCoverage =
+    coverage?.modules?.find((m) => m.module === module) ?? null;
 
   return {
     recommendations: visibleRecs,

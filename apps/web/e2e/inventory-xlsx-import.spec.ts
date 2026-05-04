@@ -203,12 +203,27 @@ test.describe("Inventory → Spreadsheets → Excel import wizard", () => {
     });
 
     // ---- Drive the UI ----
-    await page.goto("/app/marketplace");
+    // Inventory now lives under the Revenue/Commerce workspace, behind the
+    // "Inventory" mode tab. The InventoryCommandCenter inside renders the
+    // "Spreadsheets" sub-tab as a plain <button>.
+    await page.goto("/app/commerce");
 
-    // Outer marketplace tabs are rendered as role="tab"; inner inventory
-    // sub-tabs ("Overview", "Spreadsheets", ...) are plain <button>s.
-    await page.getByRole("tab", { name: /^Inventory$/ }).click();
-    await page.getByRole("button", { name: /^Spreadsheets$/ }).click();
+    // The Revenue shell mounts in a couple of stages — the WorkspaceShell tab
+    // bar gets re-rendered as billing/intelligence hooks resolve, which can
+    // detach the underlying button mid-click. Wait for the network to settle,
+    // then retry the click against a fresh element handle.
+    await page.waitForLoadState("networkidle");
+    const inventoryTab = page.getByRole("tab", { name: /^Inventory$/ });
+    await expect(inventoryTab).toBeVisible();
+    // The WorkspaceShell uses a Framer Motion `layoutId` indicator that briefly
+    // animates the tab bar after each click, which Playwright's stability
+    // check sees as the element being detached. Bypass with a forced click.
+    // dispatchEvent doesn't require the element to remain attached during the
+    // click — it just fires a synthetic event on the current handle.
+    await inventoryTab.dispatchEvent("click");
+    await page
+      .getByRole("button", { name: /^Spreadsheets$/ })
+      .dispatchEvent("click");
 
     await expect(
       page.getByRole("heading", { name: "Excel Import / Export" }),

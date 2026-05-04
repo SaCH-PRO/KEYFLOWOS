@@ -30,10 +30,32 @@ const userCache = {
 };
 
 /**
- * Seed localStorage so the `/app/*` layout treats the visitor as a signed-in,
+ * Seed localStorage AND the `kf_token` cookie so both the Next.js edge
+ * proxy (`apps/web/src/proxy.ts`, which gates `/app/*` on cookie presence)
+ * AND the in-page `<RequireAuth>` provider (which reads the token out of
+ * localStorage to call `/identity/me`) treat the visitor as a signed-in,
  * onboarded user with an active workspace. Must be called before navigation.
+ *
+ * Without the cookie the edge proxy redirects every `/app/*` request to
+ * `/auth/login` before the page hydrates, so localStorage alone is not
+ * enough — that was the cause of the e2e suite flaking out wholesale.
  */
 export async function seedWorkspace(context: BrowserContext): Promise<void> {
+  // The Playwright base URL may be http://localhost:<port> or a Replit
+  // preview domain; addCookies needs an explicit URL list rather than a
+  // bare domain so the cookie is scoped correctly for whatever host the
+  // tests are running against.
+  const baseURL =
+    process.env.E2E_BASE_URL ?? `http://localhost:${process.env.E2E_PORT ?? 5000}`;
+  await context.addCookies([
+    {
+      name: "kf_token",
+      value: TEST_TOKEN,
+      url: baseURL,
+      sameSite: "Lax",
+    },
+  ]);
+
   await context.addInitScript(
     ({ token, businessId, business, user }) => {
       try {
@@ -94,8 +116,10 @@ export async function mockBaseLayout(
     }),
   );
 
+  // The fetch wrapper appends a `?_t=…` cache-buster to every GET, so the
+  // pattern needs the trailing `**` to match the full URL.
   await page.route(
-    `**/identity/businesses/${TEST_BUSINESS_ID}`,
+    `**/identity/businesses/${TEST_BUSINESS_ID}**`,
     (route: Route) =>
       route.fulfill({
         status: 200,
@@ -126,11 +150,15 @@ export async function mockBaseLayout(
 }
 
 /**
- * Generic catch-all so anything we forgot to mock returns 200 + empty array
- * rather than a network failure that surfaces a toast.
+ * Generic catch-all so anything we forgot to mock returns 200 + an empty
+ * payload rather than a network failure (which would surface a toast or, worse,
+ * cause `<RequireAuth>` to bounce the user back to /auth/login on a 401).
+ *
+ * Covers BOTH the historical `api.test.local` host AND the dev-time
+ * same-origin `/__api/*` proxy path.
  */
 export async function mockCatchAll(page: Page): Promise<void> {
-  await page.route("**/api.test.local/**", async (route: Route) => {
+  const handler = async (route: Route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({
         status: 200,
@@ -144,5 +172,7 @@ export async function mockCatchAll(page: Page): Promise<void> {
         body: "{}",
       });
     }
-  });
+  };
+  await page.route("**/api.test.local/**", handler);
+  await page.route("**/__api/**", handler);
 }
