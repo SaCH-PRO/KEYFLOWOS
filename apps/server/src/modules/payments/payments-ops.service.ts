@@ -12,6 +12,7 @@ import {
   RefundInput,
   RefundResult,
 } from '../../core/connectors/payment-gateway.interface';
+import { CurrencyRatesService } from './currency-rates.service';
 
 export type GatewayId = 'stripe' | 'paypal' | 'wipay';
 
@@ -26,25 +27,6 @@ export interface MergedTransaction extends PaymentGatewayTransaction {
   amountTtd: number | null;
 }
 
-const FX_TO_TTD: Record<string, number> = {
-  TTD: 1,
-  USD: 6.78,
-  EUR: 7.4,
-  GBP: 8.6,
-  CAD: 5.0,
-  AUD: 4.5,
-  JMD: 0.043,
-  BBD: 3.39,
-  XCD: 2.51,
-  GYD: 0.032,
-};
-
-function toTtd(amount: number, currency: string): number | null {
-  const rate = FX_TO_TTD[currency.toUpperCase()];
-  if (!rate) return null;
-  return Math.round(amount * rate * 100) / 100;
-}
-
 @Injectable()
 export class PaymentsOpsService {
   private readonly logger = new Logger(PaymentsOpsService.name);
@@ -54,6 +36,7 @@ export class PaymentsOpsService {
     @Inject(StripeConnector) private readonly stripe: StripeConnector,
     @Inject(PayPalConnector) private readonly paypal: PayPalConnector,
     @Inject(WiPayConnector) private readonly wipay: WiPayConnector,
+    @Inject(CurrencyRatesService) private readonly fx: CurrencyRatesService,
   ) {}
 
   private getGateway(id: GatewayId): IPaymentGatewayConnector {
@@ -99,7 +82,14 @@ export class PaymentsOpsService {
     const results = await Promise.all(tasks);
     const merged = results.flat();
     merged.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-    return merged.slice(0, limit).map((t) => ({ ...t, amountTtd: toTtd(t.amount, t.currency) }));
+    const top = merged.slice(0, limit);
+    const converted = await Promise.all(
+      top.map(async (t) => ({
+        ...t,
+        amountTtd: await this.fx.toTtd(t.amount, t.currency),
+      })),
+    );
+    return converted;
   }
 
   async createPaymentLink(
