@@ -112,12 +112,15 @@ export default function AccountingPage() {
 
   useEffect(() => {
     if (!businessId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration of accounting summary
     void loadSummary();
   }, [businessId, loadSummary]);
 
   useEffect(() => {
     if (!businessId || !summary?.connected) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration of tab data when active tab changes
     if (activeTab === "invoices") void loadInvoices();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration of tab data when active tab changes
     if (activeTab === "accounts") void loadAccounts();
   }, [businessId, activeTab, summary?.connected, loadInvoices, loadAccounts]);
 

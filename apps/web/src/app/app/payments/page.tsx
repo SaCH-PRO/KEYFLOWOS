@@ -163,7 +163,7 @@ export default function PaymentsPage() {
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <AlertCircle className="h-4 w-4" />
           <span>
-            {disconnectedGateways.map((g) => g.name).join(", ")} not connected — activity from {disconnectedGateways.length === 1 ? "this provider" : "these providers"} won't appear.
+            {disconnectedGateways.map((g) => g.name).join(", ")} not connected — activity from {disconnectedGateways.length === 1 ? "this provider" : "these providers"} won&apos;t appear.
           </span>
           <Link href="/app/connect" className="ml-auto inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-amber-800 hover:bg-amber-100">
             <Plug className="h-3 w-3" /> Open Connect

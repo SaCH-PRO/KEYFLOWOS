@@ -131,6 +131,7 @@ function GoogleFormsTab({ businessId }: { businessId: string }) {
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration via load() callback
     load();
   }, [load]);
 
@@ -363,6 +364,7 @@ function ConnectorFormsTab({
   }, [businessId, source]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration plus view reset on source change
     load();
     setSelected(null);
     setView("list");

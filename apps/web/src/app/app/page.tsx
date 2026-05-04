@@ -1,15 +1,5 @@
-"use client";
-
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { ListPageSkeleton } from "@/components/ui/skeleton";
+import { redirect } from "next/navigation";
 
 export default function CommandPage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.replace("/app/keyflow-command");
-  }, [router]);
-
-  return <ListPageSkeleton />;
+  redirect("/app/keyflow-command");
 }

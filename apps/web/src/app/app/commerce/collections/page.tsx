@@ -1,20 +1,11 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-
-export default function CollectionsPage() {
-  const router = useRouter();
-  const params = useSearchParams();
-
-  useEffect(() => {
-    const sub = params.get("tab") || "payments";
-    router.replace(`/app/commerce?tab=${encodeURIComponent(sub)}&surface=collections`);
-  }, [router, params]);
-
-  return (
-    <div className="p-6 text-sm text-muted-foreground">
-      Opening Collections (customer payments)…
-    </div>
-  );
+export default async function CollectionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab } = await searchParams;
+  const sub = tab || "payments";
+  redirect(`/app/commerce?tab=${encodeURIComponent(sub)}&surface=collections`);
 }

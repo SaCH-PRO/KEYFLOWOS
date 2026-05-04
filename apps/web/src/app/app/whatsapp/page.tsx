@@ -89,6 +89,7 @@ export default function WhatsAppInboxPage() {
   const [newContactId, setNewContactId] = useState<string>("");
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only storage hydration on mount
     setBusinessId(getStoredBusinessId());
   }, []);
 
@@ -107,6 +108,7 @@ export default function WhatsAppInboxPage() {
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration via loadAll() callback
     void loadAll();
   }, [loadAll]);
 
@@ -117,6 +119,7 @@ export default function WhatsAppInboxPage() {
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration when active conversation changes
     if (activeId) void loadConversation(activeId);
   }, [activeId, loadConversation]);
 
@@ -130,6 +133,7 @@ export default function WhatsAppInboxPage() {
   const tpl = useMemo(() => templates.find((t) => t.name === selectedTemplate), [templates, selectedTemplate]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derive template param slots when selected template changes
     if (tpl) setTemplateParams(Array.from({ length: tpl.variableCount }, () => ""));
     else setTemplateParams([]);
   }, [tpl]);
