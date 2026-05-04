@@ -5,9 +5,10 @@ import { SeoGoogleAnalyticsService } from './seo-ga4.service';
 import { SeoContentService } from './seo-content.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { SeoAdminGuard } from './seo-admin.guard';
 
 @Controller('seo')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, SeoAdminGuard, BusinessGuard)
 export class SeoController {
   constructor(
     @Inject(SeoService) private readonly seo: SeoService,
