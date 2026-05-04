@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useCompose } from "@/components/email/compose-context";
 import { motion } from "framer-motion";
 import {
   MessageSquare,
@@ -202,7 +201,6 @@ export function TimelineTabPanel({
   onAddNote, onAddTask,
 }: TimelineTabPanelProps) {
   void _journeyMilestones;
-  const compose = useCompose();
   const [expanded, setExpanded] = useState(false);
   const [filter, setFilter] = useState<ModuleFilter>("all");
   const [limit, setLimit] = useState(25);
@@ -236,15 +234,6 @@ export function TimelineTabPanel({
   const handleShareWa = (text: string) => {
     if (!waPhone) return;
     window.open(buildWhatsAppLink(waPhone, text), "_blank");
-  };
-
-  const handleShareEmail = (text: string) => {
-    if (!contact.email) return;
-    compose.open({
-      to: contact.email,
-      subject: `Following up — ${contact.firstName || "contact"}`,
-      body: `<p>${text.replace(/\n/g, "<br/>")}</p>`,
-    });
   };
 
   const entries = useMemo<UnifiedEntry[]>(() => {
@@ -574,11 +563,6 @@ export function TimelineTabPanel({
                 <MessageCircle className="w-3 h-3 text-emerald-500" />
               </button>
             )}
-            {contact.email && (
-              <button onClick={() => handleShareEmail(label)} className="p-1 rounded-md hover:bg-blue-500/10 transition-colors" title="Share via Email">
-                <Mail className="w-3 h-3 text-blue-400" />
-              </button>
-            )}
             {entry.ctaLabel && entry.ctaHref && (
               <a href={entry.ctaHref} className="ml-1 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20">
                 <ExternalLink className="w-2.5 h-2.5" />
@@ -633,11 +617,6 @@ export function TimelineTabPanel({
               {waPhone && (
                 <button onClick={() => handleShareWa(aiInsight.suggestedMessage!)} className="p-1 rounded-md hover:bg-emerald-500/10" title="Send via WhatsApp">
                   <MessageCircle className="w-3 h-3 text-emerald-500" />
-                </button>
-              )}
-              {contact.email && (
-                <button onClick={() => handleShareEmail(aiInsight.suggestedMessage!)} className="p-1 rounded-md hover:bg-blue-500/10" title="Send via Email">
-                  <Mail className="w-3 h-3 text-blue-400" />
                 </button>
               )}
             </div>
@@ -709,11 +688,6 @@ export function TimelineTabPanel({
               {waPhone && (
                 <button onClick={() => handleShareWa(conversationContext.suggestedOpening!)} className="p-1 rounded-md hover:bg-emerald-500/10" title="Send via WhatsApp">
                   <MessageCircle className="w-3 h-3 text-emerald-500" />
-                </button>
-              )}
-              {contact.email && (
-                <button onClick={() => handleShareEmail(conversationContext.suggestedOpening!)} className="p-1 rounded-md hover:bg-blue-500/10" title="Send via Email">
-                  <Mail className="w-3 h-3 text-blue-400" />
                 </button>
               )}
             </div>

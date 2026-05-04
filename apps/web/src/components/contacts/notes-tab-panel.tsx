@@ -1,14 +1,12 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useCompose } from "@/components/email/compose-context";
 import { toast } from "sonner";
 import {
   Plus,
   Search,
   Copy,
   MessageCircle,
-  Mail,
   Pin,
   PinOff,
   ListPlus,
@@ -39,7 +37,6 @@ interface NotesTabPanelProps {
 }
 
 export function NotesTabPanel({ contact, notes, onAddNote, onAddTask, onDeleteNote, onUpdateNote }: NotesTabPanelProps) {
-  const compose = useCompose();
   const [newNote, setNewNote] = useState("");
   const [noteCategory, setNoteCategory] = useState<NoteCategory>("general");
   const [composerOpen, setComposerOpen] = useState(false);
@@ -121,15 +118,6 @@ export function NotesTabPanel({ contact, notes, onAddNote, onAddTask, onDeleteNo
   const handleShareWhatsApp = (body: string) => {
     if (!waPhone) return;
     window.open(buildWhatsAppLink(waPhone, body), "_blank");
-  };
-
-  const handleShareEmail = (body: string) => {
-    if (!contact.email) return;
-    compose.open({
-      to: contact.email,
-      subject: `Note re: ${contact.firstName || "contact"}`,
-      body: `<p>${body.replace(/\n/g, "<br/>")}</p>`,
-    });
   };
 
   const handleCreateTaskFromNote = async (noteId: string, body: string) => {
@@ -382,11 +370,6 @@ export function NotesTabPanel({ contact, notes, onAddNote, onAddTask, onDeleteNo
                       {waPhone && (
                         <button onClick={() => handleShareWhatsApp(note.body)} className="p-1.5 rounded-md hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
                           <MessageCircle className="w-3.5 h-3.5 text-emerald-500" />
-                        </button>
-                      )}
-                      {contact.email && (
-                        <button onClick={() => handleShareEmail(note.body)} className="p-1.5 rounded-md hover:bg-blue-500/10 transition-colors" title="Share via Email">
-                          <Mail className="w-3.5 h-3.5 text-blue-400" />
                         </button>
                       )}
                       {onAddTask && (
