@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Plus,
   Link2Off,
+  CalendarPlus,
 } from "lucide-react";
 import { fetchKeyflowEvents, type KeyflowEvent, type KeyflowEventKind } from "@/lib/client";
 import { apiGet } from "@/lib/api";
@@ -140,8 +141,14 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
     };
   }, [businessId, reloadKey]);
 
-  const openCreateDrawer = () => {
-    setDrawerInitial({});
+  const openCreateDrawer = (opts?: { allDay?: boolean; date?: Date }) => {
+    if (opts?.allDay) {
+      const d = opts.date ?? new Date();
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      setDrawerInitial({ allDay: true, start: dateStr, end: dateStr });
+    } else {
+      setDrawerInitial({});
+    }
     setDrawerOpen(true);
   };
 
@@ -309,7 +316,7 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
             </button>
           </div>
           <button
-            onClick={openCreateDrawer}
+            onClick={() => openCreateDrawer()}
             disabled={!calendarConnected}
             className="inline-flex items-center gap-1 px-2.5 min-h-[36px] text-xs font-medium rounded-lg kf-btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
             title={
@@ -320,6 +327,19 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
           >
             <Plus className="w-3.5 h-3.5" />
             New event
+          </button>
+          <button
+            onClick={() => openCreateDrawer({ allDay: true })}
+            disabled={!calendarConnected}
+            className="inline-flex items-center gap-1 px-2.5 min-h-[36px] text-xs font-medium rounded-lg kf-btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+            title={
+              calendarConnected
+                ? "Create a new all-day event (e.g. vacation)"
+                : "Connect Google Calendar to create events"
+            }
+          >
+            <CalendarPlus className="w-3.5 h-3.5" />
+            All-day
           </button>
         </div>
       </div>
@@ -406,11 +426,21 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
               const today = isSameDay(day, new Date());
               return (
                 <div key={key} className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <div
-                      className={`text-xs font-semibold ${
+                  <div className="flex items-center justify-between group/header">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        calendarConnected && openCreateDrawer({ allDay: true, date: day })
+                      }
+                      disabled={!calendarConnected}
+                      title={
+                        calendarConnected
+                          ? "Create an all-day event on this day"
+                          : "Connect Google Calendar to create events"
+                      }
+                      className={`text-xs font-semibold text-left rounded px-1 -mx-1 transition-colors ${
                         today ? "" : "text-muted-foreground"
-                      }`}
+                      } ${calendarConnected ? "hover:bg-muted/40 cursor-pointer" : "cursor-default"}`}
                       style={today ? { color: "hsl(var(--kf-accent1))" } : undefined}
                     >
                       {day.toLocaleDateString("en-US", {
@@ -429,7 +459,10 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
                           TODAY
                         </span>
                       )}
-                    </div>
+                      {calendarConnected && (
+                        <Plus className="inline-block w-3 h-3 ml-1.5 opacity-0 group-hover/header:opacity-60" />
+                      )}
+                    </button>
                     <span className="text-[10px] text-muted-foreground">
                       {dayEvents.length} item{dayEvents.length === 1 ? "" : "s"}
                     </span>
