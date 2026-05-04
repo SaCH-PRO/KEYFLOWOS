@@ -13,6 +13,11 @@ import {
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GoogleFormsService } from './google-forms.service';
+import {
+  GoogleFormsMappingService,
+  FieldMappingEntry,
+  OpportunityDefaults,
+} from './google-forms-mapping.service';
 import { GoogleContactsSyncService } from './google-contacts-sync.service';
 import { GoogleBusinessProfileService } from './google-business-profile.service';
 import { GoogleMapsService } from './google-maps.service';
@@ -22,6 +27,7 @@ import { GoogleMapsService } from './google-maps.service';
 export class ConnectController {
   constructor(
     @Inject(GoogleFormsService) private readonly forms: GoogleFormsService,
+    @Inject(GoogleFormsMappingService) private readonly formsMapping: GoogleFormsMappingService,
     @Inject(GoogleContactsSyncService) private readonly contacts: GoogleContactsSyncService,
     @Inject(GoogleBusinessProfileService) private readonly bp: GoogleBusinessProfileService,
     @Inject(GoogleMapsService) private readonly maps: GoogleMapsService,
@@ -61,6 +67,64 @@ export class ConnectController {
   @Delete('businesses/:businessId/forms/:formId')
   deleteForm(@Param('businessId') businessId: string, @Param('formId') formId: string) {
     return this.forms.deleteForm(businessId, formId);
+  }
+
+  // ----- Form → CRM Mapping -----
+  @Get('businesses/:businessId/forms/:formId/mapping')
+  getFormMapping(
+    @Param('businessId') businessId: string,
+    @Param('formId') formId: string,
+  ) {
+    return this.formsMapping.getMapping(businessId, formId);
+  }
+
+  @Post('businesses/:businessId/forms/:formId/mapping')
+  saveFormMapping(
+    @Param('businessId') businessId: string,
+    @Param('formId') formId: string,
+    @Body()
+    body: {
+      formTitle?: string;
+      fieldMappings: FieldMappingEntry[];
+      opportunityDefaults?: OpportunityDefaults | null;
+      autoCreate?: boolean;
+    },
+  ) {
+    if (!Array.isArray(body?.fieldMappings)) {
+      throw new BadRequestException('fieldMappings array is required');
+    }
+    return this.formsMapping.saveMapping({
+      businessId,
+      formId,
+      formTitle: body.formTitle,
+      fieldMappings: body.fieldMappings,
+      opportunityDefaults: body.opportunityDefaults ?? null,
+      autoCreate: body.autoCreate,
+    });
+  }
+
+  @Delete('businesses/:businessId/forms/:formId/mapping')
+  deleteFormMapping(
+    @Param('businessId') businessId: string,
+    @Param('formId') formId: string,
+  ) {
+    return this.formsMapping.deleteMapping(businessId, formId);
+  }
+
+  @Post('businesses/:businessId/forms/:formId/backfill')
+  backfillFormResponses(
+    @Param('businessId') businessId: string,
+    @Param('formId') formId: string,
+  ) {
+    return this.formsMapping.backfill(businessId, formId);
+  }
+
+  @Post('businesses/:businessId/forms/:formId/process-new')
+  processNewFormResponses(
+    @Param('businessId') businessId: string,
+    @Param('formId') formId: string,
+  ) {
+    return this.formsMapping.processNewResponses(businessId, formId);
   }
 
   // ----- Contacts -----
