@@ -13,6 +13,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1041.0",
     "@keyflow/api": "workspace:*",
     "@keyflow/db": "workspace:*",
+    "@keyflow/shared": "workspace:*",
     "@nestjs/common": "^11.1.19",
     "@nestjs/core": "^11.1.19",
     "@nestjs/event-emitter": "^3.1.0",

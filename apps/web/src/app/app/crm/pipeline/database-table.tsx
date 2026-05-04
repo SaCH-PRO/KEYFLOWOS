@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { LocalContact } from "@/lib/contacts-db";
 import type { SortField, SortDir, ColumnDef } from "./hooks/use-database-state";
+import { getContactAgeGroupLabel } from "@/lib/crm-constants";
 
 const STATUS_COLORS: Record<string, string> = {
   LEAD: "bg-amber-500/15 text-amber-400 border-amber-500/20",
@@ -85,6 +86,7 @@ function getCellValue(contact: LocalContact, key: string): string {
     case "status": return contact.status ?? "";
     case "companyName": return contact.companyName ?? "";
     case "jobTitle": return contact.jobTitle ?? "";
+    case "ageGroup": return getContactAgeGroupLabel(contact.ageGroup) ?? "";
     case "city": return contact.city ?? "";
     case "country": return contact.country ?? "";
     case "source": return contact.source ?? "";

@@ -56,6 +56,7 @@ const contactSchema = z.object({
   marketingOptIn: z.boolean().nullable().optional(),
   doNotContact: z.boolean().nullable().optional(),
   notesInternal: z.string().nullable().optional(),
+  ageGroup: z.string().nullable().optional(),
   createdAt: z.string().nullable().optional(),
   updatedAt: z.string().nullable().optional(),
   meta: contactMetaSchema.optional(),
@@ -563,6 +564,7 @@ export async function createContact(input: {
   timezone?: string;
   marketingOptIn?: boolean;
   doNotContact?: boolean;
+  ageGroup?: string | null;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const body = {
@@ -596,6 +598,7 @@ export async function createContact(input: {
     timezone: input.timezone,
     marketingOptIn: input.marketingOptIn,
     doNotContact: input.doNotContact,
+    ageGroup: input.ageGroup,
   };
 
   const res = await apiPost<Contact>({
@@ -1040,6 +1043,7 @@ export async function updateContact(input: {
   timezone?: string;
   marketingOptIn?: boolean;
   doNotContact?: boolean;
+  ageGroup?: string | null;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPatch<Contact>(
