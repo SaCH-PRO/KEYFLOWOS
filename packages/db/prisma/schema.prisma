@@ -306,9 +306,6 @@ model Business {
   bpAccountId     String?   @map("bp_account_id")
   bpLocationId    String?   @map("bp_location_id")
 
-  // Google Maps / Places API key (separate from OAuth)
-  googleMapsApiKey String? @map("google_maps_api_key")
-
   // Unified Google account preference (single email across services)
   googleSuiteEmail String? @map("google_suite_email")
 

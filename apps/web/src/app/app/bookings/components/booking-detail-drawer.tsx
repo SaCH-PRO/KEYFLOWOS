@@ -30,8 +30,6 @@ import { STATUS_STYLE, formatTime, formatFullDate, contactName } from "./booking
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 import Link from "next/link";
 import { googleDeepLinks } from "@/lib/google-deep-links";
-import { BusinessAddressAutocomplete } from "@/components/ui/business-address-autocomplete";
-import { getStoredBusinessId } from "@/lib/workspace";
 
 interface BookingDetailDrawerProps {
   selectedBooking: Booking;
@@ -199,7 +197,6 @@ export default function BookingDetailDrawer({
   const [locationLatLng, setLocationLatLng] = useState<{ lat: number; lng: number } | null>(
     selectedBooking.locationLatLng ?? null,
   );
-  const businessId = getStoredBusinessId();
 
   const canReschedule = selectedBooking.status === "PENDING" || selectedBooking.status === "CONFIRMED";
   const canInvoice = selectedBooking.status === "COMPLETED" || selectedBooking.status === "CONFIRMED";
@@ -409,25 +406,16 @@ export default function BookingDetailDrawer({
             </div>
             {editingLocation && onUpdateLocation ? (
               <div className="space-y-2">
-                <BusinessAddressAutocomplete
-                  businessId={businessId}
+                <input
+                  type="text"
                   value={locationText}
-                  onChange={(v) => {
-                    setLocationText(v);
+                  onChange={(e) => {
+                    setLocationText(e.target.value);
                     setLocationPlaceId(null);
                     setLocationLatLng(null);
                   }}
-                  onSelect={(p) => {
-                    setLocationText(p.formattedAddress);
-                    setLocationPlaceId(p.placeId);
-                    if (typeof p.lat === "number" && typeof p.lng === "number") {
-                      setLocationLatLng({ lat: p.lat, lng: p.lng });
-                    } else {
-                      setLocationLatLng(null);
-                    }
-                  }}
                   placeholder="Where will this booking happen?"
-                  inputClassName="text-xs"
+                  className="kf-input w-full text-xs"
                 />
                 <div className="flex gap-1.5 justify-end">
                   <button

@@ -16,8 +16,6 @@ import {
 import type { Service, StaffMember, Contact } from "./bookings-types";
 import { formatTime } from "./bookings-types";
 import { ContactSelect } from "@/components/contacts";
-import { BusinessAddressAutocomplete } from "@/components/ui/business-address-autocomplete";
-import { getStoredBusinessId } from "@/lib/workspace";
 
 interface BookingFormProps {
   services: Service[];
@@ -99,7 +97,6 @@ export default function BookingForm({
   const [bookingLocationPlaceId, setBookingLocationPlaceId] = useState<string | undefined>(undefined);
   const [bookingLocationLatLng, setBookingLocationLatLng] = useState<{ lat: number; lng: number } | undefined>(undefined);
   const [bookingNotes, setBookingNotes] = useState("");
-  const businessId = getStoredBusinessId();
   const [weekBase, setWeekBase] = useState(() => {
     if (defaultDate) return new Date(defaultDate + "T12:00:00");
     return new Date();
@@ -413,25 +410,16 @@ export default function BookingForm({
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Location</span>
               <span className="text-[10px] text-muted-foreground/50">(optional)</span>
             </div>
-            <BusinessAddressAutocomplete
-              businessId={businessId}
+            <input
+              type="text"
               value={bookingLocation}
-              onChange={(v) => {
-                setBookingLocation(v);
+              onChange={(e) => {
+                setBookingLocation(e.target.value);
                 setBookingLocationPlaceId(undefined);
                 setBookingLocationLatLng(undefined);
               }}
-              onSelect={(p) => {
-                setBookingLocation(p.formattedAddress);
-                setBookingLocationPlaceId(p.placeId);
-                if (typeof p.lat === "number" && typeof p.lng === "number") {
-                  setBookingLocationLatLng({ lat: p.lat, lng: p.lng });
-                } else {
-                  setBookingLocationLatLng(undefined);
-                }
-              }}
               placeholder="Where will this booking happen?"
-              inputClassName="text-xs"
+              className="kf-input w-full text-xs"
             />
           </div>
 
