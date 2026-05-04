@@ -23,6 +23,7 @@ import {
   Table as TableIcon,
   Upload,
   Loader2,
+  ArrowRight,
   UserPlus,
   Sparkles,
   ChevronDown,
@@ -689,7 +690,14 @@ function AddContactControl({
             </button>
           </div>
 
-          <div className="px-5 py-3 border-t border-border/40 bg-white/[0.02] flex items-center justify-end gap-2">
+          <div className="px-5 py-3 border-t border-border/40 bg-white/[0.02] flex items-center justify-between gap-2">
+            <button
+              onClick={() => { setOpen(false); reset(); onOpenFullForm(); }}
+              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-[hsl(var(--kf-accent1))] hover:bg-white/[0.05] transition-colors"
+            >
+              Open full form
+              <ArrowRight className="w-3 h-3" />
+            </button>
             <div className="flex items-center gap-2">
               <span className="hidden sm:inline text-[10px] text-muted-foreground/50 mr-1">⌘ + ↵</span>
               <button
