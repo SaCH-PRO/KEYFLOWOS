@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
@@ -387,6 +387,11 @@ export default function DocumentDetailPage() {
   const [driveStatus, setDriveStatus] = useState<{ connected: boolean; email?: string } | null>(null);
   const [importingFromDrive, setImportingFromDrive] = useState(false);
   const [savingBackToDrive, setSavingBackToDrive] = useState(false);
+  const [autoSyncStatus, setAutoSyncStatus] = useState<"idle" | "pending" | "syncing" | "synced" | "error">("idle");
+  const [autoSyncError, setAutoSyncError] = useState<string | null>(null);
+  const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSyncInFlightRef = useRef(false);
+  const autoSyncPendingRef = useRef<DocInstance | null>(null);
 
   const loadDoc = useCallback(async () => {
     const bid = getStoredBusinessId();
@@ -416,6 +421,83 @@ export default function DocumentDetailPage() {
     }
   }, [doc?.title, setCurrentMeta]);
 
+  const runAutoSync = useCallback(async () => {
+    if (!businessId) return;
+    if (autoSyncInFlightRef.current) return;
+    const initial = autoSyncPendingRef.current;
+    if (!initial || !initial.driveFileId) return;
+
+    autoSyncInFlightRef.current = true;
+    try {
+      while (autoSyncPendingRef.current) {
+        const instance = autoSyncPendingRef.current;
+        autoSyncPendingRef.current = null;
+        if (!instance.driveFileId) continue;
+
+        setAutoSyncStatus("syncing");
+        setAutoSyncError(null);
+        try {
+          const payload = {
+            title: instance.title,
+            sections: instance.sections.map((s) => ({ sectionName: s.sectionName, content: s.content })),
+            documentType: instance.documentType.name,
+            category: instance.documentType.category.name,
+            version: instance.currentVersionNum,
+          };
+          const htmlRes = await apiPostSimple<{ html: string }>(
+            `/drive/businesses/${businessId}/export-html`,
+            payload,
+          );
+          if (!htmlRes.data?.html) {
+            throw new Error(htmlRes.error || "Could not build HTML");
+          }
+          const writeRes = await apiPatch<{ fileId: string; webViewLink?: string }>(
+            `/drive/businesses/${businessId}/files/${instance.driveFileId}/content`,
+            { html: htmlRes.data.html },
+          );
+          if (!writeRes.data) {
+            throw new Error(writeRes.error || "Failed to sync to Drive");
+          }
+          const syncedRes = await apiPatch<DocInstance>(
+            `/documents/businesses/${businessId}/instances/${instance.id}/drive-synced`,
+            {},
+          );
+          if (syncedRes.data) {
+            setDoc(syncedRes.data);
+          }
+          if (!autoSyncPendingRef.current) {
+            setAutoSyncStatus("synced");
+          }
+        } catch (err) {
+          setAutoSyncStatus("error");
+          setAutoSyncError(err instanceof Error ? err.message : "Sync failed");
+          autoSyncPendingRef.current = null;
+          break;
+        }
+      }
+    } finally {
+      autoSyncInFlightRef.current = false;
+    }
+  }, [businessId]);
+
+  const scheduleAutoSync = useCallback((instance: DocInstance) => {
+    if (!instance.driveFileId) return;
+    autoSyncPendingRef.current = instance;
+    setAutoSyncStatus("pending");
+    setAutoSyncError(null);
+    if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
+    autoSyncTimerRef.current = setTimeout(() => {
+      autoSyncTimerRef.current = null;
+      runAutoSync();
+    }, 1500);
+  }, [runAutoSync]);
+
+  useEffect(() => {
+    return () => {
+      if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
+    };
+  }, []);
+
   const handleSaveSection = async (sectionKey: string) => {
     if (!businessId || !doc) return;
     setSaving(true);
@@ -426,6 +508,9 @@ export default function DocumentDetailPage() {
       setDoc(res.data);
       setEditingSection(null);
       setStatusMsg({ type: "success", message: "Section saved" });
+      if (res.data.driveFileId) {
+        scheduleAutoSync(res.data);
+      }
     } else {
       setStatusMsg({ type: "error", message: res.error || "Failed to save" });
     }
@@ -623,6 +708,13 @@ export default function DocumentDetailPage() {
     if (res.data) {
       setDoc(res.data);
       setStatusMsg({ type: "success", message: "Unlinked from Drive" });
+      if (autoSyncTimerRef.current) {
+        clearTimeout(autoSyncTimerRef.current);
+        autoSyncTimerRef.current = null;
+      }
+      autoSyncPendingRef.current = null;
+      setAutoSyncStatus("idle");
+      setAutoSyncError(null);
     }
   };
 
@@ -775,6 +867,28 @@ export default function DocumentDetailPage() {
             {doc.driveLastSyncedAt && (
               <span className="text-xs text-[hsl(var(--muted-foreground))] truncate">
                 · Last synced {new Date(doc.driveLastSyncedAt).toLocaleString()}
+              </span>
+            )}
+            {autoSyncStatus !== "idle" && (
+              <span
+                className={
+                  "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 " +
+                  (autoSyncStatus === "synced"
+                    ? "bg-[hsl(var(--kf-success))]/15 text-[hsl(var(--kf-success))]"
+                    : autoSyncStatus === "error"
+                    ? "bg-[hsl(var(--kf-error))]/15 text-[hsl(var(--kf-error))]"
+                    : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]")
+                }
+                title={autoSyncStatus === "error" ? autoSyncError || "Sync failed" : undefined}
+              >
+                {autoSyncStatus === "syncing" && <Loader2 className="w-3 h-3 animate-spin" />}
+                {autoSyncStatus === "pending" && <Clock className="w-3 h-3" />}
+                {autoSyncStatus === "synced" && <CheckCircle2 className="w-3 h-3" />}
+                {autoSyncStatus === "error" && <AlertTriangle className="w-3 h-3" />}
+                {autoSyncStatus === "pending" && "Saving soon…"}
+                {autoSyncStatus === "syncing" && "Saving to Drive…"}
+                {autoSyncStatus === "synced" && "Saved to Drive"}
+                {autoSyncStatus === "error" && "Sync failed"}
               </span>
             )}
           </div>
