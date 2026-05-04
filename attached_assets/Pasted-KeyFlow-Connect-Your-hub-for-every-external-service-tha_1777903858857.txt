@@ -1,0 +1,189 @@
+KeyFlow Connect
+Your hub for every external service that powers your workspace.
+
+Connect your Google account
+3 active
+One sign-in unlocks Gmail, Calendar, Drive, Docs, Sheets, Forms, Contacts, Business Profile, and Maps. You can revoke individual services any time.
+
+Re-authorize Google
+Drive browser
+Files & folders
+Sheets-as-source
+Live data sync
+Forms
+Browse responses
+Contacts sync
+Pull Google People
+Calendar sync
+Direction & conflicts
+Social Composer
+Post & schedule
+Business Profile
+Reviews & posts
+G
+Google Workspace
+3/7 connected
+Gmail
+Connected
+Read & send email, manage threads, labels, archives, and trash
+
+keyflowos.tt@gmail.com
+
+Never
+Sync now
+Test
+Activity
+Reconnect
+Disconnect
+Google Calendar
+Connected
+Sync bookings and events with your Google Calendar automatically
+
+keyflowos.tt@gmail.com
+
+Never
+Two-way
+Sync now
+Test
+Activity
+Reconnect
+Disconnect
+Google Drive
+Connected
+Browse, upload, edit, and delete files; create Docs and Sheets
+
+keyflowos.tt@gmail.com
+
+Never
+Sync now
+Test
+Activity
+Reconnect
+Disconnect
+Google Forms
+Not connected
+Create forms, capture submissions, and pull responses
+
+Never
+Connect
+Google Contacts
+Not connected
+Two-way sync of customer contacts with Google Contacts
+
+Never
+Connect
+Google Business Profile
+Not connected
+Manage business locations, posts, and reviews on Google
+
+Never
+Connect
+Google Maps
+Not connected
+Address autocomplete, place lookup, and embedded maps
+
+Connect
+S
+Social
+1/4 connected
+Meta (Facebook & Instagram)
+Connected
+Publish posts and track engagement on Facebook and Instagram
+
+Sachin Dookie
+
+Never
+Sync now
+Test
+Activity
+Reconnect
+Disconnect
+LinkedIn
+Not connected
+Schedule posts, track engagement, and sync messages with LinkedIn
+
+Never
+Connect
+TikTok
+Not connected
+Schedule videos, track engagement, and sync DMs with TikTok
+
+Never
+Connect
+Twitter / X
+Not connected
+Schedule tweets, track engagement, and sync DMs with Twitter / X
+
+Never
+Connect
+M
+Messaging
+0/1 connected
+WhatsApp Business
+Not connected
+Send template messages and media via WhatsApp Business API
+
+Connect
+P
+Payments
+0/3 connected
+PayPal
+Not connected
+Accept international card payments via PayPal
+
+Connect
+WiPay
+Not connected
+Accept Caribbean payments via WiPay payment gateway
+
+Connect
+Stripe
+Not connected
+Accept global card payments and manage subscriptions via Stripe
+
+Connect
+A
+Accounting
+0/2 connected
+QuickBooks Online
+Not connected
+Sync invoices, payments, expenses, and customers with QuickBooks Online
+
+Never
+Connect
+Xero
+Not connected
+Sync invoices, payments, expenses, and contacts with Xero accounting
+
+Never
+Connect
+E
+Marketing
+0/2 connected
+Mailchimp
+Not connected
+Sync audiences, campaigns, and engagement with Mailchimp
+
+Never
+Connect
+Klaviyo
+Not connected
+Sync segments, flows, and engagement events with Klaviyo
+
+Never
+Connect
+F
+Forms & Webhooks
+0/3 connected
+Typeform
+Not connected
+Capture Typeform submissions as CRM leads
+
+Never
+Connect
+Jotform
+Not connected
+Capture Jotform submissions as CRM leads
+
+Never
+Connect
