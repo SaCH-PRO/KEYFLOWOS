@@ -39,6 +39,7 @@ export type ContactListOptions = {
   country?: string;
   segment?: string;
   doNotContact?: boolean;
+  ageGroups?: string[];
   skip?: number;
   take?: number;
   cursor?: string;
@@ -205,6 +206,9 @@ export class CrmService {
     if (input.country) where.country = { contains: input.country, mode: 'insensitive' };
     if (input.segment) where.segment = input.segment;
     if (typeof input.doNotContact === 'boolean') where.doNotContact = input.doNotContact;
+    if (input.ageGroups && input.ageGroups.length > 0) {
+      where.ageGroup = { in: input.ageGroups };
+    }
 
     const take = Math.min(input.take ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 

@@ -26,6 +26,7 @@ import type { ColumnKey } from "./hooks/use-database-state";
 import { DatabaseTable } from "./database-table";
 import { DatabaseBulkBar } from "./database-bulk-bar";
 import { ContactLists } from "./contact-lists";
+import { CONTACT_AGE_GROUPS, CONTACT_AGE_GROUP_LABELS, type ContactAgeGroup } from "@/lib/crm-constants";
 
 interface ContactsDatabaseProps {
   businessId: string;
@@ -422,6 +423,44 @@ export function ContactsDatabase({
             {db.filteredContacts.length} of {db.activeContacts.length}
             {db.usingCache && <span className="ml-1.5 text-amber-400">(cache)</span>}
           </span>
+        </div>
+
+        <div className="flex items-center gap-1.5 mb-3 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by age group">
+          <span className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider whitespace-nowrap shrink-0 pr-1">Age</span>
+          {CONTACT_AGE_GROUPS.map((g) => {
+            const isActive = db.ageGroupFilter.has(g);
+            return (
+              <button
+                key={g}
+                onClick={() => {
+                  db.setAgeGroupFilter((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(g)) next.delete(g);
+                    else next.add(g);
+                    return next;
+                  });
+                }}
+                className={`px-2 py-1 text-[11px] rounded-md transition-all inline-flex items-center gap-1 font-medium whitespace-nowrap shrink-0 ${
+                  isActive
+                    ? "bg-[hsl(var(--kf-accent1))]/15 border border-[hsl(var(--kf-accent1))]/40 text-[hsl(var(--kf-accent1))]"
+                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+                }`}
+                aria-pressed={isActive}
+              >
+                {CONTACT_AGE_GROUP_LABELS[g as ContactAgeGroup]}
+              </button>
+            );
+          })}
+          {db.ageGroupFilter.size > 0 && (
+            <button
+              onClick={() => db.setAgeGroupFilter(new Set())}
+              className="px-2 py-1 text-[11px] rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.05] inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+              aria-label="Clear age group filter"
+            >
+              <X className="w-3 h-3" />
+              Clear
+            </button>
+          )}
         </div>
 
         <DatabaseTable
