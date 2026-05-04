@@ -1,5 +1,14 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function SettingsPage() {
-  redirect("/app/settings/billing");
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/app/settings/billing");
+  }, [router]);
+
+  return null;
 }

@@ -3,17 +3,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Users, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Building2 } from "lucide-react";
+import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown } from "lucide-react";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 
 const navItems = [
   { href: "/app/settings/billing", label: "Billing", icon: Crown, description: "Subscription & usage" },
-  { href: "/app/settings/business", label: "Business", icon: Building2, description: "Payment gateways, tax, branding" },
+  { href: "/app/settings/business", label: "Payment Gateways", icon: CreditCard, description: "Customer payment methods" },
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
+  { href: "/app/connect", label: "Connect", icon: Link2, description: "Integrations hub" },
   { href: "/app/settings/notifications", label: "Notifications", icon: Bell, description: "Customer emails" },
-  { href: "/app/settings/templates", label: "Templates", icon: Palette, description: "Gallery" },
   { href: "/app/settings/webhooks", label: "Webhooks", icon: Webhook, description: "Event hooks" },
+  { href: "/app/settings/templates", label: "Templates", icon: Palette, description: "Gallery" },
   { href: "/app/settings/output-templates", label: "AI Output", icon: Sparkles, description: "AI style" },
   { href: "/app/settings/developers", label: "Developers", icon: Code2, description: "API & extensions" },
   { href: "/app/settings/ai-control", label: "AI Control", icon: Brain, description: "AI governance" },

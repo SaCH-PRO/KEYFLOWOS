@@ -37,7 +37,7 @@ export function ConnectionBanner({
   onManage,
 }: ConnectionBannerProps) {
   const { pushContext, setTaskOrigin, current } = useNavigationContext();
-  const resolvedManageHref = manageHref ?? "/app/connect";
+  const resolvedManageHref = manageHref ?? "/app/settings/connections";
 
   function handleManageClick() {
     if (current) setTaskOrigin(current);
