@@ -196,9 +196,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!open) return;
     // Refresh scope when context entities change while drawer is open.
     if (activeTab === "contact" && contact) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reflects active contact registration into scope
       setScope({ kind: "contact", id: contact.id, label: contact.label });
     } else if (activeTab === "project" && project) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reflects active project registration into scope
       setScope({ kind: "project", id: project.id, label: project.label });
     }
   }, [activeTab, contact, project, open]);
