@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { motion, AnimatePresence } from "framer-motion";
@@ -41,7 +40,6 @@ import {
   Loader2,
   CheckCircle2,
   DollarSign,
-  FileText,
 } from "lucide-react";
 
 interface BillingDashboard {
@@ -113,34 +111,12 @@ interface BillingDashboard {
   categories: Record<string, { label: string; icon: string }>;
 }
 
-interface SubscriptionPaymentRecord {
-  id: string;
-  amount: number;
-  currency: string;
-  method: string;
-  status: string;
-  reference: string | null;
-  notes: string | null;
-  periodStart: string | null;
-  periodEnd: string | null;
-  createdAt: string;
-  subscription: { plan: string; status: string };
-}
-
 const methodLabels: Record<string, string> = {
   wipay: "Card (WiPay)",
   paypal: "PayPal",
   bank_transfer: "Bank Transfer",
   cash: "Cash",
   manual: "Manual",
-};
-
-const methodIcons: Record<string, typeof CreditCard> = {
-  wipay: CreditCard,
-  paypal: Wallet,
-  bank_transfer: Banknote,
-  cash: DollarSign,
-  manual: FileText,
 };
 
 const planDetails: Record<string, { icon: typeof Zap; color: string; gradient: string; glow: string; badge: string }> = {
@@ -195,7 +171,7 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.25 } },
 };
 
-type BillingSubTab = "overview" | "usage" | "features" | "history" | "payments";
+type BillingSubTab = "overview" | "usage" | "features" | "history";
 
 export function BillingTab() {
   const [dashboard, setDashboard] = useState<BillingDashboard | null>(null);
@@ -216,9 +192,6 @@ export function BillingTab() {
   const [checkoutRef, setCheckoutRef] = useState("");
   const [checkoutNotes, setCheckoutNotes] = useState("");
   const [checkoutProcessing, setCheckoutProcessing] = useState(false);
-  const [paymentHistory, setPaymentHistory] = useState<SubscriptionPaymentRecord[]>([]);
-  const [paymentsLoaded, setPaymentsLoaded] = useState(false);
-
   const businessId = getStoredBusinessId();
 
   const loadAll = useCallback(async () => {
@@ -238,13 +211,6 @@ export function BillingTab() {
     if (res.data) setUsageHistory(res.data);
     setShowHistory(true);
   };
-
-  const loadPayments = useCallback(async () => {
-    if (!businessId) return;
-    const res = await apiGet<SubscriptionPaymentRecord[]>(`/subscriptions/businesses/${businessId}/payments`);
-    if (res.data) setPaymentHistory(Array.isArray(res.data) ? res.data : []);
-    setPaymentsLoaded(true);
-  }, [businessId]);
 
   const handleCheckoutPay = async () => {
     if (!businessId || !checkoutPlan) return;
@@ -273,7 +239,6 @@ export function BillingTab() {
       setCheckoutRef("");
       setCheckoutNotes("");
       await loadAll();
-      await loadPayments();
     }
     setCheckoutProcessing(false);
   };
@@ -361,7 +326,6 @@ export function BillingTab() {
 
   const subTabs: { key: BillingSubTab; label: string; icon: typeof Receipt }[] = [
     { key: "overview", label: "Overview", icon: Receipt },
-    { key: "payments", label: "Payments", icon: CreditCard },
     { key: "usage", label: "Usage & Limits", icon: BarChart3 },
     { key: "features", label: "Feature Access", icon: Shield },
     { key: "history", label: "AI History", icon: Activity },
@@ -406,10 +370,7 @@ export function BillingTab() {
           <p className="text-xs font-semibold">Your KeyflowOS subscription</p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
             This is what <span className="font-medium text-foreground">you</span> pay KeyflowOS for the platform.
-            For payments <span className="font-medium text-foreground">your customers</span> send you, see{" "}
-            <Link href="/app/commerce?tab=payments" className="underline" style={{ color: "hsl(var(--kf-accent1))" }}>
-              Commerce → Collections
-            </Link>.
+            Payments <span className="font-medium text-foreground">your customers</span> send you are managed separately under Commerce.
           </p>
         </div>
       </motion.div>
@@ -1092,98 +1053,6 @@ export function BillingTab() {
                       className="text-sm text-[hsl(var(--kf-accent1))] hover:opacity-80 transition-opacity flex items-center gap-1 mx-auto"
                     >
                       <Activity className="w-4 h-4" /> Load Activity Log
-                    </button>
-                  </div>
-                )}
-              </motion.div>
-            </div>
-          )}
-          {/* ========== PAYMENTS TAB ========== */}
-          {activeSubTab === "payments" && (
-            <div className="space-y-4">
-              <motion.div variants={fadeUp} className="rounded-2xl border border-border/40 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-sm font-semibold flex items-center gap-2">
-                    <Receipt className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-                    Payment History
-                  </h4>
-                  {!paymentsLoaded ? (
-                    <button
-                      onClick={loadPayments}
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-                    >
-                      Load payments <ArrowUpRight className="w-3 h-3" />
-                    </button>
-                  ) : (
-                    <button
-                      onClick={loadPayments}
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      Refresh
-                    </button>
-                  )}
-                </div>
-
-                {paymentsLoaded ? (
-                  paymentHistory.length > 0 ? (
-                    <div className="space-y-2">
-                      {paymentHistory.map((p) => {
-                        const MIcon = methodIcons[p.method] || FileText;
-                        return (
-                          <div key={p.id} className="flex items-center justify-between px-4 py-3 rounded-xl bg-muted/10 border border-border/20">
-                            <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-[hsl(var(--kf-accent1))]/10">
-                                <MIcon className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-medium">{p.subscription.plan} Plan</span>
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                                    p.status === "COMPLETED"
-                                      ? "bg-emerald-500/20 text-emerald-300"
-                                      : p.status === "PENDING"
-                                      ? "bg-amber-500/20 text-amber-300"
-                                      : "bg-red-500/20 text-red-300"
-                                  }`}>
-                                    {p.status}
-                                  </span>
-                                </div>
-                                <div className="text-[11px] text-muted-foreground flex items-center gap-2">
-                                  <span>{methodLabels[p.method] || p.method}</span>
-                                  {p.reference && <span>Ref: {p.reference}</span>}
-                                  <span>{new Date(p.createdAt).toLocaleDateString()}</span>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-sm font-bold">
-                                {p.currency === "USD" ? "US" : "TT"}${p.amount.toFixed(2)}
-                              </span>
-                              {p.periodStart && p.periodEnd && (
-                                <p className="text-[10px] text-muted-foreground">
-                                  {new Date(p.periodStart).toLocaleDateString()} - {new Date(p.periodEnd).toLocaleDateString()}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8">
-                      <Receipt className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                      <p className="text-sm text-muted-foreground">No payments recorded yet</p>
-                      <p className="text-xs text-muted-foreground mt-1">Payments will appear here when you subscribe to a plan</p>
-                    </div>
-                  )
-                ) : (
-                  <div className="text-center py-8">
-                    <button
-                      onClick={loadPayments}
-                      className="text-sm flex items-center gap-1 mx-auto hover:opacity-80 transition-opacity"
-                      style={{ color: "hsl(var(--kf-accent1))" }}
-                    >
-                      <CreditCard className="w-4 h-4" /> Load Payment History
                     </button>
                   </div>
                 )}

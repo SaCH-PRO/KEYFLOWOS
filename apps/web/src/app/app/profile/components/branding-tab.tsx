@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { Palette, Eye, Sparkles } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { InfoBadge } from "@/components/ui/info-badge";
-import { FormState } from "./use-business-settings";
+import { FormState } from "../../settings/business/use-business-settings";
 import { useThemeColors } from "@/lib/theme-context";
 
 type Props = {
