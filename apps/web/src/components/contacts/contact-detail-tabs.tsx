@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense, useState } from "react";
-import { MessageSquare, ListTodo, History, AlertCircle, Loader2, Activity, Route } from "lucide-react";
+import { MessageSquare, ListTodo, History, AlertCircle, Loader2 } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
 import type { CrossJourneyResponse } from "@/lib/client";
@@ -9,8 +9,6 @@ import type { CrossJourneyResponse } from "@/lib/client";
 const NotesTabPanel = React.lazy(() => import("./notes-tab-panel").then(m => ({ default: m.NotesTabPanel })));
 const TasksTabPanel = React.lazy(() => import("./tasks-tab-panel").then(m => ({ default: m.TasksTabPanel })));
 const TimelineTabPanel = React.lazy(() => import("./timeline-tab-panel").then(m => ({ default: m.TimelineTabPanel })));
-const ActivityTimeline = React.lazy(() => import("./activity-timeline").then(m => ({ default: m.ActivityTimeline })));
-const ContactJourneyTimeline = React.lazy(() => import("./contact-journey-timeline").then(m => ({ default: m.ContactJourneyTimeline })));
 
 class TabErrorBoundary extends React.Component<
   { children: React.ReactNode; resetKey: string },
@@ -85,6 +83,15 @@ interface ContactDetailTabsProps {
   bookings?: BookingSummary[];
 }
 
+const LEGACY_TAB_MAP: Record<string, string> = {
+  activity: "timeline",
+  journey: "timeline",
+};
+
+function normalizeTab(tab: string): string {
+  return LEGACY_TAB_MAP[tab] ?? tab;
+}
+
 export function ContactDetailTabs({
   contact, events, notes, tasks,
   activeTab, onSetActiveTab,
@@ -96,42 +103,43 @@ export function ContactDetailTabs({
   onGenerateAiInsight, onRefreshConversationContext,
   invoices = [], bookings = [],
 }: ContactDetailTabsProps) {
-  const [activatedTabs, setActivatedTabs] = useState<Set<string>>(() => new Set(["activity", activeTab]));
-  if (!activatedTabs.has(activeTab)) {
+  const normalized = normalizeTab(activeTab);
+  const [activatedTabs, setActivatedTabs] = useState<Set<string>>(() => new Set(["timeline", normalized]));
+  if (!activatedTabs.has(normalized)) {
     setActivatedTabs((prev) => {
-      if (prev.has(activeTab)) return prev;
+      if (prev.has(normalized)) return prev;
       const next = new Set(prev);
-      next.add(activeTab);
+      next.add(normalized);
       return next;
     });
   }
+
+  const timelineCount = events.length + notes.length + tasks.length + (invoices?.length ?? 0) + (bookings?.length ?? 0);
 
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex border-b border-border overflow-x-auto shrink-0" role="tablist">
         {[
-          { key: "activity", label: "Activity", icon: Activity, count: events.length + notes.length + tasks.length },
-          { key: "journey", label: "Journey", icon: Route },
+          { key: "timeline", label: "Timeline", icon: History, count: timelineCount },
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
-          { key: "timeline", label: "Timeline", icon: History, count: events.length },
         ].map(({ key, label, icon: Icon, count }) => (
           <button
             key={key}
             role="tab"
-            aria-selected={activeTab === key}
+            aria-selected={normalized === key}
             onClick={() => onSetActiveTab(key)}
             className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${
-              activeTab === key
+              normalized === key
                 ? "border-[hsl(var(--kf-accent1))] text-foreground bg-[hsl(var(--kf-accent1))]/5"
                 : "border-transparent text-muted-foreground hover:text-foreground hover:bg-white/[0.03]"
             }`}
           >
-            <Icon className={`w-3.5 h-3.5 ${activeTab === key ? "text-[hsl(var(--kf-accent1))]" : ""}`} />
+            <Icon className={`w-3.5 h-3.5 ${normalized === key ? "text-[hsl(var(--kf-accent1))]" : ""}`} />
             {label}
             {count != null && count > 0 && (
               <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
-                activeTab === key
+                normalized === key
                   ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]"
                   : "bg-muted text-muted-foreground"
               }`}>{count}</span>
@@ -142,44 +150,41 @@ export function ContactDetailTabs({
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>}>
-          {activatedTabs.has("activity") && (
-            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "activity" ? "" : "hidden"}`}>
-              <TabErrorBoundary resetKey="activity">
-                <ActivityTimeline contact={contact} events={events} notes={notes} tasks={tasks} />
-              </TabErrorBoundary>
-            </div>
-          )}
-          {activatedTabs.has("journey") && (
-            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "journey" ? "" : "hidden"}`}>
-              <TabErrorBoundary resetKey="journey">
-                <ContactJourneyTimeline contact={contact} events={events} notes={notes} tasks={tasks} invoices={invoices} bookings={bookings} crossJourney={crossJourney} />
+          {activatedTabs.has("timeline") && (
+            <div className={`space-y-3 pt-3 pb-6 ${normalized === "timeline" ? "" : "hidden"}`}>
+              <TabErrorBoundary resetKey="timeline">
+                <TimelineTabPanel
+                  contact={contact}
+                  events={events}
+                  notes={notes}
+                  tasks={tasks}
+                  invoices={invoices}
+                  bookings={bookings}
+                  crossJourney={crossJourney}
+                  healthMetrics={healthMetrics}
+                  journeyMilestones={journeyMilestones}
+                  conversationContext={conversationContext}
+                  aiInsight={aiInsight}
+                  aiInsightLoading={aiInsightLoading}
+                  onGenerateAiInsight={onGenerateAiInsight}
+                  onRefreshConversationContext={onRefreshConversationContext}
+                  onAddNote={onAddNote}
+                  onAddTask={onAddTask}
+                />
               </TabErrorBoundary>
             </div>
           )}
           {activatedTabs.has("notes") && (
-            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "notes" ? "" : "hidden"}`}>
+            <div className={`space-y-3 pt-3 pb-6 ${normalized === "notes" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="notes">
                 <NotesTabPanel contact={contact} notes={notes} onAddNote={onAddNote} onAddTask={onAddTask} onDeleteNote={onDeleteNote} onUpdateNote={onUpdateNote} />
               </TabErrorBoundary>
             </div>
           )}
           {activatedTabs.has("tasks") && (
-            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "tasks" ? "" : "hidden"}`}>
+            <div className={`space-y-3 pt-3 pb-6 ${normalized === "tasks" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="tasks">
                 <TasksTabPanel contact={contact} tasks={tasks} onAddTask={onAddTask} onAddNote={onAddNote} onCompleteTask={onCompleteTask} onDeleteTask={onDeleteTask} onUpdateTask={onUpdateTask} />
-              </TabErrorBoundary>
-            </div>
-          )}
-          {activatedTabs.has("timeline") && (
-            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "timeline" ? "" : "hidden"}`}>
-              <TabErrorBoundary resetKey="timeline">
-                <TimelineTabPanel
-                  contact={contact} events={events}
-                  healthMetrics={healthMetrics} journeyMilestones={journeyMilestones}
-                  conversationContext={conversationContext} aiInsight={aiInsight} aiInsightLoading={aiInsightLoading}
-                  onGenerateAiInsight={onGenerateAiInsight} onRefreshConversationContext={onRefreshConversationContext}
-                  onAddNote={onAddNote} onAddTask={onAddTask}
-                />
               </TabErrorBoundary>
             </div>
           )}

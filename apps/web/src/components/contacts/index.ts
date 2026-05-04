@@ -23,4 +23,3 @@ export { BroadcastDrawer } from "./broadcast-drawer";
 export { ContactPickerDrawer } from "./contact-picker-drawer";
 export { ContactSelect } from "./contact-select";
 export { ContactChip } from "./contact-chip";
-export { ContactJourneyTimeline } from "./contact-journey-timeline";
