@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { MessageSquare, ClipboardList, Sparkles, ChevronUp } from "lucide-react";
+import { MessageSquare, Sparkles, ChevronUp } from "lucide-react";
 import type { CrossJourneyResponse } from "@/lib/client";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContactDetailHeader } from "./contact-detail-header";
@@ -13,7 +13,6 @@ import { AiContactSummaryPanel } from "./ai-contact-summary";
 import { AiLeadScorePanel } from "./ai-lead-score";
 import { AiPrepBriefPanel } from "./ai-prep-brief";
 import { AiTagSuggestionsPanel } from "./ai-tag-suggestions";
-import { CommunicationLogger } from "./communication-logger";
 import { NextBestActionCard } from "./next-best-action-card";
 import { RelationshipHealthStrip } from "./relationship-health-strip";
 import { CrossModuleEntityLinks } from "@/components/ai/cross-module-links";
@@ -113,7 +112,6 @@ interface ContactDetailProps {
   onDelete?: () => void;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onLogEvent?: (type: string, description?: string) => Promise<void>;
-  onLogCommunication?: (data: { channelType: string; outcome: string; duration?: number; notes?: string }) => Promise<void>;
   healthMetrics?: { engagement: number; payment: number; responsiveness: number; relationship: number } | null;
   journeyMilestones?: Array<{ id: string; type: string; title: string; description?: string; date: string; value?: number; isNext?: boolean }>;
   crossJourney?: CrossJourneyResponse | null;
@@ -150,7 +148,6 @@ export function ContactDetail({
   onDelete,
   onQuickAction,
   onLogEvent,
-  onLogCommunication,
   healthMetrics,
   journeyMilestones,
   crossJourney,
@@ -170,8 +167,6 @@ export function ContactDetail({
     open: false,
     action: () => {},
   });
-  const [commLoggerOpen, setCommLoggerOpen] = useState(false);
-
   if (loading) {
     return (
       <div className="kf-card p-5 space-y-4 h-full">
@@ -296,16 +291,6 @@ export function ContactDetail({
           />
         )}
 
-        {onLogCommunication && (
-          <button
-            onClick={() => setCommLoggerOpen(true)}
-            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-[hsl(var(--kf-accent2))]/10 hover:bg-[hsl(var(--kf-accent2))]/20 text-[hsl(var(--kf-accent2))] text-xs font-medium transition-colors border border-[hsl(var(--kf-accent2))]/20"
-          >
-            <ClipboardList className="w-3.5 h-3.5" />
-            Log Interaction
-          </button>
-        )}
-
         <div className="grid gap-3 sm:gap-4 lg:grid-cols-12">
           <div className="lg:col-span-4 space-y-3 sm:space-y-4 min-w-0">
             <ContactDetailStats
@@ -375,15 +360,6 @@ export function ContactDetail({
           </button>
         )}
       </motion.div>
-
-      {onLogCommunication && (
-        <CommunicationLogger
-          open={commLoggerOpen}
-          contactName={`${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || undefined}
-          onClose={() => setCommLoggerOpen(false)}
-          onSubmit={onLogCommunication}
-        />
-      )}
 
       <ConfirmDialog
         open={confirmState.open}
