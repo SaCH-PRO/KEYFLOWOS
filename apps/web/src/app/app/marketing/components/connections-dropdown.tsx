@@ -173,7 +173,7 @@ export function ConnectionsDropdown({
 
             <div className="border-t border-border px-4 py-3">
               <button
-                onClick={() => { setOpen(false); window.location.href = "/app/connect"; }}
+                onClick={() => { setOpen(false); window.location.href = "/app/settings/connections"; }}
                 className="flex items-center justify-center gap-2 w-full text-sm font-medium text-[hsl(var(--kf-accent1))] hover:underline transition-colors"
               >
                 <Settings className="w-3.5 h-3.5" />
