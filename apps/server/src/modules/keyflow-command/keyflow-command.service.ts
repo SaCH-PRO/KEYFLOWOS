@@ -233,7 +233,12 @@ export class KeyflowCommandService {
           refId: g.id,
           color: '#34a853',
           source: 'google',
-          meta: { location: g.location, organizer: g.organizer },
+          meta: {
+            location: g.location,
+            organizer: g.organizer,
+            attendees: g.attendees ?? [],
+            allDay: g.allDay,
+          },
         });
       }
     } catch (err) {

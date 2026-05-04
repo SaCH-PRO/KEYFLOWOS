@@ -396,6 +396,142 @@ export class BookingsController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/calendar/events')
+  async createExternalCalendarEvent(
+    @Param('businessId') businessId: string,
+    @Body()
+    body: {
+      summary?: string;
+      description?: string;
+      location?: string;
+      start: string;
+      end: string;
+      attendees?: Array<string | { email: string; displayName?: string }>;
+      timeZone?: string;
+    },
+  ) {
+    if (!body?.start || !body?.end) {
+      throw new BadRequestException('start and end are required');
+    }
+    const startDate = new Date(body.start);
+    const endDate = new Date(body.end);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      throw new BadRequestException('Invalid start or end date');
+    }
+    if (endDate.getTime() <= startDate.getTime()) {
+      throw new BadRequestException('end must be after start');
+    }
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { timezone: true },
+    });
+    const tz = body.timeZone || business?.timezone || 'America/Port_of_Spain';
+    const attendees = (body.attendees ?? [])
+      .map((a) => (typeof a === 'string' ? { email: a.trim() } : { email: a.email?.trim() ?? '', displayName: a.displayName }))
+      .filter((a) => a.email && /.+@.+\..+/.test(a.email));
+    const eventId = await this.calendar.createCalendarEvent(businessId, {
+      summary: body.summary?.trim() || '(No title)',
+      description: body.description,
+      location: body.location,
+      start: { dateTime: startDate.toISOString(), timeZone: tz },
+      end: { dateTime: endDate.toISOString(), timeZone: tz },
+      attendees: attendees.length ? attendees : undefined,
+    });
+    if (!eventId) {
+      throw new BadRequestException('Failed to create calendar event');
+    }
+    return { id: eventId };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/calendar/events/:eventId')
+  async updateExternalCalendarEvent(
+    @Param('businessId') businessId: string,
+    @Param('eventId') eventId: string,
+    @Body()
+    body: {
+      summary?: string;
+      description?: string;
+      location?: string;
+      start?: string;
+      end?: string;
+      attendees?: Array<string | { email: string; displayName?: string }>;
+      timeZone?: string;
+    },
+  ) {
+    if (!eventId) throw new BadRequestException('eventId is required');
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { timezone: true },
+    });
+    const tz = body.timeZone || business?.timezone || 'America/Port_of_Spain';
+    const patch: Record<string, unknown> = {};
+
+    if (body.summary !== undefined) {
+      patch.summary = body.summary.trim() || '(No title)';
+    }
+    if (body.description !== undefined) {
+      patch.description = body.description;
+    }
+    if (body.location !== undefined) {
+      patch.location = body.location;
+    }
+    if (body.start !== undefined) {
+      const startDate = new Date(body.start);
+      if (Number.isNaN(startDate.getTime())) {
+        throw new BadRequestException('Invalid start date');
+      }
+      patch.start = { dateTime: startDate.toISOString(), timeZone: tz };
+    }
+    if (body.end !== undefined) {
+      const endDate = new Date(body.end);
+      if (Number.isNaN(endDate.getTime())) {
+        throw new BadRequestException('Invalid end date');
+      }
+      patch.end = { dateTime: endDate.toISOString(), timeZone: tz };
+    }
+    if (body.start !== undefined && body.end !== undefined) {
+      if (new Date(body.end).getTime() <= new Date(body.start).getTime()) {
+        throw new BadRequestException('end must be after start');
+      }
+    }
+    if (body.attendees !== undefined) {
+      const attendees = body.attendees
+        .map((a) =>
+          typeof a === 'string'
+            ? { email: a.trim() }
+            : { email: a.email?.trim() ?? '', displayName: a.displayName },
+        )
+        .filter((a) => a.email && /.+@.+\..+/.test(a.email));
+      patch.attendees = attendees;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return { id: eventId, success: true };
+    }
+
+    const ok = await this.calendar.patchCalendarEvent(businessId, eventId, patch);
+    if (!ok) {
+      throw new BadRequestException('Failed to update calendar event');
+    }
+    return { id: eventId, success: true };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/calendar/events/:eventId')
+  async deleteExternalCalendarEvent(
+    @Param('businessId') businessId: string,
+    @Param('eventId') eventId: string,
+  ) {
+    if (!eventId) throw new BadRequestException('eventId is required');
+    const ok = await this.calendar.deleteCalendarEvent(businessId, eventId);
+    if (!ok) {
+      throw new BadRequestException('Failed to delete calendar event');
+    }
+    return { success: true };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/calendar/list')
   async listAvailableCalendars(@Param('businessId') businessId: string) {
     return this.calendar.listAvailableCalendars(businessId);

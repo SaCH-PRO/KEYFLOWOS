@@ -13,9 +13,13 @@ import {
   Bot,
   Flag,
   ExternalLink,
+  Plus,
+  Link2Off,
 } from "lucide-react";
 import { fetchKeyflowEvents, type KeyflowEvent, type KeyflowEventKind } from "@/lib/client";
+import { apiGet } from "@/lib/api";
 import Link from "next/link";
+import { EventDrawer, type EventDrawerInitial } from "./event-drawer";
 
 type ViewMode = "week" | "day" | "agenda";
 
@@ -68,6 +72,10 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
   const [events, setEvents] = useState<KeyflowEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [calendarConnected, setCalendarConnected] = useState<boolean | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerInitial, setDrawerInitial] = useState<EventDrawerInitial | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [activeKinds, setActiveKinds] = useState<Set<KeyflowEventKind>>(
     () =>
       new Set<KeyflowEventKind>([
@@ -115,7 +123,53 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [businessId, range.from, range.to]);
+  }, [businessId, range.from, range.to, reloadKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<{ connected: boolean }>(`/bookings/businesses/${businessId}/calendar/status`).then(
+      (res) => {
+        if (cancelled) return;
+        if (res.error) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch hydration
+        setCalendarConnected(res.data?.connected ?? false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId, reloadKey]);
+
+  const openCreateDrawer = () => {
+    setDrawerInitial({});
+    setDrawerOpen(true);
+  };
+
+  const openEditDrawer = (ev: KeyflowEvent) => {
+    if (ev.kind !== "google_event" || !ev.refId) return;
+    const meta = (ev.meta ?? {}) as {
+      location?: string;
+      organizer?: string;
+      attendees?: Array<{ email: string; displayName?: string }>;
+      allDay?: boolean;
+    };
+    const attendees: string[] = Array.isArray(meta.attendees) && meta.attendees.length > 0
+      ? meta.attendees.map((a) => a.email).filter(Boolean)
+      : meta.organizer
+        ? [meta.organizer]
+        : [];
+    setDrawerInitial({
+      eventId: ev.refId,
+      summary: ev.title,
+      description: ev.description,
+      start: ev.start,
+      end: ev.end,
+      attendees,
+      location: meta.location,
+      htmlLink: ev.href,
+    });
+    setDrawerOpen(true);
+  };
 
   const filtered = useMemo(
     () => events.filter((e) => activeKinds.has(e.kind)),
@@ -253,10 +307,46 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
+          <button
+            onClick={openCreateDrawer}
+            disabled={!calendarConnected}
+            className="inline-flex items-center gap-1 px-2.5 min-h-[36px] text-xs font-medium rounded-lg kf-btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+            title={
+              calendarConnected
+                ? "Create a new Google Calendar event"
+                : "Connect Google Calendar to create events"
+            }
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New event
+          </button>
         </div>
       </div>
 
       <div className="text-xs text-muted-foreground">{headerLabel}</div>
+
+      {calendarConnected === false && (
+        <div
+          className="flex items-center justify-between gap-2 p-2.5 rounded-lg text-xs"
+          style={{
+            background: "hsl(var(--kf-warning, 38 92% 50%) / 0.08)",
+            border: "1px solid hsl(var(--kf-warning, 38 92% 50%) / 0.25)",
+          }}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <Link2Off className="w-3.5 h-3.5 flex-shrink-0 text-amber-400" />
+            <span className="truncate text-foreground/90">
+              Google Calendar isn’t connected. External events and create/edit are unavailable.
+            </span>
+          </div>
+          <Link
+            href="/app/connect/calendar"
+            className="flex-shrink-0 inline-flex items-center px-2 py-1 rounded-md text-[11px] font-medium kf-btn-secondary"
+          >
+            Connect Google Calendar…
+          </Link>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-1.5">
         {(Object.keys(KIND_META) as KeyflowEventKind[]).map((k) => {
@@ -357,10 +447,27 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
                         const time = ev.allDay
                           ? "All day"
                           : `${fmtTime(start)} – ${fmtTime(end)}`;
+                        const clickable =
+                          ev.kind === "google_event" && !!ev.refId && !ev.allDay;
                         return (
                           <div
                             key={ev.id}
-                            className="flex items-start gap-2 p-2 rounded-lg hover:bg-muted/40 transition-colors group"
+                            onClick={clickable ? () => openEditDrawer(ev) : undefined}
+                            role={clickable ? "button" : undefined}
+                            tabIndex={clickable ? 0 : undefined}
+                            onKeyDown={
+                              clickable
+                                ? (e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      openEditDrawer(ev);
+                                    }
+                                  }
+                                : undefined
+                            }
+                            className={`flex items-start gap-2 p-2 rounded-lg hover:bg-muted/40 transition-colors group ${
+                              clickable ? "cursor-pointer" : ""
+                            }`}
                             style={{
                               borderLeft: `3px solid ${meta.color}`,
                             }}
@@ -399,7 +506,10 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
                                 </div>
                               )}
                             </div>
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div
+                              className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               {ev.refType && ev.refId && onOpenNotes && (
                                 <button
                                   onClick={() =>
@@ -417,6 +527,8 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
                               {ev.href && (
                                 <Link
                                   href={ev.href}
+                                  target={ev.kind === "google_event" ? "_blank" : undefined}
+                                  rel={ev.kind === "google_event" ? "noreferrer" : undefined}
                                   className="p-1 rounded hover:bg-muted/60"
                                   aria-label="Open"
                                 >
@@ -435,6 +547,14 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
           </motion.div>
         </AnimatePresence>
       )}
+
+      <EventDrawer
+        open={drawerOpen}
+        businessId={businessId}
+        initial={drawerInitial}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={() => setReloadKey((k) => k + 1)}
+      />
     </div>
   );
 }
