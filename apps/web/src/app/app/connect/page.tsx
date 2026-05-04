@@ -69,6 +69,8 @@ interface ConnectorHealth {
     syncDirection?: "push" | "pull" | "two_way" | "disabled";
     syncEnabled?: boolean;
     openConflicts?: number;
+    itemsCount?: number;
+    itemsLabel?: string;
     [key: string]: unknown;
   };
 }
@@ -203,7 +205,14 @@ function ConnectorCard({
               {entry.meta.supportsSync && (
                 <span className="inline-flex items-center gap-1">
                   <RefreshCw className="h-3 w-3" />
-                  {formatTimeAgo(entry.health.lastSyncAt)}
+                  Last sync: {formatTimeAgo(entry.health.lastSyncAt)}
+                  {typeof entry.health.metadata?.itemsCount === "number" && (
+                    <>
+                      {" • "}
+                      {entry.health.metadata.itemsCount}{" "}
+                      {entry.health.metadata.itemsLabel ?? "items"}
+                    </>
+                  )}
                 </span>
               )}
               {entry.health.errorCount > 0 && (

@@ -4,6 +4,7 @@ import { GoogleFormsService } from './google-forms.service';
 import { GoogleFormsMappingService } from './google-forms-mapping.service';
 import { GoogleContactsSyncService } from './google-contacts-sync.service';
 import { GoogleBusinessProfileService } from './google-business-profile.service';
+import { ConnectorFormMappingService } from './connector-form-mapping.service';
 import { CrmModule } from '../crm/crm.module';
 import { ConnectorModule } from '../../core/connectors/connector.module';
 
@@ -15,12 +16,14 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
     GoogleFormsMappingService,
     GoogleContactsSyncService,
     GoogleBusinessProfileService,
+    ConnectorFormMappingService,
   ],
   exports: [
     GoogleFormsService,
     GoogleFormsMappingService,
     GoogleContactsSyncService,
     GoogleBusinessProfileService,
+    ConnectorFormMappingService,
   ],
 })
 export class ConnectModule {}
