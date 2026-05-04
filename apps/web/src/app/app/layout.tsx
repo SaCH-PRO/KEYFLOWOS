@@ -55,10 +55,12 @@ import {
   Search as SearchIcon2,
 } from "lucide-react";
 
-const COMING_SOON_ADMIN_EMAIL = "keyflowos.tt@gmail.com";
-
-function isComingSoonAdmin(email: string | null | undefined): boolean {
-  return (email ?? "").trim().toLowerCase() === COMING_SOON_ADMIN_EMAIL;
+interface ResolvedFeatureFlag {
+  key: string;
+  label: string;
+  category: string | null;
+  comingSoon: boolean;
+  bypass: boolean;
 }
 
 
@@ -213,7 +215,13 @@ interface NavItem {
   icon: typeof Zap;
   matchTab?: string;
   exactMatch?: boolean;
-  comingSoon?: boolean;
+  /**
+   * Optional feature flag key. When set, the nav item is rendered as a
+   * locked "coming soon" entry whenever the matching FeatureFlag in the
+   * owner console is marked comingSoon and the current user is not on
+   * its bypass list. See `/admin/feature-flags`.
+   */
+  featureKey?: string;
 }
 
 type PrimarySectionId = "cockpit" | "tower" | "store" | "workspaces" | "studio" | "public";
@@ -250,7 +258,7 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Expenses", href: "/app/expenses", icon: Receipt },
     { label: "Reports", href: "/app/reports", icon: BarChart3 },
     { label: "Documents", href: "/app/documents", icon: FileText },
-    { label: "SEO", href: "/app/seo", icon: SearchIcon2, comingSoon: true },
+    { label: "SEO", href: "/app/seo", icon: SearchIcon2, featureKey: "nav.workspaces.seo" },
   ],
   studio: [
     { label: "Business", href: "/app/settings/business", icon: Building2 },
@@ -385,8 +393,17 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [, setOnboardingChecked] = useState(false);
   const [isAdminUser, setIsAdminUser] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const isComingSoonOverride = isComingSoonAdmin(userEmail);
+  const [, setUserEmail] = useState<string | null>(null);
+  const [featureFlags, setFeatureFlags] = useState<Record<string, ResolvedFeatureFlag>>({});
+  const isFeatureLocked = useCallback(
+    (item: NavItem) => {
+      if (!item.featureKey) return false;
+      const flag = featureFlags[item.featureKey];
+      if (!flag) return false;
+      return flag.comingSoon && !flag.bypass;
+    },
+    [featureFlags],
+  );
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
 
@@ -453,6 +470,13 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           void data.onboardingComplete;
         }
       }
+      const flagsRes = await apiGet<{ flags: ResolvedFeatureFlag[] }>(`/api/feature-flags`);
+      if (flagsRes.data?.flags) {
+        const map: Record<string, ResolvedFeatureFlag> = {};
+        for (const f of flagsRes.data.flags) map[f.key] = f;
+        setFeatureFlags(map);
+      }
+
       setOnboardingChecked(true);
     };
     init();
@@ -661,7 +685,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                     const active = isSecondaryActive(item);
                     const showConnectorBadge =
                       item.href === "/app/connect" && connectorAlertCount > 0;
-                    const isLocked = !!item.comingSoon && !isComingSoonOverride;
+                    const isLocked = isFeatureLocked(item);
                     if (isLocked) {
                       return (
                         <button
@@ -1033,7 +1057,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                         const active = isSecondaryActive(item);
                         const showConnectorBadge =
                           item.href === "/app/connect" && connectorAlertCount > 0;
-                        const isLocked = !!item.comingSoon && !isComingSoonOverride;
+                        const isLocked = isFeatureLocked(item);
                         if (isLocked) {
                           return (
                             <button

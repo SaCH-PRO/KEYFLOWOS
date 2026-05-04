@@ -50,6 +50,7 @@ import { KeyflowCommandModule } from './modules/keyflow-command/keyflow-command.
 import { ConnectModule } from './modules/connect/connect.module';
 import { SeoModule } from './modules/seo/seo.module';
 import { GrowthIntelligenceModule } from './modules/growth-intelligence/growth-intelligence.module';
+import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 
 @Module({
   imports: [
@@ -101,6 +102,7 @@ import { GrowthIntelligenceModule } from './modules/growth-intelligence/growth-i
     ConnectModule,
     SeoModule,
     GrowthIntelligenceModule,
+    FeatureFlagsModule,
   ],
   controllers: [AppController],
   providers: [

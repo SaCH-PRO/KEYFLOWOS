@@ -4941,6 +4941,29 @@ model AuthRateLimit {
   @@map("auth_rate_limits")
 }
 
+/// Runtime-configurable feature flags. Each row identifies a workspace
+/// nav feature (or any other gated capability) and stores whether it is
+/// currently in a "coming soon" state plus a list of user emails that
+/// bypass the lock. Rows are seeded lazily by the API the first time the
+/// owner console reads them; missing rows behave as "not coming soon".
+model FeatureFlag {
+  id           String   @id @default(cuid())
+  /// Stable key used in code (e.g. "nav.workspaces.seo").
+  key          String   @unique
+  /// Human readable label shown in the owner console.
+  label        String
+  /// Optional grouping (e.g. "Workspaces", "Studio") for the admin UI.
+  category     String?
+  /// When true the feature is presented as a locked "coming soon" item.
+  comingSoon   Boolean  @default(false) @map("coming_soon")
+  /// Lower-cased list of user emails permitted to bypass the lock.
+  bypassEmails String[] @default([])    @map("bypass_emails")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt      @map("updated_at")
+
+  @@map("feature_flags")
+}
+
 /// Append-only audit log of every authentication-relevant event:
 /// signup, login_success, login_failure, resend_verification, rate_limited.
 /// Surfaced in the admin Security UI; retained for forensic review.

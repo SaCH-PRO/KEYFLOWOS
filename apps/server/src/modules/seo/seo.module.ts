@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
+import { FeatureFlagsModule } from '../feature-flags/feature-flags.module';
 import { SeoController } from './seo.controller';
 import { SeoService } from './seo.service';
 import { SeoGoogleSearchConsoleService } from './seo-gsc.service';
@@ -10,7 +11,7 @@ import { SeoListener } from './seo.listener';
 import { SeoAdminGuard } from './seo-admin.guard';
 
 @Module({
-  imports: [PrismaModule, AiModule],
+  imports: [PrismaModule, AiModule, FeatureFlagsModule],
   controllers: [SeoController],
   providers: [
     SeoService,
