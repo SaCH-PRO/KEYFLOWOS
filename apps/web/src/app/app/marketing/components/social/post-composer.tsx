@@ -26,9 +26,8 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { SocialConnection } from "@/lib/client";
+import { useUpload } from "@/hooks/use-upload";
 import Image from "next/image";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
 const MAX_CHARS = 2200;
 
@@ -113,11 +112,6 @@ type Props = {
   connections?: SocialConnection[];
 };
 
-function getAuthToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage?.getItem("kf_token");
-}
-
 function normalizeMediaUrl(url: string): string {
   const trimmed = url.trim();
   const driveMatch = trimmed.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
@@ -149,6 +143,7 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
   const [showAiActions, setShowAiActions] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { uploadFile: uploadViaPresignedUrl } = useUpload();
 
   const charCount = content.length;
   const overLimit = charCount > MAX_CHARS;
@@ -208,24 +203,9 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
     setMediaFiles(prev => [...prev, { id, file, url: "", uploading: true, preview }]);
 
     try {
-      const token = getAuthToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const res = await fetch(`${API_BASE}/uploads/request-url`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
-      });
-      if (!res.ok) throw new Error("Failed to get upload URL");
-      const { uploadURL, objectPath } = await res.json();
-
-      await fetch(uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-      });
-
+      const result = await uploadViaPresignedUrl(file);
+      if (!result) throw new Error("Upload failed");
+      const { uploadURL, objectPath } = result;
       const publicUrl = uploadURL.split("?")[0];
 
       setMediaFiles(prev => prev.map(m =>
@@ -237,7 +217,7 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
         m.id === id ? { ...m, uploading: false, error: message } : m
       ));
     }
-  }, []);
+  }, [uploadViaPresignedUrl]);
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;

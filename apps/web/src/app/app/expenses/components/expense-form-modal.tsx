@@ -11,7 +11,8 @@ import {
   createExpense,
   updateExpense,
 } from "@/lib/client";
-import { API_BASE, getAuthHeaders } from "@/lib/api";
+import { useUpload } from "@/hooks/use-upload";
+import { API_BASE } from "@/lib/api";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 
 interface ExpenseFormModalProps {
@@ -26,7 +27,7 @@ interface ExpenseFormModalProps {
 }
 
 export function ExpenseFormModal({ businessId, categories, editingExpense, projects = [], contacts = [], services = [], onClose, onSaved }: ExpenseFormModalProps) {
-  const [uploading, setUploading] = useState(false);
+  const { uploadFile, isUploading: uploading } = useUpload();
   const [formData, setFormData] = useState(() => {
     if (editingExpense) {
       return {
@@ -74,21 +75,23 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploading(true);
     try {
-      const headers = getAuthHeaders();
-      const res = await fetch(`${API_BASE}/businesses/${businessId}/uploads/request-url`, {
-        method: "POST", headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, contentType: file.type }),
-      });
-      const data = await res.json();
-      if (data.uploadUrl) {
-        await fetch(data.uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-        setFormData(prev => ({ ...prev, receiptUrl: data.publicUrl || data.uploadUrl.split("?")[0] }));
+      const uploaded = await uploadFile(file);
+      if (uploaded) {
+        // Persist a directly-resolvable URL (matches the prior behaviour
+        // before this callsite was migrated onto `useUpload`). The render
+        // paths in `expense-detail-modal.tsx` use `expense.receiptUrl`
+        // straight in `<img src>` / `<a href>`, so a relative
+        // `/objects/...` path would resolve against the Next origin and
+        // 404. Prefix with `API_BASE` so the URL points at the API.
+        const path = uploaded.objectPath;
+        const receiptUrl = path.startsWith("http") ? path : `${API_BASE}${path}`;
+        setFormData(prev => ({ ...prev, receiptUrl }));
         toast.success("Receipt uploaded");
+      } else {
+        toast.error("Failed to upload receipt");
       }
     } catch (_err) { toast.error("Failed to upload receipt"); }
-    setUploading(false);
   };
 
   const selectedCategory = categories.find(c => c.id === formData.categoryId);

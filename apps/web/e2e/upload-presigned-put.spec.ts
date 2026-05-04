@@ -26,7 +26,7 @@ test.describe("File upload — presigned PUT regression", () => {
     let presignRequests = 0;
     let capturedPresignBody: Record<string, unknown> | null = null;
 
-    await page.route("**/api/uploads/request-url", async (route: Route) => {
+    await page.route("**/uploads/request-url", async (route: Route) => {
       const req = route.request();
       expect(req.method()).toBe("POST");
       expect(req.headers()["content-type"]).toContain("application/json");
@@ -133,7 +133,7 @@ test.describe("File upload — presigned PUT regression", () => {
   }) => {
     const presignedUrl = "https://s3.test.local/bucket/will-fail?sig=x";
 
-    await page.route("**/api/uploads/request-url", async (route: Route) => {
+    await page.route("**/uploads/request-url", async (route: Route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",

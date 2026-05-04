@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useRef } from "react";
 import { User, Mail, Phone, Sparkles, Camera, AlertCircle } from "lucide-react";
 import { DataUsageHint } from "./ai-field-badge";
 import { Button, Input } from "@keyflow/ui";
-import { API_BASE, getAuthHeaders, apiPatch } from "@/lib/api";
+import { API_BASE, apiPatch } from "@/lib/api";
 import { setCachedUser } from "@/lib/workspace";
 import { useProfileSection } from "@/hooks/use-profile-section";
+import { useUpload } from "@/hooks/use-upload";
 import Image from "next/image";
 
 interface PersonalInfoForm {
@@ -57,7 +58,7 @@ export default function PersonalInfoSection({
     onDirtyChange,
   });
 
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const { uploadFile, isUploading: uploadingAvatar } = useUpload();
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const initials = [form.firstName, form.lastName]
@@ -72,22 +73,11 @@ export default function PersonalInfoSection({
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploadingAvatar(true);
     onStatus(null);
     try {
-      const urlRes = await fetch(`${API_BASE}/uploads/request-url`, {
-        method: "POST",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
-      });
-      if (!urlRes.ok) throw new Error("Failed to get upload URL");
-      const { uploadURL, objectPath } = await urlRes.json();
-      const uploadRes = await fetch(uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-      });
-      if (!uploadRes.ok) throw new Error("Upload failed");
+      const uploaded = await uploadFile(file);
+      if (!uploaded) throw new Error("Upload failed");
+      const { objectPath } = uploaded;
       const { data } = await apiPatch<IdentityMe>("/identity/me", { avatarUrl: objectPath });
       if (data) {
         setCachedUser({ id: data.id, email: data.email, name: data.name, firstName: data.firstName, lastName: data.lastName, avatarUrl: objectPath });
@@ -97,7 +87,6 @@ export default function PersonalInfoSection({
     } catch (err) {
       onStatus({ type: "error", message: err instanceof Error ? err.message : "Upload failed" });
     }
-    setUploadingAvatar(false);
   };
 
   const handleSave = async () => {
