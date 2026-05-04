@@ -51,8 +51,15 @@ import {
   Brain,
   Radar,
   Award,
+  Lock,
   Search as SearchIcon2,
 } from "lucide-react";
+
+const COMING_SOON_ADMIN_EMAIL = "keyflowos.tt@gmail.com";
+
+function isComingSoonAdmin(email: string | null | undefined): boolean {
+  return (email ?? "").trim().toLowerCase() === COMING_SOON_ADMIN_EMAIL;
+}
 
 
 import type { CopilotModule } from "@/components/ai/copilot-panel";
@@ -206,6 +213,7 @@ interface NavItem {
   icon: typeof Zap;
   matchTab?: string;
   exactMatch?: boolean;
+  comingSoon?: boolean;
 }
 
 type PrimarySectionId = "cockpit" | "tower" | "store" | "workspaces" | "studio" | "public";
@@ -242,7 +250,7 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Expenses", href: "/app/expenses", icon: Receipt },
     { label: "Reports", href: "/app/reports", icon: BarChart3 },
     { label: "Documents", href: "/app/documents", icon: FileText },
-    { label: "SEO", href: "/app/seo", icon: SearchIcon2 },
+    { label: "SEO", href: "/app/seo", icon: SearchIcon2, comingSoon: true },
   ],
   studio: [
     { label: "Business", href: "/app/settings/business", icon: Building2 },
@@ -377,6 +385,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [, setOnboardingChecked] = useState(false);
   const [isAdminUser, setIsAdminUser] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const isComingSoonOverride = isComingSoonAdmin(userEmail);
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
 
@@ -421,6 +431,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         setInitials(getUserInitials());
         if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
         setIsAdminUser(isSuperAdmin());
+        setUserEmail(user.email ?? null);
       }
 
       const businessId = getStoredBusinessId();
@@ -650,6 +661,23 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                     const active = isSecondaryActive(item);
                     const showConnectorBadge =
                       item.href === "/app/connect" && connectorAlertCount > 0;
+                    const isLocked = !!item.comingSoon && !isComingSoonOverride;
+                    if (isLocked) {
+                      return (
+                        <button
+                          key={item.href + item.label}
+                          type="button"
+                          aria-disabled="true"
+                          title="future keyflow"
+                          onClick={(e) => e.preventDefault()}
+                          className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground/50 cursor-not-allowed opacity-60"
+                        >
+                          <Icon className="w-4 h-4 flex-shrink-0" />
+                          <span>{item.label}</span>
+                          <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
+                        </button>
+                      );
+                    }
                     return (
                       <Link
                         key={item.href + item.label}
@@ -1005,6 +1033,23 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                         const active = isSecondaryActive(item);
                         const showConnectorBadge =
                           item.href === "/app/connect" && connectorAlertCount > 0;
+                        const isLocked = !!item.comingSoon && !isComingSoonOverride;
+                        if (isLocked) {
+                          return (
+                            <button
+                              key={item.href + item.label}
+                              type="button"
+                              aria-disabled="true"
+                              title="future keyflow"
+                              onClick={(e) => e.preventDefault()}
+                              className="kf-nav-item py-2.5 w-full text-left opacity-60 cursor-not-allowed"
+                            >
+                              <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                              <span>{item.label}</span>
+                              <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
+                            </button>
+                          );
+                        }
                         return (
                           <Link
                             key={item.href + item.label}
