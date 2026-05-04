@@ -18,6 +18,7 @@ import {
   Shield,
   Linkedin,
   Instagram,
+  Twitter,
   Link2,
   CalendarClock,
   Plus,
@@ -502,6 +503,12 @@ function ContactFormInner({ onSubmit, onCancel, loading, initialValues }: Contac
                 </label>
                 <input type="url" placeholder="instagram.com/username" {...field("instagramUrl")} className="kf-input w-full" />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Twitter className="w-3 h-3" /> Twitter / X URL
+              </label>
+              <input type="url" placeholder="twitter.com/username" {...field("twitterUrl")} className="kf-input w-full" />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground flex items-center gap-1">
