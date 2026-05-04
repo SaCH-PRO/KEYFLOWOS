@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CommerceController } from './commerce.controller';
+import { AccountingController } from './accounting.controller';
 import { CommerceAiController } from './commerce-ai.controller';
 import { CommerceInsightsController } from './commerce-insights.controller';
 import { FinancialCopilotController } from './financial-copilot.controller';
@@ -26,7 +27,7 @@ import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 
 @Module({
   imports: [CrmModule, SubscriptionsModule, AiModule],
-  controllers: [CommerceController, CommerceAiController, CommerceInsightsController, FinancialCopilotController],
+  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController],
   providers: [
     CommerceService,
     CommerceStatsService,

@@ -8856,3 +8856,101 @@ export async function getNetworkAnalyticsDashboard(businessId: string, days = 30
 export async function listRecentProfileViewers(businessId: string, limit = 20) {
   return apiGetSimple<Array<{ id: string; createdAt: string; source?: string | null; viewer: { id: string; name: string; logoUrl?: string | null; headline?: string | null; slug?: string | null } }>>(`/businesses/${encodeURIComponent(businessId)}/community/analytics/recent-viewers?limit=${limit}`);
 }
+
+// ---------------------------------------------------------------------------
+// Accounting + email-marketing operability surfaces (Task 348)
+// ---------------------------------------------------------------------------
+
+export type AccountingProvider = 'quickbooks' | 'xero';
+export type AccountingSummary = {
+  connected: boolean;
+  provider: AccountingProvider | null;
+  connectedAccount: string | null;
+  lastSyncAt: string | null;
+  invoicesTotal: number;
+  invoicesSynced: number;
+  invoicesUnsynced: number;
+  customersTotal: number;
+  customersSynced: number;
+  customersUnsynced: number;
+};
+
+export type UnsyncedInvoiceRow = {
+  id: string;
+  invoiceNumber: string;
+  status: string;
+  total: number;
+  currency: string;
+  issueDate: string;
+  dueDate: string | null;
+  externalAccountingSource: string | null;
+  externalAccountingId: string | null;
+  contact: { id: string; firstName: string | null; lastName: string | null; displayName: string | null; companyName: string | null; email: string | null } | null;
+};
+
+export type ChartOfAccountsAccount = { id: string; name: string; type: string; subType?: string; classification?: string };
+export type AccountingPushResult = {
+  provider: AccountingProvider;
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: Array<{ invoiceId?: string; contactId?: string; success: boolean; externalId?: string; error?: string }>;
+};
+
+export async function fetchAccountingSummary(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<AccountingSummary>(`/accounting/businesses/${encodeURIComponent(businessId)}/summary`);
+}
+
+export async function fetchUnsyncedInvoices(businessId: string = DEFAULT_BUSINESS_ID, limit = 100) {
+  return apiGetSimple<{ invoices: UnsyncedInvoiceRow[] }>(`/accounting/businesses/${encodeURIComponent(businessId)}/invoices/unsynced?limit=${limit}`);
+}
+
+export async function pushInvoicesToAccounting(invoiceIds: string[], businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPostSimple<AccountingPushResult>(`/accounting/businesses/${encodeURIComponent(businessId)}/invoices/push`, { invoiceIds });
+}
+
+export async function pushCustomersToAccounting(businessId: string = DEFAULT_BUSINESS_ID, contactIds?: string[]) {
+  return apiPostSimple<AccountingPushResult>(`/accounting/businesses/${encodeURIComponent(businessId)}/customers/push`, { contactIds });
+}
+
+export async function fetchChartOfAccounts(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<{ provider: AccountingProvider; accounts: ChartOfAccountsAccount[] }>(`/accounting/businesses/${encodeURIComponent(businessId)}/chart-of-accounts`);
+}
+
+export type MarketingProvider = 'mailchimp' | 'klaviyo';
+export type MarketingList = { id: string; name: string; memberCount: number; provider: MarketingProvider };
+export type MarketingListsResponse = {
+  connected: boolean;
+  providers: MarketingProvider[];
+  lists: MarketingList[];
+  errors?: Array<{ provider: MarketingProvider; error: string }>;
+};
+
+export type MarketingCampaign = { id: string; name: string; status: string; emailsSent?: number };
+
+export async function fetchMarketingLists(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<MarketingListsResponse>(`/marketing/businesses/${encodeURIComponent(businessId)}/lists`);
+}
+
+export async function pushContactsToMarketingList(
+  params: { provider: MarketingProvider; listId: string; contactIds?: string[]; segment?: { tag?: string; status?: string; marketingOptIn?: boolean } },
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPostSimple<{ provider: MarketingProvider; listId: string; total: number; created: number; updated: number; failed: number; errors: string[] }>(
+    `/marketing/businesses/${encodeURIComponent(businessId)}/lists/push-contacts`,
+    params,
+  );
+}
+
+export async function fetchMarketingCampaigns(provider: MarketingProvider, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<{ provider: MarketingProvider; campaigns: MarketingCampaign[] }>(
+    `/marketing/businesses/${encodeURIComponent(businessId)}/lists/campaigns/${encodeURIComponent(provider)}`,
+  );
+}
+
+export async function triggerMarketingCampaign(provider: MarketingProvider, campaignId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPostSimple<{ success: boolean }>(
+    `/marketing/businesses/${encodeURIComponent(businessId)}/lists/campaigns/${encodeURIComponent(provider)}/${encodeURIComponent(campaignId)}/trigger`,
+    {},
+  );
+}

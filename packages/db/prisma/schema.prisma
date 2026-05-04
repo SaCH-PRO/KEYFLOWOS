@@ -864,12 +864,17 @@ model Invoice {
   campaignId String?       @map("campaign_id")
   campaign   EmailCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
+  externalAccountingSource String? @map("external_accounting_source") // 'quickbooks' | 'xero'
+  externalAccountingId     String? @map("external_accounting_id")
+  externalAccountingSyncedAt DateTime? @map("external_accounting_synced_at")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at") // Soft delete
 
   @@unique([businessId, invoiceNumber])
   @@index([businessId, contactId])
+  @@index([businessId, externalAccountingSource, externalAccountingId])
   @@map("invoices")
 }
 
