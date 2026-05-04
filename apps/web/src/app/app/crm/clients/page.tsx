@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Loader2, User, Mail, Phone, Building2, ArrowLeft, X } from "lucide-react";
+import { Search, Loader2, User, Mail, Phone, Building2, ArrowLeft, X, UserPlus } from "lucide-react";
 import { Button, Badge } from "@keyflow/ui";
-import { fetchContacts, type Contact } from "@/lib/client";
+import { fetchContacts, createContact, type Contact } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 type SearchState = {
