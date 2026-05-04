@@ -14,7 +14,6 @@ import { AiLeadScorePanel } from "./ai-lead-score";
 import { AiPrepBriefPanel } from "./ai-prep-brief";
 import { AiTagSuggestionsPanel } from "./ai-tag-suggestions";
 import { NextBestActionCard } from "./next-best-action-card";
-import { CrossModuleEntityLinks } from "@/components/ai/cross-module-links";
 
 export type ContactDetailData = {
   id: string;
@@ -301,18 +300,12 @@ export function ContactDetail({
               onSelectRelatedContact={onSelectRelatedContact}
               onAddTask={onAddTask}
             />
-            {businessId && contact.id && (
-              <CrossModuleEntityLinks
-                businessId={businessId}
-                entityType="contact"
-                entityId={contact.id}
-              />
-            )}
           </div>
 
           <div className="lg:col-span-5 min-w-0 flex flex-col">
             <ContactDetailTabs
               contact={contact}
+              businessId={businessId}
               events={events}
               notes={notes}
               tasks={tasks}
