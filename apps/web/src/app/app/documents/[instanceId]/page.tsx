@@ -401,6 +401,16 @@ export default function DocumentDetailPage() {
   const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSyncInFlightRef = useRef(false);
   const autoSyncPendingRef = useRef<DocInstance | null>(null);
+  const [driveRemote, setDriveRemote] = useState<{
+    hasRemoteChanges: boolean;
+    hasLocalChanges: boolean;
+    conflict: boolean;
+    remoteModifiedTime: string | null;
+    remoteName: string | null;
+    error?: string;
+  } | null>(null);
+  const [pullingFromDrive, setPullingFromDrive] = useState(false);
+  const [dismissedRemoteAt, setDismissedRemoteAt] = useState<string | null>(null);
 
   const loadDoc = useCallback(async () => {
     const bid = getStoredBusinessId();
@@ -506,6 +516,85 @@ export default function DocumentDetailPage() {
       if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
     };
   }, []);
+
+  // Poll Drive for remote changes when this document is linked. Skips while
+  // the tab is hidden, an auto-sync is running, or the user is editing a
+  // section, so we don't overwrite their work or waste API calls.
+  useEffect(() => {
+    if (!businessId || !doc?.driveFileId) {
+      setDriveRemote(null);
+      return;
+    }
+    let cancelled = false;
+
+    const poll = async () => {
+      if (cancelled) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (autoSyncInFlightRef.current || autoSyncPendingRef.current) return;
+      if (editingSection || pullingFromDrive) return;
+      const res = await apiGet<{
+        linked: boolean;
+        hasRemoteChanges: boolean;
+        hasLocalChanges: boolean;
+        conflict: boolean;
+        remoteModifiedTime: string | null;
+        remoteName: string | null;
+        error?: string;
+      }>(`/documents/businesses/${businessId}/instances/${doc.id}/drive-status`);
+      if (cancelled) return;
+      if (res.data?.linked) {
+        setDriveRemote({
+          hasRemoteChanges: res.data.hasRemoteChanges,
+          hasLocalChanges: res.data.hasLocalChanges,
+          conflict: res.data.conflict,
+          remoteModifiedTime: res.data.remoteModifiedTime,
+          remoteName: res.data.remoteName,
+          error: res.data.error,
+        });
+      }
+    };
+
+    poll();
+    const intervalId = setInterval(poll, 30_000);
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && !document.hidden) poll();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+    };
+  }, [businessId, doc?.id, doc?.driveFileId, editingSection, pullingFromDrive]);
+
+  const handlePullFromDrive = useCallback(async () => {
+    if (!businessId || !doc?.driveFileId) return;
+    if (driveRemote?.conflict) {
+      const confirmed = confirm(
+        "Both KeyflowOS and Google Drive have changes since the last sync. Pulling will REPLACE your local edits with the version from Drive. Continue?",
+      );
+      if (!confirmed) return;
+    }
+    setPullingFromDrive(true);
+    setStatusMsg(null);
+    const res = await apiPostSimple<DocInstance>(
+      `/documents/businesses/${businessId}/instances/${doc.id}/pull-from-drive`,
+      {},
+    );
+    if (res.data) {
+      setDoc(res.data);
+      setDriveRemote((prev) => prev ? { ...prev, hasRemoteChanges: false, hasLocalChanges: false, conflict: false } : prev);
+      setDismissedRemoteAt(null);
+      setStatusMsg({ type: "success", message: "Pulled latest changes from Google Drive" });
+    } else {
+      setStatusMsg({ type: "error", message: res.error || "Failed to pull from Drive" });
+    }
+    setPullingFromDrive(false);
+  }, [businessId, doc?.id, doc?.driveFileId, driveRemote?.conflict]);
 
   const handleSaveSection = async (sectionKey: string) => {
     if (!businessId || !doc) return;
@@ -729,6 +818,8 @@ export default function DocumentDetailPage() {
       autoSyncPendingRef.current = null;
       setAutoSyncStatus("idle");
       setAutoSyncError(null);
+      setDriveRemote(null);
+      setDismissedRemoteAt(null);
     }
   };
 
@@ -873,6 +964,63 @@ export default function DocumentDetailPage() {
           >
             Connect Google Drive
           </a>
+        </div>
+      )}
+
+      {doc.driveFileId && driveRemote?.error && (
+        <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[hsl(var(--kf-warning))]/10 border border-[hsl(var(--kf-warning))]/30 text-xs text-[hsl(var(--kf-warning))]">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span>Couldn&apos;t check Google Drive for new changes — {driveRemote.error}. Will retry shortly.</span>
+        </div>
+      )}
+
+      {doc.driveFileId && driveRemote?.hasRemoteChanges && driveRemote.remoteModifiedTime !== dismissedRemoteAt && (
+        <div
+          className={
+            "flex items-center justify-between gap-3 px-4 py-3 rounded-xl border " +
+            (driveRemote.conflict
+              ? "bg-[hsl(var(--kf-error))]/10 border-[hsl(var(--kf-error))]/30"
+              : "bg-[hsl(var(--kf-info))]/10 border-[hsl(var(--kf-info))]/30")
+          }
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {driveRemote.conflict ? (
+              <AlertTriangle className="w-4 h-4 text-[hsl(var(--kf-error))] flex-shrink-0" />
+            ) : (
+              <HardDrive className="w-4 h-4 text-[hsl(var(--kf-info))] flex-shrink-0" />
+            )}
+            <div className="min-w-0">
+              <div className={"text-sm font-medium " + (driveRemote.conflict ? "text-[hsl(var(--kf-error))]" : "text-[hsl(var(--foreground))]")}>
+                {driveRemote.conflict
+                  ? "Conflict: both sides have unsynced changes"
+                  : "Drive has new changes"}
+              </div>
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                {driveRemote.conflict
+                  ? "Pulling will replace your local edits with the version from Google Drive. Push your changes first if you want to keep them."
+                  : `The linked Drive file was edited${driveRemote.remoteModifiedTime ? ` ${new Date(driveRemote.remoteModifiedTime).toLocaleString()}` : ""}. Pull to bring those edits into the editor.`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <button
+              type="button"
+              onClick={handlePullFromDrive}
+              disabled={pullingFromDrive}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-[hsl(var(--kf-info))]/20 text-[hsl(var(--kf-info))] hover:bg-[hsl(var(--kf-info))]/30 transition-colors disabled:opacity-50 min-h-[36px]"
+            >
+              {pullingFromDrive ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              {pullingFromDrive ? "Pulling…" : "Pull changes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissedRemoteAt(driveRemote.remoteModifiedTime)}
+              className="p-1.5 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] min-h-[36px] min-w-[36px] flex items-center justify-center"
+              title="Dismiss"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
         </div>
       )}
 

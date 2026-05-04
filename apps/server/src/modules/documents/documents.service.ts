@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { BusinessContextService } from '../identity/business-context.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { getDocumentBlueprint, getCategoryDirective, getSensitivityLayers } from './document-blueprints';
 import { appLink } from '../../core/config/runtime-urls';
 
@@ -15,6 +16,7 @@ export class DocumentsService {
     @Inject(AiUsageService) private aiUsage: AiUsageService,
     @Inject(BusinessContextService) private bizContext: BusinessContextService,
     @Inject(TransactionalEmailService) private emailService: TransactionalEmailService,
+    @Inject(GoogleDriveService) private driveService: GoogleDriveService,
   ) {}
 
   async getCategories(businessId?: string) {
@@ -883,6 +885,111 @@ export class DocumentsService {
       data: { driveLastSyncedAt: new Date() },
     });
     return this.getInstance(businessId, instanceId);
+  }
+
+  /**
+   * Compare the linked Drive file's modifiedTime against the local
+   * driveLastSyncedAt to detect whether the document on Drive has changed
+   * since we last pushed/pulled it. Also detects whether the local copy has
+   * unsynced edits (updatedAt > driveLastSyncedAt) so the UI can warn about
+   * conflicts where both sides have moved on.
+   */
+  async getDriveSyncStatus(businessId: string, instanceId: string) {
+    const inst = await this.getInstance(businessId, instanceId);
+    if (!inst.driveFileId) {
+      return {
+        linked: false,
+        hasRemoteChanges: false,
+        hasLocalChanges: false,
+        conflict: false,
+        remoteModifiedTime: null as string | null,
+        lastSyncedAt: null as string | null,
+        remoteName: null as string | null,
+      };
+    }
+
+    let remoteModifiedTime: string | null = null;
+    let remoteName: string | null = inst.driveFileName;
+    try {
+      const file = await this.driveService.getFile(businessId, inst.driveFileId);
+      remoteModifiedTime = file.modifiedTime || null;
+      remoteName = file.name || inst.driveFileName;
+    } catch (err) {
+      this.logger.warn(`Failed to fetch Drive metadata for ${inst.driveFileId}: ${(err as Error).message}`);
+      return {
+        linked: true,
+        hasRemoteChanges: false,
+        hasLocalChanges: false,
+        conflict: false,
+        remoteModifiedTime: null,
+        lastSyncedAt: inst.driveLastSyncedAt ? inst.driveLastSyncedAt.toISOString() : null,
+        remoteName,
+        error: 'Could not reach Google Drive',
+      };
+    }
+
+    const lastSynced = inst.driveLastSyncedAt ? inst.driveLastSyncedAt.getTime() : 0;
+    const remoteMs = remoteModifiedTime ? new Date(remoteModifiedTime).getTime() : 0;
+    const localMs = inst.updatedAt ? inst.updatedAt.getTime() : 0;
+    // Tolerance to absorb clock skew between our DB and Google's servers and
+    // the small delay between our PATCH upload and Drive's recorded modifiedTime.
+    const TOLERANCE_MS = 10_000;
+
+    const hasRemoteChanges = remoteMs > 0 && remoteMs - lastSynced > TOLERANCE_MS;
+    const hasLocalChanges = localMs - lastSynced > TOLERANCE_MS;
+
+    return {
+      linked: true,
+      hasRemoteChanges,
+      hasLocalChanges,
+      conflict: hasRemoteChanges && hasLocalChanges,
+      remoteModifiedTime,
+      lastSyncedAt: inst.driveLastSyncedAt ? inst.driveLastSyncedAt.toISOString() : null,
+      remoteName,
+    };
+  }
+
+  /**
+   * Pull the latest content from the linked Drive file and replace the local
+   * document body with it. Reuses importBodyFromDrive so the change is
+   * recorded in the audit log.
+   */
+  async pullFromDrive(businessId: string, instanceId: string, actorUserId?: string) {
+    const inst = await this.getInstance(businessId, instanceId);
+    if (!inst.driveFileId) {
+      throw new BadRequestException('Document is not linked to a Drive file');
+    }
+
+    const content = await this.driveService.getFileContent(businessId, inst.driveFileId);
+    const text = this.htmlToPlainText(content.html);
+
+    return this.importBodyFromDrive(
+      businessId,
+      instanceId,
+      {
+        driveFileId: inst.driveFileId,
+        driveFileName: content.name || inst.driveFileName || 'Drive Document',
+        driveFileMimeType: content.mimeType || inst.driveFileMimeType || '',
+        content: text,
+      },
+      actorUserId,
+    );
+  }
+
+  private htmlToPlainText(html: string): string {
+    return html
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
+      .replace(/<br\s*\/?>(?!\n)/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   private async logChange(

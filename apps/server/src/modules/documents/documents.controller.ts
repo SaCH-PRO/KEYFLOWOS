@@ -117,6 +117,25 @@ export class DocumentsController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/instances/:instanceId/drive-status')
+  getDriveSyncStatus(
+    @Param('businessId') businessId: string,
+    @Param('instanceId') instanceId: string,
+  ) {
+    return this.documentsService.getDriveSyncStatus(businessId, instanceId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/instances/:instanceId/pull-from-drive')
+  pullFromDrive(
+    @Param('businessId') businessId: string,
+    @Param('instanceId') instanceId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.documentsService.pullFromDrive(businessId, instanceId, req.user?.id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/instances/:instanceId/status')
   updateStatus(
     @Param('businessId') businessId: string,

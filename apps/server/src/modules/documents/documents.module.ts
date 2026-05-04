@@ -5,9 +5,10 @@ import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
 import { BusinessContextService } from '../identity/business-context.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { GoogleDriveModule } from '../google-drive/google-drive.module';
 
 @Module({
-  imports: [PrismaModule, AiModule, NotificationsModule],
+  imports: [PrismaModule, AiModule, NotificationsModule, GoogleDriveModule],
   controllers: [DocumentsController],
   providers: [DocumentsService, BusinessContextService],
   exports: [DocumentsService],
