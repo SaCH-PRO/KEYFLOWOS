@@ -1,4 +1,5 @@
 import type { LocalContact } from "./contacts-db";
+import { getContactAgeGroupLabel } from "./crm-constants";
 
 const EXPORT_COLUMNS = [
   { key: "firstName", label: "First Name" },
@@ -27,6 +28,7 @@ const EXPORT_COLUMNS = [
   { key: "language", label: "Language" },
   { key: "preferredChannel", label: "Preferred Channel" },
   { key: "lifecycleStage", label: "Lifecycle Stage" },
+  { key: "ageGroup", label: "Age Group" },
   { key: "marketingOptIn", label: "Marketing Opt-In" },
   { key: "doNotContact", label: "Do Not Contact" },
   { key: "notesInternal", label: "Internal Notes" },
@@ -46,6 +48,8 @@ function contactToRow(c: LocalContact): Record<string, string> {
       });
     } else if (col.key === "marketingOptIn" || col.key === "doNotContact") {
       row[col.label] = val === true ? "Yes" : val === false ? "No" : "";
+    } else if (col.key === "ageGroup") {
+      row[col.label] = val ? getContactAgeGroupLabel(val as string) ?? "" : "";
     } else {
       row[col.label] = val == null ? "" : String(val);
     }

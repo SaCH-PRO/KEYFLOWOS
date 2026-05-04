@@ -5,6 +5,33 @@ import OpenAI from 'openai';
 import pdfParse from 'pdf-parse';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from './crm.service';
+import {
+  CONTACT_AGE_GROUPS,
+  CONTACT_AGE_GROUP_LABELS,
+  type ContactAgeGroup,
+} from './crm.constants';
+
+const AGE_GROUP_LABEL_TO_CODE: Record<string, ContactAgeGroup> = (() => {
+  const map: Record<string, ContactAgeGroup> = {};
+  for (const code of CONTACT_AGE_GROUPS) {
+    map[code.toLowerCase()] = code;
+    const label = CONTACT_AGE_GROUP_LABELS[code];
+    if (label) {
+      map[label.toLowerCase()] = code;
+      map[label.toLowerCase().replace(/\s+/g, '')] = code;
+    }
+  }
+  return map;
+})();
+
+function normalizeAgeGroupValue(raw: string): ContactAgeGroup | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const direct = AGE_GROUP_LABEL_TO_CODE[trimmed.toLowerCase()];
+  if (direct) return direct;
+  const collapsed = trimmed.toLowerCase().replace(/\s+/g, '');
+  return AGE_GROUP_LABEL_TO_CODE[collapsed] ?? null;
+}
 
 interface ExtractedContact {
   firstName?: string;
@@ -46,6 +73,7 @@ type FieldMapping = {
   marketingOptIn?: string;
   doNotContact?: string;
   notesInternal?: string;
+  ageGroup?: string;
   custom?: string[];
 };
 
@@ -167,6 +195,12 @@ export class CrmImportService {
     notes_internal: 'notesInternal',
     notes: 'notesInternal',
     internal_notes: 'notesInternal',
+    agegroup: 'ageGroup',
+    age_group: 'ageGroup',
+    age: 'ageGroup',
+    age_range: 'ageGroup',
+    agerange: 'ageGroup',
+    age_bracket: 'ageGroup',
   };
 
   constructor(
@@ -196,6 +230,7 @@ export class CrmImportService {
       'country', 'timezone', 'companyName', 'jobTitle', 'department',
       'industry', 'segment', 'preferredChannel', 'language',
       'lifecycleStage', 'marketingOptIn', 'doNotContact', 'notesInternal',
+      'ageGroup',
     ];
     for (const key of keys) {
       if (typeof record[key] === 'string') {
@@ -581,6 +616,7 @@ Only return the JSON object, no markdown or explanation.`,
       'country', 'timezone', 'companyName', 'jobTitle', 'department',
       'industry', 'segment', 'preferredChannel', 'language',
       'lifecycleStage', 'marketingOptIn', 'doNotContact', 'notesInternal',
+      'ageGroup',
     ];
     for (const header of headers) {
       const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -631,6 +667,13 @@ Only return the JSON object, no markdown or explanation.`,
     if (mapping.doNotContact && row[mapping.doNotContact] !== undefined) {
       const val = parseBool(row[mapping.doNotContact]);
       if (val !== null) contact.doNotContact = val;
+    }
+    if (mapping.ageGroup) {
+      const raw = row[mapping.ageGroup];
+      if (typeof raw === 'string' && raw.trim()) {
+        const code = normalizeAgeGroupValue(raw);
+        if (code) contact.ageGroup = code;
+      }
     }
     if (mapping.custom?.length) {
       const custom: Record<string, string | null> = {};
