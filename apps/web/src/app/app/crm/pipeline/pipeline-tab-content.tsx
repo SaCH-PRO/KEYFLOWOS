@@ -425,6 +425,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         onToggleSelectMode={handleToggleSelectMode}
         onRefresh={handleRefresh}
         onAddContact={handleToggleAddMenu}
+        onQuickCreate={handleQuickCreate}
         onImport={handleToggleImport}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}

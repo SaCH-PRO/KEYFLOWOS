@@ -346,9 +346,25 @@ function PipelineContactListInner({
     );
   }
 
+  const quickAddRow = onQuickCreate && activeListTab === "all" && (
+    showQuickAdd ? (
+      <QuickAddRow onSubmit={onQuickCreate} onCancel={() => setShowQuickAdd(false)} />
+    ) : (
+      <button
+        onClick={() => setShowQuickAdd(true)}
+        className="w-full kf-card p-2.5 flex items-center justify-center gap-1.5 text-xs font-medium transition-all hover:border-[hsl(var(--kf-accent1)/0.3)] min-h-[44px]"
+        style={{ color: "hsl(var(--kf-accent1))", borderStyle: "dashed" }}
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Quick Add Client
+      </button>
+    )
+  );
+
   if (contacts.length === 0) {
     return (
       <div className="space-y-3">
+        {quickAddRow}
         <EmptyState
           icon={Users}
           title={activeListTab === "pinned" ? "No pinned clients" : activeListTab === "recent" ? "No recent clients" : "No clients yet"}
@@ -411,6 +427,7 @@ function PipelineContactListInner({
   if (isVirtual) {
     return (
       <div className="space-y-3">
+        {quickAddRow}
         <div
           ref={containerRef}
           onScroll={handleScroll}
@@ -436,6 +453,7 @@ function PipelineContactListInner({
 
   return (
     <div className="space-y-3">
+      {quickAddRow}
       <div
         ref={listRef}
         role="listbox"
