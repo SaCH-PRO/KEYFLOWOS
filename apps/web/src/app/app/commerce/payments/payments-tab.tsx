@@ -315,6 +315,13 @@ export default function PaymentsTab({
       animate={{ opacity: 1, y: 0 }}
       className="space-y-4"
     >
+      <div className="flex items-start gap-2 rounded-xl border border-border/30 bg-muted/5 px-3 py-2">
+        <DollarSign className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-400" />
+        <p className="text-[11px] text-muted-foreground">
+          <span className="font-semibold text-foreground">Collections</span> — payments from <span className="font-medium text-foreground">your customers</span> on invoices, quotes, and your storefront.
+          Your own KeyflowOS plan billing lives in <span className="font-medium text-foreground">Settings → Business → Billing</span>.
+        </p>
+      </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
           <div className="flex items-center gap-1.5 mb-1">

@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Inject, Logger, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Inject, Logger, Param, Post, Query, RawBodyRequest, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
 import { PaymentsService } from './payments.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
@@ -62,5 +63,24 @@ export class PaymentsController {
   @Get('invoice/:invoiceId/status')
   async getInvoicePaymentStatus(@Param('invoiceId') invoiceId: string) {
     return this.payments.getInvoicePaymentStatus(invoiceId);
+  }
+
+  @PublicRateLimit(5, 60_000)
+  @Post('invoice/:invoiceId/stripe')
+  async createStripeCheckout(
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { successUrl: string; cancelUrl: string },
+  ) {
+    return this.payments.createStripeCheckout(invoiceId, body.successUrl, body.cancelUrl);
+  }
+
+  @PublicRateLimit(60, 60_000)
+  @Post('stripe/webhook')
+  async handleStripeWebhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('stripe-signature') signature?: string,
+  ) {
+    const raw = req.rawBody?.toString('utf8') || '';
+    return this.payments.handleStripeWebhook(raw, signature);
   }
 }

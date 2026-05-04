@@ -51,7 +51,6 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "listings", label: "Listings", icon: Tag },
   { key: "orders", label: "Orders", icon: ShoppingCart },
   { key: "fulfillment", label: "Fulfillment", icon: Truck },
-  { key: "inventory", label: "Inventory", icon: Warehouse },
   { key: "suppliers", label: "Suppliers", icon: Users },
   { key: "insights", label: "Insights", icon: TrendingUp },
 ];
@@ -65,6 +64,14 @@ function unwrapList<T>(data: T[] | ApiListResponse<T> | undefined): T[] {
 export default function MarketplacePage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("catalog");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("tab") === "inventory" || activeTab === "inventory") {
+      window.location.replace("/app/commerce?tab=inventory");
+    }
+  }, [activeTab]);
   const [loading, setLoading] = useState(true);
 
   const [products, setProducts] = useState<ProductDto[]>([]);

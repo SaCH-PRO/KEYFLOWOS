@@ -27,6 +27,7 @@ import { GrowthIntelligencePanel } from "../control-tower/components/growth-inte
 import { ApprovalsQueue } from "../control-tower/components/approvals-queue";
 import { RiskAlerts } from "../control-tower/components/risk-alerts";
 import { StorefrontIntel } from "../control-tower/components/storefront-intel";
+import { ServiceLinkWidget } from "../commerce/components/service-link-widget";
 import UnifiedCalendar from "./components/unified-calendar";
 import { AskKeyButton, KeyNoticedStream } from "@/components/key";
 import {
@@ -232,6 +233,7 @@ export default function KeyflowCommandPage() {
         {d.data && (
           <div className="space-y-4">
             {d.businessId && <KeyNoticedStream businessId={d.businessId} />}
+            {d.businessId && <ServiceLinkWidget compact />}
 
             <CommandEntry
               businessId={d.businessId}

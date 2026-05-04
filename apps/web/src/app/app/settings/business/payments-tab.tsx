@@ -27,6 +27,9 @@ type PaymentSettings = {
   wipayAccountNumber: string;
   paypalClientId: string;
   paypalClientSecret: string;
+  stripePublishableKey: string;
+  stripeSecretKey: string;
+  stripeWebhookSecret: string;
   bankTransferEnabled: boolean;
   bankName: string;
   bankAccountNumber: string;
@@ -41,6 +44,9 @@ const defaultSettings: PaymentSettings = {
   wipayAccountNumber: "",
   paypalClientId: "",
   paypalClientSecret: "",
+  stripePublishableKey: "",
+  stripeSecretKey: "",
+  stripeWebhookSecret: "",
   bankTransferEnabled: false,
   bankName: "",
   bankAccountNumber: "",
@@ -319,6 +325,7 @@ export function PaymentsTab() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     wipay: false,
     paypal: false,
+    stripe: false,
     bank: false,
     cash: false,
   });
@@ -337,6 +344,9 @@ export function PaymentsTab() {
           wipayAccountNumber: str("wipayAccountNumber"),
           paypalClientId: str("paypalClientId"),
           paypalClientSecret: str("paypalClientSecret"),
+          stripePublishableKey: str("stripePublishableKey"),
+          stripeSecretKey: str("stripeSecretKey"),
+          stripeWebhookSecret: str("stripeWebhookSecret"),
           bankTransferEnabled: bool("bankTransferEnabled"),
           bankName: str("bankName"),
           bankAccountNumber: str("bankAccountNumber"),
@@ -362,6 +372,9 @@ export function PaymentsTab() {
         wipayAccountNumber: settings.wipayAccountNumber || undefined,
         paypalClientId: settings.paypalClientId || undefined,
         paypalClientSecret: settings.paypalClientSecret || undefined,
+        stripePublishableKey: settings.stripePublishableKey || undefined,
+        stripeSecretKey: settings.stripeSecretKey || undefined,
+        stripeWebhookSecret: settings.stripeWebhookSecret || undefined,
         bankTransferEnabled: settings.bankTransferEnabled,
         bankName: settings.bankName || undefined,
         bankAccountNumber: settings.bankAccountNumber || undefined,
@@ -401,6 +414,13 @@ export function PaymentsTab() {
         ? "partial"
         : "disabled";
 
+  const stripeStatus: "connected" | "partial" | "disabled" =
+    settings.stripePublishableKey && settings.stripeSecretKey && settings.stripeWebhookSecret
+      ? "connected"
+      : settings.stripePublishableKey || settings.stripeSecretKey || settings.stripeWebhookSecret
+        ? "partial"
+        : "disabled";
+
   const bankStatus: "connected" | "partial" | "disabled" =
     settings.bankTransferEnabled && settings.bankName && settings.bankAccountNumber
       ? "connected"
@@ -418,6 +438,7 @@ export function PaymentsTab() {
   const activeMethods = [
     wipayStatus === "connected" ? "WiPay" : null,
     paypalStatus === "connected" ? "PayPal" : null,
+    stripeStatus === "connected" ? "Stripe" : null,
     bankStatus === "connected" ? "Bank Transfer" : null,
     cashStatus === "connected" ? "Cash" : null,
   ].filter(Boolean);
@@ -465,6 +486,7 @@ export function PaymentsTab() {
             {[
               { label: "WiPay", status: wipayStatus },
               { label: "PayPal", status: paypalStatus },
+              { label: "Stripe", status: stripeStatus },
               { label: "Bank", status: bankStatus },
               { label: "Cash", status: cashStatus },
             ].map((m) => (
@@ -552,6 +574,53 @@ export function PaymentsTab() {
             onChange={(v) => setField("paypalClientSecret", v)}
             placeholder="PayPal client secret"
             hint="Keep this secret — it authenticates your app with PayPal's API."
+          />
+        </div>
+      </PaymentCard>
+
+      <PaymentCard
+        icon={<CreditCard className="w-5 h-5 text-violet-400" />}
+        iconGradient="from-violet-500/20 to-indigo-500/20"
+        iconColor="violet-500"
+        title="Stripe"
+        subtitle="Accept cards globally with Stripe (USD, EUR, GBP, and more)"
+        tag="Global"
+        tagColor="bg-violet-500/20 text-violet-300"
+        status={stripeStatus}
+        statusLabel={statusLabel(stripeStatus)}
+        currencies={["USD", "EUR", "GBP", "CAD", "AUD"]}
+        externalLink="https://dashboard.stripe.com/apikeys"
+        externalLinkLabel="Stripe API Keys"
+        expanded={expanded.stripe}
+        onToggleExpand={() => toggleExpand("stripe")}
+        headerRight={
+          stripeStatus === "connected" ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          ) : null
+        }
+      >
+        <div className="grid gap-3">
+          <SecretField
+            label="Publishable Key"
+            value={settings.stripePublishableKey}
+            onChange={(v) => setField("stripePublishableKey", v)}
+            placeholder="pk_live_…"
+            showToggle={false}
+            hint="Safe to expose. From Stripe Dashboard → Developers → API keys."
+          />
+          <SecretField
+            label="Secret Key"
+            value={settings.stripeSecretKey}
+            onChange={(v) => setField("stripeSecretKey", v)}
+            placeholder="sk_live_…"
+            hint="Keep this secret — used server-side to create payment intents."
+          />
+          <SecretField
+            label="Webhook Signing Secret"
+            value={settings.stripeWebhookSecret}
+            onChange={(v) => setField("stripeWebhookSecret", v)}
+            placeholder="whsec_…"
+            hint="From Stripe Dashboard → Developers → Webhooks. Required to securely confirm payments."
           />
         </div>
       </PaymentCard>

@@ -88,7 +88,7 @@ type Gateway = {
   currencies: string[];
 };
 
-type PaymentMethod = "wipay" | "paypal" | "google_pay" | "bank_transfer" | "cash";
+type PaymentMethod = "wipay" | "paypal" | "stripe" | "google_pay" | "bank_transfer" | "cash";
 
 function ConfettiParticles() {
   const [particles] = useState(() => {
@@ -178,6 +178,29 @@ function PublicPaymentPageInner() {
   const wipayOrderId = searchParams.get("order_id");
   const paypalToken = searchParams.get("token");
   const _paypalPayerId = searchParams.get("PayerID");
+  const stripeReturn = searchParams.get("stripe");
+
+  useEffect(() => {
+    if (stripeReturn === "success") {
+      let cancelled = false;
+      const poll = async (attempt = 0) => {
+        const res = await apiGet<Invoice>(`/commerce/invoices/${encodeURIComponent(invoiceId)}`);
+        if (cancelled) return;
+        if (res.data?.status === "PAID") {
+          setInvoice(res.data);
+          setPaid(true);
+          setShowConfetti(true);
+          return;
+        }
+        if (attempt < 8) setTimeout(() => poll(attempt + 1), 1500);
+      };
+      poll();
+      return () => { cancelled = true; };
+    }
+    if (stripeReturn === "cancel") {
+      setError("Stripe payment was cancelled.");
+    }
+  }, [stripeReturn, invoiceId]);
 
   useEffect(() => {
     if (wipayStatus && wipayOrderId) {
@@ -399,6 +422,30 @@ function PublicPaymentPageInner() {
     window.location.href = approvalUrl;
   }, [invoice, invoiceId]);
 
+  const handleStripePay = useCallback(async () => {
+    if (!invoice) return;
+    setPaying(true);
+    setStep("processing");
+
+    const baseUrl = window.location.origin + window.location.pathname;
+    const successUrl = `${baseUrl}?stripe=success`;
+    const cancelUrl = `${baseUrl}?stripe=cancel`;
+
+    const res = await apiPost<{ redirectUrl: string }>({
+      path: `/payments/invoice/${encodeURIComponent(invoiceId)}/stripe`,
+      body: { successUrl, cancelUrl },
+    });
+
+    if (res.error || !res.data?.redirectUrl) {
+      setError(res.error || "Failed to initiate Stripe payment");
+      setPaying(false);
+      setStep("review");
+      return;
+    }
+
+    window.location.href = res.data.redirectUrl;
+  }, [invoice, invoiceId]);
+
   const handleOfflinePayment = useCallback(async (method: "bank_transfer" | "cash") => {
     if (!invoice) return;
     setPaying(true);
@@ -432,10 +479,12 @@ function PublicPaymentPageInner() {
       await handleWipayPay();
     } else if (selectedMethod === "paypal") {
       await handlePaypalPay();
+    } else if (selectedMethod === "stripe") {
+      await handleStripePay();
     } else if (selectedMethod === "bank_transfer" || selectedMethod === "cash") {
       await handleOfflinePayment(selectedMethod);
     }
-  }, [selectedMethod, handleGooglePay, handleWipayPay, handlePaypalPay, handleOfflinePayment]);
+  }, [selectedMethod, handleGooglePay, handleWipayPay, handlePaypalPay, handleStripePay, handleOfflinePayment]);
 
   const business = invoice?.business;
   const primaryColor = business?.primaryColor || "#F97316";
@@ -459,8 +508,10 @@ function PublicPaymentPageInner() {
 
   const hasWipay = gateways.some((g) => g.id === "wipay");
   const hasPaypal = gateways.some((g) => g.id === "paypal");
+  const hasStripe = gateways.some((g) => g.id === "stripe");
   const wipayGateway = gateways.find((g) => g.id === "wipay");
   const paypalGateway = gateways.find((g) => g.id === "paypal");
+  const stripeGateway = gateways.find((g) => g.id === "stripe");
 
   const glassCard = "backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] rounded-2xl shadow-2xl";
   const glassCardInner = "backdrop-blur-xl bg-white/[0.06] border border-white/[0.06] rounded-xl";
@@ -902,6 +953,30 @@ function PublicPaymentPageInner() {
                       </button>
                     )}
 
+                    {hasStripe && (
+                      <button
+                        onClick={() => { setSelectedMethod("stripe"); setError(null); }}
+                        className={`text-left p-4 rounded-xl border-2 transition-all ${
+                          selectedMethod === "stripe"
+                            ? "bg-white/[0.06] scale-[1.02]"
+                            : "border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.02]"
+                        }`}
+                        style={selectedMethod === "stripe" ? { borderColor: primaryColor } : {}}
+                      >
+                        <div
+                          className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
+                          style={{ backgroundColor: "#635BFF15" }}
+                        >
+                          <CreditCard className="w-5 h-5" style={{ color: "#635BFF" }} />
+                        </div>
+                        <div className="font-medium text-sm mb-1">Pay with Stripe</div>
+                        <div className="text-xs text-slate-500">Card via Stripe Checkout</div>
+                        <div className="text-[10px] text-slate-600 mt-2 font-medium">
+                          {stripeGateway?.currencies.join(" · ") || "USD"}
+                        </div>
+                      </button>
+                    )}
+
                     {googlePayAvailable && (
                       <button
                         onClick={() => { setSelectedMethod("google_pay"); setError(null); }}
@@ -1089,7 +1164,7 @@ function PublicPaymentPageInner() {
                           Pay {formatPrice(total, currency)} with Google Pay
                           <ArrowRight className="w-4 h-4 ml-2" />
                         </>
-                      ) : selectedMethod === "wipay" || selectedMethod === "paypal" ? (
+                      ) : selectedMethod === "wipay" || selectedMethod === "paypal" || selectedMethod === "stripe" ? (
                         <>
                           <CreditCard className="w-4 h-4 mr-2" />
                           Pay {formatPrice(total, currency)}
