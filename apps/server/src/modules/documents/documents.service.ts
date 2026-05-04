@@ -812,8 +812,10 @@ export class DocumentsService {
   /**
    * Replace the document body with content imported from a Drive file. We
    * collapse all sections into a single "Imported Body" section that holds
-   * the converted plain-text content; existing sections are removed so the
-   * imported document becomes the source of truth for round-trip editing.
+   * the converted content (HTML preferred to preserve headings, lists,
+   * bold/italic and tables; plain text accepted as a fallback). Existing
+   * sections are removed so the imported document becomes the source of
+   * truth for round-trip editing.
    */
   async importBodyFromDrive(
     businessId: string,
@@ -823,11 +825,13 @@ export class DocumentsService {
       driveFileName: string;
       driveFileMimeType: string;
       content: string;
+      contentFormat?: 'HTML' | 'PLAIN';
     },
     actorUserId?: string,
   ) {
     const inst = await this.getInstance(businessId, instanceId);
     const previousSectionCount = inst.sections.length;
+    const contentFormat = body.contentFormat === 'HTML' ? 'HTML' : 'PLAIN';
 
     await this.prisma.client.$transaction(async (tx) => {
       await tx.documentSection.deleteMany({ where: { instanceId: inst.id } });
@@ -837,6 +841,7 @@ export class DocumentsService {
           sectionKey: 'imported-body',
           sectionName: body.driveFileName || 'Imported Body',
           content: body.content,
+          contentFormat,
           contentSource: 'USER_EDITED',
           editableMode: 'GUIDED',
           riskScore: 'GREEN',
