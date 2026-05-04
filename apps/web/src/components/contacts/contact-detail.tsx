@@ -14,7 +14,6 @@ import { AiLeadScorePanel } from "./ai-lead-score";
 import { AiPrepBriefPanel } from "./ai-prep-brief";
 import { AiTagSuggestionsPanel } from "./ai-tag-suggestions";
 import { NextBestActionCard } from "./next-best-action-card";
-import { RelationshipHealthStrip } from "./relationship-health-strip";
 import { CrossModuleEntityLinks } from "@/components/ai/cross-module-links";
 
 export type ContactDetailData = {
@@ -272,15 +271,6 @@ export function ContactDetail({
           onAddTask={onAddTask}
           // eslint-disable-next-line react-hooks/purity -- audited: time-relative next booking lookup
           nextBookingDate={bookings?.find(b => new Date(b.startTime).getTime() > Date.now())?.startTime}
-        />
-
-        <RelationshipHealthStrip
-          healthMetrics={healthMetrics}
-          outstandingBalance={contact.meta?.outstandingBalance}
-          totalRevenue={contact.meta?.totalRevenue}
-          nextBooking={bookings?.[0]?.startTime}
-          bookingCount={contact.meta?.bookingCount ?? 0}
-          lastInteraction={contact.meta?.lastInteractionAt}
         />
 
         {(aiInsight || onGenerateAiInsight) && (
