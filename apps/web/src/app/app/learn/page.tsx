@@ -16,8 +16,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
-import { LEARN_WALKTHROUGH } from "@/lib/walkthrough-definitions";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { LearnSkeleton } from "./components/learn-skeleton";
 import { CourseCatalog } from "./components/course-catalog";
@@ -160,7 +159,7 @@ export default function LearnPage() {
       tabLayoutId="learn-tab"
       enableSwipe
       enableSlideAnimation
-      headerRight={<PageGuideTrigger moduleKey="learn" />}
+      headerRight={<NotesTrigger pageKey="learn" variant="header" />}
     >
       {tab === "learning" && (
         <div data-walkthrough="learn-progress">
@@ -192,10 +191,6 @@ export default function LearnPage() {
         </div>
       )}
 
-      <PageGuide
-        moduleKey="learn"
-        walkthroughSteps={LEARN_WALKTHROUGH}
-      />
     </WorkspaceShell>
   );
 }

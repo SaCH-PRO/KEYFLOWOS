@@ -17,8 +17,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatCardSkeleton, ChartSkeleton } from "@/components/ui/skeleton";
-import { PageGuide, PageGuideTrigger } from "@/components/ui/page-guide";
-import { REPORTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
+import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { fetchReport, GeneratedReport } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
@@ -156,7 +155,7 @@ export default function ReportsPage() {
       tabLayoutId="reports-tab-pill"
       headerRight={
         <div className="flex items-center gap-2">
-          <PageGuideTrigger moduleKey="reports" />
+          <NotesTrigger pageKey="reports" variant="header" />
           <button
             onClick={exportPDF}
             disabled={!report || exporting}
@@ -337,10 +336,6 @@ export default function ReportsPage() {
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
 
-      <PageGuide
-        moduleKey="reports"
-        walkthroughSteps={REPORTS_WALKTHROUGH}
-      />
     </WorkspaceShell>
   );
 }
