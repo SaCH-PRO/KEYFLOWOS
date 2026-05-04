@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Loader2, User, Mail, Phone, Building2, ArrowLeft, X } from "lucide-react";
 import { Button, Badge } from "@keyflow/ui";
 import { fetchContacts, type Contact } from "@/lib/client";
-import { getStoredBusinessId } from "@/lib/business-id";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 type SearchState = {
   query: string;
@@ -30,7 +30,7 @@ function initialsOf(c: Contact): string {
 export default function ClientsSearchPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const businessId = getStoredBusinessId();
+  const [businessId, setBusinessId] = useState<string | null>(null);
 
   const initialContactId = searchParams.get("contactId");
   const [selectedContactId, setSelectedContactId] = useState<string | null>(initialContactId);
@@ -47,6 +47,10 @@ export default function ClientsSearchPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    setBusinessId(getStoredBusinessId());
+  }, []);
+
+  useEffect(() => {
     if (!selectedContactId) {
       inputRef.current?.focus();
     }
@@ -54,6 +58,7 @@ export default function ClientsSearchPage() {
 
   const runSearch = useCallback(
     async (query: string) => {
+      if (!businessId) return;
       if (abortRef.current) abortRef.current.abort();
       const trimmed = query.trim();
       if (trimmed.length === 0) {
@@ -73,7 +78,7 @@ export default function ClientsSearchPage() {
         query,
         loading: false,
         results: data?.contacts ?? [],
-        error: error,
+        error,
       });
       setHighlightIdx(0);
     },
@@ -124,10 +129,7 @@ export default function ClientsSearchPage() {
     }
   };
 
-  const showResults = useMemo(
-    () => search.query.trim().length > 0,
-    [search.query],
-  );
+  const showResults = useMemo(() => search.query.trim().length > 0, [search.query]);
 
   if (selectedContactId) {
     return <ContactFullScreen contactId={selectedContactId} onBack={closeContact} />;
@@ -137,17 +139,17 @@ export default function ClientsSearchPage() {
     <div className="min-h-[calc(100vh-120px)] flex flex-col items-center px-4 pt-16 sm:pt-24">
       <div className="w-full max-w-2xl">
         <div className="text-center mb-8">
-          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-fg">
+          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground">
             Find a client
           </h1>
-          <p className="mt-2 text-sm text-fg-muted">
+          <p className="mt-2 text-sm text-muted-foreground">
             Search by name, email, phone, or company.
           </p>
         </div>
 
         <div className="relative">
           <div className="relative flex items-center">
-            <Search className="absolute left-4 size-5 text-fg-muted pointer-events-none" />
+            <Search className="absolute left-4 size-5 text-muted-foreground pointer-events-none" />
             <input
               ref={inputRef}
               type="text"
@@ -156,13 +158,13 @@ export default function ClientsSearchPage() {
               onChange={(e) => onChangeQuery(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder="Search clients…"
-              className="w-full h-14 pl-12 pr-12 rounded-2xl bg-surface-1 border border-border text-base text-fg placeholder:text-fg-muted shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
+              className="w-full h-14 pl-12 pr-12 rounded-2xl bg-card border border-border text-base text-foreground placeholder:text-muted-foreground/60 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
             />
             {search.query && (
               <button
                 type="button"
                 onClick={() => onChangeQuery("")}
-                className="absolute right-4 size-6 rounded-full text-fg-muted hover:text-fg hover:bg-surface-2 flex items-center justify-center transition"
+                className="absolute right-4 size-6 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition"
                 aria-label="Clear search"
               >
                 <X className="size-4" />
@@ -171,20 +173,20 @@ export default function ClientsSearchPage() {
           </div>
 
           {showResults && (
-            <div className="absolute left-0 right-0 mt-2 rounded-2xl bg-surface-1 border border-border shadow-lg overflow-hidden z-10">
+            <div className="absolute left-0 right-0 mt-2 rounded-2xl bg-card border border-border shadow-lg overflow-hidden z-10">
               {search.loading && search.results.length === 0 && (
-                <div className="flex items-center justify-center gap-2 py-6 text-sm text-fg-muted">
+                <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
                   Searching…
                 </div>
               )}
               {!search.loading && search.error && (
-                <div className="px-4 py-6 text-sm text-danger text-center">
+                <div className="px-4 py-6 text-sm text-destructive text-center">
                   {search.error}
                 </div>
               )}
               {!search.loading && !search.error && search.results.length === 0 && (
-                <div className="px-4 py-6 text-sm text-fg-muted text-center">
+                <div className="px-4 py-6 text-sm text-muted-foreground text-center">
                   No clients match &ldquo;{search.query}&rdquo;
                 </div>
               )}
@@ -197,7 +199,7 @@ export default function ClientsSearchPage() {
                         onClick={() => openContact(c.id)}
                         onMouseEnter={() => setHighlightIdx(idx)}
                         className={`w-full flex items-center gap-3 px-4 py-3 text-left transition ${
-                          idx === highlightIdx ? "bg-surface-2" : "hover:bg-surface-2"
+                          idx === highlightIdx ? "bg-muted/60" : "hover:bg-muted/40"
                         }`}
                       >
                         <div className="size-10 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold flex-shrink-0">
@@ -205,16 +207,16 @@ export default function ClientsSearchPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="font-medium text-fg truncate">
+                            <span className="font-medium text-foreground truncate">
                               {displayNameOf(c)}
                             </span>
                             {c.status && (
-                              <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                              <Badge tone="default" className="text-[10px] uppercase tracking-wide">
                                 {c.status}
                               </Badge>
                             )}
                           </div>
-                          <div className="mt-0.5 flex items-center gap-3 text-xs text-fg-muted truncate">
+                          <div className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground truncate">
                             {c.email && (
                               <span className="flex items-center gap-1 truncate">
                                 <Mail className="size-3" />
@@ -245,7 +247,7 @@ export default function ClientsSearchPage() {
         </div>
 
         {!showResults && (
-          <div className="mt-10 text-center text-xs text-fg-muted">
+          <div className="mt-10 text-center text-xs text-muted-foreground">
             Tip: use ↑ ↓ to move through results and press Enter to open.
           </div>
         )}
@@ -255,23 +257,22 @@ export default function ClientsSearchPage() {
 }
 
 function ContactFullScreen({ contactId, onBack }: { contactId: string; onBack: () => void }) {
-  const [iframeKey] = useState(contactId);
   return (
     <div className="flex flex-col h-[calc(100vh-72px)]">
-      <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border bg-surface-1">
+      <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border bg-card">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="size-4 mr-1" />
           Back to search
         </Button>
-        <div className="flex items-center gap-2 text-xs text-fg-muted">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <User className="size-3" />
           Client detail
         </div>
       </div>
       <iframe
-        key={iframeKey}
+        key={contactId}
         src={`/app/crm/contacts/${encodeURIComponent(contactId)}`}
-        className="flex-1 w-full border-0 bg-bg"
+        className="flex-1 w-full border-0 bg-background"
         title="Client detail"
       />
     </div>
