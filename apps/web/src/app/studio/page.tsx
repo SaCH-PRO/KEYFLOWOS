@@ -119,7 +119,7 @@ const SETUP_ITEMS: SetupItem[] = [
     label: "Integrations",
     description: "Connect Google Calendar, Gmail, and more",
     icon: Link2,
-    href: "/app/settings/connections",
+    href: "/app/connect",
     category: "growth",
   },
   {
