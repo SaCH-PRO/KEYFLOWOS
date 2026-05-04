@@ -4,9 +4,15 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Users, Tag, ArrowRight, Search, RefreshCw, Mail, PenSquare, TrendingUp } from "lucide-react";
 import { fetchContacts } from "@/lib/client";
 import { useRouter } from "next/navigation";
+import { CONTACT_AGE_GROUPS, getContactAgeGroupLabel } from "@/lib/crm-constants";
 
 interface ContactSegment {
   tag: string;
+  count: number;
+}
+
+interface AgeGroupSegment {
+  ageGroup: string;
   count: number;
 }
 
@@ -19,6 +25,8 @@ interface AudienceSegmentsPanelProps {
 export function AudienceSegmentsPanel({ businessId, onCreateCampaign, onCreatePost }: AudienceSegmentsPanelProps) {
   const router = useRouter();
   const [segments, setSegments] = useState<ContactSegment[]>([]);
+  const [ageGroupSegments, setAgeGroupSegments] = useState<AgeGroupSegment[]>([]);
+  const [selectedAgeGroups, setSelectedAgeGroups] = useState<Set<string>>(new Set());
   const [totalContacts, setTotalContacts] = useState(0);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -33,21 +41,37 @@ export function AudienceSegmentsPanel({ businessId, onCreateCampaign, onCreatePo
         const contacts = res.data.contacts;
         setTotalContacts(contacts.length);
         const tagCounts: Record<string, number> = {};
-        contacts.forEach((c: { tags?: string[] }) => {
+        const ageCounts: Record<string, number> = {};
+        contacts.forEach((c: { tags?: string[]; ageGroup?: string | null }) => {
           if (c.tags && c.tags.length > 0) {
             c.tags.forEach((t) => {
               tagCounts[t] = (tagCounts[t] || 0) + 1;
             });
           }
+          const ag = c.ageGroup ?? "UNKNOWN";
+          ageCounts[ag] = (ageCounts[ag] || 0) + 1;
         });
         const segs = Object.entries(tagCounts)
           .map(([tag, count]) => ({ tag, count }))
           .sort((a, b) => b.count - a.count);
         setSegments(segs);
+        const ageSegs = Object.entries(ageCounts)
+          .map(([ageGroup, count]) => ({ ageGroup, count }))
+          .sort((a, b) => b.count - a.count);
+        setAgeGroupSegments(ageSegs);
       }
     } catch {}
     setLoading(false);
   }, [businessId]);
+
+  const toggleAgeGroup = useCallback((group: string) => {
+    setSelectedAgeGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
@@ -67,6 +91,10 @@ export function AudienceSegmentsPanel({ businessId, onCreateCampaign, onCreatePo
 
   const handleViewSegment = (tag: string) => {
     router.push(`/app/crm?filter=tag:${encodeURIComponent(tag)}`);
+  };
+
+  const handleViewAgeGroup = (group: string) => {
+    router.push(`/app/crm?filter=ageGroup:${encodeURIComponent(group)}`);
   };
 
   if (loading) {
@@ -164,6 +192,48 @@ export function AudienceSegmentsPanel({ businessId, onCreateCampaign, onCreatePo
               <span className="text-xs tabular-nums">{untaggedCount}</span>
             </div>
           )}
+        </div>
+      )}
+
+      {ageGroupSegments.length > 0 && (
+        <div className="pt-2 border-t border-border/20 space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <Users className="w-3 h-3 text-muted-foreground" />
+              <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Age groups</span>
+            </div>
+            {selectedAgeGroups.size > 0 && (
+              <button
+                onClick={() => setSelectedAgeGroups(new Set())}
+                className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {[...CONTACT_AGE_GROUPS, "UNKNOWN"].map((group) => {
+              const seg = ageGroupSegments.find((s) => s.ageGroup === group);
+              if (!seg) return null;
+              const isSelected = selectedAgeGroups.has(group);
+              const label = group === "UNKNOWN" ? "Unknown" : getContactAgeGroupLabel(group);
+              return (
+                <button
+                  key={group}
+                  onClick={() => toggleAgeGroup(group)}
+                  onDoubleClick={() => group !== "UNKNOWN" && handleViewAgeGroup(group)}
+                  className={`text-[10px] px-2 py-1 rounded-lg border transition-colors ${
+                    isSelected
+                      ? "bg-[hsl(var(--kf-accent2))]/15 border-[hsl(var(--kf-accent2))]/30 text-[hsl(var(--kf-accent2))]"
+                      : "bg-muted/10 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/20"
+                  }`}
+                  title={`${label} — ${seg.count} contact${seg.count !== 1 ? "s" : ""}`}
+                >
+                  {label} <span className="opacity-60 tabular-nums">({seg.count})</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 

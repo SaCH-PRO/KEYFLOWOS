@@ -120,13 +120,13 @@ export class CommunicationsController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/email/validate-send')
-  validateEmailSend(@Param('businessId') businessId: string, @Body() body: { subject?: string; destinationIds?: string[]; segmentTags?: string[] }) {
+  validateEmailSend(@Param('businessId') businessId: string, @Body() body: { subject?: string; destinationIds?: string[]; segmentTags?: string[]; ageGroups?: string[] }) {
     return this.connections.validateEmailSend(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/audience/expand')
-  expandAudience(@Param('businessId') businessId: string, @Body() body: { segmentTags?: string[]; limit?: number }) {
+  expandAudience(@Param('businessId') businessId: string, @Body() body: { segmentTags?: string[]; ageGroups?: string[]; limit?: number; channel?: string }) {
     return this.connections.expandAudience(businessId, body);
   }
 

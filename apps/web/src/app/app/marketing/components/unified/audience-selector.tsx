@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { expandAudience, validateEmailSend } from "@/lib/client";
 import type { EmailValidationResult, AudienceExpandResult } from "@/lib/client";
+import { CONTACT_AGE_GROUPS, CONTACT_AGE_GROUP_LABELS } from "@/lib/crm-constants";
 
 interface AudienceSelectorProps {
   businessId: string;
@@ -22,6 +23,8 @@ interface AudienceSelectorProps {
   destinationIds: string[];
   selectedTags: string[];
   onTagsChange: (tags: string[]) => void;
+  selectedAgeGroups?: string[];
+  onAgeGroupsChange?: (ageGroups: string[]) => void;
   onValidationChange?: (result: EmailValidationResult | null) => void;
   hasEmailDestination?: boolean;
 }
@@ -32,6 +35,8 @@ export function AudienceSelector({
   destinationIds,
   selectedTags,
   onTagsChange,
+  selectedAgeGroups = [],
+  onAgeGroupsChange,
   onValidationChange,
   hasEmailDestination = true,
 }: AudienceSelectorProps) {
@@ -46,11 +51,15 @@ export function AudienceSelector({
     if (!businessId) return;
     setLoading(true);
     try {
-      const res = await expandAudience({ segmentTags: selectedTags.length > 0 ? selectedTags : undefined, limit: 500 }, businessId);
+      const res = await expandAudience({
+        segmentTags: selectedTags.length > 0 ? selectedTags : undefined,
+        ageGroups: selectedAgeGroups.length > 0 ? selectedAgeGroups : undefined,
+        limit: 500,
+      }, businessId);
       if (res.data) setAudienceData(res.data);
     } catch {}
     setLoading(false);
-  }, [businessId, selectedTags]);
+  }, [businessId, selectedTags, selectedAgeGroups]);
 
   const runValidation = useCallback(async () => {
     if (!businessId || !hasEmailDestination) {
@@ -60,14 +69,19 @@ export function AudienceSelector({
     }
     setValidating(true);
     try {
-      const res = await validateEmailSend({ subject, destinationIds, segmentTags: selectedTags.length > 0 ? selectedTags : undefined }, businessId);
+      const res = await validateEmailSend({
+        subject,
+        destinationIds,
+        segmentTags: selectedTags.length > 0 ? selectedTags : undefined,
+        ageGroups: selectedAgeGroups.length > 0 ? selectedAgeGroups : undefined,
+      }, businessId);
       if (res.data) {
         setValidation(res.data);
         onValidationChange?.(res.data);
       }
     } catch {}
     setValidating(false);
-  }, [businessId, subject, destinationIds, selectedTags, onValidationChange, hasEmailDestination]);
+  }, [businessId, subject, destinationIds, selectedTags, selectedAgeGroups, onValidationChange, hasEmailDestination]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadAudience(); }, [loadAudience]);
@@ -75,7 +89,16 @@ export function AudienceSelector({
   useEffect(() => {
     const timeout = setTimeout(() => { void runValidation(); }, 500);
     return () => clearTimeout(timeout);
-  }, [subject, selectedTags, destinationIds, runValidation]);
+  }, [subject, selectedTags, selectedAgeGroups, destinationIds, runValidation]);
+
+  const toggleAgeGroup = (group: string) => {
+    if (!onAgeGroupsChange) return;
+    onAgeGroupsChange(
+      selectedAgeGroups.includes(group)
+        ? selectedAgeGroups.filter((g) => g !== group)
+        : [...selectedAgeGroups, group],
+    );
+  };
 
   const filteredTags = useMemo(() => {
     const availableTags = audienceData?.availableTags;
@@ -179,6 +202,40 @@ export function AudienceSelector({
               >
                 Clear all
               </button>
+            </div>
+          )}
+
+          {onAgeGroupsChange && (
+            <div className="pt-2 border-t border-border/20 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-muted-foreground">Filter by age group (optional)</span>
+                {selectedAgeGroups.length > 0 && (
+                  <button
+                    onClick={() => onAgeGroupsChange([])}
+                    className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {CONTACT_AGE_GROUPS.map((group) => {
+                  const isSelected = selectedAgeGroups.includes(group);
+                  return (
+                    <button
+                      key={group}
+                      onClick={() => toggleAgeGroup(group)}
+                      className={`text-[10px] px-2 py-1 rounded-lg border transition-colors ${
+                        isSelected
+                          ? "bg-[hsl(var(--kf-accent1))]/15 border-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))]"
+                          : "bg-muted/10 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/20"
+                      }`}
+                    >
+                      {CONTACT_AGE_GROUP_LABELS[group]}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 

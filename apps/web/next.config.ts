@@ -70,7 +70,7 @@ const nextConfig: NextConfig = {
   // the module graph, which causes the recurring "module factory is not
   // available" HMR error on Next 16 + React 19. See apps/web/README.md
   // (Troubleshooting → Turbopack HMR) and Task #226 for the full root cause.
-  transpilePackages: ["@keyflow/ui"],
+  transpilePackages: ["@keyflow/ui", "@keyflow/shared"],
   turbopack: {
     root: repoRoot,
   },

@@ -300,6 +300,7 @@ export function UnifiedComposer({
   const [uploading, setUploading] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
   const [segmentTags, setSegmentTags] = useState<string[]>([]);
+  const [ageGroups, setAgeGroups] = useState<string[]>([]);
   const [emailValidation, setEmailValidation] = useState<import("@/lib/client").EmailValidationResult | null>(null);
   const [aiRunning, setAiRunning] = useState<string | null>(null);
   const [aiSuggestions, setAiSuggestions] = useState<{ type: string; data: unknown } | null>(null);
@@ -1169,6 +1170,8 @@ export function UnifiedComposer({
                     destinationIds={selectedDestinations.map(d => d.id)}
                     selectedTags={segmentTags}
                     onTagsChange={setSegmentTags}
+                    selectedAgeGroups={ageGroups}
+                    onAgeGroupsChange={setAgeGroups}
                     onValidationChange={setEmailValidation}
                     hasEmailDestination={hasEmailDestination}
                   />

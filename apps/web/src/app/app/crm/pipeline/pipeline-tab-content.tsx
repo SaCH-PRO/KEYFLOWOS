@@ -112,7 +112,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
 
   const listRef = useRef<HTMLDivElement>(null);
 
-  const handleQuickCreate = useCallback(async (data: { firstName: string; lastName?: string; email?: string; phone?: string; status?: string; source?: string }) => {
+  const handleQuickCreate = useCallback(async (data: { firstName: string; lastName?: string; email?: string; phone?: string; status?: string; source?: string; ageGroup?: string }) => {
     if (!businessId) return;
     try {
       const { data: result } = await createContact({
@@ -123,6 +123,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         phone: data.phone,
         source: data.source ?? "manual",
         status: data.status ?? "LEAD",
+        ageGroup: data.ageGroup,
       });
       if (result) {
         toast.success(`${data.firstName} added`);

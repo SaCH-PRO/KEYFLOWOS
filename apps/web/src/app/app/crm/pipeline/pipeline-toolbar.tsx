@@ -31,6 +31,7 @@ import {
   Phone,
   Building2,
 } from "lucide-react";
+import { CONTACT_AGE_GROUPS, CONTACT_AGE_GROUP_LABELS } from "@/lib/crm-constants";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { ContactScanButton } from "@/components/contacts/contact-scan-button";
 
@@ -85,7 +86,7 @@ export interface PipelineToolbarProps {
   onToggleSelectMode: () => void;
   onRefresh: () => void;
   onAddContact: () => void;
-  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string }) => Promise<void>;
+  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; ageGroup?: string }) => Promise<void>;
   onImport?: () => void;
   onScanSuccess?: () => void;
   businessId?: string;
@@ -452,7 +453,7 @@ function AddContactControl({
   onQuickCreate,
   onOpenFullForm,
 }: {
-  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string }) => Promise<void>;
+  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; ageGroup?: string }) => Promise<void>;
   onOpenFullForm: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -461,6 +462,7 @@ function AddContactControl({
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [company, setCompany] = useState("");
+  const [ageGroup, setAgeGroup] = useState<string>("");
   const [showMore, setShowMore] = useState(false);
   const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -491,6 +493,7 @@ function AddContactControl({
     setEmail("");
     setPhone("");
     setCompany("");
+    setAgeGroup("");
     setShowMore(false);
   }, []);
 
@@ -504,13 +507,14 @@ function AddContactControl({
         lastName: lastName.trim() || undefined,
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
+        ageGroup: ageGroup || undefined,
       });
       reset();
       setOpen(false);
     } finally {
       setSaving(false);
     }
-  }, [onQuickCreate, saving, firstName, lastName, email, phone, reset]);
+  }, [onQuickCreate, saving, firstName, lastName, email, phone, ageGroup, reset]);
 
   const onFieldKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -672,6 +676,21 @@ function AddContactControl({
                         placeholder="Acme Co."
                         className={`${inputCls} pl-9`}
                       />
+                    </div>
+                    <div className="mt-3">
+                      <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 mb-1.5">
+                        Age group
+                      </label>
+                      <select
+                        value={ageGroup}
+                        onChange={(e) => setAgeGroup(e.target.value)}
+                        className={inputCls}
+                      >
+                        <option value="">Not specified</option>
+                        {CONTACT_AGE_GROUPS.map((g) => (
+                          <option key={g} value={g}>{CONTACT_AGE_GROUP_LABELS[g]}</option>
+                        ))}
+                      </select>
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground/60 leading-relaxed">
                       Need address, tags, segment, lifecycle? Open the full form for everything.

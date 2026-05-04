@@ -37,8 +37,13 @@ import { FormsEmptyState } from "./marketing-empty-states";
 import { MarketingBulkBar } from "./marketing-bulk-bar";
 import { toast } from "sonner";
 import { moduleEvents } from "@/lib/module-events";
+import { CONTACT_AGE_GROUPS, CONTACT_AGE_GROUP_LABELS, getContactAgeGroupLabel } from "@/lib/crm-constants";
 
-const FIELD_TYPES = ["text", "email", "phone", "select", "textarea", "number", "date", "checkbox", "radio", "url", "hidden"];
+const FIELD_TYPES = ["text", "email", "phone", "select", "textarea", "number", "date", "checkbox", "radio", "url", "hidden", "ageGroup"];
+
+const FIELD_TYPE_LABELS: Record<string, string> = {
+  ageGroup: "age group",
+};
 
 const FORM_FILTER_PILLS = [
   { key: "all", label: "All" },
@@ -159,7 +164,11 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
     const data = {
       name: formBuilder.name,
       description: formBuilder.description,
-      fields: formBuilder.fields.map(f => ({ ...f, name: f.label.toLowerCase().replace(/\s+/g, "_") })),
+      fields: formBuilder.fields.map(f => ({
+        ...f,
+        name: f.label.toLowerCase().replace(/\s+/g, "_"),
+        ...(f.type === "ageGroup" ? { options: [...CONTACT_AGE_GROUPS] } : {}),
+      })),
       settings: { thankYouMessage: formBuilder.thankYouMessage, redirectUrl: formBuilder.redirectUrl },
     };
     try {
@@ -591,12 +600,18 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                                 {sub.source && <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 bg-muted/30 rounded">{sub.source}</span>}
                               </div>
                               <div className="grid grid-cols-2 gap-1.5">
-                                {Object.entries(sub.data).map(([key, value]) => (
-                                  <div key={key}>
-                                    <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}: </span>
-                                    <span className="text-foreground">{value}</span>
-                                  </div>
-                                ))}
+                                {Object.entries(sub.data).map(([key, value]) => {
+                                  const fieldDef = (form.fields as FormField[]).find(f => f.name === key);
+                                  const display = fieldDef?.type === "ageGroup" && value
+                                    ? getContactAgeGroupLabel(String(value))
+                                    : value;
+                                  return (
+                                    <div key={key}>
+                                      <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}: </span>
+                                      <span className="text-foreground">{display}</span>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           ))}
@@ -694,10 +709,18 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                           />
                           <select
                             value={field.type}
-                            onChange={e => updateField(i, { type: e.target.value, ...(e.target.value !== "select" && e.target.value !== "radio" ? { options: undefined } : {}) })}
+                            onChange={e => {
+                              const newType = e.target.value;
+                              const clearOptions = newType !== "select" && newType !== "radio" && newType !== "ageGroup";
+                              updateField(i, {
+                                type: newType,
+                                ...(clearOptions ? { options: undefined } : {}),
+                                ...(newType === "ageGroup" ? { options: [...CONTACT_AGE_GROUPS] } : {}),
+                              });
+                            }}
                             className="bg-muted/30 border border-border/40 rounded px-2 py-1.5 text-xs focus:outline-none"
                           >
-                            {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            {FIELD_TYPES.map(t => <option key={t} value={t}>{FIELD_TYPE_LABELS[t] ?? t}</option>)}
                           </select>
                           <button
                             onClick={() => updateField(i, { required: !field.required })}
@@ -711,6 +734,11 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
+                        {field.type === "ageGroup" && (
+                          <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            <Tag className="w-3 h-3" /> Renders a select with: {CONTACT_AGE_GROUPS.map(g => CONTACT_AGE_GROUP_LABELS[g]).join(", ")}
+                          </p>
+                        )}
                         {(field.type === "select" || field.type === "radio") && (
                           <div>
                             <label className="text-[10px] text-muted-foreground block mb-1">Options (comma-separated)</label>
