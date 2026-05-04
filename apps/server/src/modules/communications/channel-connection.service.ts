@@ -345,6 +345,7 @@ export class ChannelConnectionService {
     subject?: string;
     destinationIds?: string[];
     segmentTags?: string[];
+    ageGroups?: string[];
   }) {
     const warnings: { field: string; message: string; severity: 'error' | 'warning' }[] = [];
 
@@ -393,6 +394,9 @@ export class ChannelConnectionService {
     if (input.segmentTags && input.segmentTags.length > 0) {
       contactWhere.tags = { hasSome: input.segmentTags };
     }
+    if (input.ageGroups && input.ageGroups.length > 0) {
+      contactWhere.ageGroup = { in: input.ageGroups };
+    }
 
     const [totalAudience, suppressedCount] = await Promise.all([
       this.prisma.client.contact.count({ where: contactWhere }),
@@ -430,6 +434,7 @@ export class ChannelConnectionService {
 
   async expandAudience(businessId: string, input: {
     segmentTags?: string[];
+    ageGroups?: string[];
     limit?: number;
     channel?: string;
   }) {
@@ -451,10 +456,13 @@ export class ChannelConnectionService {
     if (input.segmentTags && input.segmentTags.length > 0) {
       contactWhere.tags = { hasSome: input.segmentTags };
     }
+    if (input.ageGroups && input.ageGroups.length > 0) {
+      contactWhere.ageGroup = { in: input.ageGroups };
+    }
 
     const contacts = await this.prisma.client.contact.findMany({
       where: contactWhere,
-      select: { id: true, email: true, phone: true, firstName: true, lastName: true, tags: true },
+      select: { id: true, email: true, phone: true, firstName: true, lastName: true, tags: true, ageGroup: true },
       take: input.limit ?? 500,
       orderBy: { createdAt: 'desc' },
     });
@@ -465,6 +473,7 @@ export class ChannelConnectionService {
         deletedAt: null,
         OR: [{ doNotContact: true }, { marketingOptIn: false }],
         ...(input.segmentTags && input.segmentTags.length > 0 ? { tags: { hasSome: input.segmentTags } } : {}),
+        ...(input.ageGroups && input.ageGroups.length > 0 ? { ageGroup: { in: input.ageGroups } } : {}),
       },
     });
 
@@ -496,19 +505,26 @@ export class ChannelConnectionService {
       }),
       this.prisma.client.contact.findMany({
         where: { businessId, deletedAt: null },
-        select: { tags: true },
+        select: { tags: true, ageGroup: true },
       }),
     ]);
 
     const segments: Record<string, number> = {};
+    const ageGroupCounts: Record<string, number> = {};
     tagCounts.forEach(c => {
       if (c.tags && Array.isArray(c.tags)) {
         (c.tags as string[]).forEach(t => { segments[t] = (segments[t] || 0) + 1; });
       }
+      const ag = (c as { ageGroup?: string | null }).ageGroup ?? 'UNKNOWN';
+      ageGroupCounts[ag] = (ageGroupCounts[ag] || 0) + 1;
     });
 
     const sortedSegments = Object.entries(segments)
       .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const sortedAgeGroups = Object.entries(ageGroupCounts)
+      .map(([ageGroup, count]) => ({ ageGroup, count }))
       .sort((a, b) => b.count - a.count);
 
     const emailCoverage = totalContacts > 0 ? Math.round((withEmail / totalContacts) * 100) : 0;
@@ -522,6 +538,7 @@ export class ChannelConnectionService {
       emailCoverage,
       deliverabilityRate,
       segments: sortedSegments,
+      ageGroups: sortedAgeGroups,
     };
   }
 

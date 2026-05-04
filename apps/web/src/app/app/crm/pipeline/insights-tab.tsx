@@ -26,6 +26,7 @@ import type { Contact } from "@/lib/client";
 import { exportInsightsReport, type InsightsExportFormat } from "@/lib/contacts-export";
 import { AskKeyButton } from "@/components/key";
 import { type Period, PERIOD_LABELS, PERIOD_MS, stagger, formatTTD } from "./components/insights/insights-shared";
+import { Users as UsersIcon } from "lucide-react";
 import { LazyWidget } from "./components/insights/lazy-widget";
 import { HeroStats } from "./components/insights/hero-stats";
 import { FunnelChart } from "./components/insights/pipeline-funnel";
@@ -34,6 +35,7 @@ import { GrowthTrend } from "./components/insights/contact-growth";
 import { DataCompleteness, TaskHealth } from "./components/insights/data-quality";
 import { LeadScoreDistribution } from "./components/insights/lead-scores";
 import { EngagementHeatmap } from "./components/insights/engagement-heatmap";
+import { ContactsByAgeGroup } from "./components/insights/contacts-by-age-group";
 import { ConversionTimeline } from "./components/insights/conversion-timeline";
 import { TagPerformance } from "./components/insights/tag-performance";
 import { SourceConversion, ChannelPreference, TopSources } from "./components/insights/source-channels";
@@ -283,6 +285,16 @@ function InsightsTabInner({
         <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
           <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4">{hasRevenueClients ? <RevenueByClient contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} /> : <InsightEmptyState icon={DollarSign} message="Revenue data appears with invoices" label="Revenue by Client" />}</div>
           <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4"><EngagementHeatmap contacts={periodContacts} /></div>
+        </motion.div>
+      </LazyWidget>
+
+      <LazyWidget height={160}>
+        <motion.div variants={stagger.item} className="rounded-xl border border-border/50 bg-card p-4">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
+            <UsersIcon className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+            Contacts by Age Group
+          </h3>
+          <ContactsByAgeGroup contacts={periodContacts} />
         </motion.div>
       </LazyWidget>
 

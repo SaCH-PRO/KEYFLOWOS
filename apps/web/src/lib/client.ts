@@ -8113,7 +8113,7 @@ export interface EmailValidationResult {
 }
 
 export interface AudienceExpandResult {
-  contacts: { id: string; email: string; firstName: string | null; lastName: string | null; tags: string[] }[];
+  contacts: { id: string; email: string; firstName: string | null; lastName: string | null; tags: string[]; ageGroup?: string | null }[];
   total: number;
   suppressed: number;
   availableTags: string[];
@@ -8127,9 +8127,10 @@ export interface AudienceHealthResult {
   emailCoverage: number;
   deliverabilityRate: number;
   segments: { tag: string; count: number }[];
+  ageGroups?: { ageGroup: string; count: number }[];
 }
 
-export async function validateEmailSend(data: { subject?: string; destinationIds?: string[]; segmentTags?: string[] }, businessId?: string): Promise<ApiResult<EmailValidationResult>> {
+export async function validateEmailSend(data: { subject?: string; destinationIds?: string[]; segmentTags?: string[]; ageGroups?: string[] }, businessId?: string): Promise<ApiResult<EmailValidationResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<EmailValidationResult>({
     path: `/communications/businesses/${encodeURIComponent(bid)}/email/validate-send`,
@@ -8137,7 +8138,7 @@ export async function validateEmailSend(data: { subject?: string; destinationIds
   });
 }
 
-export async function expandAudience(data: { segmentTags?: string[]; limit?: number }, businessId?: string): Promise<ApiResult<AudienceExpandResult>> {
+export async function expandAudience(data: { segmentTags?: string[]; ageGroups?: string[]; limit?: number; channel?: string }, businessId?: string): Promise<ApiResult<AudienceExpandResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<AudienceExpandResult>({
     path: `/communications/businesses/${encodeURIComponent(bid)}/audience/expand`,

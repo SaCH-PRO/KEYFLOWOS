@@ -2,6 +2,9 @@ import { Inject, Injectable, NotFoundException, BadRequestException } from '@nes
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { LeadFormCreatedPayload, LeadFormSubmittedPayload } from '../../core/event-bus/events.types';
+import { CONTACT_AGE_GROUPS } from '../crm/crm.constants';
+
+const AGE_GROUP_VALUES = new Set<string>([...CONTACT_AGE_GROUPS]);
 
 @Injectable()
 export class LeadFormsService {
@@ -103,10 +106,18 @@ export class LeadFormsService {
     }
 
     const fields = form.fields as any[];
+    let ageGroupFieldName: string | null = null;
     if (Array.isArray(fields)) {
       for (const field of fields) {
         if (field.required && !data[field.name]) {
           throw new BadRequestException(`Field "${field.label || field.name}" is required`);
+        }
+        if (field.type === 'ageGroup') {
+          ageGroupFieldName = field.name;
+          const value = data[field.name];
+          if (value !== undefined && value !== null && value !== '' && !AGE_GROUP_VALUES.has(String(value))) {
+            throw new BadRequestException(`Field "${field.label || field.name}" has an invalid age group value`);
+          }
         }
       }
     }
@@ -115,6 +126,8 @@ export class LeadFormsService {
     const firstName = data.firstName || data.first_name || data.name || data.Name;
     const lastName = data.lastName || data.last_name;
     const phone = data.phone || data.Phone;
+    const rawAgeGroup = ageGroupFieldName ? data[ageGroupFieldName] : (data.ageGroup || data.age_group);
+    const ageGroup = rawAgeGroup && AGE_GROUP_VALUES.has(String(rawAgeGroup)) ? String(rawAgeGroup) : null;
 
     const result = await this.prisma.client.$transaction(async (tx) => {
       let contactId: string | null = null;
@@ -128,6 +141,9 @@ export class LeadFormsService {
 
           if (existing) {
             contactId = existing.id;
+            if (ageGroup && !existing.ageGroup) {
+              await tx.contact.update({ where: { id: existing.id }, data: { ageGroup } });
+            }
           } else {
             const contact = await tx.contact.create({
               data: {
@@ -137,6 +153,7 @@ export class LeadFormsService {
                 firstName: firstName ?? null,
                 lastName: lastName ?? null,
                 phone: phone ?? null,
+                ageGroup: ageGroup ?? null,
                 source: 'LEAD_FORM',
                 sourceDetail: form.name,
                 status: 'LEAD',
