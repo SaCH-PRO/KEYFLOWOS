@@ -18,6 +18,15 @@ interface CalendarEvent {
   attendees?: Array<{ email: string; displayName?: string }>;
 }
 
+export type CalendarEventPatch = Partial<{
+  summary: string;
+  description: string;
+  location: string;
+  start: { dateTime: string; timeZone: string };
+  end: { dateTime: string; timeZone: string };
+  attendees: Array<{ email: string; displayName?: string }>;
+}>;
+
 @Injectable()
 export class CalendarService {
   private readonly logger = new Logger(CalendarService.name);
@@ -553,6 +562,36 @@ export class CalendarService {
     }
   }
 
+  async patchCalendarEvent(
+    businessId: string,
+    eventId: string,
+    patch: CalendarEventPatch,
+  ): Promise<boolean> {
+    try {
+      const accessToken = await this.refreshAccessToken(businessId);
+      const calendarId = encodeURIComponent(await this.getActiveCalendarId(businessId));
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${eventId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(patch),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.text();
+        this.logger.error('Failed to patch calendar event', err);
+      }
+      return res.ok;
+    } catch (error) {
+      this.logger.error('Error patching calendar event', error);
+      return false;
+    }
+  }
+
   async deleteCalendarEvent(businessId: string, eventId: string): Promise<boolean> {
     try {
       const accessToken = await this.refreshAccessToken(businessId);
@@ -671,6 +710,7 @@ export class CalendarService {
     htmlLink?: string;
     location?: string;
     organizer?: string;
+    attendees?: Array<{ email: string; displayName?: string }>;
   }>> {
     try {
       const accessToken = await this.refreshAccessToken(businessId);
@@ -714,6 +754,11 @@ export class CalendarService {
             htmlLink: item.htmlLink ?? undefined,
             location: item.location ?? undefined,
             organizer: item.organizer?.email ?? undefined,
+            attendees: Array.isArray(item.attendees)
+              ? item.attendees
+                  .filter((a: any) => a?.email)
+                  .map((a: any) => ({ email: a.email as string, displayName: a.displayName }))
+              : undefined,
           };
         });
     } catch (error) {
