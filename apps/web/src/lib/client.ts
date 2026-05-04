@@ -5191,6 +5191,29 @@ export async function fetchSuppressionCount(businessId: string): Promise<ApiResu
   return apiGetSimple<number>(`/businesses/${encodeURIComponent(businessId)}/suppression-count`);
 }
 
+export interface CampaignRecipient {
+  id: string;
+  contactId: string;
+  email: string;
+  status: string;
+  sentAt?: string | null;
+  openedAt?: string | null;
+  clickedAt?: string | null;
+  bouncedAt?: string | null;
+}
+export interface CampaignRecipientsResponse {
+  recipients: CampaignRecipient[];
+  summary: { total: number; sent: number; opened: number; clicked: number; bounced: number };
+}
+export async function fetchCampaignRecipients(
+  businessId: string,
+  campaignId: string,
+): Promise<ApiResult<CampaignRecipientsResponse>> {
+  return apiGetSimple<CampaignRecipientsResponse>(
+    `/businesses/${encodeURIComponent(businessId)}/campaigns/${encodeURIComponent(campaignId)}/recipients`,
+  );
+}
+
 export interface MarketingStats {
   totalCampaigns: number;
   sentCount: number;

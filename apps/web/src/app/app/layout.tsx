@@ -316,7 +316,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { pushContext, setTaskOrigin, current } = useNavigationContext();
+  useNavigationContext();
 
   const activePrimary = useMemo(() => detectPrimarySection(pathname), [pathname]);
   const copilotModule = useMemo((): CopilotModule => {
