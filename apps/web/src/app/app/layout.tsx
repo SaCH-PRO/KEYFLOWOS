@@ -217,7 +217,11 @@ interface PrimaryNavItem {
 }
 
 const primaryNav: PrimaryNavItem[] = [
-  { id: "tower", label: "KEYFLOW", icon: Radar, href: "/app/keyflow-command" },
+  // KEYFLOW (id "tower") intentionally NOT in this list — the orange
+  // Zap logo button at the top of the rail IS the home/KEYFLOW button.
+  // Adding KEYFLOW here too duplicates the affordance and confuses users.
+  // The "tower" section ID is still used elsewhere (routeToSurface,
+  // detectPrimarySection, mobile bottom nav) — see comments around line 337.
   { id: "store", label: "Store", icon: Store, href: "/app/store" },
   { id: "workspaces", label: "Workspaces", icon: LayoutGrid },
   { id: "studio", label: "Studio", icon: Wrench },
