@@ -62,6 +62,7 @@ export interface SavedView {
   isDefault: boolean;
   config: {
     statusFilter: string;
+    ageGroupFilter?: string[];
     search: string;
     sortField: SortField;
     sortDir: SortDir;
@@ -209,6 +210,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const [sortField, setSortField] = useState<SortField>("firstName");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [ageGroupFilter, setAgeGroupFilter] = useState<Set<string>>(new Set());
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -286,6 +288,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
         skip: append && !nextCursor ? serverContacts.length : undefined,
         search: search || undefined,
         status: statusFilter !== "ALL" ? statusFilter : undefined,
+        ageGroups: ageGroupFilter.size > 0 ? Array.from(ageGroupFilter) : undefined,
         sortBy: apiSortBy,
         sortOrder: sortDir,
         includeStats: true,
@@ -305,7 +308,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     } finally {
       if (!controller.signal.aborted) setServerLoading(false);
     }
-  }, [businessId, search, statusFilter, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi]);
+  }, [businessId, search, statusFilter, ageGroupFilter, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi]);
 
   useEffect(() => {
     if (isMobilePrev.current !== isMobile) {
@@ -325,7 +328,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     setNextCursor(null);
     void loadServerContacts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter, sortField, sortDir, pageSize, businessId]);
+  }, [search, statusFilter, ageGroupFilter, sortField, sortDir, pageSize, businessId]);
 
   useEffect(() => {
     getLastSyncTime().then(setLastSync);
@@ -352,6 +355,10 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
 
     if (statusFilter !== "ALL") {
       list = list.filter((c) => c.status === statusFilter);
+    }
+
+    if (ageGroupFilter.size > 0) {
+      list = list.filter((c) => c.ageGroup && ageGroupFilter.has(c.ageGroup));
     }
 
     if (search) {
@@ -624,6 +631,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     const view = savedViews.find((v) => v.id === viewId);
     if (!view) return;
     setStatusFilter(view.config.statusFilter);
+    setAgeGroupFilter(new Set(view.config.ageGroupFilter ?? []));
     setSearchInput(view.config.search);
     setSortField(view.config.sortField);
     setSortDir(view.config.sortDir);
@@ -648,6 +656,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
       isDefault: false,
       config: {
         statusFilter,
+        ageGroupFilter: [...ageGroupFilter],
         search: searchInput,
         sortField,
         sortDir,
@@ -663,7 +672,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     setActiveViewId(newView.id);
     setShowViewsPicker(false);
     toast.success(`View "${newView.name}" saved`);
-  }, [statusFilter, searchInput, sortField, sortDir, visibleColumns, pageSize]);
+  }, [statusFilter, ageGroupFilter, searchInput, sortField, sortDir, visibleColumns, pageSize]);
 
   const deleteView = useCallback((viewId: string) => {
     setSavedViews((prev) => {
@@ -689,6 +698,8 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     sortDir,
     statusFilter,
     setStatusFilter,
+    ageGroupFilter,
+    setAgeGroupFilter,
     showExport,
     exporting,
     showFilters,

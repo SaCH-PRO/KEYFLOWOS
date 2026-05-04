@@ -307,6 +307,7 @@ export async function fetchContacts(
     staleDays?: number;
     newThisWeek?: boolean;
     tags?: string[];
+    ageGroups?: string[];
     skip?: number;
     take?: number;
     cursor?: string;
@@ -324,6 +325,7 @@ export async function fetchContacts(
   if (opts?.staleDays) params.set("staleDays", String(opts.staleDays));
   if (opts?.newThisWeek) params.set("newThisWeek", "true");
   if (opts?.tags?.length) opts.tags.forEach((t) => params.append("tags", t));
+  if (opts?.ageGroups?.length) opts.ageGroups.forEach((g) => params.append("ageGroups", g));
   if (opts?.skip !== undefined) params.set("skip", String(opts.skip));
   if (opts?.take !== undefined) params.set("take", String(opts.take));
   if (opts?.cursor) params.set("cursor", opts.cursor);
