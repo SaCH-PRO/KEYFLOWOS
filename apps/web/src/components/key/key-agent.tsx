@@ -51,6 +51,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!e.key) return;
       const isMod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
       if (isMod && k === "k") {
