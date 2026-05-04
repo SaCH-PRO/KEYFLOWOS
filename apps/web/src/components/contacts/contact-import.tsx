@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, DragEvent } from "react";
+import { useEffect, useState, useRef, useCallback, DragEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload,
@@ -17,16 +17,25 @@ import {
   ArrowLeft,
   ArrowRight,
   Table,
+  Smartphone,
+  Loader2,
 } from "lucide-react";
 import { getGoogleContactsAuthUrl, checkImportDuplicates } from "@/lib/client";
 import { toast } from "sonner";
 
-type ImportMethod = "file" | "url" | "google";
+type ImportMethod = "file" | "url" | "google" | "device";
 type FileType = "csv" | "xlsx" | "vcf";
+
+interface DeviceContact {
+  name?: string[];
+  email?: string[];
+  tel?: string[];
+}
 
 interface ContactImportProps {
   onImportFile: (type: FileType | "image", file: File) => Promise<void>;
   onImportLink: (url: string) => Promise<void>;
+  onDeviceImport?: (contacts: { firstName?: string; lastName?: string; email?: string; phone?: string }[]) => Promise<void>;
   loading?: boolean;
   businessId?: string;
 }
@@ -246,7 +255,13 @@ function autoMatchHeaders(headers: string[]): Record<string, string> {
   return mapping;
 }
 
-export function ContactImport({ onImportFile, onImportLink, loading, businessId }: ContactImportProps) {
+function parseName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
+export function ContactImport({ onImportFile, onImportLink, onDeviceImport, loading, businessId }: ContactImportProps) {
   const [expanded, setExpanded] = useState(false);
   const [method, setMethod] = useState<ImportMethod>("file");
   const [fileType, setFileType] = useState<FileType>("csv");
@@ -271,7 +286,61 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
   } | null>(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [, setSkipDuplicates] = useState(false);
+  const [deviceSupported, setDeviceSupported] = useState(false);
+  const [deviceLoading, setDeviceLoading] = useState(false);
+  const [deviceSelected, setDeviceSelected] = useState<{ firstName?: string; lastName?: string; email?: string; phone?: string }[]>([]);
+  const [deviceImported, setDeviceImported] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setDeviceSupported(typeof navigator !== "undefined" && "contacts" in navigator && typeof (navigator as Navigator & { contacts?: { select?: unknown } }).contacts?.select === "function");
+  }, []);
+
+  const handleDevicePick = async () => {
+    try {
+      const nav = navigator as Navigator & { contacts: { select: (props: string[], opts: { multiple: boolean }) => Promise<DeviceContact[]> } };
+      const selected = await nav.contacts.select(["name", "email", "tel"], { multiple: true });
+      if (!selected || selected.length === 0) return;
+      const parsed = selected.map((dc: DeviceContact) => {
+        const fullName = dc.name?.[0] || "";
+        const { firstName, lastName } = parseName(fullName);
+        return {
+          firstName: firstName || undefined,
+          lastName: lastName || undefined,
+          email: dc.email?.[0] || undefined,
+          phone: dc.tel?.[0] || undefined,
+        };
+      }).filter((c) => c.firstName || c.email || c.phone);
+      setDeviceSelected(parsed);
+    } catch (err) {
+      if (err instanceof Error && err.name === "InvalidStateError") {
+        toast.error("Contact picker is already open");
+      } else if (err instanceof Error && err.name !== "AbortError") {
+        toast.error("Could not access device contacts");
+      }
+    }
+  };
+
+  const handleDeviceConfirmImport = async () => {
+    if (deviceSelected.length === 0 || !onDeviceImport) return;
+    setDeviceLoading(true);
+    try {
+      await onDeviceImport(deviceSelected);
+      setDeviceImported(true);
+      toast.success(`${deviceSelected.length} contact${deviceSelected.length !== 1 ? "s" : ""} imported from device`);
+      setUploadSuccess(true);
+      setTimeout(() => {
+        setUploadSuccess(false);
+        setDeviceSelected([]);
+        setDeviceImported(false);
+      }, 2500);
+    } catch {
+      toast.error("Failed to import device contacts");
+    } finally {
+      setDeviceLoading(false);
+    }
+  };
+
 
   const handleGoogleConnect = async () => {
     setGoogleLoading(true);
@@ -485,6 +554,7 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
               {[
                 { key: "file" as const, label: "Upload File", icon: FileSpreadsheet },
                 { key: "google" as const, label: "Google", icon: Chrome },
+                { key: "device" as const, label: "Device", icon: Smartphone },
                 { key: "url" as const, label: "From URL", icon: Link2 },
               ].map(({ key, label, icon: Icon }) => (
                 <button
@@ -918,6 +988,142 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
                   <p className="text-xs text-center text-muted-foreground">
                     You&apos;ll be redirected to Google to authorize access.
                   </p>
+                </div>
+              )}
+
+              {method === "device" && (
+                <div className="space-y-4">
+                  {!deviceSupported ? (
+                    <>
+                      <div className="text-center py-4">
+                        <div className="mx-auto w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mb-4">
+                          <Smartphone className="w-8 h-8 text-amber-500" />
+                        </div>
+                        <h3 className="font-semibold text-lg mb-2">Device Contacts</h3>
+                        <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                          Direct device contact picking is available on mobile browsers (Chrome on Android). On this device, try one of these alternatives:
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => { setMethod("file"); setFileType("vcf"); }}
+                          className="w-full flex items-center gap-3 p-3 rounded-xl border border-border hover:bg-muted/30 transition-all text-left"
+                        >
+                          <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                            <FileText className="w-4 h-4 text-amber-500" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium block">Export as vCard</span>
+                            <span className="text-[11px] text-muted-foreground">Export from your Contacts app, then upload the .vcf file</span>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => setMethod("google")}
+                          className="w-full flex items-center gap-3 p-3 rounded-xl border border-border hover:bg-muted/30 transition-all text-left"
+                        >
+                          <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                            <Chrome className="w-4 h-4 text-blue-500" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium block">Sync with Google</span>
+                            <span className="text-[11px] text-muted-foreground">If your contacts sync to Google, import them directly</span>
+                          </div>
+                        </button>
+                      </div>
+                      <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/15">
+                        <p className="text-xs text-amber-500 dark:text-amber-400 flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                          On iPhone or desktop, export your contacts as a vCard (.vcf) file and use the Upload File option.
+                        </p>
+                      </div>
+                    </>
+                  ) : deviceSelected.length === 0 && !deviceImported ? (
+                    <>
+                      <div className="text-center py-4">
+                        <div className="mx-auto w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mb-4">
+                          <Smartphone className="w-8 h-8 text-amber-500" />
+                        </div>
+                        <h3 className="font-semibold text-lg mb-2">Pick from your device</h3>
+                        <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                          Your device&apos;s contact picker will open — select the contacts you&apos;d like to import.
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleDevicePick}
+                        className="kf-btn-primary w-full flex items-center justify-center gap-2"
+                      >
+                        <Smartphone className="w-4 h-4" />
+                        Open Contact Picker
+                      </button>
+                      <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/15">
+                        <p className="text-xs text-amber-500 dark:text-amber-400 flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                          Only the name, email, and phone of selected contacts will be imported.
+                        </p>
+                      </div>
+                    </>
+                  ) : deviceImported ? (
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-green-500/10 border border-green-500/20">
+                      <CheckCircle2 className="w-5 h-5 text-green-500" />
+                      <span className="text-sm text-green-500 font-medium">
+                        {deviceSelected.length} contact{deviceSelected.length !== 1 ? "s" : ""} imported!
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-medium">
+                          {deviceSelected.length} contact{deviceSelected.length !== 1 ? "s" : ""} selected
+                        </h3>
+                        <button
+                          onClick={handleDevicePick}
+                          className="text-xs text-[hsl(var(--kf-accent1))] hover:underline"
+                        >
+                          Select more
+                        </button>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto rounded-xl border border-border divide-y divide-border">
+                        {deviceSelected.map((c, i) => (
+                          <div key={i} className="flex items-center gap-3 p-2.5">
+                            <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                              <span className="text-xs font-semibold text-amber-500">
+                                {(c.firstName?.[0] || c.email?.[0] || "?").toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium truncate">
+                                {[c.firstName, c.lastName].filter(Boolean).join(" ") || "Unknown"}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground truncate">
+                                {[c.email, c.phone].filter(Boolean).join(" · ") || "No details"}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => setDeviceSelected((prev) => prev.filter((_, idx) => idx !== i))}
+                              className="p-1 hover:bg-muted rounded-full flex-shrink-0"
+                              aria-label="Remove"
+                            >
+                              <X className="w-3 h-3 text-muted-foreground" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        onClick={handleDeviceConfirmImport}
+                        disabled={deviceLoading || deviceSelected.length === 0 || !onDeviceImport}
+                        className="kf-btn-primary w-full disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {deviceLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Importing...
+                          </>
+                        ) : (
+                          `Import ${deviceSelected.length} Contact${deviceSelected.length !== 1 ? "s" : ""}`
+                        )}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 

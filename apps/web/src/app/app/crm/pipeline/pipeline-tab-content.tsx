@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { createContact, fetchContactLists } from "@/lib/client";
 import { STATUS_COLORS } from "@/lib/crm-utils";
 import {
-  ContactCapture,
   ContactForm,
   ContactImport,
   type ContactCardData,
@@ -61,7 +60,6 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     businessId,
     displayContacts, loading, loadError, hasMore, activeListTab,
     selectedContactId, selectMode, selectedIds, pinnedIds,
-    showAddMenu, setShowAddMenu,
     showAddForm, setShowAddForm,
     editingContact, setEditingContact,
     isPending,
@@ -137,8 +135,6 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   }, [businessId, loadContacts, loadFlowData]);
 
   const handleRefresh = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
-  const handleToggleAddMenu = useCallback(() => setShowAddMenu((prev: boolean) => !prev), [setShowAddMenu]);
-  const handleCloseAddMenu = useCallback(() => setShowAddMenu(false), [setShowAddMenu]);
   const handleMergeComplete = useCallback(() => { void loadContacts(); }, [loadContacts]);
   const handleLoadMore = useCallback(() => loadContacts({ append: true }), [loadContacts]);
   const handleRetry = useCallback(() => { void loadContacts(); }, [loadContacts]);
@@ -297,25 +293,11 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
       )}
 
       <AnimatePresence>
-        {showAddMenu && (
-          <ContactCapture
-            onManualAdd={handleOpenAddForm}
-            onImportFile={handleImportFile}
-            onImportLink={handleImportLink}
-            onDeviceImport={handleDeviceImport}
-            onClose={handleCloseAddMenu}
-            onScanSuccess={handleScanSuccess}
-            loading={isPending}
-            businessId={businessId ?? undefined}
-          />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
         {showImport && (
           <ContactImport
             onImportFile={handleImportFile}
             onImportLink={handleImportLink}
+            onDeviceImport={handleDeviceImport}
             loading={isPending}
             businessId={businessId ?? undefined}
           />
@@ -369,9 +351,11 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         selectMode={selectMode}
         onToggleSelectMode={handleToggleSelectMode}
         onRefresh={handleRefresh}
-        onAddContact={handleToggleAddMenu}
+        onAddContact={handleOpenAddForm}
         onQuickCreate={handleQuickCreate}
         onImport={handleToggleImport}
+        onScanSuccess={handleScanSuccess}
+        businessId={businessId ?? undefined}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
       />

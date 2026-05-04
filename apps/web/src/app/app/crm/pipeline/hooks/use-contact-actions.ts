@@ -65,7 +65,6 @@ export function useContactActions({
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingContact, setEditingContact] = useState<ContactFormData | null>(null);
-  const [showAddMenu, setShowAddMenu] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({ open: false, action: () => {} });
@@ -548,7 +547,6 @@ export function useContactActions({
       setEditingContact(v);
       if (!v) setEditingContactId(null);
     }, []),
-    showAddMenu, setShowAddMenu,
     showBroadcast, setShowBroadcast,
     showGuide, setShowGuide,
     confirmState, setConfirmState,

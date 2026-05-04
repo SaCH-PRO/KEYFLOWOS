@@ -94,7 +94,7 @@ export default function ContactsPage() {
     {
       groupName: "CRM Navigation",
       shortcuts: [
-        { key: "n", description: "New contact", action: () => state.setShowAddMenu(true) },
+        { key: "n", description: "New contact", action: () => { if (typeof window !== "undefined") window.dispatchEvent(new Event("kf:open-quick-add-contact")); } },
         { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search contacts"]'); el?.focus(); } },
         { key: "1", description: "Contacts tab", action: () => setCrmViewTab("contacts") },
         { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
@@ -102,7 +102,7 @@ export default function ContactsPage() {
       ],
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to the specific setters used; including the full `state` bag would re-create shortcuts on every contact-pipeline state change and re-bind keyboard handlers.
-  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowAddMenu, state.setShowBroadcast]);
+  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowBroadcast]);
 
   useKeyboardShortcuts(crmShortcuts, !workspaceLoading);
 
@@ -128,11 +128,14 @@ export default function ContactsPage() {
       router.replace("/app/crm/pipeline");
     } else if (action === "new") {
       googleHandled.current = true;
-      state.setShowAddMenu(true);
+      if (typeof window !== "undefined") {
+        // Defer dispatch so the AddContactControl child has time to register its
+        // `kf:open-quick-add-contact` listener (parent effects run before child effects).
+        setTimeout(() => window.dispatchEvent(new Event("kf:open-quick-add-contact")), 0);
+      }
       router.replace("/app/crm/pipeline");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to the OAuth callback inputs; including the full `state` bag would re-fire this one-shot effect on unrelated pipeline state changes.
-  }, [searchParams, router, loadContacts, loadFlowData, state.setShowAddMenu]);
+  }, [searchParams, router, loadContacts, loadFlowData]);
 
   const confirmStateRef = useRef(confirmState);
   confirmStateRef.current = confirmState;
