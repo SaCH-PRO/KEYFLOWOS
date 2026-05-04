@@ -1,7 +1,8 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
+import { ConnectorCredentialsService } from '../connector-credentials.service';
+import type {
   IConnector,
   ConnectorMeta,
   ConnectorHealth,
@@ -11,7 +12,10 @@ import {
 
 /**
  * Google Maps connector. Unlike the OAuth-based Google services, this is keyed
- * via a Maps Platform API key stored on the Business record.
+ * via a Maps Platform API key. The key is stored in the unified encrypted
+ * credentials store (`ConnectorStatus.metadata.encryptedCredentials`); the
+ * legacy `Business.googleMapsApiKey` column is still honored as a fallback so
+ * pre-existing businesses keep working until they re-save in the new dialog.
  */
 @Injectable()
 export class GoogleMapsConnector implements IConnector {
@@ -27,38 +31,56 @@ export class GoogleMapsConnector implements IConnector {
     supportsSync: false,
     supportsWebhook: false,
     authType: 'api_key',
+    connectMode: 'dialog',
     externalUrl: 'https://console.cloud.google.com/google/maps-apis',
+    connectInstructions:
+      'Create a Google Maps Platform API key in the Cloud Console (APIs & Services → Credentials), enable the Places API, and paste the key below. Restrict the key to your KEYFLOWOS domain for safety.',
+    credentialFields: [
+      {
+        key: 'apiKey',
+        label: 'Google Maps API key',
+        type: 'password',
+        required: true,
+        secret: true,
+        placeholder: 'AIza...',
+        helpText: 'Needs the Places API enabled. We test the key live before marking the connector as connected.',
+      },
+    ],
   };
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
   ) {}
 
-  async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
+  /** Resolve the active key from the credentials store, falling back to the legacy column. */
+  async resolveApiKey(businessId: string): Promise<string | null> {
+    const creds = await this.credentials.getCredentials(businessId, 'google_maps');
+    if (creds?.apiKey?.trim()) return creds.apiKey.trim();
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { googleMapsApiKey: true },
     });
-    return { connected: !!business?.googleMapsApiKey };
+    return business?.googleMapsApiKey?.trim() || null;
+  }
+
+  async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
+    return { connected: !!(await this.resolveApiKey(businessId)) };
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { googleMapsApiKey: true },
-    });
-    const realStatus = business?.googleMapsApiKey ? 'connected' : 'disconnected';
+    const apiKey = await this.resolveApiKey(businessId);
     const stored = await this.getConnectorStatus(businessId);
     return {
-      status: realStatus,
+      status: apiKey ? 'connected' : 'disconnected',
       lastSyncAt: stored?.lastSyncAt ?? null,
       lastErrorAt: stored?.lastErrorAt ?? null,
       lastError: stored?.lastError ?? null,
       errorCount: stored?.errorCount ?? 0,
       syncCount: stored?.syncCount ?? 0,
       connectedAt: stored?.connectedAt ?? null,
-      connectedAccount: business?.googleMapsApiKey ? 'API key configured' : null,
+      connectedAccount: apiKey ? 'API key configured' : null,
     };
   }
 
@@ -74,11 +96,7 @@ export class GoogleMapsConnector implements IConnector {
   }
 
   async isConnected(businessId: string): Promise<boolean> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { googleMapsApiKey: true },
-    });
-    return !!business?.googleMapsApiKey;
+    return !!(await this.resolveApiKey(businessId));
   }
 
   async sync(_businessId: string): Promise<ConnectorSyncResult> {
@@ -86,17 +104,14 @@ export class GoogleMapsConnector implements IConnector {
   }
 
   async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { googleMapsApiKey: true },
-    });
-    if (!business?.googleMapsApiKey) return { success: false, error: 'No Google Maps API key configured' };
+    const apiKey = await this.resolveApiKey(businessId);
+    if (!apiKey) return { success: false, error: 'No Google Maps API key configured' };
     try {
       // Cheap zero-result Places call to validate the key.
       const url = new URL('https://maps.googleapis.com/maps/api/place/findplacefromtext/json');
       url.searchParams.set('input', 'test');
       url.searchParams.set('inputtype', 'textquery');
-      url.searchParams.set('key', business.googleMapsApiKey);
+      url.searchParams.set('key', apiKey);
       const res = await fetch(url.toString());
       const data = (await res.json()) as { status?: string; error_message?: string };
       if (data.status === 'REQUEST_DENIED' || data.status === 'INVALID_REQUEST') {
@@ -109,14 +124,16 @@ export class GoogleMapsConnector implements IConnector {
   }
 
   async disconnect(businessId: string): Promise<void> {
+    // Clear both the legacy column and the encrypted credentials store.
     await this.prisma.client.business.update({
       where: { id: businessId },
       data: { googleMapsApiKey: null },
     });
+    await this.credentials.clearCredentials(businessId, 'google_maps');
     await this.prisma.client.connectorStatus.upsert({
       where: { businessId_connectorType: { businessId, connectorType: 'google_maps' } },
       create: { businessId, connectorType: 'google_maps', status: 'disconnected' },
-      update: { status: 'disconnected' },
+      update: { status: 'disconnected', connectedAccount: null },
     });
   }
 

@@ -196,30 +196,141 @@ export class GoogleSuiteService {
 
     await this.prisma.client.business.update({ where: { id: state.businessId }, data });
 
-    // Mark connector statuses + record activity for each provisioned service.
-    for (const svc of enabledServices) {
+    // Ironclad verification: for each provisioned service, do a cheap live API
+    // call with the freshly-issued access token. Only mark `connected` if the
+    // call succeeds; otherwise persist `error` with the upstream message so the
+    // user immediately sees that the scope was granted but the API rejected us
+    // (disabled API, no Business Profile account, sandbox mode, etc).
+    const verified = await Promise.all(
+      enabledServices.map(async (svc) => ({
+        svc,
+        ...(await this.verifyServiceLive(svc, tokens.access_token)),
+      })),
+    );
+
+    for (const { svc, ok, account, error } of verified) {
       const ct = SERVICE_TO_CONNECTOR[svc];
+      const displayAccount = account || email || null;
       await this.prisma.client.connectorStatus.upsert({
         where: { businessId_connectorType: { businessId: state.businessId, connectorType: ct } },
         create: {
           businessId: state.businessId,
           connectorType: ct,
-          status: 'connected',
+          status: ok ? 'connected' : 'error',
           connectedAt: new Date(),
-          connectedAccount: email,
+          connectedAccount: displayAccount,
+          lastError: ok ? null : error,
+          lastErrorAt: ok ? null : new Date(),
+          errorCount: ok ? 0 : 1,
         },
-        update: { status: 'connected', connectedAt: new Date(), connectedAccount: email },
+        update: {
+          status: ok ? 'connected' : 'error',
+          connectedAt: new Date(),
+          connectedAccount: displayAccount,
+          lastError: ok ? null : error,
+          lastErrorAt: ok ? null : new Date(),
+          ...(ok ? { errorCount: 0 } : {}),
+        },
       });
       await this.activity.record({
         businessId: state.businessId,
         connectorType: ct,
         action: 'connect',
-        status: 'success',
-        message: `Connected via unified Google sign-in (${email})`,
+        status: ok ? 'success' : 'error',
+        message: ok
+          ? `Connected via unified Google sign-in (${email}) — live verification OK`
+          : `OAuth granted but live verification failed: ${error ?? 'unknown error'}`,
       });
     }
 
-    return { businessId: state.businessId, email, enabledServices };
+    return {
+      businessId: state.businessId,
+      email,
+      enabledServices,
+      verification: verified.map((v) => ({ service: v.svc, ok: v.ok, error: v.error })),
+    };
+  }
+
+  /**
+   * Per-service live ping using a freshly-issued access token. Returns success
+   * (and an optional account label) or an error message. Network failures are
+   * treated as errors so the connector is not falsely marked Connected.
+   */
+  private async verifyServiceLive(
+    svc: GoogleService,
+    accessToken: string,
+  ): Promise<{ ok: boolean; account: string | null; error: string | null }> {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    try {
+      switch (svc) {
+        case 'gmail': {
+          const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: auth });
+          if (!r.ok) return { ok: false, account: null, error: await this.errMsg(r, 'Gmail') };
+          const j = (await r.json()) as { emailAddress?: string };
+          return { ok: true, account: j.emailAddress ?? null, error: null };
+        }
+        case 'calendar': {
+          const r = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1', { headers: auth });
+          if (!r.ok) return { ok: false, account: null, error: await this.errMsg(r, 'Calendar') };
+          return { ok: true, account: null, error: null };
+        }
+        case 'drive': {
+          const r = await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', { headers: auth });
+          if (!r.ok) return { ok: false, account: null, error: await this.errMsg(r, 'Drive') };
+          const j = (await r.json()) as { user?: { emailAddress?: string } };
+          return { ok: true, account: j.user?.emailAddress ?? null, error: null };
+        }
+        case 'forms': {
+          // Google Forms API has no list/me endpoint covered by the
+          // forms.body / forms.responses.readonly scopes — every read needs a
+          // formId. Falling back to Drive would require Drive scopes which a
+          // Forms-only consent does NOT grant. We've already validated above
+          // that all required Forms scopes were granted, so trust the grant
+          // here. Per-form access errors will surface on first real read.
+          return { ok: true, account: null, error: null };
+        }
+        case 'contacts': {
+          const r = await fetch(
+            'https://people.googleapis.com/v1/people/me?personFields=emailAddresses',
+            { headers: auth },
+          );
+          if (!r.ok) return { ok: false, account: null, error: await this.errMsg(r, 'Contacts') };
+          return { ok: true, account: null, error: null };
+        }
+        case 'business_profile': {
+          // Account Management v1 is the cheapest GBP probe. We treat ANY
+          // failure (403 = API not enabled, 404 = no account, 5xx) as a hard
+          // error so the connector card honestly reports it instead of
+          // claiming Connected. Common case: the user granted the scope but
+          // has no GBP account on this Google identity — handled below.
+          const r = await fetch(
+            'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
+            { headers: auth },
+          );
+          if (!r.ok) return { ok: false, account: null, error: await this.errMsg(r, 'Business Profile') };
+          const j = (await r.json()) as { accounts?: { name?: string; accountName?: string }[] };
+          if (!j.accounts?.length) {
+            return { ok: false, account: null, error: 'No Google Business Profile accounts found for this Google user' };
+          }
+          return { ok: true, account: j.accounts[0]?.accountName ?? null, error: null };
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`Live verification network error for ${svc}: ${msg}`);
+      return { ok: false, account: null, error: `Network error verifying ${svc}: ${msg}` };
+    }
+  }
+
+  private async errMsg(r: Response, label: string): Promise<string> {
+    let detail = '';
+    try {
+      const body = (await r.json()) as { error?: { message?: string; status?: string } };
+      detail = body?.error?.message ?? body?.error?.status ?? '';
+    } catch {
+      // ignore parse failure
+    }
+    return `${label} API ${r.status}${detail ? `: ${detail}` : ''}`;
   }
 
   private fieldsForService(svc: GoogleService): {
