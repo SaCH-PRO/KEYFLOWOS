@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { MessageSquare, ClipboardList, Sparkles, ChevronDown } from "lucide-react";
+import { motion } from "framer-motion";
+import { MessageSquare, ClipboardList, Sparkles, ChevronUp } from "lucide-react";
 import type { CrossJourneyResponse } from "@/lib/client";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContactDetailHeader } from "./contact-detail-header";
@@ -171,7 +171,6 @@ export function ContactDetail({
     action: () => {},
   });
   const [commLoggerOpen, setCommLoggerOpen] = useState(false);
-  const [aiPanelsOpen, setAiPanelsOpen] = useState(false);
 
   if (loading) {
     return (
@@ -262,139 +261,120 @@ export function ContactDetail({
   return (
     <>
       <motion.div
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        className="kf-card p-5 space-y-4 h-full flex flex-col overflow-hidden"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="kf-card p-3 sm:p-5 space-y-3 sm:space-y-4"
       >
-        <div className="shrink-0">
-          <ContactDetailHeader
-            contact={contact}
-            isPinned={isPinned}
-            onTogglePin={onTogglePin}
-            onClose={onClose}
-            onEdit={onEdit}
-            onDelete={onDelete ? handleDeleteClick : undefined}
-            onUpdateStatus={onUpdateStatus}
-            onQuickAction={onQuickAction}
-            onLogEvent={onLogEvent}
-            onAddTask={onAddTask}
-            // eslint-disable-next-line react-hooks/purity -- audited: time-relative next booking lookup
-            nextBookingDate={bookings?.find(b => new Date(b.startTime).getTime() > Date.now())?.startTime}
-          />
-        </div>
+        <ContactDetailHeader
+          contact={contact}
+          isPinned={isPinned}
+          onTogglePin={onTogglePin}
+          onClose={onClose}
+          onEdit={onEdit}
+          onDelete={onDelete ? handleDeleteClick : undefined}
+          onUpdateStatus={onUpdateStatus}
+          onQuickAction={onQuickAction}
+          onLogEvent={onLogEvent}
+          onAddTask={onAddTask}
+          // eslint-disable-next-line react-hooks/purity -- audited: time-relative next booking lookup
+          nextBookingDate={bookings?.find(b => new Date(b.startTime).getTime() > Date.now())?.startTime}
+        />
 
-        <div className="shrink-0">
-          <RelationshipHealthStrip
-            healthMetrics={healthMetrics}
-            outstandingBalance={contact.meta?.outstandingBalance}
-            totalRevenue={contact.meta?.totalRevenue}
-            nextBooking={bookings?.[0]?.startTime}
-            bookingCount={contact.meta?.bookingCount ?? 0}
-            lastInteraction={contact.meta?.lastInteractionAt}
-          />
-        </div>
+        <RelationshipHealthStrip
+          healthMetrics={healthMetrics}
+          outstandingBalance={contact.meta?.outstandingBalance}
+          totalRevenue={contact.meta?.totalRevenue}
+          nextBooking={bookings?.[0]?.startTime}
+          bookingCount={contact.meta?.bookingCount ?? 0}
+          lastInteraction={contact.meta?.lastInteractionAt}
+        />
 
         {(aiInsight || onGenerateAiInsight) && (
-          <div className="shrink-0">
-            <NextBestActionCard
-              aiInsight={aiInsight}
-              loading={aiInsightLoading}
-              onGenerate={onGenerateAiInsight}
-            />
-          </div>
+          <NextBestActionCard
+            aiInsight={aiInsight}
+            loading={aiInsightLoading}
+            onGenerate={onGenerateAiInsight}
+          />
         )}
 
         {onLogCommunication && (
-          <div className="shrink-0">
-            <button
-              onClick={() => setCommLoggerOpen(true)}
-              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-[hsl(var(--kf-accent2))]/10 hover:bg-[hsl(var(--kf-accent2))]/20 text-[hsl(var(--kf-accent2))] text-xs font-medium transition-colors border border-[hsl(var(--kf-accent2))]/20"
-            >
-              <ClipboardList className="w-3.5 h-3.5" />
-              Log Interaction
-            </button>
-          </div>
+          <button
+            onClick={() => setCommLoggerOpen(true)}
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-[hsl(var(--kf-accent2))]/10 hover:bg-[hsl(var(--kf-accent2))]/20 text-[hsl(var(--kf-accent2))] text-xs font-medium transition-colors border border-[hsl(var(--kf-accent2))]/20"
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            Log Interaction
+          </button>
         )}
 
-        <div className="shrink-0">
-          <ContactDetailStats
-            contact={contact}
-            events={events}
-            onSetActiveTab={setActiveTab}
-            onQuickAction={onQuickAction}
-          />
-        </div>
+        <div className="grid gap-3 sm:gap-4 lg:grid-cols-12">
+          <div className="lg:col-span-4 space-y-3 sm:space-y-4 min-w-0">
+            <ContactDetailStats
+              contact={contact}
+              events={events}
+              onSetActiveTab={setActiveTab}
+              onQuickAction={onQuickAction}
+            />
+            <ContactDetailInfo contact={contact} relatedContacts={relatedContacts} onSelectRelatedContact={onSelectRelatedContact} />
+            {businessId && contact.id && (
+              <CrossModuleEntityLinks
+                businessId={businessId}
+                entityType="contact"
+                entityId={contact.id}
+              />
+            )}
+          </div>
 
-        <div className="shrink-0">
-          <ContactDetailInfo contact={contact} relatedContacts={relatedContacts} onSelectRelatedContact={onSelectRelatedContact} />
-        </div>
-
-        {businessId && contact.id && (
-          <div className="shrink-0">
-            <CrossModuleEntityLinks
-              businessId={businessId}
-              entityType="contact"
-              entityId={contact.id}
+          <div className="lg:col-span-5 min-w-0 flex flex-col">
+            <ContactDetailTabs
+              contact={contact}
+              events={events}
+              notes={notes}
+              tasks={tasks}
+              activeTab={activeTab}
+              onSetActiveTab={setActiveTab}
+              onAddNote={onAddNote}
+              onAddTask={onAddTask}
+              onCompleteTask={onCompleteTask}
+              onDeleteNote={onDeleteNote ? handleDeleteNote : undefined}
+              onDeleteTask={onDeleteTask ? handleDeleteTask : undefined}
+              onUpdateNote={onUpdateNote}
+              onUpdateTask={onUpdateTask}
+              healthMetrics={healthMetrics}
+              journeyMilestones={journeyMilestones}
+              crossJourney={crossJourney}
+              conversationContext={conversationContext}
+              aiInsight={aiInsight}
+              aiInsightLoading={aiInsightLoading}
+              onGenerateAiInsight={onGenerateAiInsight}
+              onRefreshConversationContext={onRefreshConversationContext}
+              invoices={invoices}
+              bookings={bookings}
             />
           </div>
-        )}
 
-        <div className="flex-1 min-h-0 flex flex-col">
-          <ContactDetailTabs
-            contact={contact}
-            events={events}
-            notes={notes}
-            tasks={tasks}
-            activeTab={activeTab}
-            onSetActiveTab={setActiveTab}
-            onAddNote={onAddNote}
-            onAddTask={onAddTask}
-            onCompleteTask={onCompleteTask}
-            onDeleteNote={onDeleteNote ? handleDeleteNote : undefined}
-            onDeleteTask={onDeleteTask ? handleDeleteTask : undefined}
-            onUpdateNote={onUpdateNote}
-            onUpdateTask={onUpdateTask}
-            healthMetrics={healthMetrics}
-            journeyMilestones={journeyMilestones}
-            crossJourney={crossJourney}
-            conversationContext={conversationContext}
-            aiInsight={aiInsight}
-            aiInsightLoading={aiInsightLoading}
-            onGenerateAiInsight={onGenerateAiInsight}
-            onRefreshConversationContext={onRefreshConversationContext}
-            invoices={invoices}
-            bookings={bookings}
-          />
+          <div className="lg:col-span-3 space-y-2 min-w-0">
+            <div className="flex items-center gap-2 px-1 py-1 border-t border-border/30 pt-3 lg:border-t-0 lg:pt-1">
+              <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">AI Intelligence</span>
+            </div>
+            <AiContactSummaryPanel contactId={contact.id} />
+            <AiPrepBriefPanel contactId={contact.id} />
+            <AiLeadScorePanel contactId={contact.id} currentScore={contact.meta?.leadScore} />
+            <AiTagSuggestionsPanel contactId={contact.id} currentTags={contact.tags} />
+          </div>
         </div>
 
-        <div className="shrink-0">
+        {onClose && (
           <button
-            onClick={() => setAiPanelsOpen(!aiPanelsOpen)}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white/[0.03] transition-colors text-left"
+            onClick={onClose}
+            className="lg:hidden w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] text-xs font-medium text-muted-foreground transition-colors border border-border/30 min-h-[44px]"
+            aria-label="Collapse contact details"
           >
-            <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
-            <span className="text-xs font-semibold text-muted-foreground">AI Intelligence</span>
-            <ChevronDown className={`w-3.5 h-3.5 ml-auto text-muted-foreground/50 transition-transform ${aiPanelsOpen ? "rotate-180" : ""}`} />
+            <ChevronUp className="w-4 h-4" />
+            Collapse
           </button>
-          <AnimatePresence>
-            {aiPanelsOpen && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden"
-              >
-                <div className="space-y-2 pt-1">
-                  <AiContactSummaryPanel contactId={contact.id} />
-                  <AiPrepBriefPanel contactId={contact.id} />
-                  <AiLeadScorePanel contactId={contact.id} currentScore={contact.meta?.leadScore} />
-                  <AiTagSuggestionsPanel contactId={contact.id} currentTags={contact.tags} />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+        )}
       </motion.div>
 
       {onLogCommunication && (

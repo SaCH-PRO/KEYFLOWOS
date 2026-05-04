@@ -117,7 +117,7 @@ export function ContactDetailTabs({
   const timelineCount = events.length + notes.length + tasks.length + (invoices?.length ?? 0) + (bookings?.length ?? 0);
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col min-h-0">
       <div className="flex border-b border-border overflow-x-auto shrink-0" role="tablist">
         {[
           { key: "timeline", label: "Timeline", icon: History, count: timelineCount },

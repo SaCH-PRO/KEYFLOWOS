@@ -129,8 +129,11 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     }
   }, [selectedContactId, businessId]);
 
+  const hasAutoSelectedRef = useRef(false);
   useEffect(() => {
+    if (hasAutoSelectedRef.current) return;
     if (contacts.length > 0 && !selectedContactId) {
+      hasAutoSelectedRef.current = true;
       setSelectedContactId(contacts[0].id);
       void loadDetail(contacts[0].id);
     }

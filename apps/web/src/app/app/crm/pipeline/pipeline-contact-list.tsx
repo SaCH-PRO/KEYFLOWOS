@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Users, RefreshCw, AlertTriangle } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CardListSkeleton } from "@/components/ui/skeleton";
@@ -86,6 +87,8 @@ export interface PipelineContactListProps {
   onLoadMore: () => void;
   onRetry?: () => void;
   onAddContact: () => void;
+  expandedPanel?: React.ReactNode;
+  onCollapse?: () => void;
 }
 
 function PipelineContactListInner({
@@ -108,8 +111,11 @@ function PipelineContactListInner({
   onLoadMore,
   onRetry,
   onAddContact,
+  expandedPanel,
+  onCollapse,
 }: PipelineContactListProps) {
-  const enableVirtual = contacts.length >= VIRTUAL_SCROLL_THRESHOLD;
+  const hasExpansion = expandedPanel != null && selectedContactId != null;
+  const enableVirtual = contacts.length >= VIRTUAL_SCROLL_THRESHOLD && !hasExpansion;
   const {
     containerRef,
     startIndex,
@@ -158,17 +164,35 @@ function PipelineContactListInner({
           scrollItemIntoView(prev);
           break;
         }
-        case "Enter": {
+        case "Enter":
+        case " ": {
           e.preventDefault();
           if (focusedIndex >= 0 && focusedIndex < contacts.length) {
             onSelectContact(contacts[focusedIndex].id);
           }
           break;
         }
+        case "Escape": {
+          if (selectedContactId && onCollapse) {
+            e.preventDefault();
+            onCollapse();
+          }
+          break;
+        }
       }
     },
-    [contacts, focusedIndex, onSelectContact, scrollItemIntoView]
+    [contacts, focusedIndex, onSelectContact, scrollItemIntoView, selectedContactId, onCollapse]
   );
+
+  const expandedRowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selectedContactId || !expandedPanel) return;
+    const id = window.requestAnimationFrame(() => {
+      const el = expandedRowRef.current;
+      if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [selectedContactId, expandedPanel]);
 
   const setItemRef = useCallback((index: number, el: HTMLElement | null) => {
     if (el) {
@@ -238,32 +262,56 @@ function PipelineContactListInner({
     </button>
   );
 
-  const renderContactItem = (contact: ContactCardData, absoluteIndex: number) => (
-    <div
-      key={contact.id}
-      ref={(el) => setItemRef(absoluteIndex, el)}
-      role="option"
-      aria-selected={selectedContactId === contact.id}
-      data-focused={focusedIndex === absoluteIndex || undefined}
-      className={focusedIndex === absoluteIndex ? "ring-2 ring-primary rounded-lg" : ""}
-    >
-      <ContactCard
-        contact={contact}
-        isSelected={selectedContactId === contact.id}
-        selectable={selectMode}
-        selected={selectedIds.has(contact.id)}
-        onToggleSelect={onToggleSelect}
-        isPinned={pinnedIds.includes(contact.id)}
-        onTogglePin={onTogglePin}
-        isFavorite={favoriteIds?.has(contact.id)}
-        onToggleFavorite={onToggleFavorite}
-        onClick={() => onSelectContact(contact.id)}
-        onDelete={onDelete}
-        onQuickAction={onQuickAction}
-        index={absoluteIndex}
-      />
-    </div>
-  );
+  const renderContactItem = (contact: ContactCardData, absoluteIndex: number) => {
+    const isExpanded = selectedContactId === contact.id && expandedPanel != null;
+    return (
+      <div key={contact.id} ref={isExpanded ? expandedRowRef : undefined}>
+        <div
+          ref={(el) => setItemRef(absoluteIndex, el)}
+          role="option"
+          aria-selected={selectedContactId === contact.id}
+          data-expanded={isExpanded || undefined}
+          data-focused={focusedIndex === absoluteIndex || undefined}
+          className={focusedIndex === absoluteIndex ? "ring-2 ring-primary rounded-lg" : ""}
+        >
+          <ContactCard
+            contact={contact}
+            isSelected={selectedContactId === contact.id}
+            selectable={selectMode}
+            selected={selectedIds.has(contact.id)}
+            onToggleSelect={onToggleSelect}
+            isPinned={pinnedIds.includes(contact.id)}
+            onTogglePin={onTogglePin}
+            isFavorite={favoriteIds?.has(contact.id)}
+            onToggleFavorite={onToggleFavorite}
+            onClick={() => {
+              if (selectMode) onToggleSelect(contact.id);
+              else onSelectContact(contact.id);
+            }}
+            onDelete={onDelete}
+            onQuickAction={onQuickAction}
+            index={absoluteIndex}
+          />
+        </div>
+        <AnimatePresence initial={false}>
+          {isExpanded && (
+            <motion.div
+              key="expanded-panel"
+              role="region"
+              aria-label="Contact details"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="pt-3">{expandedPanel}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
 
   if (isVirtual) {
     return (
