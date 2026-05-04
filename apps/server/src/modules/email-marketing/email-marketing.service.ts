@@ -137,7 +137,139 @@ export class EmailMarketingService {
   buildUnsubscribeFooter(contactId: string, businessId: string, campaignId: string): string {
     const token = this.buildUnsubscribeToken(contactId, businessId, campaignId);
     const url = apiLink(`/marketing/unsubscribe/${token}`);
-    return `\n\n---\nTo unsubscribe from future emails, click here: ${url}`;
+    return `<div style="margin-top:32px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:11px;color:#64748b;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">You're receiving this email because you're a contact of this business. <a href="${url}" style="color:#64748b;text-decoration:underline">Unsubscribe</a> from future emails.</div>`;
+  }
+
+  buildTrackingToken(campaignId: string, contactId: string, kind: 'open' | 'click', extra = ''): string {
+    const payload = `${kind}:${campaignId}:${contactId}:${extra}`;
+    return createHmac('sha256', this.hmacSecret).update(payload).digest('base64url').slice(0, 24);
+  }
+
+  verifyTrackingToken(
+    token: string,
+    campaignId: string,
+    contactId: string,
+    kind: 'open' | 'click',
+    extra = '',
+  ): boolean {
+    try {
+      const expected = this.buildTrackingToken(campaignId, contactId, kind, extra);
+      if (token.length !== expected.length) return false;
+      let result = 0;
+      for (let i = 0; i < expected.length; i++) {
+        result |= token.charCodeAt(i) ^ expected.charCodeAt(i);
+      }
+      return result === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private injectTrackingAndFooter(
+    htmlBody: string,
+    campaignId: string,
+    contactId: string,
+    businessId: string,
+  ): string {
+    const footer = this.buildUnsubscribeFooter(contactId, businessId, campaignId);
+    const openToken = this.buildTrackingToken(campaignId, contactId, 'open');
+    const openUrl = apiLink(
+      `/marketing/track/open/${campaignId}/${contactId}/${openToken}.gif`,
+    );
+    const pixel = `<img src="${openUrl}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;outline:none" />`;
+
+    let body = htmlBody.replace(
+      /href="(https?:\/\/[^"]+)"/gi,
+      (_match: string, url: string) => {
+        const clickToken = this.buildTrackingToken(campaignId, contactId, 'click', url);
+        const wrapped = apiLink(
+          `/marketing/track/click/${campaignId}/${contactId}/${clickToken}?r=${encodeURIComponent(url)}`,
+        );
+        return `href="${wrapped}"`;
+      },
+    );
+    body += footer + pixel;
+    return body;
+  }
+
+  async recordOpen(campaignId: string, contactId: string) {
+    const recipient = await this.prisma.client.emailCampaignContact.findFirst({
+      where: { campaignId, contactId },
+      select: { id: true, businessId: true, openedAt: true },
+    });
+    if (!recipient) return;
+    if (recipient.openedAt) return;
+    await this.prisma.client.emailCampaignContact.update({
+      where: { id: recipient.id },
+      data: { openedAt: new Date(), status: 'OPENED' },
+    });
+    await this.prisma.client.emailCampaign.update({
+      where: { id: campaignId },
+      data: { openCount: { increment: 1 } },
+    });
+    this.invalidateStatsCache(recipient.businessId);
+  }
+
+  async recordClick(campaignId: string, contactId: string) {
+    const existing = await this.prisma.client.emailCampaignContact.findFirst({
+      where: { campaignId, contactId },
+      select: { id: true, businessId: true, clickedAt: true, openedAt: true },
+    });
+    if (!existing) return;
+    const data: { clickedAt?: Date; openedAt?: Date; status?: string } = {};
+    let incrementClick = false;
+    let incrementOpen = false;
+    if (!existing.clickedAt) {
+      data.clickedAt = new Date();
+      data.status = 'CLICKED';
+      incrementClick = true;
+    }
+    if (!existing.openedAt) {
+      data.openedAt = new Date();
+      incrementOpen = true;
+    }
+    if (Object.keys(data).length > 0) {
+      await this.prisma.client.emailCampaignContact.update({
+        where: { id: existing.id },
+        data,
+      });
+      const counts: { openCount?: { increment: number }; clickCount?: { increment: number } } = {};
+      if (incrementOpen) counts.openCount = { increment: 1 };
+      if (incrementClick) counts.clickCount = { increment: 1 };
+      if (incrementOpen || incrementClick) {
+        await this.prisma.client.emailCampaign.update({
+          where: { id: campaignId },
+          data: counts,
+        });
+        this.invalidateStatsCache(existing.businessId);
+      }
+    }
+  }
+
+  async getCampaignRecipients(businessId: string, campaignId: string) {
+    const recipients = await this.prisma.client.emailCampaignContact.findMany({
+      where: { businessId, campaignId },
+      orderBy: [{ clickedAt: 'desc' }, { openedAt: 'desc' }, { sentAt: 'desc' }],
+      select: {
+        id: true,
+        contactId: true,
+        email: true,
+        status: true,
+        sentAt: true,
+        openedAt: true,
+        clickedAt: true,
+        bouncedAt: true,
+      },
+      take: 500,
+    });
+    const summary = {
+      total: recipients.length,
+      sent: recipients.filter((r) => r.sentAt).length,
+      opened: recipients.filter((r) => r.openedAt).length,
+      clicked: recipients.filter((r) => r.clickedAt).length,
+      bounced: recipients.filter((r) => r.bouncedAt).length,
+    };
+    return { recipients, summary };
   }
 
   async unsubscribeContact(businessId: string, contactId: string) {
@@ -266,8 +398,12 @@ export class EmailMarketingService {
           if (gmailConnected) {
             for (const recipient of recipientData) {
               try {
-                const footer = this.buildUnsubscribeFooter(recipient.contactId, businessId, id);
-                const htmlBody = campaign.body + footer;
+                const htmlBody = this.injectTrackingAndFooter(
+                  campaign.body,
+                  id,
+                  recipient.contactId,
+                  businessId,
+                );
                 await this.gmail.sendEmail({
                   businessId,
                   to: recipient.email,
@@ -281,7 +417,7 @@ export class EmailMarketingService {
                 this.logger.warn(`Failed to send email to ${recipient.email}: ${err}`);
                 await this.prisma.client.emailCampaignContact.updateMany({
                   where: { campaignId: id, contactId: recipient.contactId },
-                  data: { status: 'BOUNCED' },
+                  data: { status: 'BOUNCED', bouncedAt: new Date() },
                 });
               }
             }

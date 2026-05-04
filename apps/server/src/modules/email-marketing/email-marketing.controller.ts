@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { EmailMarketingService } from './email-marketing.service';
 import { CampaignIntelligenceService } from './campaign-intelligence.service';
@@ -102,6 +102,57 @@ export class EmailMarketingController {
     @Param('id') id: string,
   ) {
     return this.emailMarketing.getCampaignStats(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/campaigns/:id/recipients')
+  getCampaignRecipients(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.emailMarketing.getCampaignRecipients(businessId, id);
+  }
+
+  @Get('marketing/track/open/:campaignId/:contactId/:token.gif')
+  async trackCampaignOpen(
+    @Param('campaignId') campaignId: string,
+    @Param('contactId') contactId: string,
+    @Param('token') token: string,
+    @Res() res: Response,
+  ) {
+    try {
+      if (this.emailMarketing.verifyTrackingToken(token, campaignId, contactId, 'open')) {
+        await this.emailMarketing.recordOpen(campaignId, contactId);
+      }
+    } catch {}
+    const pixel = Buffer.from(
+      'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+      'base64',
+    );
+    res.setHeader('Content-Type', 'image/gif');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.send(pixel);
+  }
+
+  @Get('marketing/track/click/:campaignId/:contactId/:token')
+  async trackCampaignClick(
+    @Param('campaignId') campaignId: string,
+    @Param('contactId') contactId: string,
+    @Param('token') token: string,
+    @Query('r') redirectUrl: string | undefined,
+    @Res() res: Response,
+  ) {
+    if (!redirectUrl || !/^https?:\/\//i.test(redirectUrl)) {
+      return res.status(400).send('Invalid redirect URL');
+    }
+    if (!this.emailMarketing.verifyTrackingToken(token, campaignId, contactId, 'click', redirectUrl)) {
+      return res.status(403).send('Invalid tracking token');
+    }
+    try {
+      await this.emailMarketing.recordClick(campaignId, contactId);
+    } catch {}
+    return res.redirect(302, redirectUrl);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

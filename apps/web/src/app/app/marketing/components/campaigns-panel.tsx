@@ -30,7 +30,9 @@ import {
   scheduleCampaign,
   cancelScheduleCampaign,
   runPreSendValidation,
+  fetchCampaignRecipients,
   type PreSendValidationResult,
+  type CampaignRecipient,
 } from "@/lib/client";
 import { PreSendValidationWarnings } from "./campaign-intelligence-cards";
 import { CampaignsEmptyState } from "./marketing-empty-states";
@@ -99,6 +101,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   const [scheduling, setScheduling] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [expandedCampaign, setExpandedCampaign] = useState<string | null>(null);
+  const [recipientsByCampaign, setRecipientsByCampaign] = useState<Record<string, CampaignRecipient[] | "loading" | "error">>({});
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("newest");
   const [saving, setSaving] = useState(false);
@@ -509,7 +512,20 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                       </button>
                     )}
                     {campaign.status === "SENT" && (
-                      <button onClick={() => setExpandedCampaign(expandedCampaign === campaign.id ? null : campaign.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors" aria-label="Toggle stats">
+                      <button onClick={() => {
+                        const next = expandedCampaign === campaign.id ? null : campaign.id;
+                        setExpandedCampaign(next);
+                        if (next && !recipientsByCampaign[campaign.id] && businessId) {
+                          setRecipientsByCampaign(p => ({ ...p, [campaign.id]: "loading" }));
+                          fetchCampaignRecipients(businessId, campaign.id).then(res => {
+                            if (res.data) {
+                              setRecipientsByCampaign(p => ({ ...p, [campaign.id]: res.data!.recipients }));
+                            } else {
+                              setRecipientsByCampaign(p => ({ ...p, [campaign.id]: "error" }));
+                            }
+                          });
+                        }
+                      }} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors" aria-label="Toggle stats">
                         {expandedCampaign === campaign.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                       </button>
                     )}
@@ -540,6 +556,44 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{stat.label}</p>
                           </div>
                         ))}
+                      </div>
+                      <div className="mt-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Per-recipient activity</p>
+                        {(() => {
+                          const r = recipientsByCampaign[campaign.id];
+                          if (r === "loading" || r === undefined) return <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Loading recipients…</p>;
+                          if (r === "error") return <p className="text-xs text-red-400">Failed to load recipients.</p>;
+                          if (r.length === 0) return <p className="text-xs text-muted-foreground">No recipients tracked.</p>;
+                          return (
+                            <div className="max-h-64 overflow-y-auto rounded-lg border border-border/30">
+                              <table className="w-full text-xs">
+                                <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left">Recipient</th>
+                                    <th className="px-3 py-2 text-left">Status</th>
+                                    <th className="px-3 py-2 text-left">Opened</th>
+                                    <th className="px-3 py-2 text-left">Clicked</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {r.map(rec => (
+                                    <tr key={rec.id} className="border-t border-border/20">
+                                      <td className="px-3 py-1.5 truncate max-w-[200px]">{rec.email}</td>
+                                      <td className="px-3 py-1.5">
+                                        <span className="px-1.5 py-0.5 rounded text-[10px]" style={{
+                                          background: rec.clickedAt ? "rgba(245,158,11,0.15)" : rec.openedAt ? "rgba(34,197,94,0.15)" : rec.bouncedAt ? "rgba(239,68,68,0.15)" : "rgba(148,163,184,0.15)",
+                                          color: rec.clickedAt ? "#f59e0b" : rec.openedAt ? "#22c55e" : rec.bouncedAt ? "#ef4444" : "#94a3b8",
+                                        }}>{rec.status.toLowerCase()}</span>
+                                      </td>
+                                      <td className="px-3 py-1.5 text-muted-foreground">{rec.openedAt ? new Date(rec.openedAt).toLocaleString() : "—"}</td>
+                                      <td className="px-3 py-1.5 text-muted-foreground">{rec.clickedAt ? new Date(rec.clickedAt).toLocaleString() : "—"}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </motion.div>
