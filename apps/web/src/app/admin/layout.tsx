@@ -10,6 +10,7 @@ import {
   Activity,
   Bell,
   Cpu,
+  Flag,
   LayoutTemplate,
   Home,
   ExternalLink,
@@ -25,6 +26,7 @@ const navItems = [
   { label: "Analytics", href: "/admin/analytics", icon: Activity },
   { label: "Events", href: "/admin/events", icon: Bell },
   { label: "System Health", href: "/admin/system", icon: Cpu },
+  { label: "Feature Flags", href: "/admin/feature-flags", icon: Flag },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
