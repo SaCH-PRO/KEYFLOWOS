@@ -417,12 +417,25 @@ build` now exit clean.
    any request handler), but each requires a major-version bump of a
    first-class dep to clear. Treat as a follow-up upgrade pass — out of
    scope for this hygiene-only task per the project brief.
-2. **Replit-isolate `docker compose up --build` smoke test** could not be
-   executed in this environment (no Docker daemon inside the agent
-   container). The `Dockerfile` and `docker-compose.yml` are unchanged
-   from the verified state of the previous audit pass; the verification
-   commands above exercise the same `pnpm` build/start path the Docker
-   `server` and `web` targets invoke.
+2. **Replit-isolate `docker compose up --build` smoke test** still could
+   not be executed end-to-end in the agent environment (Docker CLI is
+   present but no daemon — rootless `dockerd` requires privileges the
+   agent container does not have). A static review of `Dockerfile` and
+   `docker-compose.yml` was performed in Task #312 and surfaced one
+   real bug that would have broken `docker compose up --build`:
+   the `server` runtime stage installed deps with `--prod`, which
+   excludes `prisma` (the CLI lives in `packages/db`'s
+   `devDependencies`), and then immediately ran
+   `pnpm --filter @keyflow/db run db:generate` — which needs that CLI.
+   Fix: dropped `--prod` from the `server` stage's `pnpm install`. The
+   stage already copies `apps/server/src` and runs from TypeScript via
+   `tsx`, so the image is not meaningfully smaller with `--prod` anyway.
+   The `web` stage is unaffected (it runs `next start` against the
+   prebuilt `.next` output and only needs the workspace symlink to
+   `@keyflow/ui` for `transpilePackages`, which the existing
+   `--filter web... --prod` install satisfies). A live
+   `docker compose up --build` run on a host with a real daemon is
+   still required to fully close this item out.
 3. The dev-mode `Custom Cache-Control headers detected for the following
    routes: /_next/static/(.*)` warning during `next build` is benign —
    `apps/web/next.config.ts` only emits that header when
