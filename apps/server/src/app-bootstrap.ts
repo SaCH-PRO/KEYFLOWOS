@@ -49,12 +49,11 @@ export function configureNestApp(app: INestApplication): void {
     }),
   );
 
+  // CORS allow-list. `allowedCorsOrigins()` already encapsulates the full
+  // env-driven precedence chain (APP_URL / NEXT_PUBLIC_SITE_URL / PUBLIC_BASE_URL
+  // / REPLIT_DEV_DOMAIN / CORS_ALLOWED_ORIGINS / localhost), so app-bootstrap
+  // doesn't need to know anything about specific hosting providers.
   const allowedOrigins = allowedCorsOrigins();
-  const replitSlug = process.env.REPL_SLUG;
-  const replitOwner = process.env.REPL_OWNER;
-  if (replitSlug && replitOwner) {
-    allowedOrigins.push(`https://${replitSlug}.${replitOwner}.repl.co`);
-  }
 
   const isProduction = process.env.NODE_ENV === 'production';
 

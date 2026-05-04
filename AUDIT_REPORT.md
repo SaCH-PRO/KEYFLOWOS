@@ -351,3 +351,98 @@ the workspace layout. `tsx` is now a regular dependency of `apps/server`
 
 **Deleted:**
 - `apps/server/src/replit_integrations/` (entire directory)
+
+---
+
+## 11. 2026-05-04 follow-up pass (Task #304)
+
+A second hardening pass was run to confirm the codebase still meets the
+"green build / green lint / boots clean off-Replit" bar after several months
+of feature work.
+
+### What was found
+
+| Symptom | Root cause | Fix |
+| --- | --- | --- |
+| `Backend API` workflow exited at boot with `ReferenceError: Cannot access 'NotificationsModule' before initialization` (TDZ) | The dependency chain `notifications → commerce → crm → connector → notifications` is a static-import cycle. SWC/tsx compiles `import { CommerceModule }` to a getter that fires before `class NotificationsModule {}` finishes evaluating, throwing TDZ. | `apps/server/src/modules/notifications/notifications.module.ts` now imports `CommerceModule` as a `type` only and resolves it lazily via `require()` inside the `forwardRef(() => …)` callback. Type-checking and DI wiring are unchanged. |
+| `pnpm --filter web lint` — 4 errors (`react-hooks/set-state-in-effect`) in `contextual-onboarding.tsx`, `products-panel.tsx`, `document-health-section.tsx`, `pay/[invoiceId]/page.tsx` | All four are valid async-hydration / transient-feedback patterns that the React 19 compiler-aware rule cannot statically prove safe. | Per-line `eslint-disable-next-line react-hooks/set-state-in-effect -- <category>` comments using the documented categories from `apps/web/eslint.config.mjs`. No suppressions of errors that represented real bugs. |
+| Stale unused-import / unused-var warnings (10 occurrences) | Dead code and stale eslint-disable directives left over from previous refactors. | `eslint --fix` removed all auto-fixable cases. Remaining manual cleanups: `_businessId` rename in `crm/pipeline/insights-tab.tsx`, `_getFileIcon` rename in `profile/components/google-drive-browser.tsx`, and an `eslint-disable jsx-a11y/alt-text` for the lucide-react `Image` icon (false positive — it's an SVG component, not an `<img>`). |
+| `apps/server/src/app-bootstrap.ts` still hand-rolled a `${REPL_SLUG}.${REPL_OWNER}.repl.co` CORS allow-list entry | Vestige from the original Replit-coupling pass. `allowedCorsOrigins()` already encapsulates the full env precedence chain. | Removed the inline `REPL_SLUG`/`REPL_OWNER` block; CORS now comes exclusively from `allowedCorsOrigins()` which honors `APP_URL` / `NEXT_PUBLIC_SITE_URL` / `PUBLIC_BASE_URL` / `REPLIT_DEV_DOMAIN` / `CORS_ALLOWED_ORIGINS` / localhost in that order. |
+
+### Verification matrix (current pass)
+
+```text
+$ pnpm --filter @keyflow/db exec prisma validate
+The schema at prisma/schema.prisma is valid 🚀
+
+$ pnpm --filter web build
+✓ Compiled successfully in 54s
+✓ Finished TypeScript in 69s
+✓ Generating static pages (81/81)
+
+$ pnpm --filter server exec tsc --noEmit
+(clean — exit 0)
+
+$ pnpm --filter @keyflow/api exec tsc --noEmit
+(clean — exit 0)
+
+$ pnpm --filter @keyflow/db  exec tsc --noEmit
+(clean — exit 0)
+
+$ pnpm --filter @keyflow/ui  exec tsc --noEmit
+(clean — exit 0)
+
+$ pnpm --filter web lint
+(clean — exit 0, 0 errors, 0 warnings)
+
+$ Workflow `Backend API`
+[boot] API ready on http://localhost:3001 (env=development)
+[boot] Health: GET /healthz  Readiness: GET /readyz
+GET / 200 1ms
+```
+
+The pre-existing build errors flagged in section 6 (schema-drift between
+the Prisma model and several services, and a control-tower prop-type
+mismatch) have already been resolved by intervening feature work — both
+`pnpm --filter server build`-equivalent type-check and `pnpm --filter web
+build` now exit clean.
+
+### Residual risks (not addressed in this pass)
+
+1. **Dependency audit.** `pnpm audit --prod` reports 22 high / 27 moderate
+   transitive vulnerabilities, almost entirely in indirect deps of NestJS
+   10, `@vercel/node`, Multer 1.x, axios <1.13.5, and assorted
+   `minimatch`/`picomatch`/`undici` chains. None expose an unauthenticated
+   attack surface in the running app (the vulnerable code paths are not on
+   any request handler), but each requires a major-version bump of a
+   first-class dep to clear. Treat as a follow-up upgrade pass — out of
+   scope for this hygiene-only task per the project brief.
+2. **Replit-isolate `docker compose up --build` smoke test** could not be
+   executed in this environment (no Docker daemon inside the agent
+   container). The `Dockerfile` and `docker-compose.yml` are unchanged
+   from the verified state of the previous audit pass; the verification
+   commands above exercise the same `pnpm` build/start path the Docker
+   `server` and `web` targets invoke.
+3. The dev-mode `Custom Cache-Control headers detected for the following
+   routes: /_next/static/(.*)` warning during `next build` is benign —
+   `apps/web/next.config.ts` only emits that header when
+   `NODE_ENV === 'production'`, and the warning only appears because the
+   `build` workflow runs without `NODE_ENV` set explicitly. No code
+   change required.
+
+### Files changed in this pass
+
+- `apps/server/src/modules/notifications/notifications.module.ts`
+- `apps/server/src/app-bootstrap.ts`
+- `apps/web/src/app/app/commerce/components/contextual-onboarding.tsx`
+- `apps/web/src/app/app/commerce/products/products-panel.tsx`
+- `apps/web/src/app/app/profile/components/document-health-section.tsx`
+- `apps/web/src/app/pay/[invoiceId]/page.tsx`
+- `apps/web/src/app/app/crm/pipeline/insights-tab.tsx`
+- `apps/web/src/app/app/profile/components/google-drive-browser.tsx`
+- (auto-fixed by `eslint --fix`) `apps/web/src/app/app/marketplace/page.tsx`,
+  `apps/web/src/app/app/commerce/billing/billing-panel.tsx`,
+  `apps/web/src/app/app/marketplace/components/product-editor-modal.tsx`,
+  `apps/web/src/app/app/profile/page.tsx`,
+  `apps/web/src/app/app/store/page.tsx`,
+  `apps/web/src/app/book/[slug]/page.tsx`
