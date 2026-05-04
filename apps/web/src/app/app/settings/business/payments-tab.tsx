@@ -435,14 +435,6 @@ export function PaymentsTab() {
   const statusLabel = (s: "connected" | "partial" | "disabled") =>
     s === "connected" ? "Connected" : s === "partial" ? "Partial" : "Not configured";
 
-  const activeMethods = [
-    wipayStatus === "connected" ? "WiPay" : null,
-    paypalStatus === "connected" ? "PayPal" : null,
-    stripeStatus === "connected" ? "Stripe" : null,
-    bankStatus === "connected" ? "Bank Transfer" : null,
-    cashStatus === "connected" ? "Cash" : null,
-  ].filter(Boolean);
-
   return (
     <motion.div
       variants={{ show: { transition: { staggerChildren: 0.06 } } }}
@@ -468,36 +460,6 @@ export function PaymentsTab() {
           {status.message}
         </motion.div>
       )}
-
-      <motion.div
-        variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.25 } } }}
-        className="rounded-2xl border border-[hsl(var(--kf-border))]/40 backdrop-blur-md bg-[hsl(var(--kf-surface))]/60 p-5"
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-sm">Payment Methods Overview</h3>
-            <p className="text-xs text-[hsl(var(--kf-text-muted))] mt-0.5">
-              {activeMethods.length > 0
-                ? `${activeMethods.length} active: ${activeMethods.join(", ")}`
-                : "No payment methods configured yet"}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {[
-              { label: "WiPay", status: wipayStatus },
-              { label: "PayPal", status: paypalStatus },
-              { label: "Stripe", status: stripeStatus },
-              { label: "Bank", status: bankStatus },
-              { label: "Cash", status: cashStatus },
-            ].map((m) => (
-              <div key={m.label} className="flex items-center gap-1.5">
-                <StatusDot status={m.status} />
-                <span className="text-[11px] text-[hsl(var(--kf-text-muted))] hidden sm:inline">{m.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </motion.div>
 
       <PaymentCard
         icon={<CreditCard className="w-5 h-5 text-green-400" />}

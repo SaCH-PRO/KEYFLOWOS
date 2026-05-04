@@ -7,7 +7,7 @@ export default function SettingsPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/app/settings/business");
+    router.replace("/app/settings/billing");
   }, [router]);
 
   return null;

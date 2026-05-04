@@ -5,10 +5,10 @@ import { motion } from "framer-motion";
 import { CheckCircle2, AlertCircle, Building2, Globe, Palette } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import { useBusinessSettings } from "../../settings/business/use-business-settings";
-import { LogoUploader } from "../../settings/business/logo-uploader";
-import { BasicInfoTab } from "../../settings/business/basic-info-tab";
+import { LogoUploader } from "./logo-uploader";
+import { BasicInfoTab } from "./basic-info-tab";
 import { SocialTab } from "../../settings/business/social-tab";
-import { BrandingTab } from "../../settings/business/branding-tab";
+import { BrandingTab } from "./branding-tab";
 import { AccordionSection, AccordionGroup } from "../../store/components/accordion-section";
 
 const fadeUp = {

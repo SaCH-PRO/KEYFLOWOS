@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { InfoBadge } from "@/components/ui/info-badge";
-import { FormState, ValidationErrors } from "./use-business-settings";
+import { FormState, ValidationErrors } from "../../settings/business/use-business-settings";
 
 const TIMEZONES = [
   "America/Port_of_Spain",

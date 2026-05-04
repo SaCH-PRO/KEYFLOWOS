@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain } from "lucide-react";
+import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown } from "lucide-react";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 
 const navItems = [
-  { href: "/app/settings/business", label: "Payments", icon: CreditCard, description: "Billing & gateways" },
+  { href: "/app/settings/billing", label: "Billing", icon: Crown, description: "Subscription & usage" },
+  { href: "/app/settings/business", label: "Payment Gateways", icon: CreditCard, description: "Customer payment methods" },
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
   { href: "/app/connect", label: "Connect", icon: Link2, description: "Integrations hub" },
   { href: "/app/settings/notifications", label: "Notifications", icon: Bell, description: "Customer emails" },
@@ -49,7 +50,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         </div>
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-          <p className="text-sm text-muted-foreground">Payments, integrations, and workspace configuration</p>
+          <p className="text-sm text-muted-foreground">Billing, payment gateways, integrations, and workspace configuration</p>
         </div>
       </motion.div>
 
