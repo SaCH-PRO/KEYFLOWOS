@@ -8,7 +8,6 @@ import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmRevenueService } from './crm-revenue.service';
 import { CrmStatsService } from './crm-stats.service';
 import { CrmTimelineService } from './crm-timeline.service';
-import { CrmVisionService } from './crm-vision.service';
 import { CrmService } from './crm.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -34,7 +33,6 @@ export class CrmController {
     @Inject(CrmStatsService) private readonly crmStats: CrmStatsService,
     @Inject(CrmImportService) private readonly crmImport: CrmImportService,
     @Inject(CrmPlaybookService) private readonly playbook: CrmPlaybookService,
-    @Inject(CrmVisionService) private readonly vision: CrmVisionService,
     @Inject(CrmFlowService) private readonly flow: CrmFlowService,
     @Inject(CrmActionsService) private readonly actions: CrmActionsService,
     @Inject(CrmRevenueService) private readonly revenue: CrmRevenueService,
@@ -466,21 +464,7 @@ export class CrmController {
     if (!image || !image.buffer) {
       throw new BadRequestException('Image file is required');
     }
-    const base64 = `data:${image.mimetype || 'image/jpeg'};base64,${image.buffer.toString('base64')}`;
-    const extracted = await this.vision.extractContactFromImage(base64);
-    if (!extracted.firstName && !extracted.lastName && !extracted.email && !extracted.phone) {
-      throw new BadRequestException('Could not extract any contact information from this image. Try a clearer photo.');
-    }
-    const contact = await this.crm.findOrCreateContact(businessId, {
-      firstName: extracted.firstName,
-      lastName: extracted.lastName,
-      email: extracted.email,
-      phone: extracted.phone,
-      companyName: extracted.companyName,
-      source: 'scan',
-      sourceDetail: 'business_card',
-    });
-    return { contact, extracted };
+    return this.crmImport.scanContactImage(businessId, image.buffer, image.mimetype);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -796,6 +780,66 @@ export class CrmController {
     @Param('contactId') contactId: string,
   ) {
     return this.journey.getContactCrossJourney(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/story')
+  async getContactStory(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Query('filter') filter?: string,
+  ) {
+    const result = await this.journey.getContactCrossJourney(businessId, contactId);
+    if (!filter || filter === 'all') return result;
+    const filterFn = (() => {
+      switch (filter) {
+        case 'comms':
+          return (t: string) => t.startsWith('communication.') || t.startsWith('email.') || t.startsWith('whatsapp.') || t.startsWith('campaign.');
+        case 'money':
+          return (t: string) => t.startsWith('invoice.') || t.startsWith('payment.') || t.startsWith('quote.');
+        case 'tasks':
+          return (t: string) => t.startsWith('task.');
+        case 'notes':
+          return (t: string) => t.startsWith('note.');
+        case 'bookings':
+          return (t: string) => t.startsWith('booking.');
+        default:
+          return () => true;
+      }
+    })();
+    return {
+      ...result,
+      timeline: result.timeline.filter((item) => filterFn(item.type)),
+    };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(30, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/dossier')
+  async getContactDossier(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    const [detail, story, insight, health] = await Promise.all([
+      this.crmStats.contactDetail({ businessId, contactId }),
+      this.journey.getContactCrossJourney(businessId, contactId),
+      this.journey.generateAiInsight(businessId, contactId),
+      this.journey.getContactHealthMetrics(businessId, contactId),
+    ]);
+    return {
+      generatedAt: new Date().toISOString(),
+      contact: detail?.contact ?? null,
+      notes: detail?.notes ?? [],
+      tasks: detail?.tasks ?? [],
+      meta: detail?.meta ?? null,
+      health,
+      insight,
+      summary: story.summary,
+      timeline: story.timeline,
+    };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

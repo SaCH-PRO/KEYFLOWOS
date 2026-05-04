@@ -23,6 +23,7 @@ import type { ViewMode } from "./pipeline-toolbar";
 import { PipelineContactList } from "./pipeline-contact-list";
 import { PipelineDetailPanel } from "./pipeline-detail-panel";
 import { PipelineKanban } from "./pipeline-kanban";
+import { ContactsDatabase } from "./contacts-database";
 import { DuplicateDetector } from "./duplicate-detector";
 import type { PipelineState } from "./use-contacts-pipeline";
 
@@ -94,8 +95,12 @@ const PIPELINE_VIEW_KEY = "kf_pipeline_view";
 function getStoredViewMode(): ViewMode {
   if (typeof window === "undefined") return "list";
   try {
+    const params = new URLSearchParams(window.location.search);
+    const queryView = params.get("view");
+    if (queryView === "table" || queryView === "kanban" || queryView === "list") return queryView;
     const stored = localStorage.getItem(PIPELINE_VIEW_KEY);
-    return stored === "kanban" ? "kanban" : "list";
+    if (stored === "kanban" || stored === "table") return stored;
+    return "list";
   } catch {
     return "list";
   }
@@ -147,6 +152,14 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
     try { localStorage.setItem(PIPELINE_VIEW_KEY, mode); } catch {}
+    if (typeof window !== "undefined") {
+      try {
+        const url = new URL(window.location.href);
+        if (mode === "list") url.searchParams.delete("view");
+        else url.searchParams.set("view", mode);
+        window.history.replaceState({}, "", url.toString());
+      } catch {}
+    }
   }, []);
   const handleToggleImport = useCallback(() => setShowImport((prev) => !prev), []);
 
@@ -419,6 +432,17 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
 
       {viewMode === "kanban" ? (
         <PipelineKanban state={state} />
+      ) : viewMode === "table" && businessId ? (
+        <ContactsDatabase
+          businessId={businessId}
+          contacts={contacts as unknown as import("@/lib/contacts-db").LocalContact[]}
+          onRefresh={handleRefresh}
+          activeListId={activeListId}
+          onSelectList={(listId, contactIds) => { setActiveListId(listId); setActiveListContactIds(contactIds ?? null); }}
+          onSelectContact={selectContact}
+          favoriteIds={favoriteIds}
+          onToggleFavorite={handleToggleFavorite}
+        />
       ) : (
         <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
           <div ref={listRef}>

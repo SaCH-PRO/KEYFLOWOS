@@ -18,6 +18,7 @@ import {
   addContactTask,
   completeContactTask,
   fetchContactDetail,
+  fetchContactDossier,
   deleteContact,
   mergeContacts,
   updateContact,
@@ -481,9 +482,87 @@ export default function ContactDetailPage() {
             )}
           </div>
         </div>
-        <Button variant="outline" onClick={() => router.back()}>
-          Back
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                toast.info("Generating dossier…");
+                const res = await fetchContactDossier(contactId);
+                if (res.error || !res.data) throw new Error(res.error ?? "Failed to fetch dossier");
+                const dossier = res.data as {
+                  generatedAt: string;
+                  contact: { firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null; companyName?: string | null; jobTitle?: string | null; status?: string | null; tags?: string[] | null } | null;
+                  insight?: { summary?: string; nextStep?: string } | null;
+                  health?: { score?: number; daysSinceLastInteraction?: number | null } | null;
+                  summary?: { totalRevenue?: number; totalTouchpoints?: number; lastInteractionAt?: string | null } | null;
+                  timeline?: Array<{ timestamp: string; title: string; description?: string; module?: string; type?: string }>;
+                };
+                const { default: JsPDFCtor } = await import("jspdf");
+                await import("jspdf-autotable");
+                const doc = new JsPDFCtor({ unit: "pt", format: "a4" });
+                const name = `${dossier.contact?.firstName ?? ""} ${dossier.contact?.lastName ?? ""}`.trim() || dossier.contact?.email || "Contact";
+                doc.setFontSize(20);
+                doc.text(`Contact Dossier — ${name}`, 40, 50);
+                doc.setFontSize(10);
+                doc.setTextColor(120);
+                doc.text(`Generated ${new Date(dossier.generatedAt).toLocaleString()}`, 40, 68);
+                doc.setTextColor(0);
+                let y = 100;
+                doc.setFontSize(12);
+                doc.text("Profile", 40, y); y += 16;
+                doc.setFontSize(10);
+                const lines = [
+                  dossier.contact?.email && `Email: ${dossier.contact.email}`,
+                  dossier.contact?.phone && `Phone: ${dossier.contact.phone}`,
+                  dossier.contact?.companyName && `Company: ${dossier.contact.companyName}`,
+                  dossier.contact?.jobTitle && `Title: ${dossier.contact.jobTitle}`,
+                  dossier.contact?.status && `Status: ${dossier.contact.status}`,
+                  dossier.contact?.tags?.length && `Tags: ${dossier.contact.tags.join(", ")}`,
+                ].filter(Boolean) as string[];
+                lines.forEach((l) => { doc.text(l, 40, y); y += 14; });
+                y += 8;
+                doc.setFontSize(12);
+                doc.text("Health & Insight", 40, y); y += 16;
+                doc.setFontSize(10);
+                if (dossier.health?.score != null) { doc.text(`Health score: ${dossier.health.score}`, 40, y); y += 14; }
+                if (dossier.health?.daysSinceLastInteraction != null) { doc.text(`Days since last interaction: ${dossier.health.daysSinceLastInteraction}`, 40, y); y += 14; }
+                if (dossier.insight?.summary) { const wrapped = doc.splitTextToSize(`Summary: ${dossier.insight.summary}`, 515); doc.text(wrapped, 40, y); y += wrapped.length * 14; }
+                if (dossier.insight?.nextStep) { const wrapped = doc.splitTextToSize(`Next step: ${dossier.insight.nextStep}`, 515); doc.text(wrapped, 40, y); y += wrapped.length * 14; }
+                y += 8;
+                if (dossier.summary) {
+                  doc.setFontSize(12); doc.text("Engagement Summary", 40, y); y += 16;
+                  doc.setFontSize(10);
+                  if (dossier.summary.totalRevenue != null) { doc.text(`Total revenue: ${dossier.summary.totalRevenue.toLocaleString()}`, 40, y); y += 14; }
+                  if (dossier.summary.totalTouchpoints != null) { doc.text(`Total touchpoints: ${dossier.summary.totalTouchpoints}`, 40, y); y += 14; }
+                  if (dossier.summary.lastInteractionAt) { doc.text(`Last interaction: ${new Date(dossier.summary.lastInteractionAt).toLocaleString()}`, 40, y); y += 14; }
+                  y += 8;
+                }
+                if (dossier.timeline?.length) {
+                  doc.setFontSize(12); doc.text("Story (last 30 events)", 40, y); y += 8;
+                  const rows = dossier.timeline.slice(0, 30).map((t) => [
+                    new Date(t.timestamp).toLocaleDateString(),
+                    t.module ?? "",
+                    t.title,
+                    (t.description ?? "").slice(0, 80),
+                  ]);
+                  // @ts-expect-error - jspdf-autotable augments doc
+                  doc.autoTable({ startY: y + 8, head: [["Date", "Module", "Title", "Detail"]], body: rows, styles: { fontSize: 8 }, headStyles: { fillColor: [40, 40, 40] } });
+                }
+                doc.save(`${name.replace(/\s+/g, "_")}_dossier.pdf`);
+                toast.success("Dossier downloaded");
+              } catch (err) {
+                console.error(err);
+                toast.error("Failed to generate dossier");
+              }
+            }}
+          >
+            Export Dossier
+          </Button>
+          <Button variant="outline" onClick={() => router.back()}>
+            Back
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-2">

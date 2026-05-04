@@ -3082,6 +3082,16 @@ export async function fetchContactHealthMetrics(contactId: string, businessId?: 
   );
 }
 
+export async function fetchContactDossier(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<unknown>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/dossier`,
+    undefined,
+    undefined,
+    { signal: opts?.signal },
+  );
+}
+
 export async function fetchContactJourney(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<JourneyMilestone[]>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(

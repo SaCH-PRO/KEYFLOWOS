@@ -76,6 +76,35 @@ export class EntityResolutionService {
     return { ...this.mergeRules };
   }
 
+  async findContactIdByMatch(
+    businessId: string,
+    input: { externalId?: string | null; source?: string | null; email?: string | null; phone?: string | null },
+  ): Promise<{ contactId: string; matchedOn: 'external_id' | 'email' | 'phone' } | null> {
+    const normalizedEmail = input.email ? input.email.trim().toLowerCase() : null;
+    const normalizedPhone = input.phone ? input.phone.replace(/[^0-9+]/g, '') : null;
+    for (const matchType of this.mergeRules.matchOrder) {
+      if (matchType === 'external_id' && input.externalId && input.source) {
+        const byExternalId = await this.findByExternalId(businessId, input.source, input.externalId);
+        if (byExternalId) return { contactId: byExternalId.id, matchedOn: 'external_id' };
+      }
+      if (matchType === 'email' && normalizedEmail) {
+        const byEmail = await this.prisma.client.contact.findFirst({
+          where: { businessId, emailNormalized: normalizedEmail, deletedAt: null },
+          select: { id: true },
+        });
+        if (byEmail) return { contactId: byEmail.id, matchedOn: 'email' };
+      }
+      if (matchType === 'phone' && normalizedPhone) {
+        const byPhone = await this.prisma.client.contact.findFirst({
+          where: { businessId, phoneNormalized: normalizedPhone, deletedAt: null },
+          select: { id: true },
+        });
+        if (byPhone) return { contactId: byPhone.id, matchedOn: 'phone' };
+      }
+    }
+    return null;
+  }
+
   async resolveContact(businessId: string, entity: ExternalEntity): Promise<ResolvedEntity> {
     const normalizedEmail = entity.email?.toLowerCase().trim() || null;
     const normalizedPhone = this.normalizePhone(entity.phone);

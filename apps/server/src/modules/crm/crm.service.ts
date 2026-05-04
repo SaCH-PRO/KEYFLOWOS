@@ -17,7 +17,8 @@ import { CrmListsService } from './crm-lists.service';
 import { CrmFlowService } from './crm-flow.service';
 import type { ContactMeta, ContactWithStats } from './crm-stats.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
-import { normalizeEmail, normalizePhone, findExistingByEmailOrPhone, findExistingBulk } from './crm-duplicate.util';
+import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
+import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
 type ContactSortBy = 'name' | 'newest' | 'oldest' | 'revenue' | 'score' | 'lastInteraction';
 
@@ -85,6 +86,7 @@ export class CrmService {
     @Inject(CrmStatsService) private readonly stats: CrmStatsService,
     @Inject(CrmListsService) private readonly lists: CrmListsService,
     @Inject(CrmFlowService) private readonly flow: CrmFlowService,
+    @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
   ) {}
 
   async healthPing(): Promise<void> {
@@ -400,30 +402,19 @@ export class CrmService {
     const phoneNormalized = normalizePhone(phone);
     const tags = this.normalizeTags(input.tags);
 
+    const matched = await this.entityResolution.findContactIdByMatch(businessId, {
+      source: input.source ?? null,
+      email,
+      phone,
+    });
+
     return this.prisma.client.$transaction(async (tx) => {
-      if (email) {
+      if (matched) {
         const existing = await tx.contact.findFirst({
-          where: { ...contactWhereBase(businessId), emailNormalized },
+          where: { ...contactWhereWithId(businessId, matched.contactId) },
         });
         if (existing) {
           return this.mergeContactDetails(existing, businessId, {
-            firstName: input.firstName,
-            lastName: input.lastName,
-            email,
-            phone,
-            companyName: input.companyName,
-            source: input.source,
-            sourceDetail: input.sourceDetail,
-            tags,
-          });
-        }
-      }
-      if (phoneNormalized) {
-        const existingByPhone = await tx.contact.findFirst({
-          where: { ...contactWhereBase(businessId), phoneNormalized },
-        });
-        if (existingByPhone) {
-          return this.mergeContactDetails(existingByPhone, businessId, {
             firstName: input.firstName,
             lastName: input.lastName,
             email,

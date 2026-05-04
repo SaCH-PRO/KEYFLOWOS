@@ -19,34 +19,6 @@ const DUPLICATE_SELECT = {
   phoneNormalized: true,
 } as const;
 
-export async function findExistingByEmailOrPhone(
-  prisma: PrismaService,
-  businessId: string,
-  email?: string | null,
-  phone?: string | null,
-) {
-  const emailNormalized = normalizeEmail(email);
-  const phoneNormalized = normalizePhone(phone);
-
-  if (emailNormalized) {
-    const match = await prisma.client.contact.findFirst({
-      where: { ...contactWhereBase(businessId), emailNormalized },
-      select: DUPLICATE_SELECT,
-    });
-    if (match) return { match, matchField: 'email' as const };
-  }
-
-  if (phoneNormalized) {
-    const match = await prisma.client.contact.findFirst({
-      where: { ...contactWhereBase(businessId), phoneNormalized },
-      select: DUPLICATE_SELECT,
-    });
-    if (match) return { match, matchField: 'phone' as const };
-  }
-
-  return null;
-}
-
 export async function findExistingBulk(
   prisma: PrismaService,
   businessId: string,
