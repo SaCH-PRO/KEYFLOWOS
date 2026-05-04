@@ -3,9 +3,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
+import { IPaymentGatewayConnector, PaymentGatewayTransaction, PaymentLinkInput, PaymentLinkResult, RefundInput, RefundResult } from '../payment-gateway.interface';
 
 @Injectable()
-export class StripeConnector implements IConnector {
+export class StripeConnector implements IConnector, IPaymentGatewayConnector {
   private readonly logger = new Logger(StripeConnector.name);
 
   readonly meta: ConnectorMeta = {
@@ -184,5 +185,211 @@ export class StripeConnector implements IConnector {
     return this.prisma.client.connectorStatus.findUnique({
       where: { businessId_connectorType: { businessId, connectorType: 'stripe' } },
     });
+  }
+
+  private async getSecretKey(businessId: string): Promise<string> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    const meta = (business?.metaData as Record<string, unknown>) ?? {};
+    const key = (meta.stripeSecretKey as string | undefined) || process.env.STRIPE_SECRET_KEY;
+    if (!key) throw new Error('Stripe is not configured for this business');
+    return key;
+  }
+
+  private async stripeRequest(
+    key: string,
+    method: 'GET' | 'POST',
+    path: string,
+    body?: URLSearchParams,
+  ): Promise<unknown> {
+    const url = `https://api.stripe.com/v1${path}`;
+    const res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+      },
+      body: body?.toString(),
+    });
+    const text = await res.text();
+    let parsed: unknown = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
+    if (!res.ok) {
+      const msg = (parsed as { error?: { message?: string } } | null)?.error?.message || text || `HTTP ${res.status}`;
+      throw new Error(`Stripe API error: ${msg}`);
+    }
+    return parsed;
+  }
+
+  async listRecentTransactions(businessId: string, limit = 50): Promise<PaymentGatewayTransaction[]> {
+    const key = await this.getSecretKey(businessId);
+    const charges = (await this.stripeRequest(key, 'GET', `/charges?limit=${Math.min(limit, 100)}`)) as {
+      data?: Array<{
+        id: string;
+        amount: number;
+        amount_refunded?: number;
+        currency: string;
+        status: string;
+        paid: boolean;
+        refunded?: boolean;
+        description?: string | null;
+        billing_details?: { name?: string | null; email?: string | null };
+        metadata?: { invoiceId?: string };
+        created: number;
+      }>;
+    };
+    const out: PaymentGatewayTransaction[] = [];
+    type StripeChargeRow = NonNullable<typeof charges.data>[number];
+    const chargeById = new Map<string, StripeChargeRow>();
+    for (const c of charges.data ?? []) {
+      chargeById.set(c.id, c);
+      out.push({
+        id: c.id,
+        provider: 'stripe',
+        type: 'charge',
+        status: c.refunded ? 'refunded' : c.status,
+        amount: c.amount / 100,
+        currency: (c.currency || 'usd').toUpperCase(),
+        customerName: c.billing_details?.name ?? null,
+        customerEmail: c.billing_details?.email ?? null,
+        description: c.description ?? null,
+        invoiceId: c.metadata?.invoiceId ?? null,
+        externalUrl: `https://dashboard.stripe.com/payments/${c.id}`,
+        createdAt: new Date(c.created * 1000),
+      });
+    }
+    try {
+      const refunds = (await this.stripeRequest(key, 'GET', `/refunds?limit=${Math.min(limit, 100)}`)) as {
+        data?: Array<{
+          id: string; charge: string; amount: number; currency: string; status: string;
+          reason?: string | null; created: number;
+        }>;
+      };
+      for (const r of refunds.data ?? []) {
+        const c = chargeById.get(r.charge);
+        out.push({
+          id: r.id,
+          provider: 'stripe',
+          type: 'refund',
+          status: r.status,
+          amount: r.amount / 100,
+          currency: (r.currency || c?.currency || 'usd').toUpperCase(),
+          customerName: c?.billing_details?.name ?? null,
+          customerEmail: c?.billing_details?.email ?? null,
+          description: r.reason ?? (c?.description ? `Refund: ${c.description}` : 'Refund'),
+          invoiceId: c?.metadata?.invoiceId ?? null,
+          externalUrl: `https://dashboard.stripe.com/refunds/${r.id}`,
+          createdAt: new Date(r.created * 1000),
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`Stripe refunds list failed: ${err instanceof Error ? err.message : err}`);
+    }
+    await this.trackActivity(businessId);
+    return out;
+  }
+
+  async createPaymentLink(businessId: string, input: PaymentLinkInput): Promise<PaymentLinkResult> {
+    const key = await this.getSecretKey(businessId);
+    const priceBody = new URLSearchParams();
+    priceBody.append('currency', input.currency.toLowerCase());
+    priceBody.append('unit_amount', String(Math.round(input.amount * 100)));
+    priceBody.append('product_data[name]', input.description.slice(0, 250) || 'Payment');
+    const price = (await this.stripeRequest(key, 'POST', '/prices', priceBody)) as { id: string };
+
+    const linkBody = new URLSearchParams();
+    linkBody.append('line_items[0][price]', price.id);
+    linkBody.append('line_items[0][quantity]', '1');
+    if (input.customerEmail) {
+      linkBody.append('metadata[customerEmail]', input.customerEmail);
+    }
+    const link = (await this.stripeRequest(key, 'POST', '/payment_links', linkBody)) as {
+      id: string; url: string; active: boolean; created: number;
+    };
+    await this.trackActivity(businessId);
+    return {
+      id: link.id,
+      url: link.url,
+      provider: 'stripe',
+      amount: input.amount,
+      currency: input.currency.toUpperCase(),
+      description: input.description,
+      active: link.active,
+      createdAt: new Date(link.created * 1000),
+    };
+  }
+
+  async listPaymentLinks(businessId: string): Promise<PaymentLinkResult[]> {
+    const key = await this.getSecretKey(businessId);
+    const list = (await this.stripeRequest(key, 'GET', '/payment_links?limit=50&active=true')) as {
+      data?: Array<{
+        id: string; url: string; active: boolean; created: number;
+        line_items?: { data?: Array<{ price?: { unit_amount?: number; currency?: string }; description?: string }> };
+      }>;
+    };
+    const links: PaymentLinkResult[] = [];
+    for (const l of list.data ?? []) {
+      let amount = 0;
+      let currency = 'USD';
+      let description = '';
+      try {
+        const li = (await this.stripeRequest(key, 'GET', `/payment_links/${l.id}/line_items?limit=1`)) as {
+          data?: Array<{ amount_total?: number; currency?: string; description?: string }>;
+        };
+        const first = li.data?.[0];
+        if (first) {
+          amount = (first.amount_total ?? 0) / 100;
+          currency = (first.currency || 'usd').toUpperCase();
+          description = first.description || '';
+        }
+      } catch { /* ignore line item lookup failures */ }
+      links.push({
+        id: l.id,
+        url: l.url,
+        provider: 'stripe',
+        amount,
+        currency,
+        description,
+        active: l.active,
+        createdAt: new Date(l.created * 1000),
+      });
+    }
+    return links;
+  }
+
+  async revokePaymentLink(businessId: string, linkId: string): Promise<void> {
+    const key = await this.getSecretKey(businessId);
+    const body = new URLSearchParams();
+    body.append('active', 'false');
+    await this.stripeRequest(key, 'POST', `/payment_links/${linkId}`, body);
+  }
+
+  async refundCharge(businessId: string, input: RefundInput): Promise<RefundResult> {
+    const key = await this.getSecretKey(businessId);
+    const body = new URLSearchParams();
+    body.append('charge', input.chargeId);
+    if (input.amount !== undefined) {
+      body.append('amount', String(Math.round(input.amount * 100)));
+    }
+    if (input.reason) {
+      const valid = ['duplicate', 'fraudulent', 'requested_by_customer'];
+      if (valid.includes(input.reason)) body.append('reason', input.reason);
+      else body.append('metadata[reason]', input.reason.slice(0, 500));
+    }
+    const refund = (await this.stripeRequest(key, 'POST', '/refunds', body)) as {
+      id: string; amount: number; currency: string; status: string; charge: string; created: number;
+    };
+    await this.trackActivity(businessId);
+    return {
+      id: refund.id,
+      chargeId: refund.charge,
+      amount: refund.amount / 100,
+      currency: (refund.currency || 'usd').toUpperCase(),
+      status: refund.status,
+      provider: 'stripe',
+      createdAt: new Date(refund.created * 1000),
+    };
   }
 }

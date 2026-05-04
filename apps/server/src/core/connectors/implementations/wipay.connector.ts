@@ -3,9 +3,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
+import { GatewayNotSupportedError, IPaymentGatewayConnector, PaymentGatewayTransaction, PaymentLinkInput, PaymentLinkResult, RefundInput, RefundResult } from '../payment-gateway.interface';
 
 @Injectable()
-export class WiPayConnector implements IConnector {
+export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
   private readonly logger = new Logger(WiPayConnector.name);
 
   readonly meta: ConnectorMeta = {
@@ -224,5 +225,52 @@ export class WiPayConnector implements IConnector {
     return this.prisma.client.connectorStatus.findUnique({
       where: { businessId_connectorType: { businessId, connectorType: 'wipay' } },
     });
+  }
+
+  async listRecentTransactions(businessId: string, limit = 50): Promise<PaymentGatewayTransaction[]> {
+    const payments = await this.prisma.client.payment.findMany({
+      where: { businessId, provider: 'wipay' },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 100),
+      include: { invoice: { select: { id: true, contact: { select: { firstName: true, lastName: true, email: true } } } } },
+    }).catch(() => [] as Array<{
+      id: string; amount: number; currency: string; status: string; provider: string;
+      providerPaymentId: string; createdAt: Date; invoiceId: string;
+      invoice: { id: string; contact: { firstName: string | null; lastName: string | null; email: string | null } | null } | null;
+    }>);
+    return payments.map((p) => {
+      const contact = p.invoice?.contact;
+      const name = contact ? `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || null : null;
+      return {
+        id: p.providerPaymentId || p.id,
+        provider: 'wipay' as const,
+        type: (p.status === 'REFUNDED' ? 'refund' : 'charge') as 'charge' | 'refund',
+        status: p.status.toLowerCase(),
+        amount: Number(p.amount),
+        currency: p.currency,
+        customerName: name,
+        customerEmail: contact?.email ?? null,
+        description: p.invoice?.id ? `Invoice ${p.invoice.id}` : null,
+        invoiceId: p.invoiceId ?? null,
+        externalUrl: null,
+        createdAt: p.createdAt,
+      };
+    });
+  }
+
+  async createPaymentLink(_businessId: string, _input: PaymentLinkInput): Promise<PaymentLinkResult> {
+    throw new GatewayNotSupportedError('wipay', 'Create payment link');
+  }
+
+  async listPaymentLinks(_businessId: string): Promise<PaymentLinkResult[]> {
+    return [];
+  }
+
+  async revokePaymentLink(_businessId: string, _linkId: string): Promise<void> {
+    throw new GatewayNotSupportedError('wipay', 'Revoke payment link');
+  }
+
+  async refundCharge(_businessId: string, _input: RefundInput): Promise<RefundResult> {
+    throw new GatewayNotSupportedError('wipay', 'Refund charge');
   }
 }

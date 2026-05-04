@@ -951,10 +951,20 @@ export default function QuotesPanel({
             const cardBadges = (
               <>
                 {quote.invoiceId && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
-                    <ArrowRightLeft className="w-3 h-3" />
-                    Converted
-                  </span>
+                  <>
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
+                      <ArrowRightLeft className="w-3 h-3" />
+                      Converted
+                    </span>
+                    <a
+                      href={`/app/payments?tab=transactions&q=${encodeURIComponent(quote.invoiceId)}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+                      title="View payments for this invoice"
+                    >
+                      View in Payments
+                    </a>
+                  </>
                 )}
                 {expired && (
                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-amber-500/20 text-amber-300 border-amber-500/40">
