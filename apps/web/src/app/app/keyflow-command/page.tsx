@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { apiGet } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { Sparkles, RefreshCw } from "lucide-react";
+import { Sparkles, RefreshCw, Plug } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import {
@@ -46,6 +47,26 @@ export default function KeyflowCommandPage() {
   const router = useRouter();
   const [notesTarget, setNotesTarget] = useState<KeyflowNotesTarget | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [connectorAlertCount, setConnectorAlertCount] = useState(0);
+
+  useEffect(() => {
+    if (!d.businessId) return;
+    let cancelled = false;
+    const load = async () => {
+      const res = await apiGet<{ count?: number }>(
+        `/connectors/businesses/${d.businessId}/needs-attention`,
+      );
+      if (!cancelled && res.data && typeof res.data.count === "number") {
+        setConnectorAlertCount(res.data.count);
+      }
+    };
+    load();
+    const id = window.setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [d.businessId]);
 
   const aiCustomData = useMemo(
     () => ({
@@ -207,6 +228,30 @@ export default function KeyflowCommandPage() {
               module="cockpit"
               context={pageContext as Record<string, unknown> | undefined}
             />
+            <button
+              onClick={() => router.push("/app/connect")}
+              className="relative flex items-center gap-1.5 h-9 px-3 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-h-[36px]"
+              aria-label={
+                connectorAlertCount > 0
+                  ? `Connect — ${connectorAlertCount} need attention`
+                  : "Connect integrations"
+              }
+              title="Manage integrations"
+            >
+              <Plug className="w-3.5 h-3.5" />
+              <span className="text-xs font-medium">Connect</span>
+              {connectorAlertCount > 0 && (
+                <span
+                  className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 text-[10px] font-semibold rounded-full flex items-center justify-center"
+                  style={{
+                    background: "hsl(var(--kf-error))",
+                    color: "white",
+                  }}
+                >
+                  {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
+                </span>
+              )}
+            </button>
             <button
               onClick={d.refresh}
               className="flex items-center justify-center w-9 h-9 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-w-[36px] min-h-[36px]"
