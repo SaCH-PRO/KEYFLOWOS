@@ -51,6 +51,19 @@ export function useContactsPipeline() {
     },
     [detailSelectContact, trackRecent],
   );
+  const toggleContact = useCallback(
+    (contactId: string) => {
+      if (selectedContactId === contactId) {
+        setSelectedContactId(null);
+        return;
+      }
+      detailSelectContact(contactId, trackRecent);
+    },
+    [detailSelectContact, trackRecent, selectedContactId, setSelectedContactId],
+  );
+  const clearSelectedContact = useCallback(() => {
+    setSelectedContactId(null);
+  }, [setSelectedContactId]);
 
   const handleDoAction = useCallback((action: NextActionUI) => {
     switch (action.type) {
@@ -217,7 +230,7 @@ export function useContactsPipeline() {
     segmentCounts: contactsData.segmentCounts,
     selectedContactsForBroadcast,
     detailPanelProps,
-    loadContacts, loadFlowData, selectContact,
+    loadContacts, loadFlowData, selectContact, toggleContact, clearSelectedContact,
     handleSubmitContact: actions.handleSubmitContact,
     handleAddNote: actions.handleAddNote,
     handleAddTask: actions.handleAddTask,
