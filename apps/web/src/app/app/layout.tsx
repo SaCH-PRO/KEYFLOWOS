@@ -543,10 +543,10 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             style={{ background: "hsl(var(--kf-sidebar-bg))" }}
           >
             <Link
-              href="/app"
+              href="/app/keyflow-command"
               className="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 mb-3"
               style={{ background: "hsl(var(--kf-accent1))" }}
-              title="KEYFLOWOS"
+              title="KEYFLOW — home"
             >
               <Zap className="w-4 h-4 text-white" />
             </Link>
