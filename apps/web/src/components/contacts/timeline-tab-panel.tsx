@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   MessageSquare,
@@ -32,6 +32,7 @@ import {
   ExternalLink,
   Filter,
   FileText,
+  FolderKanban,
   CheckCircle2,
   AlertTriangle,
   Star,
@@ -39,7 +40,7 @@ import {
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
-import type { CrossJourneyResponse } from "@/lib/client";
+import { fetchCrossModuleLinks, type CrossJourneyResponse, type CrossModuleLinks } from "@/lib/client";
 import {
   EVENT_LABELS,
   HEALTH_METRICS_CONFIG,
@@ -49,7 +50,7 @@ import {
   type JourneyMilestoneData,
 } from "./tab-constants";
 
-type ModuleFilter = "all" | "crm" | "bookings" | "commerce" | "marketing" | "notes" | "tasks";
+type ModuleFilter = "all" | "crm" | "bookings" | "commerce" | "marketing" | "notes" | "tasks" | "projects";
 
 interface InvoiceSummary {
   id: string;
@@ -74,7 +75,7 @@ interface BookingSummary {
 interface UnifiedEntry {
   id: string;
   module: ModuleFilter;
-  kind: "event" | "note" | "task" | "invoice" | "booking";
+  kind: "event" | "note" | "task" | "invoice" | "booking" | "project";
   icon: typeof Calendar;
   iconColor: string;
   iconBg: string;
@@ -90,6 +91,7 @@ interface UnifiedEntry {
 
 interface TimelineTabPanelProps {
   contact: ContactDetailData;
+  businessId?: string | null;
   events: ContactEvent[];
   notes?: ContactNote[];
   tasks?: ContactTask[];
@@ -113,6 +115,7 @@ const MODULE_PILLS: { key: ModuleFilter; label: string; icon: typeof Calendar }[
   { key: "bookings", label: "Bookings", icon: Calendar },
   { key: "commerce", label: "Commerce", icon: DollarSign },
   { key: "marketing", label: "Marketing", icon: Megaphone },
+  { key: "projects", label: "Projects", icon: FolderKanban },
   { key: "notes", label: "Notes", icon: StickyNote },
   { key: "tasks", label: "Tasks", icon: ListTodo },
 ];
@@ -172,6 +175,7 @@ function getModuleLabel(m: ModuleFilter): string {
     case "bookings": return "Bookings";
     case "commerce": return "Commerce";
     case "marketing": return "Marketing";
+    case "projects": return "Project";
     case "notes": return "Note";
     case "tasks": return "Task";
     default: return "";
@@ -182,6 +186,7 @@ const CTA_HREF_MAP: Record<string, (id?: string) => string> = {
   commerce: (id) => id ? `/app/commerce?tab=invoices&id=${encodeURIComponent(id)}` : "/app/commerce?tab=invoices",
   bookings: (id) => id ? `/app/bookings?id=${encodeURIComponent(id)}` : "/app/bookings",
   marketing: (id) => id ? `/app/marketing?tab=calendar&id=${encodeURIComponent(id)}` : "/app/marketing?tab=calendar",
+  projects: (id) => id ? `/app/projects?projectId=${encodeURIComponent(id)}` : "/app/projects",
 };
 
 function computeMomentumScore(eventsCount: number, bookingsCount: number, paidRevenue: number, daysSinceLastInteraction: number): number {
@@ -193,7 +198,7 @@ function computeMomentumScore(eventsCount: number, bookingsCount: number, paidRe
 }
 
 export function TimelineTabPanel({
-  contact, events, notes = [], tasks = [], invoices = [], bookings = [],
+  contact, businessId, events, notes = [], tasks = [], invoices = [], bookings = [],
   crossJourney,
   healthMetrics, journeyMilestones: _journeyMilestones,
   conversationContext, aiInsight, aiInsightLoading,
@@ -206,6 +211,16 @@ export function TimelineTabPanel({
   const [limit, setLimit] = useState(25);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [aiCopied, setAiCopied] = useState(false);
+  const [crossLinks, setCrossLinks] = useState<CrossModuleLinks | null>(null);
+
+  useEffect(() => {
+    if (!businessId || !contact.id) return;
+    let cancelled = false;
+    fetchCrossModuleLinks(businessId, "contact", contact.id)
+      .then((res) => { if (!cancelled && res.data) setCrossLinks(res.data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [businessId, contact.id]);
 
   const waPhone = getContactPhone(contact);
 
@@ -403,12 +418,41 @@ export function TimelineTabPanel({
       });
     }
 
+    if (crossLinks?.projects?.length) {
+      const projectEventIds = new Set<string>();
+      for (const e of events) {
+        if (e.type.startsWith("project.")) {
+          const d = e.data as Record<string, unknown> | null | undefined;
+          if (typeof d?.projectId === "string") projectEventIds.add(d.projectId);
+        }
+      }
+      for (const p of crossLinks.projects) {
+        if (projectEventIds.has(p.id)) continue;
+        const status = (p.status || "").toUpperCase();
+        const isComplete = status === "COMPLETED" || status === "DONE";
+        const isCancelled = status === "CANCELLED";
+        out.push({
+          id: `proj-${p.id}`,
+          module: "projects",
+          kind: "project",
+          icon: isComplete ? CheckCircle2 : isCancelled ? AlertTriangle : FolderKanban,
+          iconColor: isComplete ? "hsl(var(--kf-success))" : isCancelled ? "hsl(var(--kf-error))" : "hsl(var(--kf-accent2))",
+          iconBg: isComplete ? "hsl(var(--kf-success) / 0.15)" : isCancelled ? "hsl(var(--kf-error) / 0.15)" : "hsl(var(--kf-accent2) / 0.15)",
+          title: isComplete ? "Project completed" : isCancelled ? "Project cancelled" : "Project",
+          description: p.name,
+          timestamp: new Date().toISOString(),
+          ctaLabel: "View Project",
+          ctaHref: `/app/projects?projectId=${encodeURIComponent(p.id)}`,
+        });
+      }
+    }
+
     out.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return out;
-  }, [crossJourney, events, notes, tasks, invoices, bookings]);
+  }, [crossJourney, crossLinks, events, notes, tasks, invoices, bookings]);
 
   const moduleCounts = useMemo(() => {
-    const c: Record<ModuleFilter, number> = { all: entries.length, crm: 0, bookings: 0, commerce: 0, marketing: 0, notes: 0, tasks: 0 };
+    const c: Record<ModuleFilter, number> = { all: entries.length, crm: 0, bookings: 0, commerce: 0, marketing: 0, projects: 0, notes: 0, tasks: 0 };
     for (const e of entries) c[e.module]++;
     return c;
   }, [entries]);

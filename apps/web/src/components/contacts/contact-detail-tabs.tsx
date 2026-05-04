@@ -59,6 +59,7 @@ interface BookingSummary {
 
 interface ContactDetailTabsProps {
   contact: ContactDetailData;
+  businessId?: string | null;
   events: ContactEvent[];
   notes: ContactNote[];
   tasks: ContactTask[];
@@ -93,7 +94,7 @@ function normalizeTab(tab: string): string {
 }
 
 export function ContactDetailTabs({
-  contact, events, notes, tasks,
+  contact, businessId, events, notes, tasks,
   activeTab, onSetActiveTab,
   onAddNote, onAddTask, onCompleteTask, onDeleteNote, onDeleteTask,
   onUpdateNote, onUpdateTask,
@@ -155,6 +156,7 @@ export function ContactDetailTabs({
               <TabErrorBoundary resetKey="timeline">
                 <TimelineTabPanel
                   contact={contact}
+                  businessId={businessId}
                   events={events}
                   notes={notes}
                   tasks={tasks}
