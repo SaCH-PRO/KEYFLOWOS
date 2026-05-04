@@ -7,6 +7,8 @@ import { ThemeColorsProvider } from "@/lib/theme-context";
 import { RegisterSW } from "@/components/register-sw";
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
 import { useSuppressTurbopackHmrFactoryError } from "@/components/dev-hmr-error-suppressor";
+import { ComposeProvider } from "@/components/email/compose-context";
+import { ComposeFab } from "@/components/email/compose-fab";
 
 export function Providers({ children }: { children: ReactNode }) {
   // Dev-only: suppress the recurring Turbopack jsx-dev-runtime HMR
@@ -35,7 +37,10 @@ export function Providers({ children }: { children: ReactNode }) {
           closeButton
           richColors
         />
-        {children}
+        <ComposeProvider>
+          {children}
+          <ComposeFab />
+        </ComposeProvider>
       </ThemeColorsProvider>
     </ThemeProvider>
   );
