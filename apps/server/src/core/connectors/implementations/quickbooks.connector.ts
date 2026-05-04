@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { ConnectorCredentialsService } from '../connector-credentials.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 const CONNECTOR_TYPE = 'quickbooks' as const;
 
@@ -22,6 +22,7 @@ export class QuickbooksConnector implements IConnector {
     supportsWebhook: true,
     authType: 'oauth2',
     connectMode: 'dialog',
+    externalUrl: 'https://qbo.intuit.com/',
     connectInstructions:
       'Generate an OAuth access token from your Intuit Developer dashboard (Sandbox or Production), then paste it below along with your QuickBooks Realm ID.',
     credentialFields: [
@@ -110,6 +111,43 @@ export class QuickbooksConnector implements IConnector {
     if (!realmId) return { success: false, error: 'Missing QuickBooks Realm ID' };
     const realmName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'realmName');
     return { success: true, account: realmName ?? `Realm ${realmId}` };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const accessToken = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accessToken', 'quickbooksAccessToken');
+    if (!accessToken) return { success: false, error: 'No QuickBooks access token configured' };
+    const realmId = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'realmId', 'quickbooksRealmId');
+    if (!realmId) return { success: false, error: 'Missing QuickBooks Realm ID' };
+    const isSandbox = !!process.env.QUICKBOOKS_SANDBOX;
+    const base = isSandbox
+      ? 'https://sandbox-quickbooks.api.intuit.com'
+      : 'https://quickbooks.api.intuit.com';
+    try {
+      const res = await fetch(
+        `${base}/v3/company/${encodeURIComponent(realmId)}/companyinfo/${encodeURIComponent(realmId)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json',
+          },
+        },
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `QuickBooks API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { CompanyInfo?: { CompanyName?: string; LegalName?: string; Country?: string } };
+      await this.trackActivity(businessId);
+      const info = data.CompanyInfo;
+      return {
+        success: true,
+        action: 'Fetched QuickBooks CompanyInfo',
+        account: info?.CompanyName ?? info?.LegalName ?? `Realm ${realmId}`,
+        detail: `${isSandbox ? 'Sandbox' : 'Production'}${info?.Country ? ` • ${info.Country}` : ''}`,
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   /**

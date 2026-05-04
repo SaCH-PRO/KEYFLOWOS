@@ -7,6 +7,7 @@ import {
   ConnectorHealth,
   ConnectorSyncResult,
   ConnectorStatusSummary,
+  ConnectorSmokeResult,
 } from '../connector.interface';
 
 @Injectable()
@@ -111,6 +112,37 @@ export class GoogleBusinessProfileConnector implements IConnector {
       });
       if (!res.ok) return { success: false, error: `Business Profile API returned ${res.status}` };
       return { success: true, account: business.bpEmail ?? undefined };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { bpAccessToken: true, bpEmail: true },
+    });
+    if (!business?.bpAccessToken) return { success: false, error: 'Business Profile is not connected' };
+    try {
+      const res = await fetch('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', {
+        headers: { Authorization: `Bearer ${business.bpAccessToken}` },
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Business Profile API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { accounts?: Array<{ name?: string; accountName?: string }> };
+      await this.prisma.client.connectorStatus.upsert({
+        where: { businessId_connectorType: { businessId, connectorType: 'google_business_profile' } },
+        create: { businessId, connectorType: 'google_business_profile', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
+        update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
+      }).catch(() => undefined);
+      return {
+        success: true,
+        action: 'Listed Business Profile accounts',
+        account: business.bpEmail ?? undefined,
+        detail: `${data.accounts?.length ?? 0} account(s)${data.accounts?.[0]?.accountName ? ` • primary: "${data.accounts[0].accountName.slice(0, 40)}"` : ''}`,
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }

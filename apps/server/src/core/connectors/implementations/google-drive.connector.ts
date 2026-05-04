@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 @Injectable()
 export class GoogleDriveConnector implements IConnector {
@@ -118,6 +118,35 @@ export class GoogleDriveConnector implements IConnector {
       }
       const data = await res.json();
       return { success: true, account: data.user?.emailAddress ?? business.driveEmail ?? undefined };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { driveAccessToken: true, driveEmail: true },
+    });
+    if (!business?.driveAccessToken) return { success: false, error: 'Google Drive is not connected' };
+    try {
+      const res = await fetch(
+        'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName),storageQuota(limit,usage)',
+        { headers: { Authorization: `Bearer ${business.driveAccessToken}` } },
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Drive API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { user?: { emailAddress?: string }; storageQuota?: { usage?: string; limit?: string } };
+      await this.trackActivity(businessId);
+      const usageGb = data.storageQuota?.usage ? (Number(data.storageQuota.usage) / 1e9).toFixed(2) : null;
+      return {
+        success: true,
+        action: 'Fetched Drive account info',
+        account: data.user?.emailAddress ?? business.driveEmail ?? undefined,
+        detail: usageGb ? `Using ${usageGb} GB` : undefined,
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }

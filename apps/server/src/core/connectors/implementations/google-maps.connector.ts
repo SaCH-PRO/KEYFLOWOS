@@ -8,6 +8,7 @@ import type {
   ConnectorHealth,
   ConnectorSyncResult,
   ConnectorStatusSummary,
+  ConnectorSmokeResult,
 } from '../connector.interface';
 
 /**
@@ -118,6 +119,36 @@ export class GoogleMapsConnector implements IConnector {
         return { success: false, error: data.error_message ?? data.status };
       }
       return { success: true, account: 'API key configured' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const apiKey = await this.resolveApiKey(businessId);
+    if (!apiKey) return { success: false, error: 'No Google Maps API key configured' };
+    try {
+      const url = new URL('https://maps.googleapis.com/maps/api/place/findplacefromtext/json');
+      url.searchParams.set('input', 'Port of Spain Trinidad');
+      url.searchParams.set('inputtype', 'textquery');
+      url.searchParams.set('fields', 'name,place_id');
+      url.searchParams.set('key', apiKey);
+      const res = await fetch(url.toString());
+      const data = (await res.json()) as { status?: string; error_message?: string; candidates?: Array<{ name?: string }> };
+      if (data.status === 'REQUEST_DENIED' || data.status === 'INVALID_REQUEST') {
+        return { success: false, error: data.error_message ?? data.status };
+      }
+      await this.prisma.client.connectorStatus.upsert({
+        where: { businessId_connectorType: { businessId, connectorType: 'google_maps' } },
+        create: { businessId, connectorType: 'google_maps', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
+        update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
+      }).catch(() => undefined);
+      return {
+        success: true,
+        action: 'Performed Places find lookup',
+        account: 'API key configured',
+        detail: `Status ${data.status}${data.candidates?.[0]?.name ? ` • match: "${data.candidates[0].name}"` : ''}`,
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }

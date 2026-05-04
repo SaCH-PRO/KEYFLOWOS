@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { ConnectorCredentialsService } from '../connector-credentials.service';
-import { ConnectorMeta } from '../connector.interface';
+import { ConnectorMeta, ConnectorSmokeResult } from '../connector.interface';
 import { FormPlatformConnector } from './form-platform.base';
 
 @Injectable()
@@ -19,6 +19,7 @@ export class TypeformConnector extends FormPlatformConnector {
     supportsWebhook: true,
     authType: 'api_key',
     connectMode: 'dialog',
+    externalUrl: 'https://admin.typeform.com/',
     connectInstructions:
       'In Typeform: Workspace → Settings → Personal tokens — generate a token. Then create a webhook on each form pointing at the URL shown after saving and use the secret in the "Secret" field.',
     credentialFields: [
@@ -37,5 +38,22 @@ export class TypeformConnector extends FormPlatformConnector {
     @Inject(ConnectorCredentialsService) credentials: ConnectorCredentialsService,
   ) {
     super(prisma, events, entityResolution, credentials);
+  }
+
+  protected async pingProvider(token: string): Promise<ConnectorSmokeResult> {
+    const res = await fetch('https://api.typeform.com/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return { success: false, error: `Typeform API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+    }
+    const data = (await res.json()) as { alias?: string; email?: string; language?: string };
+    return {
+      success: true,
+      action: 'Fetched Typeform /me',
+      account: data.email ?? data.alias ?? 'Typeform Account',
+      detail: data.language ? `Language: ${data.language}` : undefined,
+    };
   }
 }

@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 @Injectable()
 export class WhatsAppConnector implements IConnector {
@@ -18,6 +18,7 @@ export class WhatsAppConnector implements IConnector {
     supportsSync: false,
     supportsWebhook: true,
     authType: 'api_key',
+    externalUrl: 'https://business.facebook.com/wa/manage',
   };
 
   constructor(
@@ -72,6 +73,33 @@ export class WhatsAppConnector implements IConnector {
       return { success: false, itemsSynced: 0, errors: ['WhatsApp not connected'], duration: Date.now() - start };
     }
     return { success: true, itemsSynced: 0, errors: [], duration: Date.now() - start };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const token = process.env.WHATSAPP_ACCESS_TOKEN;
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (!token) return { success: false, error: 'WHATSAPP_ACCESS_TOKEN is not set' };
+    if (!phoneNumberId) return { success: false, error: 'WHATSAPP_PHONE_NUMBER_ID is not set' };
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/v17.0/${encodeURIComponent(phoneNumberId)}?fields=display_phone_number,verified_name,quality_rating`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `WhatsApp Graph API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { display_phone_number?: string; verified_name?: string; quality_rating?: string };
+      await this.trackActivity(businessId);
+      return {
+        success: true,
+        action: 'Fetched WhatsApp phone number profile',
+        account: data.verified_name ?? data.display_phone_number ?? phoneNumberId,
+        detail: `${data.display_phone_number ?? phoneNumberId}${data.quality_rating ? ` • quality: ${data.quality_rating}` : ''}`,
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async disconnect(businessId: string): Promise<void> {

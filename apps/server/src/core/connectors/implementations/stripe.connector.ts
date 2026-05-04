@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 @Injectable()
 export class StripeConnector implements IConnector {
@@ -18,6 +18,7 @@ export class StripeConnector implements IConnector {
     supportsSync: false,
     supportsWebhook: true,
     authType: 'api_key',
+    externalUrl: 'https://dashboard.stripe.com',
   };
 
   constructor(
@@ -74,6 +75,31 @@ export class StripeConnector implements IConnector {
     }).catch(() => 0);
 
     return { success: true, itemsSynced: recentPayments, errors: [], duration: Date.now() - start };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) return { success: false, error: 'STRIPE_SECRET_KEY is not set' };
+    try {
+      const res = await fetch('https://api.stripe.com/v1/balance', {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Stripe API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { available?: Array<{ amount: number; currency: string }>; livemode?: boolean };
+      await this.trackActivity(businessId);
+      const top = data.available?.[0];
+      return {
+        success: true,
+        action: 'Fetched Stripe /v1/balance',
+        account: data.livemode ? 'Live mode' : 'Test mode',
+        detail: top ? `Available: ${(top.amount / 100).toFixed(2)} ${top.currency.toUpperCase()}` : 'Zero balance',
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async disconnect(businessId: string): Promise<void> {

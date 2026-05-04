@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 @Injectable()
 export class GoogleCalendarConnector implements IConnector {
@@ -144,6 +144,37 @@ export class GoogleCalendarConnector implements IConnector {
         return { success: false, error: `Calendar API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
       }
       return { success: true, account: business.calendarEmail ?? undefined };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { calendarAccessToken: true, calendarEmail: true },
+    });
+    if (!business?.calendarAccessToken) {
+      return { success: false, error: 'Google Calendar is not connected' };
+    }
+    try {
+      const headers = { Authorization: `Bearer ${business.calendarAccessToken}` };
+      const res = await fetch(
+        'https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=3&fields=items(id,summary,start)&orderBy=updated&singleEvents=true',
+        { headers },
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Calendar API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { items?: Array<{ id: string; summary?: string }> };
+      await this.trackActivity(businessId);
+      return {
+        success: true,
+        action: 'Listed primary calendar events',
+        account: business.calendarEmail ?? undefined,
+        detail: `${data.items?.length ?? 0} recent event(s)${data.items?.[0]?.summary ? ` • latest: "${data.items[0].summary.slice(0, 40)}"` : ''}`,
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }

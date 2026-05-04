@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorType } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorType, ConnectorSmokeResult } from '../connector.interface';
 
 /**
  * Shared base for the expanded social platform connectors (LinkedIn / TikTok / Twitter).
@@ -79,6 +79,32 @@ export abstract class SocialPlatformConnector implements IConnector {
     }).catch(() => 0);
     await this.trackActivity(businessId);
     return { success: true, itemsSynced: posts, errors: [], duration: Date.now() - start };
+  }
+
+  /**
+   * Subclasses override to call the platform's "who am I" endpoint. Default
+   * implementation just verifies the stored token exists. Should NOT throw —
+   * return { success:false, error } on failure.
+   */
+  protected async pingProvider(_token: string, _accountName: string | null): Promise<ConnectorSmokeResult> {
+    return { success: true, action: 'Verified stored access token' };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const conn = await this.prisma.client.socialConnection.findFirst({
+      where: { businessId, platform: this.platformKey, status: 'CONNECTED' },
+    });
+    if (!conn?.token) return { success: false, error: `${this.meta.name} is not connected` };
+    try {
+      const result = await this.pingProvider(conn.token, conn.accountName ?? null);
+      if (result.success) await this.trackActivity(businessId);
+      return {
+        ...result,
+        account: result.account ?? conn.accountName ?? undefined,
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async disconnect(businessId: string): Promise<void> {

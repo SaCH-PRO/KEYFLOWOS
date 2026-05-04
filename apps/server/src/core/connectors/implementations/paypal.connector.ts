@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 @Injectable()
 export class PayPalConnector implements IConnector {
@@ -18,6 +18,7 @@ export class PayPalConnector implements IConnector {
     supportsSync: false,
     supportsWebhook: true,
     authType: 'credentials',
+    externalUrl: 'https://www.paypal.com/businessmanage/account/aboutBusiness',
   };
 
   constructor(
@@ -82,6 +83,44 @@ export class PayPalConnector implements IConnector {
     }).catch(() => 0);
 
     return { success: true, itemsSynced: recentPayments, errors: [], duration: Date.now() - start };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    const meta = (business?.metaData as Record<string, unknown>) ?? {};
+    const clientId = (meta.paypalClientId as string | undefined) || process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = (meta.paypalClientSecret as string | undefined) || process.env.PAYPAL_CLIENT_SECRET;
+    if (!clientId || !clientSecret) return { success: false, error: 'PayPal client ID/secret not configured' };
+    const isSandbox = !!(meta.paypalSandbox ?? process.env.PAYPAL_SANDBOX);
+    const base = isSandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com';
+    try {
+      const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      const res = await fetch(`${base}/v1/oauth2/token`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'grant_type=client_credentials',
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `PayPal OAuth ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { app_id?: string; expires_in?: number; scope?: string };
+      await this.trackActivity(businessId);
+      return {
+        success: true,
+        action: 'Issued PayPal OAuth client-credentials token',
+        account: data.app_id ?? clientId,
+        detail: `${isSandbox ? 'Sandbox' : 'Live'}${data.expires_in ? ` • expires in ${data.expires_in}s` : ''}`,
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async disconnect(businessId: string): Promise<void> {

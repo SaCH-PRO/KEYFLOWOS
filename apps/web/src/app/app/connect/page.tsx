@@ -16,6 +16,7 @@ import {
   Zap,
   ChevronRight,
   ExternalLink,
+  PlayCircle,
   ShieldCheck,
   Mail,
   Calendar,
@@ -140,22 +141,26 @@ function ConnectorCard({
   entry,
   onSync,
   onTest,
+  onSmoke,
   onReconnect,
   onDisconnect,
   onActivity,
   onCredentials,
   busy,
   testResult,
+  smokeResult,
 }: {
   entry: DashboardEntry;
   onSync: (type: string) => void;
   onTest: (type: string) => void;
+  onSmoke: (type: string) => void;
   onReconnect: (type: string) => void;
   onDisconnect: (type: string) => void;
   onActivity: (type: string) => void;
   onCredentials: (type: string) => void;
-  busy: { sync?: boolean; test?: boolean; reconnect?: boolean; disconnect?: boolean };
+  busy: { sync?: boolean; test?: boolean; smoke?: boolean; reconnect?: boolean; disconnect?: boolean };
   testResult?: { success: boolean; error?: string; account?: string };
+  smokeResult?: { success: boolean; error?: string; action?: string; account?: string; detail?: string };
 }) {
   const Icon = ICONS[entry.meta.icon] ?? Plug2;
   const statusStyle = STATUS_STYLES[entry.health.status] ?? STATUS_STYLES.disconnected;
@@ -247,20 +252,50 @@ function ConnectorCard({
                   : testResult.error}
               </p>
             )}
+            {smokeResult && (
+              <p
+                className={`text-[11px] mt-1 ${
+                  smokeResult.success ? "text-emerald-400" : "text-red-400"
+                }`}
+              >
+                {smokeResult.success
+                  ? `Live ✓ ${smokeResult.action ?? "Round-trip OK"}${
+                      smokeResult.account ? ` — ${smokeResult.account}` : ""
+                    }${smokeResult.detail ? ` • ${smokeResult.detail}` : ""}`
+                  : `Live ✗ ${smokeResult.error}`}
+              </p>
+            )}
           </div>
         </div>
+      </div>
 
+      <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-border/30">
         {entry.meta.externalUrl && (
           <a
             href={entry.meta.externalUrl}
             target="_blank"
             rel="noreferrer"
-            className="text-muted-foreground hover:text-foreground transition-colors"
-            aria-label={`Open ${entry.meta.name}`}
+            className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
           >
-            <ExternalLink className="h-3.5 w-3.5" />
+            <ExternalLink className="h-3 w-3" />
+            Open in Provider
           </a>
         )}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onSmoke(entry.meta.type)}
+          disabled={busy.smoke}
+          className="h-7 px-2 text-xs"
+          title="Run a real round-trip API call against the provider"
+        >
+          {busy.smoke ? (
+            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+          ) : (
+            <PlayCircle className="h-3 w-3 mr-1" />
+          )}
+          Try it live
+        </Button>
       </div>
 
       <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-border/30">
@@ -367,8 +402,11 @@ export default function KeyFlowConnectPage() {
   const searchParams = useSearchParams();
   const [entries, setEntries] = useState<DashboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<Record<string, { sync?: boolean; test?: boolean; reconnect?: boolean; disconnect?: boolean }>>({});
+  const [busy, setBusy] = useState<Record<string, { sync?: boolean; test?: boolean; smoke?: boolean; reconnect?: boolean; disconnect?: boolean }>>({});
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; error?: string; account?: string }>>({});
+  const [smokeResults, setSmokeResults] = useState<
+    Record<string, { success: boolean; error?: string; action?: string; account?: string; detail?: string }>
+  >({});
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [activityOpen, setActivityOpen] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
@@ -473,6 +511,32 @@ export default function KeyFlowConnectPage() {
       setTestResults((p) => ({ ...p, [type]: data }));
     }
     setBusyFor(type, "test", false);
+  };
+
+  const handleSmoke = async (type: string) => {
+    if (!businessId) return;
+    setBusyFor(type, "smoke", true);
+    const res = await apiPostSimple<{
+      success: boolean;
+      error?: string;
+      action?: string;
+      account?: string;
+      detail?: string;
+    }>(`/connectors/businesses/${businessId}/smoke/${type}`, {});
+    if (res.error) {
+      const errMsg = res.error;
+      setSmokeResults((p) => ({ ...p, [type]: { success: false, error: errMsg } }));
+      toast.error(`Live test failed: ${errMsg}`);
+    } else if (res.data) {
+      const data = res.data;
+      setSmokeResults((p) => ({ ...p, [type]: data }));
+      if (data.success) {
+        toast.success(`Live ✓ ${data.action ?? "Round-trip OK"}${data.account ? ` — ${data.account}` : ""}`);
+      } else {
+        toast.error(`Live ✗ ${data.error ?? "Unknown error"}`);
+      }
+    }
+    setBusyFor(type, "smoke", false);
   };
 
   const handleReconnect = async (type: string) => {
@@ -858,8 +922,10 @@ export default function KeyFlowConnectPage() {
                   entry={entry}
                   busy={busy[entry.meta.type] ?? {}}
                   testResult={testResults[entry.meta.type]}
+                  smokeResult={smokeResults[entry.meta.type]}
                   onSync={handleSync}
                   onTest={handleTest}
+                  onSmoke={handleSmoke}
                   onReconnect={handleReconnect}
                   onDisconnect={handleDisconnect}
                   onActivity={handleActivity}

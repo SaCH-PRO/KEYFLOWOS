@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 
 @Injectable()
 export class MetaSocialConnector implements IConnector {
@@ -18,6 +18,7 @@ export class MetaSocialConnector implements IConnector {
     supportsSync: true,
     supportsWebhook: true,
     authType: 'oauth2',
+    externalUrl: 'https://business.facebook.com',
   };
 
   constructor(
@@ -102,6 +103,31 @@ export class MetaSocialConnector implements IConnector {
     });
 
     return { success: true, itemsSynced: postCount, errors: [], duration: Date.now() - start };
+  }
+
+  async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const conn = await this.prisma.client.socialConnection.findFirst({
+      where: { businessId, platform: { in: ['FACEBOOK', 'INSTAGRAM'] }, status: 'CONNECTED' },
+    });
+    if (!conn?.token) return { success: false, error: 'No connected Meta account' };
+    try {
+      const res = await fetch('https://graph.facebook.com/v21.0/me?fields=id,name', {
+        headers: { Authorization: `Bearer ${conn.token}` },
+      });
+      if (!res.ok) {
+        return { success: false, error: `Meta Graph API ${res.status}` };
+      }
+      const data = (await res.json()) as { id?: string; name?: string };
+      await this.trackActivity(businessId);
+      return {
+        success: true,
+        action: `Verified ${conn.platform} access token`,
+        account: data.name ?? conn.accountName ?? undefined,
+        detail: data.id ? `Account ID ${data.id}` : undefined,
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
   }
 
   async disconnect(businessId: string): Promise<void> {
