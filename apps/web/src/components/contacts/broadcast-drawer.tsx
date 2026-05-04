@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useCompose } from "@/components/email/compose-context";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
-import { X, MessageCircle, Mail, Send, Copy, Check, AlertCircle } from "lucide-react";
+import { X, MessageCircle, Send, Copy, Check, AlertCircle } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactCardData } from "./contact-card";
 
@@ -24,38 +23,25 @@ interface BroadcastDrawerProps {
 }
 
 export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectAll: _onDeselectAll }: BroadcastDrawerProps) {
-  const compose = useCompose();
   const [message, setMessage] = useState("");
-  const [channel, setChannel] = useState<"whatsapp" | "email">("whatsapp");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const contactsWithWhatsApp = selectedContacts.filter((c) => getContactPhone(c));
-  const contactsWithEmail = selectedContacts.filter((c) => c.email);
-  const eligibleCount = channel === "whatsapp" ? contactsWithWhatsApp.length : contactsWithEmail.length;
+  const eligibleCount = contactsWithWhatsApp.length;
   const ineligibleCount = selectedContacts.length - eligibleCount;
 
   const handleSendBroadcast = async () => {
     if (!message.trim() || eligibleCount === 0) return;
     setSending(true);
 
-    if (channel === "whatsapp") {
-      for (const contact of contactsWithWhatsApp) {
-        const phone = getContactPhone(contact);
-        if (!phone) continue;
-        const personalMessage = message.replace(/\{name\}/g, contact.firstName || "there");
-        window.open(buildWhatsAppLink(phone, personalMessage), "_blank");
-        await new Promise((r) => setTimeout(r, 800));
-      }
-    } else {
-      const emails = contactsWithEmail.map((c) => c.email).filter(Boolean).join(", ");
-      const personalised = message.replace(/\{name\}/g, "Valued Customer");
-      compose.open({
-        to: emails,
-        subject: "Message from your service provider",
-        body: `<p>${personalised.replace(/\n/g, "<br/>")}</p>`,
-      });
+    for (const contact of contactsWithWhatsApp) {
+      const phone = getContactPhone(contact);
+      if (!phone) continue;
+      const personalMessage = message.replace(/\{name\}/g, contact.firstName || "there");
+      window.open(buildWhatsAppLink(phone, personalMessage), "_blank");
+      await new Promise((r) => setTimeout(r, 800));
     }
 
     setSending(false);
@@ -117,36 +103,16 @@ export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectA
           </div>
 
           <div className="p-4 space-y-4">
-            <div className="flex gap-2">
-              <button
-                onClick={() => setChannel("whatsapp")}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all ${
-                  channel === "whatsapp"
-                    ? "bg-emerald-600 text-white"
-                    : "bg-muted hover:bg-muted/80 text-muted-foreground"
-                }`}
-              >
-                <MessageCircle className="w-4 h-4" />
-                WhatsApp ({contactsWithWhatsApp.length})
-              </button>
-              <button
-                onClick={() => setChannel("email")}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all ${
-                  channel === "email"
-                    ? "bg-blue-600 text-white"
-                    : "bg-muted hover:bg-muted/80 text-muted-foreground"
-                }`}
-              >
-                <Mail className="w-4 h-4" />
-                Email ({contactsWithEmail.length})
-              </button>
+            <div className="flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600/10 text-emerald-400 text-sm font-medium">
+              <MessageCircle className="w-4 h-4" />
+              WhatsApp ({contactsWithWhatsApp.length})
             </div>
 
             {ineligibleCount > 0 && (
               <div className="flex items-center gap-2 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-sm">
                 <AlertCircle className="w-4 h-4 text-yellow-500 flex-shrink-0" />
                 <span className="text-yellow-400">
-                  {ineligibleCount} contact{ineligibleCount > 1 ? "s" : ""} missing {channel === "whatsapp" ? "phone number" : "email address"}
+                  {ineligibleCount} contact{ineligibleCount > 1 ? "s" : ""} missing phone number
                 </span>
               </div>
             )}
@@ -192,11 +158,7 @@ export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectA
               <button
                 onClick={handleSendBroadcast}
                 disabled={!message.trim() || eligibleCount === 0 || sending}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-50 ${
-                  channel === "whatsapp"
-                    ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                    : "bg-blue-600 hover:bg-blue-700 text-white"
-                }`}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-50 bg-emerald-600 hover:bg-emerald-700 text-white"
               >
                 {sending ? (
                   <>Sending...</>
@@ -225,7 +187,7 @@ export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectA
             <div className="pt-2 border-t border-border">
               <p className="text-[10px] text-muted-foreground mb-2">Sending to:</p>
               <div className="flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto">
-                {(channel === "whatsapp" ? contactsWithWhatsApp : contactsWithEmail).map((c) => (
+                {contactsWithWhatsApp.map((c) => (
                   <span key={c.id} className="text-[10px] px-2 py-1 rounded-full bg-muted text-muted-foreground">
                     {c.firstName || c.lastName || c.email || "Unknown"}
                   </span>

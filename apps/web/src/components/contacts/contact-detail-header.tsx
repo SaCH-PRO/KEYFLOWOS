@@ -24,7 +24,6 @@ import {
   Zap,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
-import { useCompose } from "@/components/email/compose-context";
 import type { ContactDetailData, DetailQuickAction } from "./contact-detail";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -82,6 +81,10 @@ function getPrimaryChannel(contact: ContactDetailData): CommChannel {
   if (getContactPhone(contact)) return "whatsapp";
   if (contact.email) return "email";
   return "call";
+}
+
+function inboxComposeHref(email: string): string {
+  return `/app/inbox?compose=1&to=${encodeURIComponent(email)}`;
 }
 
 function getContextHint(contact: ContactDetailData, nextBookingDate?: string | null): string | null {
@@ -143,7 +146,6 @@ export function ContactDetailHeader({
   const sourceInfo = SOURCE_CONFIG[sourceKey] || { label: contact.source || "Unknown", icon: Globe };
   const SourceIcon = sourceInfo.icon;
 
-  const compose = useCompose();
   const [stageChange, setStageChange] = useState<{ from: string; to: string } | null>(null);
   const [stageTaskCreated, setStageTaskCreated] = useState(false);
 
@@ -225,14 +227,13 @@ export function ContactDetailHeader({
             )}
             <div className="flex items-center gap-2 mt-0.5">
               {contact.email && (
-                <button
-                  type="button"
-                  onClick={() => compose.open({ to: contact.email! })}
+                <a
+                  href={inboxComposeHref(contact.email)}
                   className="text-xs text-blue-400 hover:underline truncate max-w-[180px] text-left"
                   title={`Email ${contact.email}`}
                 >
                   {contact.email}
-                </button>
+                </a>
               )}
               {contact.email && contact.phone && <span className="text-muted-foreground text-[10px]">·</span>}
               {contact.phone && (
@@ -409,15 +410,14 @@ export function ContactDetailHeader({
       <div className="rounded-xl bg-muted/30 border border-border/50 overflow-hidden">
         <div className="flex items-center gap-2 p-3">
           {contact.email && (
-            <button
-              type="button"
-              onClick={() => compose.open({ to: contact.email! })}
+            <a
+              href={inboxComposeHref(contact.email)}
               className={`${channelStyles("email", primaryChannel === "email")} hover:bg-blue-500/10 ${primaryChannel === "email" ? `bg-blue-500/5 ${channelRingColor("email")}` : ""}`}
               title={`Email ${contact.email}`}
             >
               <Mail className="w-4 h-4 text-blue-400" />
               <span className="hidden sm:inline text-blue-400 text-xs">Email</span>
-            </button>
+            </a>
           )}
           {contact.phone ? (
             <a

@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useMemo, useCallback } from "react";
-import { useCompose } from "@/components/email/compose-context";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot,
@@ -92,10 +91,9 @@ const stagger = {
   item: { hidden: { opacity: 0, x: -8 }, visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] as const } } },
 };
 
-function DraftPreview({ draft, onSendWhatsApp, onSendEmail, onMarkDone, onCopy, sending }: {
+function DraftPreview({ draft, onSendWhatsApp, onMarkDone, onCopy, sending }: {
   draft: AutopilotDraft;
   onSendWhatsApp: () => void;
-  onSendEmail: () => void;
   onMarkDone: () => void;
   onCopy: () => void;
   sending: boolean;
@@ -142,14 +140,6 @@ function DraftPreview({ draft, onSendWhatsApp, onSendEmail, onMarkDone, onCopy, 
             Open WhatsApp
           </button>
           <button
-            onClick={onSendEmail}
-            disabled={sending}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold rounded-lg bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border border-blue-500/20 transition-all disabled:opacity-50"
-          >
-            {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mail className="w-3 h-3" />}
-            Open Email
-          </button>
-          <button
             onClick={onCopy}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold rounded-lg hover:bg-white/[0.06] text-muted-foreground/60 transition-all"
           >
@@ -189,7 +179,6 @@ const ApprovalCard = React.memo(function ApprovalCard({
   const isApproving = approving === action.id;
   const draft = drafts[action.id];
   const isLoadingDraft = draftLoading[action.id];
-  const compose = useCompose();
   const [expanded, setExpanded] = useState(false);
   const [sending, setSending] = useState(false);
   const [, setCopied] = useState(false);
@@ -212,19 +201,6 @@ const ApprovalCard = React.memo(function ApprovalCard({
     setSending(false);
     setDone(true);
   }, [action, draft, onExecute]);
-
-  const handleSendEmail = useCallback(async () => {
-    if (!draft) return;
-    setSending(true);
-    compose.open({
-      to: action.contactEmail || "",
-      subject: draft.subject,
-      body: `<p>${draft.message.replace(/\n/g, "<br/>")}</p>`,
-    });
-    onExecute(action, "email", draft.message);
-    setSending(false);
-    setDone(true);
-  }, [action, draft, onExecute, compose]);
 
   const handleMarkDone = useCallback(async () => {
     if (!draft) return;
@@ -348,7 +324,6 @@ const ApprovalCard = React.memo(function ApprovalCard({
           <DraftPreview
             draft={draft}
             onSendWhatsApp={handleSendWhatsApp}
-            onSendEmail={handleSendEmail}
             onMarkDone={handleMarkDone}
             onCopy={handleCopy}
             sending={sending}

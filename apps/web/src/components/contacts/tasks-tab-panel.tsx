@@ -1,14 +1,12 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useCompose } from "@/components/email/compose-context";
 import { toast } from "sonner";
 import {
   Plus,
   Search,
   Copy,
   MessageCircle,
-  Mail,
   ListTodo,
   StickyNote,
   Check,
@@ -49,7 +47,6 @@ interface TasksTabPanelProps {
 }
 
 export function TasksTabPanel({ contact, tasks, onAddTask, onAddNote, onCompleteTask, onDeleteTask, onUpdateTask }: TasksTabPanelProps) {
-  const compose = useCompose();
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDue, setNewTaskDue] = useState("");
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>("NORMAL");
@@ -151,18 +148,6 @@ export function TasksTabPanel({ contact, tasks, onAddTask, onAddNote, onComplete
       ? `Reminder: ${title}\nDue: ${formatDateTimeTZ(dueDate)}`
       : `Reminder: ${title}`;
     window.open(buildWhatsAppLink(waPhone, msg), "_blank");
-  };
-
-  const handleShareTaskEmail = (title: string, dueDate?: string | null) => {
-    if (!contact.email) return;
-    const bodyText = dueDate
-      ? `Task: ${title}<br/>Due: ${formatDateTimeTZ(dueDate)}`
-      : `Task: ${title}`;
-    compose.open({
-      to: contact.email,
-      subject: `Task: ${title}`,
-      body: `<p>${bodyText}</p>`,
-    });
   };
 
   const handleCreateNoteFromTask = async (taskId: string, title: string) => {
@@ -470,11 +455,6 @@ export function TasksTabPanel({ contact, tasks, onAddTask, onAddNote, onComplete
                       {waPhone && (
                         <button onClick={() => handleShareTaskWhatsApp(task.title, task.dueDate)} className="p-1.5 rounded-md hover:bg-emerald-500/10 transition-colors" title="Send reminder via WhatsApp">
                           <MessageCircle className="w-3.5 h-3.5 text-emerald-500" />
-                        </button>
-                      )}
-                      {contact.email && (
-                        <button onClick={() => handleShareTaskEmail(task.title, task.dueDate)} className="p-1.5 rounded-md hover:bg-blue-500/10 transition-colors" title="Send reminder via Email">
-                          <Mail className="w-3.5 h-3.5 text-blue-400" />
                         </button>
                       )}
                       {onAddNote && (
