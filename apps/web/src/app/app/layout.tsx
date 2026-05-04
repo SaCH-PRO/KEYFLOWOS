@@ -230,7 +230,7 @@ const primaryNav: PrimaryNavItem[] = [
 
 const secondaryNav: Record<string, NavItem[]> = {
   workspaces: [
-    { label: "Clients", href: "/app/crm/clients", icon: Users },
+    { label: "Clients", href: "/app/crm/pipeline", icon: Users },
     { label: "Inbox", href: "/app/inbox", icon: Mail },
     { label: "Calendar", href: "/app/bookings", icon: Calendar },
     { label: "Revenue", href: "/app/commerce", icon: CreditCard },
