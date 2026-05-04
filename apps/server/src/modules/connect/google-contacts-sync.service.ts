@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GoogleTokenHelper } from './google-token.helper';
 
@@ -9,6 +10,36 @@ interface PeopleConnection {
   emailAddresses?: Array<{ value: string; type?: string }>;
   phoneNumbers?: Array<{ value: string; type?: string }>;
   organizations?: Array<{ name?: string; title?: string }>;
+}
+
+export interface ContactMappingRules {
+  defaultTags: string[];
+  defaultStatus?: string | null;
+  defaultOwnerId?: string | null;
+  defaultLifecycleStage?: string | null;
+}
+
+const EMPTY_RULES: ContactMappingRules = {
+  defaultTags: [],
+  defaultStatus: null,
+  defaultOwnerId: null,
+  defaultLifecycleStage: null,
+};
+
+function parseRules(raw: unknown): ContactMappingRules {
+  if (!raw || typeof raw !== 'object') return { ...EMPTY_RULES };
+  const obj = raw as Record<string, unknown>;
+  return {
+    defaultTags: Array.isArray(obj.defaultTags)
+      ? (obj.defaultTags as unknown[])
+          .filter((x) => typeof x === 'string' && x.trim().length > 0)
+          .map((x) => (x as string).trim())
+      : [],
+    defaultStatus: typeof obj.defaultStatus === 'string' ? obj.defaultStatus : null,
+    defaultOwnerId: typeof obj.defaultOwnerId === 'string' ? obj.defaultOwnerId : null,
+    defaultLifecycleStage:
+      typeof obj.defaultLifecycleStage === 'string' ? obj.defaultLifecycleStage : null,
+  };
 }
 
 @Injectable()
@@ -39,20 +70,197 @@ export class GoogleContactsSyncService {
     return digits || null;
   }
 
+  /** Read mapping rules stored on the connector_status row metadata. */
+  async getMappingRules(businessId: string): Promise<ContactMappingRules> {
+    const row = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+      select: { metadata: true },
+    });
+    const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+    return parseRules(meta.mappingRules);
+  }
+
+  /** Persist mapping rules on the connector_status row metadata. */
+  async saveMappingRules(
+    businessId: string,
+    rules: Partial<ContactMappingRules>,
+  ): Promise<ContactMappingRules> {
+    const next = parseRules({ ...(await this.getMappingRules(businessId)), ...rules });
+    const existing = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+      select: { metadata: true },
+    });
+    const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
+    const merged = { ...meta, mappingRules: next };
+    await this.prisma.client.connectorStatus.upsert({
+      where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+      create: {
+        businessId,
+        connectorType: 'google_contacts',
+        status: 'disconnected',
+        metadata: merged as unknown as Prisma.InputJsonValue,
+      },
+      update: { metadata: merged as unknown as Prisma.InputJsonValue },
+    });
+    return next;
+  }
+
+  /** Sync status snapshot for the contacts page header. */
+  async getStatus(businessId: string) {
+    const [business, status, total, importedCount, lastImported] = await Promise.all([
+      this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { contactsAccessToken: true, contactsEmail: true, contactsLastSyncAt: true },
+      }),
+      this.prisma.client.connectorStatus.findUnique({
+        where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+      }),
+      this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
+      this.prisma.client.contact.count({
+        where: { businessId, source: 'google_contacts', deletedAt: null },
+      }),
+      this.prisma.client.contactExternalMapping.findFirst({
+        where: { businessId, source: 'google_contacts' },
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true },
+      }),
+    ]);
+    const meta = (status?.metadata ?? {}) as Record<string, unknown>;
+    const rules = parseRules(meta.mappingRules);
+    return {
+      connected: !!business?.contactsAccessToken,
+      account: business?.contactsEmail ?? status?.connectedAccount ?? null,
+      lastSyncAt: business?.contactsLastSyncAt ?? status?.lastSyncAt ?? null,
+      lastImportAt: lastImported?.updatedAt ?? null,
+      lastError: status?.lastError ?? null,
+      lastErrorAt: status?.lastErrorAt ?? null,
+      syncCount: status?.syncCount ?? 0,
+      totalContacts: total,
+      googleContacts: importedCount,
+      mappingRules: rules,
+      syncProgress: (meta.syncProgress as unknown) ?? null,
+    };
+  }
+
+  /** Recently-touched Google contacts for the dashboard table. */
+  async getRecent(businessId: string, limit = 25) {
+    const mappings = await this.prisma.client.contactExternalMapping.findMany({
+      where: { businessId, source: 'google_contacts' },
+      orderBy: { updatedAt: 'desc' },
+      take: Math.max(1, Math.min(limit, 100)),
+      select: { contactId: true, externalId: true, updatedAt: true, createdAt: true },
+    });
+    if (mappings.length === 0) return [];
+    const contacts = await this.prisma.client.contact.findMany({
+      where: {
+        id: { in: mappings.map((m) => m.contactId) },
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        companyName: true,
+        status: true,
+        tags: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    const byId = new Map(contacts.map((c) => [c.id, c]));
+    return mappings
+      .map((m) => {
+        const c = byId.get(m.contactId);
+        if (!c) return null;
+        return {
+          ...c,
+          externalId: m.externalId,
+          syncedAt: m.updatedAt,
+          firstSyncedAt: m.createdAt,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+  }
+
+  private async applyDefaultsToNewContact(
+    businessId: string,
+    contactId: string,
+    rules: ContactMappingRules,
+  ) {
+    const data: Prisma.ContactUpdateInput = {};
+    if (rules.defaultTags.length > 0) {
+      data.tags = { set: rules.defaultTags };
+    }
+    if (rules.defaultStatus) data.status = rules.defaultStatus;
+    if (rules.defaultLifecycleStage) data.lifecycleStage = rules.defaultLifecycleStage;
+    if (rules.defaultOwnerId) data.ownerId = rules.defaultOwnerId;
+    if (Object.keys(data).length === 0) return;
+    await this.prisma.client.contact
+      .update({ where: { id: contactId }, data })
+      .catch((e) => this.logger.warn(`Apply defaults failed for ${contactId}: ${(e as Error).message}`));
+  }
+
   /**
    * Pulls connections from Google People API, optionally using a previously stored
    * sync token for incremental updates. Upserts each into the Contact table and
    * tracks the Google resource name in ContactExternalMapping.
    */
-  async sync(businessId: string): Promise<{ imported: number; updated: number }> {
+  /** Update only `metadata.syncProgress` on the connector status row. */
+  private async writeProgress(
+    businessId: string,
+    progress: { phase: string; pagesFetched: number; processed: number; imported: number; updated: number; startedAt: string; finishedAt?: string },
+  ) {
+    try {
+      const row = await this.prisma.client.connectorStatus.findUnique({
+        where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+        select: { metadata: true },
+      });
+      const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+      const merged = { ...meta, syncProgress: progress };
+      await this.prisma.client.connectorStatus.upsert({
+        where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+        create: {
+          businessId,
+          connectorType: 'google_contacts',
+          status: 'connected',
+          metadata: merged as unknown as Prisma.InputJsonValue,
+        },
+        update: { metadata: merged as unknown as Prisma.InputJsonValue },
+      });
+    } catch {
+      /* progress is best-effort */
+    }
+  }
+
+  async sync(businessId: string): Promise<{ imported: number; updated: number; matched: number; created: number; skipped: number; appliedRules: boolean }> {
     const token = await this.accessToken(businessId);
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { contactsSyncToken: true },
     });
+    const rules = await this.getMappingRules(businessId);
+    const hasRules =
+      rules.defaultTags.length > 0 ||
+      !!rules.defaultStatus ||
+      !!rules.defaultOwnerId ||
+      !!rules.defaultLifecycleStage;
 
     let imported = 0;
     let updated = 0;
+    let skipped = 0;
+    let pagesFetched = 0;
+    let processed = 0;
+    const startedAt = new Date().toISOString();
+    await this.writeProgress(businessId, {
+      phase: 'starting',
+      pagesFetched: 0,
+      processed: 0,
+      imported: 0,
+      updated: 0,
+      startedAt,
+    });
     let pageToken: string | undefined;
     let nextSyncToken: string | undefined;
 
@@ -95,9 +303,12 @@ export class GoogleContactsSyncService {
         const company = conn.organizations?.[0]?.name ?? null;
         const emailNorm = this.normalizeEmail(email);
         const phoneNorm = this.normalizePhone(phone);
-        if (!emailNorm && !phoneNorm) continue;
+        if (!emailNorm && !phoneNorm) {
+          skipped += 1;
+          continue;
+        }
+        processed += 1;
 
-        // Find existing via mapping first, then via normalized email/phone.
         const mapping = await this.prisma.client.contactExternalMapping.findUnique({
           where: {
             businessId_source_externalId: {
@@ -109,6 +320,7 @@ export class GoogleContactsSyncService {
         });
 
         let contactId = mapping?.contactId;
+        let isNew = false;
         if (!contactId) {
           const existing = await this.prisma.client.contact.findFirst({
             where: {
@@ -154,6 +366,7 @@ export class GoogleContactsSyncService {
           });
           contactId = created.id;
           imported += 1;
+          isNew = true;
         }
 
         if (!mapping) {
@@ -167,11 +380,31 @@ export class GoogleContactsSyncService {
               },
             })
             .catch(() => undefined);
+        } else {
+          await this.prisma.client.contactExternalMapping
+            .update({
+              where: { id: mapping.id },
+              data: { updatedAt: new Date() },
+            })
+            .catch(() => undefined);
+        }
+
+        if (isNew && hasRules && contactId) {
+          await this.applyDefaultsToNewContact(businessId, contactId, rules);
         }
       }
 
       pageToken = data.nextPageToken;
       if (data.nextSyncToken) nextSyncToken = data.nextSyncToken;
+      pagesFetched += 1;
+      await this.writeProgress(businessId, {
+        phase: pageToken ? 'fetching' : 'finalizing',
+        pagesFetched,
+        processed,
+        imported,
+        updated,
+        startedAt,
+      });
     } while (pageToken);
 
     await this.prisma.client.business.update({
@@ -181,7 +414,57 @@ export class GoogleContactsSyncService {
         ...(nextSyncToken ? { contactsSyncToken: nextSyncToken } : {}),
       },
     });
+    const totalGoogle = await this.prisma.client.contact.count({
+      where: { businessId, source: 'google_contacts', deletedAt: null },
+    });
+    const existingMeta = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+      select: { metadata: true },
+    });
+    const baseMeta = (existingMeta?.metadata ?? {}) as Record<string, unknown>;
+    const mergedMeta = {
+      ...baseMeta,
+      itemsCount: totalGoogle,
+      itemsLabel: 'contacts',
+    };
 
-    return { imported, updated };
+    await this.prisma.client.connectorStatus.upsert({
+      where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+      create: {
+        businessId,
+        connectorType: 'google_contacts',
+        status: 'connected',
+        lastSyncAt: new Date(),
+        syncCount: 1,
+        metadata: mergedMeta as unknown as Prisma.InputJsonValue,
+      },
+      update: {
+        lastSyncAt: new Date(),
+        syncCount: { increment: 1 },
+        status: 'connected',
+        lastError: null,
+        lastErrorAt: null,
+        metadata: mergedMeta as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.writeProgress(businessId, {
+      phase: 'idle',
+      pagesFetched,
+      processed,
+      imported,
+      updated,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+    });
+
+    return {
+      imported,
+      updated,
+      created: imported,
+      matched: updated,
+      skipped,
+      appliedRules: hasRules,
+    };
   }
 }

@@ -7,6 +7,7 @@ import {
   Inject,
   Param,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -18,8 +19,23 @@ import {
   FieldMappingEntry,
   OpportunityDefaults,
 } from './google-forms-mapping.service';
-import { GoogleContactsSyncService } from './google-contacts-sync.service';
+import {
+  GoogleContactsSyncService,
+  ContactMappingRules,
+} from './google-contacts-sync.service';
 import { GoogleBusinessProfileService } from './google-business-profile.service';
+import {
+  ConnectorFormMappingService,
+  isSupportedSource,
+  ConnectorFormSource,
+} from './connector-form-mapping.service';
+
+function ensureSource(s: string): ConnectorFormSource {
+  if (!isSupportedSource(s)) {
+    throw new BadRequestException(`Unsupported form source "${s}"`);
+  }
+  return s;
+}
 
 @Controller('connect')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -29,9 +45,11 @@ export class ConnectController {
     @Inject(GoogleFormsMappingService) private readonly formsMapping: GoogleFormsMappingService,
     @Inject(GoogleContactsSyncService) private readonly contacts: GoogleContactsSyncService,
     @Inject(GoogleBusinessProfileService) private readonly bp: GoogleBusinessProfileService,
+    @Inject(ConnectorFormMappingService)
+    private readonly connectorForms: ConnectorFormMappingService,
   ) {}
 
-  // ----- Forms -----
+  // ----- Google Forms -----
   @Get('businesses/:businessId/forms')
   listForms(
     @Param('businessId') businessId: string,
@@ -67,7 +85,7 @@ export class ConnectController {
     return this.forms.deleteForm(businessId, formId);
   }
 
-  // ----- Form → CRM Mapping -----
+  // ----- Google Form → CRM Mapping -----
   @Get('businesses/:businessId/forms/:formId/mapping')
   getFormMapping(
     @Param('businessId') businessId: string,
@@ -125,10 +143,104 @@ export class ConnectController {
     return this.formsMapping.processNewResponses(businessId, formId);
   }
 
+  // ----- Connector Forms (Typeform / Jotform / Webhook) -----
+  @Get('businesses/:businessId/connector-forms/:source')
+  listConnectorForms(
+    @Param('businessId') businessId: string,
+    @Param('source') source: string,
+  ) {
+    return this.connectorForms.listForms(businessId, ensureSource(source));
+  }
+
+  @Get('businesses/:businessId/connector-forms/:source/:leadFormId/submissions')
+  listConnectorSubmissions(
+    @Param('businessId') businessId: string,
+    @Param('source') source: string,
+    @Param('leadFormId') leadFormId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.connectorForms.listSubmissions(
+      businessId,
+      ensureSource(source),
+      leadFormId,
+      limit ? Number(limit) : undefined,
+    );
+  }
+
+  @Get('businesses/:businessId/connector-forms/:source/:externalFormId/mapping')
+  getConnectorFormMapping(
+    @Param('businessId') businessId: string,
+    @Param('source') source: string,
+    @Param('externalFormId') externalFormId: string,
+  ) {
+    return this.connectorForms.getMapping(businessId, ensureSource(source), externalFormId);
+  }
+
+  @Post('businesses/:businessId/connector-forms/:source/:externalFormId/mapping')
+  saveConnectorFormMapping(
+    @Param('businessId') businessId: string,
+    @Param('source') source: string,
+    @Param('externalFormId') externalFormId: string,
+    @Body()
+    body: {
+      formTitle?: string;
+      fieldMappings: FieldMappingEntry[];
+      defaultTags?: string[];
+      defaultStatus?: string | null;
+      autoCreate?: boolean;
+    },
+  ) {
+    return this.connectorForms.saveMapping(businessId, ensureSource(source), externalFormId, body);
+  }
+
+  @Delete('businesses/:businessId/connector-forms/:source/:externalFormId/mapping')
+  deleteConnectorFormMapping(
+    @Param('businessId') businessId: string,
+    @Param('source') source: string,
+    @Param('externalFormId') externalFormId: string,
+  ) {
+    return this.connectorForms.deleteMapping(businessId, ensureSource(source), externalFormId);
+  }
+
+  @Post('businesses/:businessId/connector-forms/:source/:leadFormId/backfill')
+  backfillConnectorForm(
+    @Param('businessId') businessId: string,
+    @Param('source') source: string,
+    @Param('leadFormId') leadFormId: string,
+  ) {
+    return this.connectorForms.backfill(businessId, ensureSource(source), leadFormId);
+  }
+
   // ----- Contacts -----
   @Post('businesses/:businessId/contacts/sync')
   syncContacts(@Param('businessId') businessId: string) {
     return this.contacts.sync(businessId);
+  }
+
+  @Get('businesses/:businessId/contacts/status')
+  getContactsStatus(@Param('businessId') businessId: string) {
+    return this.contacts.getStatus(businessId);
+  }
+
+  @Get('businesses/:businessId/contacts/recent')
+  getContactsRecent(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.contacts.getRecent(businessId, limit ? Number(limit) : undefined);
+  }
+
+  @Get('businesses/:businessId/contacts/mapping-rules')
+  getContactsRules(@Param('businessId') businessId: string) {
+    return this.contacts.getMappingRules(businessId);
+  }
+
+  @Put('businesses/:businessId/contacts/mapping-rules')
+  saveContactsRules(
+    @Param('businessId') businessId: string,
+    @Body() body: Partial<ContactMappingRules>,
+  ) {
+    return this.contacts.saveMappingRules(businessId, body ?? {});
   }
 
   // ----- Business Profile -----
@@ -191,5 +303,42 @@ export class ConnectController {
     @Body() body: { reviewName: string; comment: string },
   ) {
     return this.bp.replyToReview(businessId, body.reviewName, body.comment);
+  }
+
+  @Get('businesses/:businessId/business-profile/insights')
+  getBpInsights(
+    @Param('businessId') businessId: string,
+    @Query('location') locationName: string,
+    @Query('days') days?: string,
+  ) {
+    if (!locationName) throw new BadRequestException('location query param required');
+    return this.bp.getInsights(businessId, locationName, days ? Number(days) : undefined);
+  }
+
+  @Get('businesses/:businessId/business-profile/scheduled-posts')
+  listBpScheduled(@Param('businessId') businessId: string) {
+    return this.bp.listScheduledPosts(businessId);
+  }
+
+  @Post('businesses/:businessId/business-profile/scheduled-posts')
+  scheduleBpPost(
+    @Param('businessId') businessId: string,
+    @Body()
+    body: {
+      location: string;
+      summary: string;
+      callToAction?: { actionType: string; url: string };
+      scheduledFor: string;
+    },
+  ) {
+    return this.bp.schedulePost(businessId, body);
+  }
+
+  @Delete('businesses/:businessId/business-profile/scheduled-posts/:id')
+  cancelBpScheduled(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.bp.cancelScheduledPost(businessId, id);
   }
 }

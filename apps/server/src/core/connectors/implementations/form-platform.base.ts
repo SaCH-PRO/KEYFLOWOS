@@ -139,16 +139,43 @@ export abstract class FormPlatformConnector implements IConnector {
   }) {
     await this.trackActivity(businessId);
 
-    const resolved = (opts.email || opts.phone || opts.externalId)
-      ? await this.entityResolution.resolveContact(businessId, {
+    // Honor per-form `autoCreate` toggle from the mapping metadata. When the user
+    // disabled auto-create for this form, we still record the submission but
+    // skip contact creation (we only attach to existing matches).
+    const autoCreate = await this.isAutoCreateAllowed(businessId, opts.formId);
+
+    const canResolve = opts.email || opts.phone || opts.externalId;
+    let resolved: { contactId: string; isNew: boolean; merged: boolean; matchedOn: string } | null = null;
+    if (canResolve) {
+      if (autoCreate) {
+        resolved = await this.entityResolution.resolveContact(businessId, {
           source: this.source,
           externalId: opts.externalId,
           email: opts.email,
           phone: opts.phone,
           firstName: opts.firstName,
           lastName: opts.lastName,
-        })
-      : null;
+        });
+      } else {
+        // Auto-create disabled: only attach if a contact already exists. Never create
+        // (avoids transient row + spurious `contact.created` events that would trigger
+        // automations downstream).
+        const match = await this.entityResolution.findContactIdByMatch(businessId, {
+          source: this.source,
+          externalId: opts.externalId,
+          email: opts.email,
+          phone: opts.phone,
+        });
+        if (match) {
+          resolved = {
+            contactId: match.contactId,
+            isNew: false,
+            merged: false,
+            matchedOn: match.matchedOn,
+          };
+        }
+      }
+    }
 
     if (resolved) {
       this.events.emit('entity.resolved', {
@@ -162,6 +189,59 @@ export abstract class FormPlatformConnector implements IConnector {
     }
 
     const timestamp = opts.submittedAt ?? new Date();
+
+    // Persist into LeadFormSubmission for unified Forms UI (list/responses/backfill).
+    // Auto-create a "virtual" LeadForm row keyed by `${source}:${formId}` so each
+    // external form gets its own bucket of submissions.
+    const externalKey = `${this.source}:${opts.formId}`;
+    let leadFormId: string | null = null;
+    try {
+      const existingForm = await this.prisma.client.leadForm.findFirst({
+        where: { businessId, embedCode: externalKey, deletedAt: null },
+        select: { id: true, name: true },
+      });
+      if (existingForm) {
+        leadFormId = existingForm.id;
+        if (opts.formName && opts.formName !== existingForm.name) {
+          await this.prisma.client.leadForm.update({
+            where: { id: existingForm.id },
+            data: { name: opts.formName },
+          }).catch(() => undefined);
+        }
+      } else {
+        const created = await this.prisma.client.leadForm.create({
+          data: {
+            businessId,
+            name: opts.formName ?? `${this.meta.name} ${opts.formId}`,
+            description: `Auto-created from ${this.meta.name} (formId=${opts.formId})`,
+            fields: [] as unknown as object,
+            settings: { externalSource: this.source, externalFormId: opts.formId } as unknown as object,
+            embedCode: externalKey,
+            isActive: true,
+          },
+        });
+        leadFormId = created.id;
+      }
+    } catch (err) {
+      this.logger.warn(`Could not upsert virtual LeadForm: ${(err as Error).message}`);
+    }
+
+    if (leadFormId) {
+      try {
+        await this.prisma.client.leadFormSubmission.create({
+          data: {
+            formId: leadFormId,
+            businessId,
+            data: { ...(opts.fields as object), __externalId: opts.externalId ?? null },
+            contactId: resolved?.contactId ?? null,
+            source: this.source,
+          },
+        });
+      } catch (err) {
+        this.logger.warn(`Could not persist submission: ${(err as Error).message}`);
+      }
+    }
+
     this.events.emit('form.submitted', {
       connectorType: this.connectorType,
       externalId: opts.externalId ?? null,
@@ -181,7 +261,27 @@ export abstract class FormPlatformConnector implements IConnector {
       contactId: resolved?.contactId ?? null,
     });
 
-    return { contactId: resolved?.contactId ?? null };
+    return { contactId: resolved?.contactId ?? null, leadFormId };
+  }
+
+  /**
+   * Look up the per-form `autoCreate` toggle stored alongside the field mapping.
+   * Returns true when no mapping exists (default behavior).
+   */
+  private async isAutoCreateAllowed(businessId: string, formId: string): Promise<boolean> {
+    try {
+      const status = await this.prisma.client.connectorStatus.findUnique({
+        where: { businessId_connectorType: { businessId, connectorType: this.connectorType } },
+        select: { metadata: true },
+      });
+      const meta = (status?.metadata ?? {}) as Record<string, unknown>;
+      const formMappings = (meta.formMappings ?? {}) as Record<string, { autoCreate?: boolean }>;
+      const mapping = formMappings[formId];
+      if (!mapping) return true;
+      return mapping.autoCreate !== false;
+    } catch {
+      return true;
+    }
   }
 
   protected async trackActivity(businessId: string) {

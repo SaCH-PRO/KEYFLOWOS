@@ -13,12 +13,18 @@ import {
   ExternalLink,
   Megaphone,
   CheckCircle2,
+  Sparkles,
+  Clock,
+  BarChart3,
+  CalendarClock,
+  XCircle,
+  TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button, Badge } from "@keyflow/ui";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
-import { apiGet, apiPostSimple } from "@/lib/api";
+import { apiGet, apiPostSimple, apiDelete } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 interface BpAccount {
@@ -57,6 +63,40 @@ interface BpPost {
   createTime?: string;
   searchUrl?: string;
 }
+
+interface ScheduledPost {
+  id: string;
+  location: string;
+  summary: string;
+  callToAction?: { actionType: string; url: string };
+  scheduledFor: string;
+  status: "scheduled" | "published" | "failed" | "cancelled";
+  createdAt: string;
+  publishedAt?: string;
+  error?: string;
+}
+
+interface InsightsResponse {
+  locationName: string;
+  rangeDays: number;
+  metrics: Array<{
+    metric: string;
+    total: number;
+    daily: Array<{ date: string; value: number }>;
+  }>;
+  generatedAt: string;
+}
+
+const METRIC_LABELS: Record<string, string> = {
+  BUSINESS_IMPRESSIONS_DESKTOP_MAPS: "Desktop · Maps views",
+  BUSINESS_IMPRESSIONS_DESKTOP_SEARCH: "Desktop · Search views",
+  BUSINESS_IMPRESSIONS_MOBILE_MAPS: "Mobile · Maps views",
+  BUSINESS_IMPRESSIONS_MOBILE_SEARCH: "Mobile · Search views",
+  BUSINESS_DIRECTION_REQUESTS: "Direction requests",
+  CALL_CLICKS: "Call clicks",
+  WEBSITE_CLICKS: "Website clicks",
+  BUSINESS_CONVERSATIONS: "Messages",
+};
 
 const STAR_TO_NUM: Record<string, number> = {
   ONE: 1,
@@ -109,8 +149,17 @@ export default function ConnectBusinessProfilePage() {
   const [postSummary, setPostSummary] = useState("");
   const [postCtaUrl, setPostCtaUrl] = useState("");
   const [postCtaType, setPostCtaType] = useState("LEARN_MORE");
+  const [postScheduleAt, setPostScheduleAt] = useState("");
   const [posting, setPosting] = useState(false);
   const [showComposer, setShowComposer] = useState(false);
+
+  const [aiBusyFor, setAiBusyFor] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"reviews" | "posts" | "insights">("reviews");
+  const [scheduled, setScheduled] = useState<ScheduledPost[]>([]);
+  const [scheduledLoading, setScheduledLoading] = useState(false);
+  const [insights, setInsights] = useState<InsightsResponse | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
 
   const loadAccountsAndLocations = useCallback(async () => {
     if (!businessId) {
@@ -225,34 +274,112 @@ export default function ConnectBusinessProfilePage() {
 
   const handlePublishPost = async () => {
     if (!businessId || !activeLocation || !postSummary.trim()) return;
+    const cta = postCtaUrl.trim()
+      ? { actionType: postCtaType, url: postCtaUrl.trim() }
+      : undefined;
+
     setPosting(true);
-    const body: {
-      location: string;
-      summary: string;
-      callToAction?: { actionType: string; url: string };
-    } = {
+    const willSchedule = !!postScheduleAt.trim();
+    const path = willSchedule
+      ? `/connect/businesses/${businessId}/business-profile/scheduled-posts`
+      : `/connect/businesses/${businessId}/business-profile/posts`;
+    const body: Record<string, unknown> = {
       location: activeLocation,
       summary: postSummary.trim(),
+      ...(cta ? { callToAction: cta } : {}),
     };
-    if (postCtaUrl.trim()) {
-      body.callToAction = {
-        actionType: postCtaType,
-        url: postCtaUrl.trim(),
-      };
-    }
-    const res = await apiPostSimple(
-      `/connect/businesses/${businessId}/business-profile/posts`,
-      body,
-    );
+    if (willSchedule) body.scheduledFor = new Date(postScheduleAt).toISOString();
+
+    const res = await apiPostSimple(path, body);
     setPosting(false);
     if (res.error) {
       toast.error(res.error);
     } else {
-      toast.success("Post published");
+      toast.success(willSchedule ? "Post scheduled" : "Post published");
       setPostSummary("");
       setPostCtaUrl("");
+      setPostScheduleAt("");
       setShowComposer(false);
       await loadDetails();
+      await loadScheduled();
+    }
+  };
+
+  const loadScheduled = useCallback(async () => {
+    if (!businessId) return;
+    setScheduledLoading(true);
+    const res = await apiGet<ScheduledPost[]>(
+      `/connect/businesses/${businessId}/business-profile/scheduled-posts`,
+    );
+    setScheduledLoading(false);
+    if (!res.error && res.data) setScheduled(res.data);
+  }, [businessId]);
+
+  useEffect(() => {
+    if (activeTab === "posts") loadScheduled();
+  }, [activeTab, loadScheduled]);
+
+  const handleCancelScheduled = async (id: string) => {
+    if (!businessId) return;
+    const res = await apiDelete(
+      `/connect/businesses/${businessId}/business-profile/scheduled-posts/${id}`,
+    );
+    if (res.error) toast.error(res.error);
+    else {
+      toast.success("Scheduled post cancelled");
+      await loadScheduled();
+    }
+  };
+
+  const loadInsights = useCallback(
+    async (days = 30) => {
+      if (!businessId || !activeLocation) return;
+      setInsightsLoading(true);
+      setInsightsError(null);
+      const res = await apiGet<InsightsResponse>(
+        `/connect/businesses/${businessId}/business-profile/insights?location=${encodeURIComponent(activeLocation)}&days=${days}`,
+      );
+      setInsightsLoading(false);
+      if (res.error) setInsightsError(res.error);
+      else if (res.data) setInsights(res.data);
+    },
+    [businessId, activeLocation],
+  );
+
+  useEffect(() => {
+    if (activeTab === "insights") loadInsights(30);
+  }, [activeTab, loadInsights]);
+
+  const handleAiSuggestReply = async (review: BpReview) => {
+    if (!businessId) return;
+    const reviewName = review.name ?? review.reviewId;
+    if (!reviewName) return;
+    setAiBusyFor(reviewName);
+    const stars = STAR_TO_NUM[review.starRating ?? ""] ?? 0;
+    const prompt = `Draft a warm, professional public reply (max 2 short paragraphs) to this Google Business review.
+Reviewer: ${review.reviewer?.displayName ?? "a customer"}
+Rating: ${stars}/5
+Review: """${review.comment ?? "(no text)"}"""
+
+Address them by first name if known. Thank them for their feedback. If the rating is 4 or higher, reinforce what they liked. If it is 3 or lower, acknowledge the concern, apologize, and invite them to reach out privately. Do not include placeholders. Reply only with the message body.`;
+    try {
+      const res = await apiPostSimple<{ reply?: string; message?: string; text?: string }>(
+        `/ai/businesses/${businessId}/ai/chat`,
+        { message: prompt },
+      );
+      const text =
+        res.data?.reply ?? res.data?.message ?? res.data?.text ?? "";
+      if (text) {
+        setReplyOpen(reviewName);
+        setReplyText(text.trim());
+        toast.success("AI reply drafted — review and edit before publishing");
+      } else {
+        toast.error(res.error ?? "AI did not return a reply");
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setAiBusyFor(null);
     }
   };
 
@@ -407,6 +534,34 @@ export default function ConnectBusinessProfilePage() {
 
           {activeLocationObject && (
             <>
+              {/* Tabs */}
+              <div className="flex items-center gap-1 border-b border-border/40">
+                {([
+                  { id: "reviews", label: "Reviews", icon: MessageCircle },
+                  { id: "posts", label: "Posts", icon: Megaphone },
+                  { id: "insights", label: "Insights", icon: BarChart3 },
+                ] as const).map((t) => {
+                  const Icon = t.icon;
+                  const active = activeTab === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setActiveTab(t.id)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition-colors ${
+                        active
+                          ? "border-emerald-400 text-foreground"
+                          : "border-transparent text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {activeTab === "posts" && (
+              <>
               {/* Posts composer */}
               <section className="rounded-2xl border border-border/50 bg-card/40 p-4">
                 <div className="flex items-center justify-between gap-3 mb-3">
@@ -452,7 +607,19 @@ export default function ConnectBusinessProfilePage() {
                         className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-sm"
                       />
                     </div>
-                    <div className="flex justify-end">
+                    <div className="flex flex-wrap items-end gap-3 justify-between">
+                      <label className="flex flex-col text-[11px] uppercase tracking-wider text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 mb-1">
+                          <CalendarClock className="h-3 w-3" />
+                          Schedule for later (optional)
+                        </span>
+                        <input
+                          type="datetime-local"
+                          value={postScheduleAt}
+                          onChange={(e) => setPostScheduleAt(e.target.value)}
+                          className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-sm normal-case tracking-normal text-foreground"
+                        />
+                      </label>
                       <Button
                         size="sm"
                         onClick={handlePublishPost}
@@ -460,10 +627,12 @@ export default function ConnectBusinessProfilePage() {
                       >
                         {posting ? (
                           <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        ) : postScheduleAt ? (
+                          <Clock className="h-3 w-3 mr-1" />
                         ) : (
                           <Send className="h-3 w-3 mr-1" />
                         )}
-                        Publish
+                        {postScheduleAt ? "Schedule" : "Publish"}
                       </Button>
                     </div>
                   </div>
@@ -505,6 +674,80 @@ export default function ConnectBusinessProfilePage() {
                 )}
               </section>
 
+              {/* Scheduled posts queue */}
+              <section className="rounded-2xl border border-border/50 bg-card/40 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <CalendarClock className="h-4 w-4 text-blue-400" />
+                    <h3 className="text-sm font-semibold">Scheduled & history</h3>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={loadScheduled}
+                    disabled={scheduledLoading}
+                  >
+                    {scheduledLoading ? (
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                    )}
+                    Refresh
+                  </Button>
+                </div>
+                {scheduled.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No scheduled posts yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {scheduled.map((sp) => {
+                      const tone =
+                        sp.status === "published"
+                          ? "success"
+                          : sp.status === "failed"
+                            ? "danger"
+                            : sp.status === "cancelled"
+                              ? "default"
+                              : "info";
+                      return (
+                        <div
+                          key={sp.id}
+                          className="rounded-xl border border-border/30 bg-muted/10 p-3 text-xs"
+                        >
+                          <div className="flex items-center justify-between mb-1 gap-2">
+                            <div className="inline-flex items-center gap-2 text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              {new Date(sp.scheduledFor).toLocaleString()}
+                              <Badge tone={tone} className="text-[9px] uppercase">
+                                {sp.status}
+                              </Badge>
+                            </div>
+                            {sp.status === "scheduled" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleCancelScheduled(sp.id)}
+                                className="h-6 px-2 text-[11px] text-red-400 hover:text-red-300"
+                              >
+                                <XCircle className="h-3 w-3 mr-1" />
+                                Cancel
+                              </Button>
+                            )}
+                          </div>
+                          <p className="line-clamp-2">{sp.summary}</p>
+                          {sp.error && (
+                            <p className="text-red-400 mt-1">{sp.error}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+              </>
+              )}
+
+              {activeTab === "reviews" && (
+              <>
               {/* Reviews */}
               <section>
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
@@ -564,18 +807,35 @@ export default function ConnectBusinessProfilePage() {
                                 </div>
                               )}
                             </div>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setReplyOpen(isReplying ? null : reviewName ?? null);
-                                setReplyText(r.reviewReply?.comment ?? "");
-                              }}
-                              className="h-7 px-2 text-xs shrink-0"
-                            >
-                              <MessageCircle className="h-3 w-3 mr-1" />
-                              {r.reviewReply ? "Edit reply" : "Reply"}
-                            </Button>
+                            <div className="flex flex-col gap-1 shrink-0">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setReplyOpen(isReplying ? null : reviewName ?? null);
+                                  setReplyText(r.reviewReply?.comment ?? "");
+                                }}
+                                className="h-7 px-2 text-xs"
+                              >
+                                <MessageCircle className="h-3 w-3 mr-1" />
+                                {r.reviewReply ? "Edit reply" : "Reply"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleAiSuggestReply(r)}
+                                disabled={aiBusyFor === reviewName}
+                                className="h-7 px-2 text-xs text-fuchsia-300 hover:text-fuchsia-200"
+                                title="Draft a reply with AI"
+                              >
+                                {aiBusyFor === reviewName ? (
+                                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                ) : (
+                                  <Sparkles className="h-3 w-3 mr-1" />
+                                )}
+                                Suggest
+                              </Button>
+                            </div>
                           </div>
                           {isReplying && (
                             <div className="mt-3 space-y-2">
@@ -586,30 +846,46 @@ export default function ConnectBusinessProfilePage() {
                                 rows={3}
                                 className="w-full rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1)/0.5)]"
                               />
-                              <div className="flex justify-end gap-2">
+                              <div className="flex justify-between gap-2">
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  onClick={() => {
-                                    setReplyOpen(null);
-                                    setReplyText("");
-                                  }}
-                                  disabled={replyBusy}
+                                  onClick={() => handleAiSuggestReply(r)}
+                                  disabled={aiBusyFor === reviewName}
+                                  className="text-fuchsia-300 hover:text-fuchsia-200"
                                 >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleSubmitReply(r)}
-                                  disabled={!replyText.trim() || replyBusy}
-                                >
-                                  {replyBusy ? (
+                                  {aiBusyFor === reviewName ? (
                                     <Loader2 className="h-3 w-3 animate-spin mr-1" />
                                   ) : (
-                                    <Send className="h-3 w-3 mr-1" />
+                                    <Sparkles className="h-3 w-3 mr-1" />
                                   )}
-                                  Publish reply
+                                  AI rewrite
                                 </Button>
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => {
+                                      setReplyOpen(null);
+                                      setReplyText("");
+                                    }}
+                                    disabled={replyBusy}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleSubmitReply(r)}
+                                    disabled={!replyText.trim() || replyBusy}
+                                  >
+                                    {replyBusy ? (
+                                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                    ) : (
+                                      <Send className="h-3 w-3 mr-1" />
+                                    )}
+                                    Publish reply
+                                  </Button>
+                                </div>
                               </div>
                             </div>
                           )}
@@ -619,6 +895,74 @@ export default function ConnectBusinessProfilePage() {
                   </div>
                 )}
               </section>
+              </>
+              )}
+
+              {activeTab === "insights" && (
+              <section className="rounded-2xl border border-border/50 bg-card/40 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4 text-emerald-400" />
+                    <h3 className="text-sm font-semibold">Performance — last 30 days</h3>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => loadInsights(30)}
+                    disabled={insightsLoading}
+                  >
+                    {insightsLoading ? (
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                    )}
+                    Refresh
+                  </Button>
+                </div>
+                {insightsError && (
+                  <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300 mb-3">
+                    {insightsError}
+                  </div>
+                )}
+                {insightsLoading && !insights ? (
+                  <div className="h-40 rounded-xl bg-muted/10 border border-border/20 animate-pulse" />
+                ) : !insights || insights.metrics.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No performance data available for this location yet.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {insights.metrics.map((m) => {
+                      const max = Math.max(1, ...m.daily.map((d) => d.value));
+                      return (
+                        <div
+                          key={m.metric}
+                          className="rounded-xl border border-border/40 bg-card/40 p-3"
+                        >
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {METRIC_LABELS[m.metric] ?? m.metric}
+                          </div>
+                          <div className="text-lg font-semibold mt-1 inline-flex items-center gap-1">
+                            <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
+                            {m.total.toLocaleString()}
+                          </div>
+                          <div className="flex items-end gap-0.5 mt-2 h-12">
+                            {m.daily.slice(-30).map((d) => (
+                              <div
+                                key={d.date}
+                                title={`${d.date}: ${d.value}`}
+                                className="flex-1 rounded-sm bg-emerald-500/40"
+                                style={{ height: `${Math.max(2, (d.value / max) * 100)}%` }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+              )}
             </>
           )}
         </>
