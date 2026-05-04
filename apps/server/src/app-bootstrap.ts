@@ -60,7 +60,7 @@ export function configureNestApp(app: INestApplication): void {
   app.enableCors({
     origin: isProduction
       ? allowedOrigins
-      : (_origin, callback) => {
+      : (_origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
           callback(null, true);
         },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

@@ -3,6 +3,7 @@ import { EventEmitterModule, EventEmitter2 } from '@nestjs/event-emitter';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { INestApplication } from '@nestjs/common';
 import { AiListener } from '../src/modules/ai/ai.listener';
+import { BusinessGraphService } from '../src/modules/ai/business-graph.service';
 
 describe('AiListener', () => {
   let app: INestApplication;
@@ -12,7 +13,10 @@ describe('AiListener', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [EventEmitterModule.forRoot({ wildcard: true })],
-      providers: [AiListener],
+      providers: [
+        AiListener,
+        { provide: BusinessGraphService, useValue: { invalidateCache: () => {} } },
+      ],
     }).compile();
 
     app = moduleRef.createNestApplication();

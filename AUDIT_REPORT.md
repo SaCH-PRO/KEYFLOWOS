@@ -534,12 +534,12 @@ running app and are left for a dedicated upgrade task.
    `@uppy/aws-s3` upload client. Neither code path renders user-controlled
    templates or merges untrusted JSON into shared objects in our usage,
    so exploitability in our app is nil.
-2. **`@nestjs/core` 10.4.22 — moderate (improper neutralization of special
-   elements).** Patched in `>=11.1.18`. Requires bumping the entire
-   NestJS 10.x stack (`@nestjs/common`, `@nestjs/platform-express`,
-   `@nestjs/event-emitter`, `@nestjs/testing`) to 11.x — a co-ordinated
-   major across every module in `apps/server/src/modules/**`. Tracked
-   separately as a follow-up.
+2. ~~**`@nestjs/core` 10.4.22 — moderate (improper neutralization of special
+   elements).** Patched in `>=11.1.18`.~~ **Resolved (Task #321).** The
+   entire NestJS 10.x stack (`@nestjs/common`, `@nestjs/core`,
+   `@nestjs/platform-express`, `@nestjs/event-emitter`, `@nestjs/testing`)
+   has been bumped to 11.1.19. `pnpm audit --prod` no longer reports the
+   GHSA-36xv-jgw5-4q75 advisory.
 
 ### Files changed
 
