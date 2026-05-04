@@ -210,7 +210,7 @@ export class GoogleDriveController {
     @Param('businessId') businessId: string,
     @Body() body: {
       title: string;
-      sections: Array<{ sectionName: string; content: string }>;
+      sections: Array<{ sectionName: string; content: string; contentFormat?: string }>;
       documentType: string;
       category: string;
       version: number;
@@ -225,7 +225,7 @@ export class GoogleDriveController {
     @Param('businessId') businessId: string,
     @Body() body: {
       title: string;
-      sections: Array<{ sectionName: string; content: string }>;
+      sections: Array<{ sectionName: string; content: string; contentFormat?: string }>;
       documentType: string;
       category: string;
       version: number;

@@ -101,7 +101,7 @@ export class DocumentsController {
   importFromDrive(
     @Param('businessId') businessId: string,
     @Param('instanceId') instanceId: string,
-    @Body() body: { driveFileId: string; driveFileName: string; driveFileMimeType: string; content: string },
+    @Body() body: { driveFileId: string; driveFileName: string; driveFileMimeType: string; content: string; contentFormat?: 'HTML' | 'PLAIN' },
     @Req() req: { user?: { id?: string } },
   ) {
     return this.documentsService.importBodyFromDrive(businessId, instanceId, body, req.user?.id);

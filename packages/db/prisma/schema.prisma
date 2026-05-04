@@ -3651,6 +3651,7 @@ model DocumentSection {
   sectionKey      String  @map("section_key")
   sectionName     String  @map("section_name")
   content         String
+  contentFormat   String  @default("PLAIN") @map("content_format")
   contentSource   String  @default("AI_GENERATED") @map("content_source")
   editableMode    String  @default("GUIDED") @map("editable_mode")
   dependsOnFields String[] @default([]) @map("depends_on_fields")

@@ -2,11 +2,36 @@ import { Injectable, BadRequestException, Logger, Inject, Optional } from '@nest
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
 import * as mammoth from 'mammoth';
+import sanitizeHtml from 'sanitize-html';
 import { GoogleDriveConnector } from '../../core/connectors/implementations/google-drive.connector';
 
 const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const GDOC_MIME = 'application/vnd.google-apps.document';
+
+const RICH_HTML_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
+  allowedTags: [
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'p', 'br', 'hr',
+    'strong', 'b', 'em', 'i', 'u', 's', 'sub', 'sup',
+    'ul', 'ol', 'li',
+    'blockquote', 'pre', 'code',
+    'a',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'span', 'div',
+    'img',
+  ],
+  allowedAttributes: {
+    a: ['href', 'target', 'rel', 'title'],
+    img: ['src', 'alt', 'title'],
+    td: ['colspan', 'rowspan'],
+    th: ['colspan', 'rowspan'],
+    '*': ['style'],
+  },
+  allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+  allowedSchemesByTag: { img: ['http', 'https', 'data'] },
+  allowProtocolRelative: false,
+};
 
 interface OAuthState {
   businessId: string;
@@ -493,7 +518,7 @@ export class GoogleDriveService {
     businessId: string,
     document: {
       title: string;
-      sections: Array<{ sectionName: string; content: string }>;
+      sections: Array<{ sectionName: string; content: string; contentFormat?: string }>;
       documentType: string;
       category: string;
       version: number;
@@ -555,16 +580,19 @@ export class GoogleDriveService {
 
   buildDocumentHtml(document: {
     title: string;
-    sections: Array<{ sectionName: string; content: string }>;
+    sections: Array<{ sectionName: string; content: string; contentFormat?: string }>;
     documentType: string;
     category: string;
     version: number;
   }): string {
     const sectionsHtml = document.sections
-      .map(
-        (s) =>
-          `<h2 style="color:#333;border-bottom:1px solid #e5e5e5;padding-bottom:8px;margin-top:28px;">${this.escapeHtml(s.sectionName)}</h2>\n<div style="white-space:pre-wrap;line-height:1.7;color:#444;">${this.escapeHtml(s.content)}</div>`,
-      )
+      .map((s) => {
+        const isHtml = s.contentFormat === 'HTML';
+        const body = isHtml
+          ? `<div style="line-height:1.7;color:#444;">${this.sanitizeRichHtml(s.content)}</div>`
+          : `<div style="white-space:pre-wrap;line-height:1.7;color:#444;">${this.escapeHtml(s.content)}</div>`;
+        return `<h2 style="color:#333;border-bottom:1px solid #e5e5e5;padding-bottom:8px;margin-top:28px;">${this.escapeHtml(s.sectionName)}</h2>\n${body}`;
+      })
       .join('\n');
 
     return `<!DOCTYPE html>
@@ -582,6 +610,10 @@ export class GoogleDriveService {
   </div>
 </body>
 </html>`;
+  }
+
+  private sanitizeRichHtml(html: string): string {
+    return sanitizeHtml(html || '', RICH_HTML_SANITIZE_OPTIONS);
   }
 
   private escapeHtml(str: string): string {

@@ -44,12 +44,15 @@ import {
   X,
 } from "lucide-react";
 import GoogleDriveBrowser from "@/app/app/profile/components/google-drive-browser";
+import DOMPurify from "isomorphic-dompurify";
+import { RichSectionEditor } from "./rich-section-editor";
 
 interface DocumentSection {
   id: string;
   sectionKey: string;
   sectionName: string;
   content: string;
+  contentFormat: string;
   contentSource: string;
   editableMode: string;
   riskScore: string;
@@ -57,6 +60,28 @@ interface DocumentSection {
   lastModifiedBy: string | null;
   approvedBy: string | null;
   sortOrder: number;
+}
+
+const SANITIZE_CONFIG = {
+  ALLOWED_TAGS: [
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "p", "br", "hr",
+    "strong", "b", "em", "i", "u", "s", "sub", "sup",
+    "ul", "ol", "li",
+    "blockquote", "pre", "code",
+    "a",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "span", "div",
+    "img",
+  ],
+  ALLOWED_ATTR: ["href", "target", "rel", "src", "alt", "title", "colspan", "rowspan", "style"],
+};
+
+function sanitizeImportedHtml(html: string): string {
+  // Google Docs export wraps content in <html><body>… — keep just the body.
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  const inner = bodyMatch ? bodyMatch[1] : html;
+  return DOMPurify.sanitize(inner, SANITIZE_CONFIG);
 }
 
 interface DocumentVersion {
@@ -110,22 +135,6 @@ interface DocInstance {
   versions: DocumentVersion[];
   reviewTasks: ReviewTask[];
   changeLogs: ChangeLog[];
-}
-
-function stripHtmlToText(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
-    .replace(/<br\s*\/?>(?!\n)/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 function RiskBadge({ tier }: { tier: string }) {
@@ -563,7 +572,11 @@ export default function DocumentDetailPage() {
     if (!doc) return null;
     return {
       title: doc.title,
-      sections: doc.sections.map((s) => ({ sectionName: s.sectionName, content: s.content })),
+      sections: doc.sections.map((s) => ({
+        sectionName: s.sectionName,
+        content: s.content,
+        contentFormat: s.contentFormat || "PLAIN",
+      })),
       documentType: doc.documentType.name,
       category: doc.documentType.category.name,
       version: doc.currentVersionNum,
@@ -649,7 +662,7 @@ export default function DocumentDetailPage() {
         return;
       }
 
-      const text = stripHtmlToText(contentRes.data.html);
+      const sanitized = sanitizeImportedHtml(contentRes.data.html);
 
       const importRes = await apiPostSimple<DocInstance>(
         `/documents/businesses/${businessId}/instances/${doc.id}/import-from-drive`,
@@ -657,7 +670,8 @@ export default function DocumentDetailPage() {
           driveFileId: file.id,
           driveFileName: file.name,
           driveFileMimeType: file.mimeType,
-          content: text,
+          content: sanitized,
+          contentFormat: "HTML",
         },
       );
       if (importRes.data) {
@@ -727,9 +741,14 @@ export default function DocumentDetailPage() {
       payload,
     );
     if (res.data?.html) {
+      const safeHtml = DOMPurify.sanitize(res.data.html, {
+        ...SANITIZE_CONFIG,
+        WHOLE_DOCUMENT: true,
+        ALLOWED_TAGS: [...SANITIZE_CONFIG.ALLOWED_TAGS, "html", "head", "body", "title", "meta"],
+      });
       const printWindow = window.open("", "_blank", "width=800,height=600");
       if (printWindow) {
-        printWindow.document.write(res.data.html);
+        printWindow.document.write(safeHtml);
         printWindow.document.close();
         printWindow.focus();
         setTimeout(() => {
@@ -1113,11 +1132,20 @@ export default function DocumentDetailPage() {
             </div>
             <div className="p-4">
               {editingSection === section.sectionKey ? (
-                <textarea
-                  value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
-                  rows={Math.max(6, section.content.split("\n").length + 2)}
-                  className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-sm text-[hsl(var(--foreground))] font-mono resize-y"
+                section.contentFormat === "HTML" ? (
+                  <RichSectionEditor value={editContent} onChange={setEditContent} />
+                ) : (
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    rows={Math.max(6, section.content.split("\n").length + 2)}
+                    className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-sm text-[hsl(var(--foreground))] font-mono resize-y"
+                  />
+                )
+              ) : section.contentFormat === "HTML" ? (
+                <div
+                  className="prose prose-sm max-w-none text-sm text-[hsl(var(--foreground))] leading-relaxed"
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.content, SANITIZE_CONFIG) }}
                 />
               ) : (
                 <div className="text-sm text-[hsl(var(--foreground))] whitespace-pre-wrap leading-relaxed">
