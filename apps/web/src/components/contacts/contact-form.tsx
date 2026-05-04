@@ -369,6 +369,23 @@ function ContactFormInner({ onSubmit, onCancel, loading, initialValues }: Contac
               </div>
             </div>
 
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Users className="w-3 h-3" /> Age Group
+                <span className="text-[10px] text-muted-foreground/60 ml-1">(optional)</span>
+              </label>
+              <select
+                value={form.ageGroup}
+                onChange={(e) => setForm((p) => ({ ...p, ageGroup: e.target.value }))}
+                className="kf-input w-full"
+              >
+                <option value="">Not specified</option>
+                {CONTACT_AGE_GROUPS.map((g) => (
+                  <option key={g} value={g}>{CONTACT_AGE_GROUP_LABELS[g]}</option>
+                ))}
+              </select>
+            </div>
+
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground">Status</label>
               <div className="flex flex-wrap gap-2">
@@ -535,22 +552,6 @@ function ContactFormInner({ onSubmit, onCancel, loading, initialValues }: Contac
                 onChange={(e) => setForm((p) => ({ ...p, nextScheduledInteraction: e.target.value }))}
                 className="kf-input w-full"
               />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground flex items-center gap-1">
-                <Users className="w-3 h-3" /> Age Group
-                <span className="text-[10px] text-muted-foreground/60 ml-1">(optional)</span>
-              </label>
-              <select
-                value={form.ageGroup}
-                onChange={(e) => setForm((p) => ({ ...p, ageGroup: e.target.value }))}
-                className="kf-input w-full"
-              >
-                <option value="">Not specified</option>
-                {CONTACT_AGE_GROUPS.map((g) => (
-                  <option key={g} value={g}>{CONTACT_AGE_GROUP_LABELS[g]}</option>
-                ))}
-              </select>
             </div>
             <div className="flex items-center gap-6 flex-wrap">
               <label className="flex items-center gap-2 text-sm cursor-pointer min-h-[44px]">
