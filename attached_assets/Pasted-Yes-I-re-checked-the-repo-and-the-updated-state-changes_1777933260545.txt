@@ -1,0 +1,1311 @@
+Yes — I re-checked the repo, and the updated state changes the plan significantly.
+
+The important finding: **KeyFlowOS already has a serious CRM foundation.** The job is not “build CRM from scratch.” The job is to **finish, standardize, connect, productize, and operationalize Relationship Intelligence**.
+
+Your AI coder saying “157 tasks and months” is believable because the module is already broad: database, API client, import flows, duplicates, contact timeline, notes, tasks, highlights, AI next actions, stats, segments, bookings, invoices, quotes, products, sequences, and business-level cross-module relationships are all present or partially present. The schema already labels Module 2 as **CRM (RELATIONSHIP INTELLIGENCE)** and has core models for contacts, events, notes, tasks, imports, media, playbooks, lists, momentum, recommendations, and external mappings.  The frontend client also already exposes contact fetching, filtering, details, events, notes, tasks, highlights, stats, segments, duplicate detection, imports, OCR/image scanning, merge, bulk update, and favorites.  
+
+So the master plan should be built as a **completion and hardening roadmap**, not as a greenfield rebuild.
+
+---
+
+# Master Document: KeyFlowOS Relationship Intelligence CRM Completion Plan
+
+## 1. Product Vision
+
+### Module Name
+
+**Relationship Intelligence**
+
+### Core Promise
+
+KeyFlowOS should not merely store contacts. It should help business owners know:
+
+> Who matters, why they matter, what happened, what to do next, and how each relationship affects revenue, execution, opportunity, and growth.
+
+### Strategic Philosophy
+
+Every contact can create one or more types of leverage:
+
+1. **Money leverage** — revenue, sales, investment, paid work, purchasing power.
+2. **Time leverage** — staff, contractors, suppliers, delegation, fulfillment, execution.
+3. **People leverage** — referrals, introductions, hiring, partnerships, distribution.
+4. **Knowledge leverage** — expertise, advice, mentorship, strategic insight.
+5. **Credibility leverage** — endorsements, social proof, reputation transfer.
+6. **Operational leverage** — vendors, logistics, service delivery, repeat processes.
+
+The module should eventually behave like a **relationship operating system**, not an address book.
+
+---
+
+# 2. Current Repo Reality
+
+## Already Present
+
+### Business-level CRM relationships
+
+The `Business` model already connects to contacts, invoices, quotes, bookings, contact events, notes, tasks, imports, media, playbooks, CRM sequences, workflows, notifications, lead forms, customer notification logs, and communication channels. 
+
+This means CRM can already connect to:
+
+* Revenue
+* Bookings
+* Tasks
+* Campaigns
+* Imports
+* Communication
+* Automation
+* AI flows
+
+### Contact record
+
+The `Contact` model already includes identity, normalized email/phone, status, source, tags, custom JSON, display name, WhatsApp, preferred channel, address, company, job title, industry, lifecycle stage, source detail, segment, language, marketing preferences, do-not-contact, notes, lead score, and last interaction date. 
+
+### Interaction timeline
+
+`ContactEvent`, `ContactNote`, and `ContactTask` already exist and are indexed by business/contact/status/type/date. 
+
+### Imports and capture
+
+The schema supports `ContactImport`, `ContactImportContact`, `ContactMedia`, `ContactPlaybook`, and contact lists/memberships. 
+
+The client supports file imports, link imports, Google Contacts auth URL, OCR contact creation, image scanning, duplicate checking, and merging. 
+
+### Frontend client capabilities
+
+The client already supports:
+
+* Fetching contacts with filters for status, search, unpaid invoices, upcoming bookings, stale days, new this week, tags, pagination, stats, sorting.
+* Fetching contact details with events, notes, tasks, invoices, bookings, and meta.
+* Logging events and communications.
+* Adding notes and tasks.
+* Favorites.
+* Stats, segments, duplicates, highlights, due tasks.
+* Bulk update/delete.
+* Imports and OCR.
+   
+
+### Existing AI/action direction
+
+The frontend client already defines `nextActionSchema` and `aiNextActionSchema`, with AI action types like follow-up, send quote, payment reminder, add note, review request, referral request, thank you, and re-engage. 
+
+That is already aligned with the Relationship Intelligence philosophy.
+
+---
+
+# 3. Core Gap Analysis
+
+The module appears to have **breadth**, but likely lacks **coherence**.
+
+The major risks are:
+
+1. Too many fields without standardized meaning.
+2. Too many flexible JSON fields without enforced taxonomy.
+3. Lead/customer CRM bias instead of universal relationship intelligence.
+4. Existing stats/highlights but not enough strategic dashboards.
+5. Existing AI actions but not enough rule clarity, explainability, or safe execution.
+6. Existing imports but possible weak deduplication, merge UX, and cleanup workflow.
+7. Existing contact tasks but unclear follow-up operating rhythm.
+8. Existing contact events but likely no canonical event taxonomy.
+9. Existing source/status/segment fields but probably not standardized across industries.
+10. Existing contact lists but not enough smart segments and saved views.
+11. Existing cross-module links but likely insufficient UI surfacing.
+12. Existing momentum/recommendation schema references, but unclear if fully implemented.
+
+So the goal is:
+
+> Turn scattered CRM capabilities into a polished, reliable, analytics-ready, AI-assisted Relationship Intelligence system.
+
+---
+
+# 4. Completion Roadmap Overview
+
+I would split the 157 tasks into **12 execution workstreams**.
+
+## Workstream 1 — Product Definition and Taxonomy
+
+Goal: standardize meanings before coding deeper.
+
+## Workstream 2 — Data Model Hardening
+
+Goal: ensure schema supports relationship intelligence without messy workarounds.
+
+## Workstream 3 — API and Backend Services
+
+Goal: stable endpoints, scoring, projections, event logging, insights.
+
+## Workstream 4 — Contact Command Center
+
+Goal: main CRM dashboard that tells users what matters now.
+
+## Workstream 5 — Contact Profile
+
+Goal: each contact becomes a command page.
+
+## Workstream 6 — Capture, Import, Cleanup
+
+Goal: get contacts in cleanly from many sources.
+
+## Workstream 7 — Pipeline, Lists, Segments
+
+Goal: make contacts actionable by stage, role, source, and leverage.
+
+## Workstream 8 — Tasks, Follow-ups, Communications
+
+Goal: make sure relationships produce action.
+
+## Workstream 9 — Relationship Intelligence Engine
+
+Goal: scoring, momentum, decay, next-best-actions.
+
+## Workstream 10 — Analytics and Projections
+
+Goal: trend, analyze, forecast.
+
+## Workstream 11 — AI Assistance and Automation
+
+Goal: AI recommends, drafts, summarizes, but user controls execution.
+
+## Workstream 12 — QA, Permissions, Performance, Launch
+
+Goal: production-grade reliability.
+
+---
+
+# 5. Recommended Data Philosophy
+
+Do **not** over-normalize everything at first. Use a hybrid model:
+
+### Structured fields for universal concepts
+
+These must be queryable:
+
+* Relationship type
+* Lifecycle stage
+* Status
+* Source
+* Source detail
+* Owner
+* Lead score
+* Last interaction
+* Next action due
+* Marketing consent
+* Do-not-contact
+* Contact type/classification
+* Leverage scores
+
+### JSON for flexible industry-specific data
+
+Use `custom` or `ContactPlaybook.data` for:
+
+* Clinic-specific fields
+* Agency-specific fields
+* Supplier details
+* Industry forms
+* Custom intake answers
+* AI-generated context
+
+The existing `custom` and `ContactPlaybook` structures already support this direction.  
+
+---
+
+# 6. Required Taxonomies
+
+This is one of the most important parts. Without taxonomies, analytics will break.
+
+## 6.1 Contact Relationship Types
+
+Add or standardize:
+
+* `LEAD`
+* `CUSTOMER`
+* `REPEAT_CUSTOMER`
+* `SUPPLIER`
+* `CONTRACTOR`
+* `EMPLOYEE`
+* `PARTNER`
+* `INVESTOR`
+* `ADVISOR`
+* `REFERRAL_SOURCE`
+* `INFLUENCER`
+* `COMMUNITY_MEMBER`
+* `VENDOR`
+* `STRATEGIC_CONTACT`
+* `COLD_CONTACT`
+* `DORMANT_CONTACT`
+
+You can map this to `segment`, `lifecycleStage`, tags, or a new field. My recommendation: **add a dedicated `relationshipType` field** rather than overloading `status`.
+
+## 6.2 Lifecycle Stages
+
+Universal stages:
+
+* `NEW`
+* `CONTACTED`
+* `ENGAGED`
+* `QUALIFIED`
+* `ACTIVE`
+* `OPPORTUNITY`
+* `WON`
+* `LOST`
+* `DORMANT`
+* `ARCHIVED`
+
+For business-specific pipelines, allow custom stage maps later.
+
+## 6.3 Status
+
+Use status for operational state:
+
+* `LEAD`
+* `PROSPECT`
+* `CLIENT`
+* `ACTIVE`
+* `INACTIVE`
+* `LOST`
+* `SUPPLIER`
+* `PARTNER`
+
+But ideally, deprecate broad ambiguous status usage over time and rely on:
+
+* relationshipType
+* lifecycleStage
+* pipelineStage
+
+## 6.4 Source
+
+Canonical sources:
+
+* `MANUAL`
+* `CSV_IMPORT`
+* `GOOGLE_CONTACTS`
+* `WHATSAPP`
+* `INSTAGRAM`
+* `FACEBOOK`
+* `LINKEDIN`
+* `WEBSITE_FORM`
+* `LANDING_PAGE`
+* `REFERRAL`
+* `WALK_IN`
+* `EVENT`
+* `EMAIL`
+* `PHONE`
+* `MARKETPLACE`
+* `API`
+* `OTHER`
+
+## 6.5 Event Types
+
+Standardize `ContactEvent.type`:
+
+### Communication
+
+* `MESSAGE_SENT`
+* `MESSAGE_RECEIVED`
+* `CALL_MADE`
+* `CALL_RECEIVED`
+* `CALL_MISSED`
+* `EMAIL_SENT`
+* `EMAIL_RECEIVED`
+* `MEETING_HELD`
+* `WHATSAPP_SENT`
+* `WHATSAPP_RECEIVED`
+
+### CRM movement
+
+* `CONTACT_CREATED`
+* `CONTACT_UPDATED`
+* `STATUS_CHANGED`
+* `STAGE_CHANGED`
+* `OWNER_ASSIGNED`
+* `TAG_ADDED`
+* `TAG_REMOVED`
+
+### Sales/revenue
+
+* `OPPORTUNITY_CREATED`
+* `QUOTE_SENT`
+* `QUOTE_ACCEPTED`
+* `INVOICE_SENT`
+* `PAYMENT_RECEIVED`
+* `PURCHASE_COMPLETED`
+* `OPPORTUNITY_WON`
+* `OPPORTUNITY_LOST`
+
+### Delivery/operations
+
+* `BOOKING_CREATED`
+* `BOOKING_ATTENDED`
+* `BOOKING_CANCELLED`
+* `NO_SHOW`
+* `TASK_CREATED`
+* `TASK_COMPLETED`
+
+### Relationship leverage
+
+* `REFERRAL_GIVEN`
+* `REFERRAL_RECEIVED`
+* `INTRODUCTION_MADE`
+* `PARTNERSHIP_DISCUSSION`
+* `SUPPLIER_CONTACTED`
+* `CONTRACTOR_ASSIGNED`
+* `ENDORSEMENT_RECEIVED`
+
+### AI/system
+
+* `AI_SUMMARY_GENERATED`
+* `AI_NEXT_ACTION_RECOMMENDED`
+* `AUTOMATION_TRIGGERED`
+* `IMPORT_CREATED`
+* `DUPLICATE_MERGED`
+
+---
+
+# 7. Data Model Recommendations
+
+The current model is already strong, but I would add a few fields carefully.
+
+## 7.1 Contact additions
+
+Add fields:
+
+```prisma
+relationshipType String? @map("relationship_type")
+pipelineStage    String? @map("pipeline_stage")
+priority         String? @default("NORMAL")
+favorite         Boolean @default(false)
+archivedAt       DateTime? @map("archived_at")
+lastContactedAt  DateTime? @map("last_contacted_at")
+nextActionAt     DateTime? @map("next_action_at")
+nextActionType   String? @map("next_action_type")
+relationshipHealth String? @map("relationship_health") // HOT, WARM, COLD, DORMANT, AT_RISK
+```
+
+You already have `leadScore` and `lastInteractionAt`, so do not duplicate those. 
+
+## 7.2 Add or verify leverage model
+
+Because `ContactMomentum`, snapshots, and recommendations are referenced in the `Contact` relations but not shown in full, verify their implementation. The `Contact` model already references `momentum`, `momentumSnapshots`, and `momentumRecommendations`. 
+
+If not complete, implement:
+
+```prisma
+model ContactLeverageScore {
+  id String @id @default(cuid())
+  businessId String
+  contactId String
+  moneyScore Int @default(0)
+  timeScore Int @default(0)
+  peopleScore Int @default(0)
+  knowledgeScore Int @default(0)
+  credibilityScore Int @default(0)
+  operationalScore Int @default(0)
+  trustScore Int @default(0)
+  engagementScore Int @default(0)
+  totalScore Int @default(0)
+  explanation Json?
+  calculatedAt DateTime @default(now())
+}
+```
+
+But if `ContactMomentum` already covers this, extend that instead of adding a duplicate model.
+
+## 7.3 Opportunity model
+
+If KeyFlowOS does not already have a dedicated opportunity/deal model, add one.
+
+```prisma
+model ContactOpportunity {
+  id String @id @default(cuid())
+  businessId String
+  contactId String
+  title String
+  type String // SALE, PARTNERSHIP, REFERRAL, SUPPLIER, HIRE, INVESTMENT
+  stage String
+  estimatedValue Float?
+  probability Int?
+  expectedCloseAt DateTime?
+  source String?
+  lostReason String?
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+```
+
+This is important because not all value is a quote/invoice. Some value is referral, supplier, investor, partnership, or contractor opportunity.
+
+## 7.4 Communication consent
+
+Existing `marketingOptIn` and `doNotContact` are good.  Add channel-specific consent later:
+
+* emailOptIn
+* smsOptIn
+* whatsappOptIn
+* consentSource
+* consentAt
+
+Do not overbuild this now unless you are ready for full compliance workflows.
+
+---
+
+# 8. Backend/API Completion Plan
+
+## 8.1 Contact CRUD hardening
+
+Ensure endpoints support:
+
+* Create
+* Read
+* Update
+* Delete/soft delete
+* Bulk update
+* Bulk delete
+* Merge duplicates
+* Favorite/unfavorite
+* Archive/unarchive
+* Owner assignment
+* Tagging
+
+Frontend client already expects several of these: bulk update/delete, duplicate checking, merge, favorites, update, delete. 
+
+## 8.2 Event service
+
+Create a central service:
+
+```ts
+logContactEvent({
+  businessId,
+  contactId,
+  type,
+  data,
+  actorType,
+  actorId,
+  source
+})
+```
+
+All modules should call this service:
+
+* Bookings
+* Quotes
+* Invoices
+* Payments
+* Campaigns
+* Lead forms
+* Tasks
+* Imports
+* AI actions
+
+Do not allow each module to invent event shapes.
+
+## 8.3 Meta aggregation service
+
+The frontend contact detail already expects `meta` including:
+
+* outstanding balance
+* unpaid invoices
+* last interaction
+* next due task
+* overdue tasks
+* recent bookings
+* lead score
+* predicted next booking
+* total revenue
+* invoice count
+* booking count
+
+
+Build this as a reusable backend function:
+
+```ts
+getContactMeta(contactId, businessId)
+```
+
+## 8.4 Highlights service
+
+Frontend already expects CRM highlights:
+
+* high potential contacts
+* overdue reminders
+* service affinity
+* segments
+* timeline
+* next actions
+* AI next actions
+
+
+Build the backend to produce this reliably from real data.
+
+## 8.5 Duplicate service
+
+Already expected by frontend. Implement:
+
+* exact email match
+* normalized phone match
+* fuzzy name + phone partial
+* company + email domain
+* merge preview
+* conflict resolution
+* event logging after merge
+
+## 8.6 Import service
+
+Already expected:
+
+* CSV
+* XLSX
+* PDF
+* image
+* VCF
+* link
+* Google Contacts
+* OCR/image scanning
+
+
+Complete with:
+
+* mapping screen
+* duplicate preview
+* validation report
+* import job progress
+* rollback option
+* import source tagging
+
+---
+
+# 9. Frontend UX Completion Plan
+
+## 9.1 Main page: Relationship Command Center
+
+This should be the CRM home.
+
+### Sections
+
+#### Top KPI cards
+
+* Total contacts
+* New this week
+* Follow-ups due
+* High leverage contacts
+* Active opportunities
+* Projected relationship value
+
+#### Priority action panel
+
+“Do these next”
+
+* Follow up with X
+* Send quote to Y
+* Ask Z for referral
+* Reconnect with dormant client
+* Review unpaid invoice
+
+#### Relationship segments
+
+* Leads
+* Customers
+* Suppliers
+* Partners
+* Contractors
+* Referral sources
+* Dormant
+* High leverage
+
+#### Activity timeline
+
+Recent:
+
+* New contact
+* Quote sent
+* Booking created
+* Payment received
+* Message logged
+* AI recommendation
+
+#### Analytics strip
+
+* Growth trend
+* Source performance
+* Conversion rate
+* Revenue by source
+
+The client already exposes stats, segments, highlights, and due tasks needed for this. 
+
+## 9.2 Contacts list
+
+Required features:
+
+* Search
+* Filters
+* Saved views
+* Sort by updated, score, revenue, last interaction, next action
+* Bulk select
+* Bulk tag/status/stage
+* Import button
+* Duplicate warning
+* Quick action buttons
+
+Existing fetch filters already include status, search, unpaid invoices, bookings, stale, new this week, tags, pagination, sorting. 
+
+Add filters:
+
+* relationshipType
+* pipelineStage
+* owner
+* priority
+* leverageScore
+* lastContacted
+* nextActionDue
+* relationshipHealth
+* sourceDetail
+
+## 9.3 Contact profile page
+
+Must include:
+
+### Header
+
+* Name
+* Type
+* Stage
+* Health
+* Scores
+* Owner
+* Last interaction
+* Next action
+* Quick buttons: call, WhatsApp, email, note, task, quote, invoice, booking.
+
+### Tabs
+
+1. Overview
+2. Timeline
+3. Notes
+4. Tasks
+5. Revenue
+6. Opportunities
+7. Communications
+8. Files/media
+9. AI summary
+10. Playbook/custom data
+
+Frontend detail already expects contact + events + notes + tasks + invoices + bookings + meta. 
+
+## 9.4 Import/Cleanup page
+
+Sections:
+
+* Import contacts
+* Map fields
+* Duplicate preview
+* Merge suggestions
+* Import history
+* Failed rows
+* Bulk clean tags/source/stage
+
+## 9.5 Next-best-action page
+
+A dedicated inbox:
+
+* High priority
+* Due today
+* AI recommended
+* Revenue-related
+* Relationship decay
+* Awaiting reply
+* Needs human decision
+
+---
+
+# 10. Relationship Intelligence Engine
+
+This is the strategic heart.
+
+## 10.1 Score types
+
+### Money Score
+
+Inputs:
+
+* Revenue generated
+* Active quotes/invoices
+* Purchase history
+* Deal value
+* Payment reliability
+* Opportunity value
+
+### Time Score
+
+Inputs:
+
+* Contractor/team/supplier role
+* Tasks assigned/completed
+* Operational dependency
+* Fulfillment reliability
+
+### People Score
+
+Inputs:
+
+* Referrals made
+* Introductions made
+* Network connections
+* Partner/influencer role
+
+### Knowledge Score
+
+Inputs:
+
+* Advisor/mentor/expert role
+* Notes tagged as insight
+* Strategic meetings
+* Expertise tags
+
+### Trust Score
+
+Inputs:
+
+* Repeat interactions
+* Completed transactions
+* Response consistency
+* Endorsements
+* Payment history
+
+### Engagement Score
+
+Inputs:
+
+* Recent interactions
+* Replies
+* Meetings
+* Booking attendance
+* Campaign engagement
+
+### Relationship Health
+
+Derived:
+
+* Hot
+* Warm
+* Cold
+* Dormant
+* At Risk
+
+## 10.2 Momentum
+
+Track whether the relationship is:
+
+* Improving
+* Stable
+* Cooling
+* Dormant
+* Recovering
+* Converted
+
+Potential logic:
+
+* New positive event: + momentum
+* No activity after due follow-up: - momentum
+* Quote sent but no reply: at risk
+* Repeat revenue: strong
+* Task overdue: friction
+* No interaction for X days: decay
+
+## 10.3 Next-best-action rules
+
+Examples:
+
+### Follow-up
+
+If contact is lead/prospect and last interaction > 3 days:
+
+> Follow up with this contact.
+
+### Quote follow-up
+
+If quote sent and no invoice/payment after 5 days:
+
+> Follow up on quote.
+
+### Payment reminder
+
+If invoice overdue:
+
+> Send payment reminder.
+
+### Referral ask
+
+If customer paid and has high satisfaction/proven value:
+
+> Ask for referral.
+
+### Re-engage
+
+If customer had revenue but no interaction in 90 days:
+
+> Reconnect.
+
+### Supplier check
+
+If supplier is high operational score and no update in 30 days:
+
+> Confirm availability/capacity.
+
+### Contractor delegation
+
+If contractor has completed tasks and business has overdue tasks:
+
+> Consider assigning work.
+
+## 10.4 AI recommendations
+
+The frontend already supports AI action types:
+
+* follow_up
+* send_quote
+* payment_reminder
+* add_note
+* review_request
+* referral_request
+* thank_you
+* re_engage
+
+
+Rules:
+
+* AI should explain why.
+* AI should show data used.
+* AI should not send without approval unless automation permissions are explicitly enabled.
+* Every AI recommendation should be stored as an event or recommendation record.
+
+---
+
+# 11. Analytics and Projections
+
+## 11.1 Required dashboards
+
+### Relationship Growth
+
+* Contacts over time
+* New contacts/week
+* Contacts by source
+* Contacts by relationship type
+* Contacts by stage
+
+### Activity
+
+* Interactions over time
+* Tasks created/completed
+* Follow-up completion rate
+* Average response delay
+* Dormant contact count
+
+### Revenue
+
+* Revenue by contact
+* Revenue by source
+* Revenue by segment
+* Revenue by relationship type
+* Average revenue per contact
+* LTV
+
+### Pipeline
+
+* Contacts by stage
+* Stage conversion rates
+* Average days per stage
+* Lost reasons
+* Forecasted value
+
+### Leverage
+
+* Top money leverage contacts
+* Top time leverage contacts
+* Top people leverage contacts
+* Top knowledge leverage contacts
+* Dormant high-value contacts
+* High-opportunity contacts with no next action
+
+## 11.2 Projections
+
+Build simple projections first:
+
+### Lead projection
+
+```
+Projected revenue = active leads × lead-to-customer conversion rate × avg revenue/customer
+```
+
+### Follow-up projection
+
+```
+Expected wins = overdue follow-ups × historical follow-up conversion rate
+```
+
+### Source projection
+
+```
+Expected monthly revenue by source = monthly leads from source × source conversion rate × avg revenue from source
+```
+
+### Capacity projection
+
+```
+Required follow-up workload = open contacts needing action × avg minutes/action
+```
+
+Later add ML/AI.
+
+---
+
+# 12. Automation Plan
+
+## Phase 1: Assisted automation
+
+* Suggest action
+* User approves
+* System logs event/task
+
+## Phase 2: Template automation
+
+* Generate message
+* User edits/sends
+* System logs
+
+## Phase 3: Rules automation
+
+Examples:
+
+* Create follow-up task after quote sent.
+* Create thank-you task after invoice paid.
+* Mark contact dormant after 90 inactive days.
+* Enroll new website lead into intro sequence.
+* Notify owner if high-value contact goes cold.
+
+## Phase 4: Agent automation
+
+Only after trust:
+
+* Auto-create tasks
+* Auto-tag
+* Auto-score
+* Auto-generate summaries
+* Auto-draft outreach
+* Maybe auto-send only for low-risk reminders with opt-in.
+
+---
+
+# 13. 157-Task Execution Architecture
+
+Rather than treating 157 tasks as chaos, group them into epics.
+
+## Epic 1 — CRM Taxonomy and Product Spec
+
+1. Define relationship types.
+2. Define lifecycle stages.
+3. Define event taxonomy.
+4. Define source taxonomy.
+5. Define lost reasons.
+6. Define leverage scoring rubric.
+7. Define relationship health states.
+8. Define pipeline defaults.
+9. Define saved views.
+10. Define AI action taxonomy.
+11. Define permission model.
+12. Define analytics KPIs.
+
+## Epic 2 — Schema and Migrations
+
+13. Audit existing CRM schema.
+14. Verify ContactMomentum models.
+15. Add relationshipType.
+16. Add pipelineStage.
+17. Add priority.
+18. Add favorite if not present.
+19. Add archivedAt.
+20. Add lastContactedAt.
+21. Add nextActionAt.
+22. Add nextActionType.
+23. Add relationshipHealth.
+24. Add leverage score fields/model.
+25. Add opportunity model if absent.
+26. Add event enum or validation layer.
+27. Add indexes for relationshipType/stage/nextActionAt.
+28. Add migration tests.
+
+## Epic 3 — Backend Services
+
+29. Contact service refactor.
+30. Event logging service.
+31. Contact meta service.
+32. Contact score service.
+33. Momentum calculation service.
+34. Recommendation service.
+35. Duplicate detection service.
+36. Merge service.
+37. Import service.
+38. Contact list service.
+39. Saved view service.
+40. Opportunity service.
+41. Projection service.
+42. Analytics service.
+43. Communication logging service.
+44. Audit log integration.
+
+## Epic 4 — API Endpoints
+
+45. Contacts list filters.
+46. Contact detail.
+47. Contact create/update/delete.
+48. Bulk update.
+49. Bulk delete.
+50. Merge duplicates.
+51. Favorite/archive.
+52. Events list/create.
+53. Notes CRUD.
+54. Tasks CRUD.
+55. Tasks complete/reopen.
+56. Stats endpoint.
+57. Segments endpoint.
+58. Highlights endpoint.
+59. Scores endpoint.
+60. Recommendations endpoint.
+61. Opportunities CRUD.
+62. Import file.
+63. Import link.
+64. Import OCR.
+65. Import status.
+66. Duplicate check.
+67. Saved views CRUD.
+68. Projections endpoint.
+
+## Epic 5 — Frontend Client Updates
+
+69. Update schemas.
+70. Add relationship type fields.
+71. Add pipeline fields.
+72. Add leverage score types.
+73. Add opportunity types.
+74. Add saved view types.
+75. Add recommendation types.
+76. Add projection types.
+77. Add API methods.
+78. Add error handling.
+79. Add loading states.
+
+## Epic 6 — Relationship Command Center UI
+
+80. KPI cards.
+81. Priority next actions.
+82. High-leverage contacts.
+83. Overdue follow-ups.
+84. Timeline panel.
+85. Segment cards.
+86. Revenue/opportunity cards.
+87. Source performance.
+88. Empty state.
+89. Mobile layout.
+90. Demo data.
+
+## Epic 7 — Contacts List UI
+
+91. Table/card layout.
+92. Search.
+93. Filters.
+94. Saved views.
+95. Bulk select.
+96. Bulk actions.
+97. Sort options.
+98. Score badges.
+99. Health badges.
+100. Quick actions.
+101. Duplicate warnings.
+102. Pagination/infinite load.
+
+## Epic 8 — Contact Profile UI
+
+103. Header redesign.
+104. Identity section.
+105. Relationship classification.
+106. Score panel.
+107. Meta panel.
+108. Timeline tab.
+109. Notes tab.
+110. Tasks tab.
+111. Revenue tab.
+112. Bookings tab.
+113. Opportunities tab.
+114. AI summary tab.
+115. Playbook tab.
+116. Quick action composer.
+
+## Epic 9 — Import/Cleanup UI
+
+117. Import landing.
+118. CSV/XLSX upload.
+119. Field mapping.
+120. Duplicate preview.
+121. Merge UI.
+122. OCR scan UI.
+123. Google Contacts connection.
+124. Import history.
+125. Error rows.
+126. Rollback/undo plan.
+127. Bulk cleanup.
+
+## Epic 10 — Intelligence/AI UX
+
+128. Next action inbox.
+129. Recommendation cards.
+130. Explainability panel.
+131. Approve/deny flow.
+132. Draft message generation.
+133. AI summary generation.
+134. AI contact classification.
+135. AI duplicate suggestions.
+136. AI score explanation.
+137. AI safety/consent checks.
+
+## Epic 11 — Analytics/Projection UI
+
+138. CRM analytics dashboard.
+139. Source dashboard.
+140. Pipeline dashboard.
+141. Revenue dashboard.
+142. Activity dashboard.
+143. Leverage dashboard.
+144. Forecast panel.
+145. Export reports.
+146. Date range filters.
+147. Saved reports.
+
+## Epic 12 — QA, Security, Launch
+
+148. Permission tests.
+149. Tenant isolation tests.
+150. API validation tests.
+151. Import tests.
+152. Duplicate merge tests.
+153. Score calculation tests.
+154. Performance tests.
+155. Mobile/responsive QA.
+156. Seed/demo data QA.
+157. Launch checklist and documentation.
+
+This is likely very close to why your coder estimated 157 tasks.
+
+---
+
+# 14. Practical Build Sequence
+
+Do not build all 157 equally. Build in dependency order.
+
+## Milestone 1 — CRM Foundation Polish
+
+**Goal:** usable and clean.
+
+Deliver:
+
+* Taxonomies
+* Contact list upgrades
+* Contact profile upgrades
+* Event/notes/tasks stable
+* Duplicate merge
+* Import cleanup
+* Basic stats
+
+## Milestone 2 — Relationship Intelligence MVP
+
+**Goal:** KeyFlowOS differentiation appears.
+
+Deliver:
+
+* Relationship types
+* Leverage scores
+* Relationship health
+* Momentum
+* Next-best-action inbox
+* Explainable recommendations
+* High-leverage contacts
+
+## Milestone 3 — Revenue + Opportunity Intelligence
+
+**Goal:** connect relationships to money.
+
+Deliver:
+
+* Opportunities
+* Revenue by contact/source/type
+* Quote/invoice/payment event integration
+* Forecasts
+* Pipeline analytics
+
+## Milestone 4 — Automation and AI Assistance
+
+**Goal:** reduce manual work.
+
+Deliver:
+
+* AI summaries
+* AI recommended actions
+* Message drafts
+* Rule-based follow-up tasks
+* Approval/deny system
+* Audit trail
+
+## Milestone 5 — Advanced Scaling
+
+**Goal:** polished SaaS-grade system.
+
+Deliver:
+
+* Saved reports
+* Smart segments
+* Advanced import sources
+* Team permissions
+* Workflow automation
+* Benchmarking and projections
+
+---
+
+# 15. What I Would Tell the AI Coder
+
+Give them this instruction:
+
+> Do not start by randomly adding features. First audit the current CRM implementation against this master plan. Preserve existing schema and APIs where possible. Prioritize standardization, event logging, contact profile usability, command center intelligence, and analytics. Use migrations only where existing fields cannot support the Relationship Intelligence model cleanly. Every new recommendation must be explainable and logged. Every automated action must be approval-gated unless explicitly configured.
+
+---
+
+# 16. Acceptance Criteria
+
+The module is “complete” when a user can do this:
+
+1. Import 500 contacts.
+2. Clean duplicates.
+3. Classify contacts by relationship type.
+4. See who matters most.
+5. See what happened with each person.
+6. Know who to follow up with today.
+7. Log calls/messages/meetings.
+8. Create tasks and reminders.
+9. Track quote/invoice/booking/payment history.
+10. See revenue by source and contact type.
+11. See dormant high-value contacts.
+12. Get AI next-best-action suggestions with reasons.
+13. Approve/deny AI actions.
+14. Forecast revenue and workload from relationships.
+15. Export/report CRM performance.
+16. Use the system weekly without needing a spreadsheet.
+
+That is the product-level definition of completion.
+
+---
+
+# 17. Final Recommendation
+
+Yes — this may take months if built fully. But you can get a valuable MVP much sooner by focusing on the dependency chain:
+
+**Taxonomy → clean contact profile → timeline → tasks/follow-ups → relationship scoring → command center → analytics → AI automation.**
+
+The biggest mistake would be trying to build all 157 tasks as equal priority.
+
+The correct move is to build a **Relationship Intelligence Core** first, then layer projections and automation on top.
