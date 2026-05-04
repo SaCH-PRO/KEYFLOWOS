@@ -3,47 +3,98 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingsService } from '../src/modules/bookings/bookings.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 
-class PrismaMock implements Partial<PrismaService> {
-  private bookings: any[] = [];
-  private services: any[] = [
-    { id: 'service_1', businessId: 'biz_1', duration: 60, price: 100, name: 'Consult', deletedAt: null },
-  ];
-  client: any = {
-    booking: {
-      findMany: vi.fn(({ where }: any) =>
-        this.bookings.filter((b) => b.businessId === where.businessId && b.deletedAt === null),
-      ),
-      findFirst: vi.fn(() => null),
-      create: vi.fn(({ data }: any) => {
-        const item = {
-          ...data,
-          id: `booking_${this.bookings.length + 1}`,
-          deletedAt: null,
-          createdAt: new Date(),
-        };
-        this.bookings.push(item);
-        return item;
-      }),
-    },
-    availability: {
-      findMany: vi.fn(() => []),
-    },
-    service: {
-      findFirstOrThrow: vi.fn(({ where }: any) => {
-        const match = this.services.find((s) => s.id === where.id && s.businessId === where.businessId && s.deletedAt === null);
-        if (!match) throw new Error('not found');
-        return match;
-      }),
-    },
-    contact: {
-      findFirst: vi.fn(() => null),
-      create: vi.fn(),
-    },
-    business: {
-      findFirstOrThrow: vi.fn(() => ({ id: 'biz_1', deletedAt: null, storeEnabled: true, businessHours: null })),
-    },
-  };
+interface PrismaMockOptions {
+  availabilities?: Array<{ staffId: string; dayOfWeek: number; startTime: string; endTime: string }>;
+  businessHours?: Record<string, { open: string; close: string; closed: boolean }> | null;
+  storeEnabled?: boolean;
+  services?: Array<any>;
 }
+
+class PrismaMock {
+  bookings: any[] = [];
+  services: any[];
+  availabilities: PrismaMockOptions['availabilities'];
+  businessHours: PrismaMockOptions['businessHours'];
+  storeEnabled: boolean;
+  client: any;
+
+  constructor(opts: PrismaMockOptions = {}) {
+    const self = this;
+    self.services = opts.services ?? [
+      { id: 'service_1', businessId: 'biz_1', duration: 60, price: 100, name: 'Consult', deletedAt: null, leadTimeMins: 0, bufferMins: 0 },
+    ];
+    self.availabilities = opts.availabilities ?? [];
+    self.businessHours = opts.businessHours ?? null;
+    self.storeEnabled = opts.storeEnabled ?? true;
+
+    self.client = {
+      booking: {
+        findMany: vi.fn(({ where }: any) =>
+          self.bookings.filter((b) => b.businessId === where.businessId && b.deletedAt === null),
+        ),
+        findFirst: vi.fn(() => null),
+        create: vi.fn(({ data }: any) => {
+          const item = {
+            ...data,
+            id: `booking_${self.bookings.length + 1}`,
+            deletedAt: null,
+            createdAt: new Date(),
+          };
+          self.bookings.push(item);
+          return item;
+        }),
+      },
+      availability: {
+        findMany: vi.fn(({ where }: any) =>
+          self.availabilities!.filter((a) => a.staffId === where.staffId),
+        ),
+      },
+      service: {
+        findFirstOrThrow: vi.fn(({ where }: any) => {
+          const match = self.services.find(
+            (s) => s.id === where.id && s.businessId === where.businessId && s.deletedAt === null,
+          );
+          if (!match) throw new Error('not found');
+          return match;
+        }),
+      },
+      contact: {
+        findFirst: vi.fn(() => null),
+        create: vi.fn(),
+      },
+      business: {
+        findFirstOrThrow: vi.fn(() => ({
+          id: 'biz_1',
+          deletedAt: null,
+          storeEnabled: self.storeEnabled,
+          businessHours: self.businessHours,
+        })),
+      },
+    };
+  }
+}
+
+function makeService(prisma: PrismaService, opts: { findOrCreateContact?: any; createInvoiceForService?: any } = {}) {
+  const events = { emit: vi.fn(), listenerCount: vi.fn(() => 0) } as unknown as EventEmitter2;
+  const crm = {
+    findOrCreateContact: opts.findOrCreateContact ?? vi.fn().mockResolvedValue({ id: 'contact_public' }),
+    logContactEvent: vi.fn(),
+  };
+  const commerce = { createInvoiceForService: opts.createInvoiceForService ?? vi.fn().mockResolvedValue(null) };
+  return new BookingsService(
+    prisma,
+    events,
+    crm as any,
+    commerce as any,
+    { checkAndEnforceLimit: vi.fn() } as any,
+    { sendTransactionalEmail: vi.fn() } as any,
+  );
+}
+
+// Use a deterministic local-time Monday at 10:00 (Jan 7, 2030 is a Monday in any timezone)
+const monday10am = () => new Date(2030, 0, 7, 10, 0, 0);
+const tuesday10am = () => new Date(2030, 0, 8, 10, 0, 0);
+const monday7am = () => new Date(2030, 0, 7, 7, 0, 0);
 
 describe('BookingsService', () => {
   it('emits booking.created on createBooking', async () => {
@@ -152,5 +203,169 @@ describe('BookingsService', () => {
         businessId: 'biz_1',
       }),
     );
+  });
+
+  describe('staff availability checks', () => {
+    it('rejects booking when the staff member has no availability for the selected day', async () => {
+      const prisma = new PrismaMock({
+        availabilities: [
+          { staffId: 'staff_1', dayOfWeek: 1, startTime: '09:00', endTime: '17:00' },
+        ],
+      }) as unknown as PrismaService;
+      const service = makeService(prisma);
+
+      await expect(
+        service.publicCreateBooking({
+          businessId: 'biz_1',
+          serviceId: 'service_1',
+          staffId: 'staff_1',
+          startTime: tuesday10am(),
+          contact: { email: 'a@example.com' },
+        }),
+      ).rejects.toThrowError('not available on this day');
+    });
+
+    it('rejects booking when the time falls outside the staff member\'s available hours', async () => {
+      const prisma = new PrismaMock({
+        availabilities: [
+          { staffId: 'staff_1', dayOfWeek: 1, startTime: '09:00', endTime: '17:00' },
+        ],
+      }) as unknown as PrismaService;
+      const service = makeService(prisma);
+
+      await expect(
+        service.publicCreateBooking({
+          businessId: 'biz_1',
+          serviceId: 'service_1',
+          staffId: 'staff_1',
+          startTime: monday7am(),
+          contact: { email: 'a@example.com' },
+        }),
+      ).rejects.toThrowError('outside this staff member');
+    });
+
+    it('accepts booking when the staff schedule covers the requested slot', async () => {
+      const prisma = new PrismaMock({
+        availabilities: [
+          { staffId: 'staff_1', dayOfWeek: 1, startTime: '09:00', endTime: '17:00' },
+        ],
+      }) as unknown as PrismaService;
+      const service = makeService(prisma);
+
+      const result = await service.publicCreateBooking({
+        businessId: 'biz_1',
+        serviceId: 'service_1',
+        staffId: 'staff_1',
+        startTime: monday10am(),
+        contact: { email: 'a@example.com' },
+      });
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('business hours checks', () => {
+    it('rejects booking when the business is closed on the selected day', async () => {
+      const prisma = new PrismaMock({
+        businessHours: {
+          mon: { open: '09:00', close: '17:00', closed: false },
+          tue: { open: '00:00', close: '00:00', closed: true },
+          wed: { open: '09:00', close: '17:00', closed: false },
+          thu: { open: '09:00', close: '17:00', closed: false },
+          fri: { open: '09:00', close: '17:00', closed: false },
+          sat: { open: '00:00', close: '00:00', closed: true },
+          sun: { open: '00:00', close: '00:00', closed: true },
+        },
+      }) as unknown as PrismaService;
+      const service = makeService(prisma);
+
+      await expect(
+        service.publicCreateBooking({
+          businessId: 'biz_1',
+          serviceId: 'service_1',
+          staffId: null,
+          startTime: tuesday10am(),
+          contact: { email: 'a@example.com' },
+        }),
+      ).rejects.toThrowError('closed on the selected day');
+    });
+
+    it('rejects booking when the time is outside business hours', async () => {
+      const prisma = new PrismaMock({
+        businessHours: {
+          mon: { open: '09:00', close: '17:00', closed: false },
+          tue: { open: '09:00', close: '17:00', closed: false },
+          wed: { open: '09:00', close: '17:00', closed: false },
+          thu: { open: '09:00', close: '17:00', closed: false },
+          fri: { open: '09:00', close: '17:00', closed: false },
+          sat: { open: '00:00', close: '00:00', closed: true },
+          sun: { open: '00:00', close: '00:00', closed: true },
+        },
+      }) as unknown as PrismaService;
+      const service = makeService(prisma);
+
+      await expect(
+        service.publicCreateBooking({
+          businessId: 'biz_1',
+          serviceId: 'service_1',
+          staffId: null,
+          startTime: monday7am(),
+          contact: { email: 'a@example.com' },
+        }),
+      ).rejects.toThrowError('outside business hours');
+    });
+
+    it('accepts booking that falls within business hours', async () => {
+      const prisma = new PrismaMock({
+        businessHours: {
+          mon: { open: '09:00', close: '17:00', closed: false },
+          tue: { open: '09:00', close: '17:00', closed: false },
+          wed: { open: '09:00', close: '17:00', closed: false },
+          thu: { open: '09:00', close: '17:00', closed: false },
+          fri: { open: '09:00', close: '17:00', closed: false },
+          sat: { open: '00:00', close: '00:00', closed: true },
+          sun: { open: '00:00', close: '00:00', closed: true },
+        },
+      }) as unknown as PrismaService;
+      const service = makeService(prisma);
+
+      const result = await service.publicCreateBooking({
+        businessId: 'biz_1',
+        serviceId: 'service_1',
+        staffId: null,
+        startTime: monday10am(),
+        contact: { email: 'a@example.com' },
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('skips business-hours check when the staff member has explicit availability', async () => {
+      const prisma = new PrismaMock({
+        availabilities: [
+          { staffId: 'staff_1', dayOfWeek: 1, startTime: '06:00', endTime: '22:00' },
+        ],
+        businessHours: {
+          mon: { open: '09:00', close: '17:00', closed: false },
+          tue: { open: '09:00', close: '17:00', closed: false },
+          wed: { open: '09:00', close: '17:00', closed: false },
+          thu: { open: '09:00', close: '17:00', closed: false },
+          fri: { open: '09:00', close: '17:00', closed: false },
+          sat: { open: '00:00', close: '00:00', closed: true },
+          sun: { open: '00:00', close: '00:00', closed: true },
+        },
+      }) as unknown as PrismaService;
+      const service = makeService(prisma);
+
+      const result = await service.publicCreateBooking({
+        businessId: 'biz_1',
+        serviceId: 'service_1',
+        staffId: 'staff_1',
+        startTime: monday7am(),
+        contact: { email: 'a@example.com' },
+      });
+
+      expect(result.success).toBe(true);
+    });
   });
 });
