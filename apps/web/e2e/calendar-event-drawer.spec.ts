@@ -21,20 +21,32 @@ const minimalControlTowerData = {
     healthIndicators: [],
   },
   dashboard: {
+    momentumScore: 72,
     monthlyRevenue: 12000,
+    outstandingRevenue: 0,
     overdueInvoices: 0,
-    staleLeads: 0,
+    overdueAmount: 0,
     activeProjects: 2,
     overdueTaskCount: 0,
     upcomingBookings: 3,
+    staleLeads: 0,
+    pendingQuotes: 0,
+    pendingQuoteValue: 0,
+    expensesThisMonth: 0,
     utilizationRate: 0.65,
   },
   priorities: [],
   risks: [],
   pendingApprovals: 0,
   modules: {
-    contacts: { total: 14 },
-    storefront: {},
+    contacts: { total: 14, byStatus: {}, recentCount: 0, staleLeadCount: 0 },
+    revenue: { totalCollected: 0, outstandingAmount: 0, outstandingCount: 0, overdueCount: 0, overdueAmount: 0, monthlyRevenue: 12000, averageInvoiceValue: 0 },
+    bookings: { upcomingCount: 3, completedThisMonth: 0, cancelledThisMonth: 0, utilizationRate: 65 },
+    expenses: { totalThisMonth: 0, topCategories: [], budgetUtilization: 0 },
+    projects: { activeCount: 2, overdueTaskCount: 0, completionRate: 100 },
+    content: { draftPostCount: 0, scheduledPostCount: 0, draftCampaignCount: 0 },
+    automations: { activeCount: 1, disabledCount: 0, totalRuns: 0 },
+    storefront: { activeProductCount: 0, averagePrice: 0 },
   },
 };
 
@@ -101,100 +113,101 @@ interface RecordedRequests {
 async function setupKeyflowMocks(page: Parameters<typeof mockBaseLayout>[0]) {
   const recorded: RecordedRequests = { patch: [], post: [], delete: [] };
 
-  await page.route(
-    `**/bookings/businesses/${TEST_BUSINESS_ID}/calendar/status`,
-    (route: Route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          connected: true,
-          email: "owner@acme.com",
-          syncDirection: "two_way",
-          syncEnabled: true,
-        }),
-      }),
-  );
+  // Single dispatcher route covering every endpoint the page hits. Matching one
+  // pattern at a time was racing with the dev server (some requests slipped
+  // through before specific patterns took effect), so we intercept all `/__api/*`
+  // traffic up front and dispatch by path.
+  await page.route((url) => url.pathname.startsWith("/__api/"), async (route: Route) => {
+    const req = route.request();
+    const url = req.url();
+    const method = req.method();
+    const path = new URL(url).pathname;
 
-  await page.route(
-    `**/keyflow/businesses/${TEST_BUSINESS_ID}/events**`,
-    (route: Route) =>
+    const json = (status: number, body: unknown) =>
       route.fulfill({
-        status: 200,
+        status,
         contentType: "application/json",
-        body: JSON.stringify({
-          events: buildEvents(new Date()),
-          range: { timeMin: "", timeMax: "" },
-        }),
-      }),
-  );
+        body: JSON.stringify(body),
+      });
 
-  await page.route(
-    `**/ai/businesses/${TEST_BUSINESS_ID}/ai/control-tower`,
-    (route: Route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(minimalControlTowerData),
-      }),
-  );
-
-  await page.route(
-    `**/graph/business/${TEST_BUSINESS_ID}**`,
-    (route: Route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ snapshot: null, links: [], linkCount: 0 }),
-      }),
-  );
-
-  await page.route(
-    `**/actions/businesses/${TEST_BUSINESS_ID}/queue**`,
-    (route: Route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ items: [] }),
-      }),
-  );
-
-  await page.route(
-    `**/bookings/businesses/${TEST_BUSINESS_ID}/calendar/events**`,
-    async (route: Route) => {
-      const req = route.request();
-      const method = req.method();
-      const url = req.url();
+    if (path.endsWith(`/bookings/businesses/${TEST_BUSINESS_ID}/calendar/status`)) {
+      return json(200, {
+        connected: true,
+        email: "owner@acme.com",
+        syncDirection: "two_way",
+        syncEnabled: true,
+      });
+    }
+    if (path.endsWith(`/keyflow/businesses/${TEST_BUSINESS_ID}/events`)) {
+      return json(200, {
+        events: buildEvents(new Date()),
+        range: { timeMin: "", timeMax: "" },
+      });
+    }
+    if (path.endsWith(`/ai/businesses/${TEST_BUSINESS_ID}/ai/control-tower`)) {
+      return json(200, minimalControlTowerData);
+    }
+    if (path.endsWith(`/graph/business/${TEST_BUSINESS_ID}`)) {
+      return json(200, { snapshot: null, links: [], linkCount: 0 });
+    }
+    if (path.endsWith(`/actions/businesses/${TEST_BUSINESS_ID}/queue`)) {
+      return json(200, { items: [] });
+    }
+    if (path.endsWith(`/growth-intelligence/businesses/${TEST_BUSINESS_ID}/dashboard`)) {
+      return json(200, {
+        kpis: {
+          totalContacts: 0,
+          activeJourneys: 0,
+          conversions30d: 0,
+          conversionRate: 0,
+          attributedRevenue: 0,
+          attributedRevenueLabel: "TT$0",
+          touchpoints30d: 0,
+          avgDaysToConversion: 0,
+          avgJourneyHealth: 0,
+        },
+        funnel: [],
+        channelMix: [],
+        attribution: { dimension: "channel", byModel: {} },
+        atRiskContacts: [],
+        topContacts: [],
+        insights: [],
+      });
+    }
+    if (path.endsWith(`/ai/businesses/${TEST_BUSINESS_ID}/ai/monitoring/insights`)) {
+      return json(200, { insights: [] });
+    }
+    if (path.endsWith(`/ai/businesses/${TEST_BUSINESS_ID}/ai/strategic/weekly-plan`)) {
+      return json(200, { plan: null, generatedAt: null, items: [] });
+    }
+    if (path.endsWith(`/identity/businesses/${TEST_BUSINESS_ID}`)) {
+      return json(200, {
+        id: TEST_BUSINESS_ID,
+        name: "E2E Test Business",
+        onboardingComplete: true,
+        primaryColor: "#F97316",
+        secondaryColor: "#14B8A6",
+        currency: "TTD",
+        timezone: "America/Port_of_Spain",
+      });
+    }
+    if (path.includes(`/bookings/businesses/${TEST_BUSINESS_ID}/calendar/events`)) {
       if (method === "POST") {
         recorded.post.push({ url, body: req.postDataJSON() });
-        await route.fulfill({
-          status: 201,
-          contentType: "application/json",
-          body: JSON.stringify({ id: "evt_created_123" }),
-        });
-        return;
+        return json(201, { id: "evt_created_123" });
       }
       if (method === "PATCH") {
         recorded.patch.push({ url, body: req.postDataJSON() });
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ id: "evt_patched", success: true }),
-        });
-        return;
+        return json(200, { id: "evt_patched", success: true });
       }
       if (method === "DELETE") {
         recorded.delete.push({ url });
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true }),
-        });
-        return;
+        return json(200, { success: true });
       }
-      await route.fallback();
-    },
-  );
+    }
+    // Default: empty payload so the page never sees a network failure.
+    return json(200, method === "GET" ? [] : {});
+  });
 
   return recorded;
 }

@@ -481,8 +481,11 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
                         const time = ev.allDay
                           ? "All day"
                           : `${fmtTime(start)} – ${fmtTime(end)}`;
+                        // All-day Google events are read-only in the agenda —
+                        // they typically represent holidays / out-of-office
+                        // markers that shouldn't open the edit drawer.
                         const clickable =
-                          ev.kind === "google_event" && !!ev.refId;
+                          ev.kind === "google_event" && !!ev.refId && !ev.allDay;
                         return (
                           <div
                             key={ev.id}

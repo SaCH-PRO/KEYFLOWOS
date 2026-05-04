@@ -19,6 +19,12 @@ export default defineConfig({
     video: "retain-on-failure",
     actionTimeout: 5_000,
     navigationTimeout: 15_000,
+    // The app registers a service worker (`/sw.js`) that proxies every fetch
+    // through its own `fetch(event.request)`. Playwright route handlers don't
+    // intercept fetches issued from inside a SW, so any endpoint mocked by the
+    // tests would silently miss once the SW activated. Blocking SWs at the
+    // browser level keeps every request visible to `page.route(...)`.
+    serviceWorkers: "block",
   },
   projects: [
     {
