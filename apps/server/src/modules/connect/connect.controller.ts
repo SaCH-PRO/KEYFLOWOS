@@ -20,7 +20,6 @@ import {
 } from './google-forms-mapping.service';
 import { GoogleContactsSyncService } from './google-contacts-sync.service';
 import { GoogleBusinessProfileService } from './google-business-profile.service';
-import { GoogleMapsService } from './google-maps.service';
 
 @Controller('connect')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -30,7 +29,6 @@ export class ConnectController {
     @Inject(GoogleFormsMappingService) private readonly formsMapping: GoogleFormsMappingService,
     @Inject(GoogleContactsSyncService) private readonly contacts: GoogleContactsSyncService,
     @Inject(GoogleBusinessProfileService) private readonly bp: GoogleBusinessProfileService,
-    @Inject(GoogleMapsService) private readonly maps: GoogleMapsService,
   ) {}
 
   // ----- Forms -----
@@ -193,40 +191,5 @@ export class ConnectController {
     @Body() body: { reviewName: string; comment: string },
   ) {
     return this.bp.replyToReview(businessId, body.reviewName, body.comment);
-  }
-
-  // ----- Maps -----
-  @Post('businesses/:businessId/maps/api-key')
-  setMapsApiKey(
-    @Param('businessId') businessId: string,
-    @Body() body: { apiKey: string },
-  ) {
-    if (!body.apiKey?.trim()) throw new BadRequestException('apiKey is required');
-    return this.maps.setApiKey(businessId, body.apiKey).then(() => ({ success: true }));
-  }
-
-  @Delete('businesses/:businessId/maps/api-key')
-  clearMapsApiKey(@Param('businessId') businessId: string) {
-    return this.maps.clearApiKey(businessId).then(() => ({ success: true }));
-  }
-
-  @Get('businesses/:businessId/maps/autocomplete')
-  mapsAutocomplete(
-    @Param('businessId') businessId: string,
-    @Query('input') input: string,
-    @Query('sessiontoken') sessionToken?: string,
-    @Query('types') types?: string,
-    @Query('components') components?: string,
-  ) {
-    return this.maps.autocomplete(businessId, input ?? '', { sessionToken, types, components });
-  }
-
-  @Get('businesses/:businessId/maps/place/:placeId')
-  mapsPlaceDetails(
-    @Param('businessId') businessId: string,
-    @Param('placeId') placeId: string,
-    @Query('sessiontoken') sessionToken?: string,
-  ) {
-    return this.maps.placeDetails(businessId, placeId, sessionToken);
   }
 }

@@ -7,7 +7,6 @@ import {
   GoogleFormsConnector,
   GoogleContactsConnector,
   GoogleBusinessProfileConnector,
-  GoogleMapsConnector,
   WhatsAppConnector,
   MetaSocialConnector,
   PayPalConnector,
@@ -38,7 +37,6 @@ export class ConnectorInitializerService implements OnModuleInit {
     @Inject(GoogleContactsConnector) private readonly contacts: GoogleContactsConnector,
     @Inject(GoogleBusinessProfileConnector)
     private readonly businessProfile: GoogleBusinessProfileConnector,
-    @Inject(GoogleMapsConnector) private readonly maps: GoogleMapsConnector,
     @Inject(WhatsAppConnector) private readonly whatsapp: WhatsAppConnector,
     @Inject(MetaSocialConnector) private readonly meta: MetaSocialConnector,
     @Inject(PayPalConnector) private readonly paypal: PayPalConnector,
@@ -64,7 +62,6 @@ export class ConnectorInitializerService implements OnModuleInit {
       this.forms,
       this.contacts,
       this.businessProfile,
-      this.maps,
       this.whatsapp,
       this.meta,
       this.paypal,

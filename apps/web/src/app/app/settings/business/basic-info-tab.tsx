@@ -13,8 +13,6 @@ import {
 } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { InfoBadge } from "@/components/ui/info-badge";
-import { BusinessAddressAutocomplete } from "@/components/ui/business-address-autocomplete";
-import { getStoredBusinessId } from "@/lib/workspace";
 import { FormState, ValidationErrors } from "./use-business-settings";
 
 const TIMEZONES = [
@@ -185,15 +183,12 @@ export function BasicInfoTab({ form, setField, logoUrl: _logoUrl, validationErro
           <MapPin className="h-3 w-3" />
           Business Address
         </div>
-        <BusinessAddressAutocomplete
-          businessId={getStoredBusinessId()}
+        <textarea
           value={form.address}
-          onChange={(v) => setField("address", v)}
-          onSelect={(place) => setField("address", place.formattedAddress)}
+          onChange={(e) => setField("address", e.target.value)}
           placeholder="123 Main Street, Port of Spain, Trinidad"
-          multiline
           rows={3}
-          hint="Powered by Google Places when a Maps API key is configured."
+          className="w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
         />
       </div>
 

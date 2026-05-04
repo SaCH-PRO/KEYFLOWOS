@@ -806,7 +806,7 @@ export default function KeyFlowConnectPage() {
             </div>
             <p className="text-xs text-muted-foreground max-w-2xl">
               One sign-in unlocks Gmail, Calendar, Drive, Docs, Sheets, Forms, Contacts,
-              Business Profile, and Maps. You can revoke individual services any time.
+              and Business Profile. You can revoke individual services any time.
             </p>
           </div>
           <Button
