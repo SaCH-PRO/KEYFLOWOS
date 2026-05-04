@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiGet } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { Sparkles, RefreshCw, Plug } from "lucide-react";
+import { Sparkles, RefreshCw, Plug, Pencil } from "lucide-react";
+import { useCompose } from "@/components/email/compose-context";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import {
@@ -45,6 +46,7 @@ function formatTTD(n: number): string {
 export default function KeyflowCommandPage() {
   const d = useControlTowerData();
   const router = useRouter();
+  const compose = useCompose();
   const [notesTarget, setNotesTarget] = useState<KeyflowNotesTarget | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const [connectorAlertCount, setConnectorAlertCount] = useState(0);
@@ -228,6 +230,16 @@ export default function KeyflowCommandPage() {
               module="cockpit"
               context={pageContext as Record<string, unknown> | undefined}
             />
+            <button
+              onClick={() => compose.open()}
+              className="flex items-center gap-1.5 h-9 px-3 kf-radius-md text-xs font-medium min-h-[36px]"
+              style={{ background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-primary-foreground))" }}
+              aria-label="Compose new email (Cmd+Shift+M)"
+              title="Compose (Cmd+Shift+M)"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>Compose</span>
+            </button>
             <button
               onClick={() => router.push("/app/connect")}
               className="relative flex items-center gap-1.5 h-9 px-3 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-h-[36px]"

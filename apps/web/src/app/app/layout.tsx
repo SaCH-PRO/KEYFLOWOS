@@ -231,6 +231,7 @@ const primaryNav: PrimaryNavItem[] = [
 const secondaryNav: Record<string, NavItem[]> = {
   workspaces: [
     { label: "Clients", href: "/app/crm/pipeline", icon: Users },
+    { label: "Inbox", href: "/app/inbox", icon: Mail },
     { label: "Calendar", href: "/app/bookings", icon: Calendar },
     { label: "Revenue", href: "/app/commerce", icon: CreditCard },
     { label: "Content", href: "/app/marketing", icon: Megaphone },
@@ -278,6 +279,7 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/reports", "workspaces"],
   ["/app/documents", "workspaces"],
   ["/app/seo", "workspaces"],
+  ["/app/inbox", "workspaces"],
   ["/app/onboarding", "tower"],
 ];
 
