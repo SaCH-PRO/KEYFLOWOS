@@ -117,11 +117,6 @@ export class GoogleBusinessProfileConnector implements IConnector {
     }
   }
 
-  /**
-   * Real round-trip per Task #340 spec: list accounts then fetch the first
-   * active location under that account — surfaces the locationName so the
-   * user can confirm Keyflow can see their actual storefront.
-   */
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -134,7 +129,8 @@ export class GoogleBusinessProfileConnector implements IConnector {
       if (!accountResource) {
         const accRes = await fetch('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', { headers });
         if (!accRes.ok) {
-          return { success: false, error: `Business Profile accounts ${accRes.status}` };
+          const body = await accRes.text().catch(() => '');
+          return { success: false, error: `Business Profile accounts ${accRes.status}${body ? `: ${body}` : ''}` };
         }
         const accData = (await accRes.json()) as { accounts?: Array<{ name?: string }> };
         accountResource = accData.accounts?.[0]?.name ?? null;
@@ -151,9 +147,10 @@ export class GoogleBusinessProfileConnector implements IConnector {
         { headers },
       );
       if (!locRes.ok) {
+        const body = await locRes.text().catch(() => '');
         return {
           success: false,
-          error: `Business Profile locations ${locRes.status}`,
+          error: `Business Profile locations ${locRes.status}${body ? `: ${body}` : ''}`,
           account: business.bpEmail ?? undefined,
         };
       }

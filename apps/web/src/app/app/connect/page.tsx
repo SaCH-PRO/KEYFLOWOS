@@ -281,21 +281,23 @@ function ConnectorCard({
             Open in Provider
           </a>
         )}
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => onSmoke(entry.meta.type)}
-          disabled={busy.smoke}
-          className="h-7 px-2 text-xs"
-          title="Run a real round-trip API call against the provider"
-        >
-          {busy.smoke ? (
-            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-          ) : (
-            <PlayCircle className="h-3 w-3 mr-1" />
-          )}
-          Try it live
-        </Button>
+        {isConnected && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onSmoke(entry.meta.type)}
+            disabled={busy.smoke}
+            className="h-7 px-2 text-xs"
+            title="Run a real round-trip API call against the provider"
+          >
+            {busy.smoke ? (
+              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+            ) : (
+              <PlayCircle className="h-3 w-3 mr-1" />
+            )}
+            Try it live
+          </Button>
+        )}
         {isConnected && (
           <Button
             size="sm"

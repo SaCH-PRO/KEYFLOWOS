@@ -102,21 +102,34 @@ export class MailchimpConnector implements IConnector {
     if (!dc) return { success: false, error: 'Mailchimp API key is missing the data-center suffix (e.g. "-us21")' };
     try {
       const auth = Buffer.from(`anystring:${apiKey}`).toString('base64');
-      const res = await fetch(`https://${dc}.api.mailchimp.com/3.0/ping`, {
+      const rootRes = await fetch(`https://${dc}.api.mailchimp.com/3.0/`, {
         headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
       });
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        return { success: false, error: `Mailchimp API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      if (!rootRes.ok) {
+        const body = await rootRes.text().catch(() => '');
+        return { success: false, error: `Mailchimp /3.0/ ${rootRes.status}${body ? `: ${body}` : ''}` };
       }
-      const data = (await res.json()) as { health_status?: string };
+      const root = (await rootRes.json()) as {
+        account_name?: string;
+        email?: string;
+        total_subscribers?: number;
+        pricing_plan_type?: string;
+      };
+      const listsRes = await fetch(`https://${dc}.api.mailchimp.com/3.0/lists?count=1`, {
+        headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+      });
+      if (!listsRes.ok) {
+        const body = await listsRes.text().catch(() => '');
+        return { success: false, error: `Mailchimp /3.0/lists ${listsRes.status}${body ? `: ${body}` : ''}` };
+      }
+      const lists = (await listsRes.json()) as { total_items?: number };
       const accountName = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'accountName', 'mailchimpAccount');
       await this.trackActivity(businessId);
       return {
         success: true,
-        action: 'Pinged Mailchimp /3.0/ping',
-        account: accountName ?? `Mailchimp (${dc})`,
-        detail: data.health_status ?? 'OK',
+        action: 'Fetched Mailchimp account + audiences',
+        account: root.account_name ?? root.email ?? accountName ?? `Mailchimp (${dc})`,
+        detail: `${lists.total_items ?? 0} audience(s)${typeof root.total_subscribers === 'number' ? ` • ${root.total_subscribers} subscribers` : ''}`,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };

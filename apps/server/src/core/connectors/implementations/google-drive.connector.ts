@@ -123,11 +123,6 @@ export class GoogleDriveConnector implements IConnector {
     }
   }
 
-  /**
-   * Real round-trip per Task #340 spec: create a tiny .txt file on the user's
-   * Drive then immediately move it to trash. Returns the file's webViewLink so
-   * the user can confirm it existed.
-   */
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -162,7 +157,8 @@ export class GoogleDriveConnector implements IConnector {
         },
       );
       if (!createRes.ok) {
-        return { success: false, error: `Drive create ${createRes.status}` };
+        const body = await createRes.text().catch(() => '');
+        return { success: false, error: `Drive create ${createRes.status}${body ? `: ${body}` : ''}` };
       }
       const file = (await createRes.json()) as { id?: string; webViewLink?: string };
       if (file.id) {
@@ -175,9 +171,10 @@ export class GoogleDriveConnector implements IConnector {
           },
         );
         if (!trashRes.ok) {
+          const body = await trashRes.text().catch(() => '');
           return {
             success: false,
-            error: `Created file ${file.id} but trash failed (${trashRes.status}) — please remove manually`,
+            error: `Created file ${file.id} but trash failed (${trashRes.status})${body ? `: ${body}` : ''} — please remove manually`,
             account: business.driveEmail ?? undefined,
           };
         }
