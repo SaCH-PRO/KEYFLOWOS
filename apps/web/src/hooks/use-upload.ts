@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { API_BASE, getAuthHeaders } from "@/lib/api";
 
 interface UploadMetadata {
   name: string;
@@ -18,6 +19,41 @@ interface UseUploadOptions {
 }
 
 /**
+ * Canonical endpoint for requesting a presigned upload URL.
+ *
+ * This is the auth-guarded Nest `UploadsController` route
+ * (`apps/server/src/modules/uploads/uploads.controller.ts`). All upload
+ * surfaces in the web app — `useUpload`, `ObjectUploader`, the avatar
+ * picker, expense receipts, the social composer, business logo upload —
+ * must funnel through this single path so future security/behavior
+ * changes (auth headers, content-type allow-list, file-size cap, retries)
+ * apply uniformly.
+ */
+const REQUEST_URL_PATH = "/uploads/request-url";
+
+async function requestPresignedUrl(file: File): Promise<UploadResponse> {
+  const response = await fetch(`${API_BASE}${REQUEST_URL_PATH}`, {
+    method: "POST",
+    headers: {
+      ...getAuthHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: file.name,
+      size: file.size,
+      contentType: file.type || "application/octet-stream",
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || errorData.message || "Failed to get upload URL");
+  }
+
+  return response.json();
+}
+
+/**
  * React hook for handling file uploads with presigned URLs.
  *
  * This hook implements the two-step presigned URL upload flow:
@@ -31,30 +67,6 @@ export function useUpload(options: UseUploadOptions = {}) {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [progress, setProgress] = useState(0);
-
-  const requestUploadUrl = useCallback(
-    async (file: File): Promise<UploadResponse> => {
-      const response = await fetch("/api/uploads/request-url", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: file.name,
-          size: file.size,
-          contentType: file.type || "application/octet-stream",
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to get upload URL");
-      }
-
-      return response.json();
-    },
-    [],
-  );
 
   const uploadToPresignedUrl = useCallback(
     async (file: File, uploadURL: string): Promise<void> => {
@@ -81,7 +93,7 @@ export function useUpload(options: UseUploadOptions = {}) {
 
       try {
         setProgress(10);
-        const uploadResponse = await requestUploadUrl(file);
+        const uploadResponse = await requestPresignedUrl(file);
 
         setProgress(30);
         await uploadToPresignedUrl(file, uploadResponse.uploadURL);
@@ -98,7 +110,7 @@ export function useUpload(options: UseUploadOptions = {}) {
         setIsUploading(false);
       }
     },
-    [requestUploadUrl, uploadToPresignedUrl, options],
+    [uploadToPresignedUrl, options],
   );
 
   /**
@@ -114,23 +126,7 @@ export function useUpload(options: UseUploadOptions = {}) {
       url: string;
       headers?: Record<string, string>;
     }> => {
-      const response = await fetch("/api/uploads/request-url", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: file.name,
-          size: file.size,
-          contentType: file.type || "application/octet-stream",
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to get upload URL");
-      }
-
-      const data = await response.json();
+      const data = await requestPresignedUrl(file);
       return {
         method: "PUT",
         url: data.uploadURL,
