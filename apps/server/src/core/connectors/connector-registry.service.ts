@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaService } from '../prisma/prisma.service';
 import type {
   IConnector,
   ConnectorType,
@@ -20,7 +21,10 @@ export class ConnectorRegistryService {
   private readonly logger = new Logger(ConnectorRegistryService.name);
   private readonly connectors = new Map<ConnectorType, IConnector>();
 
-  constructor(@Inject(EventEmitter2) private readonly events: EventEmitter2) {}
+  constructor(
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
 
   register(connector: IConnector): void {
     this.connectors.set(connector.meta.type, connector);
@@ -208,6 +212,35 @@ export class ConnectorRegistryService {
         success: false,
         error: err instanceof Error ? err.message : String(err),
       };
+    }
+
+    if (result.success) {
+      try {
+        const update: { lastSyncAt: Date; status: string; connectedAccount?: string } = {
+          lastSyncAt: new Date(),
+          status: 'connected',
+        };
+        if (result.account) update.connectedAccount = result.account;
+        await this.prisma.client.connectorStatus.upsert({
+          where: { businessId_connectorType: { businessId, connectorType: type } },
+          create: {
+            businessId,
+            connectorType: type,
+            status: 'connected',
+            lastSyncAt: new Date(),
+            syncCount: 1,
+            connectedAccount: result.account ?? null,
+          },
+          update: {
+            ...update,
+            syncCount: { increment: 1 },
+          },
+        });
+      } catch (e) {
+        this.logger.warn(
+          `Failed to persist smoke success for ${type}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
     }
 
     this.events.emit('connector.smoke_tested', {

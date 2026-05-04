@@ -296,6 +296,23 @@ function ConnectorCard({
           )}
           Try it live
         </Button>
+        {isConnected && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onTest(entry.meta.type)}
+            disabled={busy.test}
+            className="h-7 px-2 text-xs"
+            title="Validate the stored OAuth token / credential against the provider"
+          >
+            {busy.test ? (
+              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+            ) : (
+              <ShieldCheck className="h-3 w-3 mr-1" />
+            )}
+            Verify token
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-border/30">
@@ -317,20 +334,6 @@ function ConnectorCard({
                 Sync now
               </Button>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => onTest(entry.meta.type)}
-              disabled={busy.test}
-              className="h-7 px-2 text-xs"
-            >
-              {busy.test ? (
-                <Loader2 className="h-3 w-3 animate-spin mr-1" />
-              ) : (
-                <ShieldCheck className="h-3 w-3 mr-1" />
-              )}
-              Test
-            </Button>
             <Button
               size="sm"
               variant="ghost"

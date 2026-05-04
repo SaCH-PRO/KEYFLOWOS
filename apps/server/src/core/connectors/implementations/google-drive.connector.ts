@@ -123,6 +123,11 @@ export class GoogleDriveConnector implements IConnector {
     }
   }
 
+  /**
+   * Real round-trip per Task #340 spec: create a tiny .txt file on the user's
+   * Drive then immediately move it to trash. Returns the file's webViewLink so
+   * the user can confirm it existed.
+   */
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -130,22 +135,58 @@ export class GoogleDriveConnector implements IConnector {
     });
     if (!business?.driveAccessToken) return { success: false, error: 'Google Drive is not connected' };
     try {
-      const res = await fetch(
-        'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName),storageQuota(limit,usage)',
-        { headers: { Authorization: `Bearer ${business.driveAccessToken}` } },
+      const token = business.driveAccessToken;
+      const stamp = new Date().toISOString();
+      const boundary = `keyflow-${Date.now().toString(36)}`;
+      const metadata = {
+        name: `keyflow-smoke-${stamp}.txt`,
+        description: 'Automated Keyflow Drive smoke test — safe to delete.',
+      };
+      const body =
+        `--${boundary}\r\n` +
+        `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+        `${JSON.stringify(metadata)}\r\n` +
+        `--${boundary}\r\n` +
+        `Content-Type: text/plain\r\n\r\n` +
+        `Keyflow smoke test at ${stamp}\r\n` +
+        `--${boundary}--`;
+      const createRes = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`,
+          },
+          body,
+        },
       );
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        return { success: false, error: `Drive API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      if (!createRes.ok) {
+        return { success: false, error: `Drive create ${createRes.status}` };
       }
-      const data = (await res.json()) as { user?: { emailAddress?: string }; storageQuota?: { usage?: string; limit?: string } };
-      await this.trackActivity(businessId);
-      const usageGb = data.storageQuota?.usage ? (Number(data.storageQuota.usage) / 1e9).toFixed(2) : null;
+      const file = (await createRes.json()) as { id?: string; webViewLink?: string };
+      if (file.id) {
+        const trashRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}`,
+          {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trashed: true }),
+          },
+        );
+        if (!trashRes.ok) {
+          return {
+            success: false,
+            error: `Created file ${file.id} but trash failed (${trashRes.status}) — please remove manually`,
+            account: business.driveEmail ?? undefined,
+          };
+        }
+      }
       return {
         success: true,
-        action: 'Fetched Drive account info',
-        account: data.user?.emailAddress ?? business.driveEmail ?? undefined,
-        detail: usageGb ? `Using ${usageGb} GB` : undefined,
+        action: 'Created and trashed a tiny .txt file on Drive',
+        account: business.driveEmail ?? undefined,
+        detail: file.webViewLink ?? undefined,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };

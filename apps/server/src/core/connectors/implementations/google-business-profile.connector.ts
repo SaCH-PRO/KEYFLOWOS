@@ -117,31 +117,57 @@ export class GoogleBusinessProfileConnector implements IConnector {
     }
   }
 
+  /**
+   * Real round-trip per Task #340 spec: list accounts then fetch the first
+   * active location under that account — surfaces the locationName so the
+   * user can confirm Keyflow can see their actual storefront.
+   */
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { bpAccessToken: true, bpEmail: true },
+      select: { bpAccessToken: true, bpEmail: true, bpAccountId: true },
     });
     if (!business?.bpAccessToken) return { success: false, error: 'Business Profile is not connected' };
     try {
-      const res = await fetch('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', {
-        headers: { Authorization: `Bearer ${business.bpAccessToken}` },
-      });
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        return { success: false, error: `Business Profile API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      const headers = { Authorization: `Bearer ${business.bpAccessToken}` };
+      let accountResource = business.bpAccountId ? `accounts/${business.bpAccountId}` : null;
+      if (!accountResource) {
+        const accRes = await fetch('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', { headers });
+        if (!accRes.ok) {
+          return { success: false, error: `Business Profile accounts ${accRes.status}` };
+        }
+        const accData = (await accRes.json()) as { accounts?: Array<{ name?: string }> };
+        accountResource = accData.accounts?.[0]?.name ?? null;
       }
-      const data = (await res.json()) as { accounts?: Array<{ name?: string; accountName?: string }> };
-      await this.prisma.client.connectorStatus.upsert({
-        where: { businessId_connectorType: { businessId, connectorType: 'google_business_profile' } },
-        create: { businessId, connectorType: 'google_business_profile', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
-        update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
-      }).catch(() => undefined);
+      if (!accountResource) {
+        return {
+          success: false,
+          error: 'No Business Profile accounts found for this token',
+          account: business.bpEmail ?? undefined,
+        };
+      }
+      const locRes = await fetch(
+        `https://mybusinessbusinessinformation.googleapis.com/v1/${accountResource}/locations?pageSize=1&readMask=name,title,storeCode`,
+        { headers },
+      );
+      if (!locRes.ok) {
+        return {
+          success: false,
+          error: `Business Profile locations ${locRes.status}`,
+          account: business.bpEmail ?? undefined,
+        };
+      }
+      const locData = (await locRes.json()) as {
+        locations?: Array<{ name?: string; title?: string; storeCode?: string }>;
+      };
+      const loc = locData.locations?.[0];
       return {
         success: true,
-        action: 'Listed Business Profile accounts',
+        action: 'Fetched first active Business Profile location',
         account: business.bpEmail ?? undefined,
-        detail: `${data.accounts?.length ?? 0} account(s)${data.accounts?.[0]?.accountName ? ` • primary: "${data.accounts[0].accountName.slice(0, 40)}"` : ''}`,
+        detail: loc?.title
+          ? `Location: "${loc.title}"${loc.storeCode ? ` (${loc.storeCode})` : ''}`
+          : 'Account is reachable but has no published locations',
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
