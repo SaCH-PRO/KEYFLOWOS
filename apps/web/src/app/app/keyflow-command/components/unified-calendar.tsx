@@ -167,6 +167,7 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
       attendees,
       location: meta.location,
       htmlLink: ev.href,
+      allDay: ev.allDay || !!meta.allDay,
     });
     setDrawerOpen(true);
   };
@@ -448,7 +449,7 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
                           ? "All day"
                           : `${fmtTime(start)} – ${fmtTime(end)}`;
                         const clickable =
-                          ev.kind === "google_event" && !!ev.refId && !ev.allDay;
+                          ev.kind === "google_event" && !!ev.refId;
                         return (
                           <div
                             key={ev.id}

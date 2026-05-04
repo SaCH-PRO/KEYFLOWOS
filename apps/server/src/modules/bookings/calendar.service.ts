@@ -9,12 +9,16 @@ interface OAuthState {
   exp: number;
 }
 
+type CalendarTimeSpec =
+  | { dateTime: string; timeZone: string; date?: undefined }
+  | { date: string; dateTime?: undefined; timeZone?: undefined };
+
 interface CalendarEvent {
   summary: string;
   description?: string;
   location?: string;
-  start: { dateTime: string; timeZone: string };
-  end: { dateTime: string; timeZone: string };
+  start: CalendarTimeSpec;
+  end: CalendarTimeSpec;
   attendees?: Array<{ email: string; displayName?: string }>;
 }
 
@@ -22,8 +26,8 @@ export type CalendarEventPatch = Partial<{
   summary: string;
   description: string;
   location: string;
-  start: { dateTime: string; timeZone: string };
-  end: { dateTime: string; timeZone: string };
+  start: CalendarTimeSpec;
+  end: CalendarTimeSpec;
   attendees: Array<{ email: string; displayName?: string }>;
 }>;
 

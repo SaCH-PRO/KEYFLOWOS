@@ -16,6 +16,7 @@ export interface EventDrawerInitial {
   attendees?: string[];
   location?: string;
   htmlLink?: string;
+  allDay?: boolean;
 }
 
 interface Props {
@@ -26,17 +27,38 @@ interface Props {
   onSaved: () => void;
 }
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
 function toLocalInput(value?: string): string {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 function fromLocalInput(value: string): string {
   if (!value) return "";
   return new Date(value).toISOString();
+}
+
+function toDateInput(value?: string): string {
+  if (!value) return "";
+  if (DATE_ONLY_RE.test(value)) return value;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function addDaysToDateStr(dateStr: string, days: number): string {
+  if (!DATE_ONLY_RE.test(dateStr)) return dateStr;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
 }
 
 function defaultStart(): string {
@@ -53,9 +75,21 @@ function defaultEnd(startLocal: string): string {
   return toLocalInput(d.toISOString());
 }
 
+function todayDateStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function detectAllDay(initial: EventDrawerInitial | null | undefined): boolean {
+  if (!initial) return false;
+  if (typeof initial.allDay === "boolean") return initial.allDay;
+  return !!initial.start && DATE_ONLY_RE.test(initial.start);
+}
+
 export function EventDrawer({ open, businessId, initial, onClose, onSaved }: Props) {
   const isEdit = !!initial?.eventId;
   const [title, setTitle] = useState("");
+  const [allDay, setAllDay] = useState(false);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [attendees, setAttendees] = useState("");
@@ -64,6 +98,7 @@ export function EventDrawer({ open, businessId, initial, onClose, onSaved }: Pro
   const [deleting, setDeleting] = useState(false);
   const [initialSnapshot, setInitialSnapshot] = useState<{
     title: string;
+    allDay: boolean;
     start: string;
     end: string;
     attendees: string;
@@ -72,24 +107,59 @@ export function EventDrawer({ open, businessId, initial, onClose, onSaved }: Pro
 
   useEffect(() => {
     if (!open) return;
-    const startLocal = toLocalInput(initial?.start) || defaultStart();
-    const endLocal = toLocalInput(initial?.end) || defaultEnd(startLocal);
+    const allDayVal = detectAllDay(initial);
+    let startVal: string;
+    let endVal: string;
+    if (allDayVal) {
+      startVal = toDateInput(initial?.start) || todayDateStr();
+      // Google's all-day end is exclusive; show inclusive (last day)
+      const rawEnd = toDateInput(initial?.end) || addDaysToDateStr(startVal, 1);
+      endVal = addDaysToDateStr(rawEnd, -1);
+      if (endVal < startVal) endVal = startVal;
+    } else {
+      startVal = toLocalInput(initial?.start) || defaultStart();
+      endVal = toLocalInput(initial?.end) || defaultEnd(startVal);
+    }
     const titleVal = initial?.summary ?? "";
     const attendeesVal = (initial?.attendees ?? []).join(", ");
     const notesVal = initial?.description ?? "";
     setTitle(titleVal);
-    setStart(startLocal);
-    setEnd(endLocal);
+    setAllDay(allDayVal);
+    setStart(startVal);
+    setEnd(endVal);
     setAttendees(attendeesVal);
     setNotes(notesVal);
     setInitialSnapshot({
       title: titleVal,
-      start: startLocal,
-      end: endLocal,
+      allDay: allDayVal,
+      start: startVal,
+      end: endVal,
       attendees: attendeesVal,
       notes: notesVal,
     });
   }, [open, initial]);
+
+  const toggleAllDay = (next: boolean) => {
+    if (next === allDay) return;
+    if (next) {
+      // Switch to all-day: keep date portion of current values
+      const s = toDateInput(start) || todayDateStr();
+      let e = toDateInput(end) || s;
+      if (e < s) e = s;
+      setAllDay(true);
+      setStart(s);
+      setEnd(e);
+    } else {
+      // Switch to timed: default to 9am-10am on the chosen date
+      const sDate = DATE_ONLY_RE.test(start) ? start : todayDateStr();
+      const eDate = DATE_ONLY_RE.test(end) && end >= sDate ? end : sDate;
+      const s = `${sDate}T09:00`;
+      const e = `${eDate}T10:00`;
+      setAllDay(false);
+      setStart(s);
+      setEnd(e);
+    }
+  };
 
   const handleSave = async () => {
     if (!title.trim()) {
@@ -100,7 +170,16 @@ export function EventDrawer({ open, businessId, initial, onClose, onSaved }: Pro
       toast.error("Start and end are required");
       return;
     }
-    if (new Date(end).getTime() <= new Date(start).getTime()) {
+    if (allDay) {
+      if (!DATE_ONLY_RE.test(start) || !DATE_ONLY_RE.test(end)) {
+        toast.error("Invalid date");
+        return;
+      }
+      if (end < start) {
+        toast.error("End must be on or after start");
+        return;
+      }
+    } else if (new Date(end).getTime() <= new Date(start).getTime()) {
       toast.error("End must be after start");
       return;
     }
@@ -110,14 +189,20 @@ export function EventDrawer({ open, businessId, initial, onClose, onSaved }: Pro
       .map((s) => s.trim())
       .filter((s) => s.length > 0 && /.+@.+\..+/.test(s));
 
+    // For all-day: backend expects exclusive end (Google convention)
+    const startPayload = allDay ? start : fromLocalInput(start);
+    const endPayload = allDay ? addDaysToDateStr(end, 1) : fromLocalInput(end);
+
     let res;
     if (isEdit) {
       const snap = initialSnapshot;
       const patch: Record<string, unknown> = {};
       if (!snap || title !== snap.title) patch.summary = title.trim();
       if (!snap || notes !== snap.notes) patch.description = notes;
-      if (!snap || start !== snap.start) patch.start = fromLocalInput(start);
-      if (!snap || end !== snap.end) patch.end = fromLocalInput(end);
+      const allDayChanged = !snap || allDay !== snap.allDay;
+      if (allDayChanged) patch.allDay = allDay;
+      if (allDayChanged || !snap || start !== snap.start) patch.start = startPayload;
+      if (allDayChanged || !snap || end !== snap.end) patch.end = endPayload;
       if (!snap || attendees !== snap.attendees) patch.attendees = attendeeList;
       if (Object.keys(patch).length === 0) {
         setSaving(false);
@@ -135,8 +220,9 @@ export function EventDrawer({ open, businessId, initial, onClose, onSaved }: Pro
         {
           summary: title.trim(),
           description: notes,
-          start: fromLocalInput(start),
-          end: fromLocalInput(end),
+          start: startPayload,
+          end: endPayload,
+          allDay,
           attendees: attendeeList,
         },
       );
@@ -223,26 +309,51 @@ export function EventDrawer({ open, businessId, initial, onClose, onSaved }: Pro
           />
         </div>
 
+        <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground select-none">
+          <input
+            type="checkbox"
+            checked={allDay}
+            onChange={(e) => toggleAllDay(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-border/50"
+          />
+          All-day event
+        </label>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Start</label>
-            <input
-              type="datetime-local"
-              value={start}
-              onChange={(e) => {
-                const next = e.target.value;
-                setStart(next);
-                if (!end || new Date(end).getTime() <= new Date(next).getTime()) {
-                  setEnd(defaultEnd(next));
-                }
-              }}
-              className="w-full rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50"
-            />
+            {allDay ? (
+              <input
+                type="date"
+                value={start}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setStart(next);
+                  if (!end || end < next) setEnd(next);
+                }}
+                className="w-full rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50"
+              />
+            ) : (
+              <input
+                type="datetime-local"
+                value={start}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setStart(next);
+                  if (!end || new Date(end).getTime() <= new Date(next).getTime()) {
+                    setEnd(defaultEnd(next));
+                  }
+                }}
+                className="w-full rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50"
+              />
+            )}
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">End</label>
+            <label className="text-xs font-medium text-muted-foreground">
+              End{allDay ? " (inclusive)" : ""}
+            </label>
             <input
-              type="datetime-local"
+              type={allDay ? "date" : "datetime-local"}
               value={end}
               onChange={(e) => setEnd(e.target.value)}
               className="w-full rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50"
