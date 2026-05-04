@@ -53,7 +53,7 @@ export default function StorePage() {
     if (initRef.current) return;
     const p = searchParams.get("tab");
     if (p && TAB_KEYS.includes(p as TabKey)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
+       
       setActiveTab(p as TabKey);
       initRef.current = true;
     }

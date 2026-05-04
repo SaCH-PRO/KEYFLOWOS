@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { Button } from "@keyflow/ui";
@@ -198,6 +198,7 @@ function PublicPaymentPageInner() {
       return () => { cancelled = true; };
     }
     if (stripeReturn === "cancel") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- transient toast feedback: surface the Stripe-cancel return-URL state into the page error banner once on mount
       setError("Stripe payment was cancelled.");
     }
   }, [stripeReturn, invoiceId]);

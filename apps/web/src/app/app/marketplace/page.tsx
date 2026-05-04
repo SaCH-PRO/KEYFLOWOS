@@ -8,7 +8,6 @@ import {
   Tag,
   ShoppingCart,
   Truck,
-  Warehouse,
   Users,
   TrendingUp,
   Loader2,

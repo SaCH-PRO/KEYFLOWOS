@@ -105,7 +105,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors latest products list into the currently selected product
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration: re-resolve the currently-selected product against the latest product list returned from the server so the detail pane stays in sync
     setSelectedProduct(prev => {
       if (!prev) return prev;
       const updated = products.find(p => p.id === prev.id);

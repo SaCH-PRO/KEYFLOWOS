@@ -53,22 +53,14 @@ const MIME_TYPE_FILTERS = [
   { label: "Folders", value: "folder" },
 ];
 
-function getFileIcon(mimeType: string) {
-  if (mimeType === "application/vnd.google-apps.folder") return FolderOpen;
-  if (mimeType === "application/vnd.google-apps.document") return FileText;
-  if (mimeType === "application/vnd.google-apps.spreadsheet") return Table2;
-  if (mimeType === "application/vnd.google-apps.presentation") return Presentation;
-  if (mimeType.startsWith("image/")) return Image;
-  if (mimeType.startsWith("video/")) return Video;
-  if (mimeType === "application/pdf") return FileText;
-  return File;
-}
-
 function FileIcon({ mimeType, className }: { mimeType: string; className?: string }) {
   if (mimeType === "application/vnd.google-apps.folder") return <FolderOpen className={className} />;
   if (mimeType === "application/vnd.google-apps.document") return <FileText className={className} />;
   if (mimeType === "application/vnd.google-apps.spreadsheet") return <Table2 className={className} />;
   if (mimeType === "application/vnd.google-apps.presentation") return <Presentation className={className} />;
+  // The `Image` symbol here is a lucide-react SVG icon component, not an
+  // <img> element — `alt` is not a valid prop. Suppress the false positive.
+  // eslint-disable-next-line jsx-a11y/alt-text
   if (mimeType.startsWith("image/")) return <Image className={className} />;
   if (mimeType.startsWith("video/")) return <Video className={className} />;
   if (mimeType === "application/pdf") return <FileText className={className} />;
@@ -170,10 +162,10 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
     setFilesLoading(false);
   }, [businessId, searchQuery, mimeFilter]);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
+   
   useEffect(() => { checkStatus(); }, [checkStatus]);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
+     
     if (connected) loadFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `loadFiles` is intentionally excluded because it changes whenever `searchQuery` updates; we don't want every keystroke in the search box to trigger a fresh fetch here. Search-driven loads are handled by a separate debounced effect; this one only refetches when the user (re)connects or changes the MIME filter.
   }, [connected, mimeFilter]);
@@ -181,7 +173,7 @@ export default function GoogleDriveBrowser({ businessId }: GoogleDriveBrowserPro
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("drive") === "success") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
+       
       checkStatus();
       window.history.replaceState({}, "", window.location.pathname + "?tab=intelligence");
     }

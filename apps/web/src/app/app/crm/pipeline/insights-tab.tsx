@@ -151,7 +151,7 @@ const AlertCards = React.memo(function AlertCards({
 
 function InsightsTabInner({
   flowIntelligence, revenueData, contacts, loading,
-  businessId, onViewCold, onViewReady, onViewExpiringQuotes, onViewOverdueInvoices,
+  businessId: _businessId, onViewCold, onViewReady, onViewExpiringQuotes, onViewOverdueInvoices,
   onRefresh, onNavigatePipeline,
 }: InsightsTabProps) {
   const [period, setPeriod] = useState<Period>("30d");
