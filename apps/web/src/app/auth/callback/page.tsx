@@ -42,11 +42,15 @@ export function deriveOAuthName(meta: Record<string, unknown> | null | undefined
   return { firstName: parts[0], lastName: parts.slice(1).join(" "), fullName };
 }
 
+type CallbackErrorKind = "generic" | "account_email_conflict";
+
 function AuthCallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<"loading" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<CallbackErrorKind>("generic");
+  const [conflictEmail, setConflictEmail] = useState<string | null>(null);
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -106,6 +110,12 @@ function AuthCallbackInner() {
             window.localStorage.setItem("kf_user_cache", JSON.stringify(bootstrap.data.user));
           }
           window.localStorage.setItem("kf_business_cache", JSON.stringify(bootstrap.data.business));
+        } else if (bootstrap.errorCode === "account_email_conflict") {
+          setConflictEmail(email ?? null);
+          setErrorKind("account_email_conflict");
+          setError(bootstrap.error);
+          setStatus("error");
+          return;
         } else if (bootstrap.error) {
           throw new Error(bootstrap.error);
         } else {
@@ -115,6 +125,7 @@ function AuthCallbackInner() {
         router.push("/app");
       } catch (err) {
         const message = err instanceof Error ? err.message : "Authentication failed";
+        setErrorKind("generic");
         setError(message);
         setStatus("error");
       }
@@ -124,6 +135,51 @@ function AuthCallbackInner() {
   }, [router, searchParams]);
 
   if (status === "error") {
+    if (errorKind === "account_email_conflict") {
+      return (
+        <div className="min-h-screen flex items-center justify-center" style={{ background: "hsl(20 14% 4%)" }}>
+          <div className="w-full max-w-md mx-auto px-4 text-center">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4" style={{ background: "linear-gradient(135deg, hsl(24 95% 53%), hsl(173 58% 39%))" }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold mb-2" style={{ color: "hsl(30 20% 98%)" }}>This email is already in use</h1>
+            <div className="rounded-2xl p-6 flex flex-col gap-4" style={{ background: "hsl(20 14% 7% / 0.9)", border: "1px solid hsl(20 10% 15%)" }}>
+              <p className="text-sm" style={{ color: "hsl(30 10% 75%)" }}>
+                {conflictEmail ? (
+                  <>An account already exists for <span style={{ color: "hsl(30 20% 98%)" }}>{conflictEmail}</span>. Try signing in with your email and password instead.</>
+                ) : (
+                  <>An account with this email already exists. Try signing in with your email and password instead.</>
+                )}
+              </p>
+              <button
+                onClick={() => {
+                  if (conflictEmail) {
+                    window.localStorage.setItem("kf_email", conflictEmail);
+                  }
+                  router.push("/auth/login");
+                }}
+                className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110"
+                style={{ background: "linear-gradient(135deg, hsl(24 95% 53%), hsl(24 95% 45%))" }}
+              >
+                Sign in with email & password
+              </button>
+              <a
+                href="mailto:support@keyflow.app?subject=Help%20signing%20in%20with%20Google"
+                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:brightness-110"
+                style={{ color: "hsl(30 20% 98%)", background: "hsl(20 10% 12%)", border: "1px solid hsl(20 10% 18%)", display: "inline-block" }}
+              >
+                Contact support
+              </a>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "hsl(20 14% 4%)" }}>
         <div className="w-full max-w-md mx-auto px-4 text-center">

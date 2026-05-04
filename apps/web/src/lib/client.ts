@@ -1520,6 +1520,23 @@ export type BootstrapIdentityResponse = {
   business: { id: string; name: string; onboardingComplete?: boolean };
 };
 
+export type BootstrapIdentityErrorCode = "account_email_conflict";
+
+export type BootstrapIdentityResult = {
+  data: BootstrapIdentityResponse | null;
+  error: string | null;
+  errorCode?: BootstrapIdentityErrorCode | null;
+  status?: number;
+};
+
+/**
+ * Bootstraps the local User + Business + Membership for the freshly-authed
+ * Supabase user. Uses a direct fetch (rather than the shared `apiPost`)
+ * because the OAuth callback page needs to switch on the structured error
+ * body — specifically the 409 `account_email_conflict` path added in task
+ * #309 — to render a friendly "this email already exists" screen instead
+ * of a generic error string.
+ */
 export async function bootstrapIdentity(input: {
   username?: string;
   email?: string;
@@ -1529,11 +1546,43 @@ export async function bootstrapIdentity(input: {
   phone?: string;
   avatarUrl?: string;
   company?: string;
-}) {
-  return apiPost<BootstrapIdentityResponse>({
-    path: `/identity/bootstrap`,
-    body: input,
-  });
+}): Promise<BootstrapIdentityResult> {
+  try {
+    const res = await fetch(`${API_BASE}/identity/bootstrap`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(input),
+    });
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      const parsed = (typeof json === "object" && json !== null ? (json as Record<string, unknown>) : null);
+      const nestedMessage = parsed && typeof parsed.message === "object" && parsed.message !== null
+        ? (parsed.message as Record<string, unknown>)
+        : null;
+      const code =
+        (nestedMessage && typeof nestedMessage.code === "string" ? (nestedMessage.code as string) : null) ??
+        (parsed && typeof parsed.code === "string" ? (parsed.code as string) : null);
+      const message =
+        (nestedMessage && typeof nestedMessage.message === "string" ? (nestedMessage.message as string) : null) ??
+        (parsed && typeof parsed.message === "string" ? (parsed.message as string) : null) ??
+        res.statusText ??
+        "Request failed";
+      if (res.status === 401) emitUnauthorizedEvent("/identity/bootstrap");
+      return {
+        data: null,
+        error: message,
+        errorCode: code === "account_email_conflict" ? "account_email_conflict" : null,
+        status: res.status,
+      };
+    }
+    return { data: json as BootstrapIdentityResponse, error: null, status: res.status };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Network error";
+    return { data: null, error: message };
+  }
 }
 
 export type SignupResponse =

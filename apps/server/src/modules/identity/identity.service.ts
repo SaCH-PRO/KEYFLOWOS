@@ -684,9 +684,14 @@ export class IdentityService {
     } catch (err) {
       const code = (err as { code?: string })?.code;
       if (code === 'P2002') {
-        throw new ConflictException(
-          'A user with this email already exists and could not be reconciled. Please contact support.',
+        this.logger.warn(
+          `[bootstrap] email conflict during reconcile (userId=${input.userId})`,
         );
+        throw new ConflictException({
+          code: 'account_email_conflict',
+          message:
+            'An account with this email already exists. Please sign in with email and password instead.',
+        });
       }
       throw err;
     }
@@ -772,9 +777,14 @@ export class IdentityService {
           // of an opaque Prisma 500.
           const code = (err as { code?: string })?.code;
           if (code === 'P2002') {
-            throw new ConflictException(
-              'A user with this email already exists. Please contact support to reconcile your account.',
+            this.logger.warn(
+              `[bootstrap] email conflict on user create (userId=${input.userId})`,
             );
+            throw new ConflictException({
+              code: 'account_email_conflict',
+              message:
+                'An account with this email already exists. Please sign in with email and password instead.',
+            });
           }
           throw err;
         }
