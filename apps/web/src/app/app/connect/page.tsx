@@ -724,9 +724,23 @@ export default function KeyFlowConnectPage() {
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="grid grid-cols-2 md:grid-cols-4 gap-3"
+        className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"
       >
         {[
+          {
+            href: "/app/connect/drive",
+            icon: HardDrive,
+            title: "Drive browser",
+            desc: "Files & folders",
+            tone: "from-blue-500/15 to-emerald-500/15 text-blue-200",
+          },
+          {
+            href: "/app/connect/sheets",
+            icon: FileText,
+            title: "Sheets-as-source",
+            desc: "Live data sync",
+            tone: "from-emerald-500/15 to-teal-500/15 text-emerald-200",
+          },
           {
             href: "/app/connect/forms",
             icon: FileText,
@@ -742,18 +756,18 @@ export default function KeyFlowConnectPage() {
             tone: "from-emerald-500/15 to-teal-500/15 text-emerald-200",
           },
           {
+            href: "/app/social",
+            icon: Share2,
+            title: "Social Composer",
+            desc: "Post & schedule",
+            tone: "from-pink-500/15 to-purple-500/15 text-pink-200",
+          },
+          {
             href: "/app/connect/business-profile",
             icon: Building2,
             title: "Business Profile",
             desc: "Reviews & posts",
             tone: "from-amber-500/15 to-orange-500/15 text-amber-200",
-          },
-          {
-            href: "/app/connect/maps",
-            icon: MapIcon,
-            title: "Maps",
-            desc: "API key & test",
-            tone: "from-cyan-500/15 to-blue-500/15 text-cyan-200",
           },
         ].map((tile) => {
           const Icon = tile.icon;
