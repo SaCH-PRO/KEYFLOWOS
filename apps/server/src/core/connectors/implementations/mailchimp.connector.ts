@@ -163,6 +163,141 @@ export class MailchimpConnector implements IConnector {
     return { contactId: resolved.contactId, event: opts.event };
   }
 
+  // ---------------------------------------------------------------------------
+  // Operability surface (used by /app/marketing/lists)
+  // ---------------------------------------------------------------------------
+
+  private async mailchimpAuth(businessId: string): Promise<{ apiKey: string; dc: string } | { error: string }> {
+    const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'mailchimpApiKey');
+    if (!apiKey) return { error: 'No Mailchimp API key configured' };
+    const dc = apiKey.split('-')[1];
+    if (!dc) return { error: 'Mailchimp API key is missing the data-center suffix (e.g. "-us21")' };
+    return { apiKey, dc };
+  }
+
+  private mailchimpHeaders(apiKey: string): Record<string, string> {
+    const auth = Buffer.from(`anystring:${apiKey}`).toString('base64');
+    return { Authorization: `Basic ${auth}`, Accept: 'application/json', 'Content-Type': 'application/json' };
+  }
+
+  async listLists(businessId: string): Promise<{ success: boolean; lists?: Array<{ id: string; name: string; memberCount: number; provider: 'mailchimp' }>; error?: string }> {
+    if (!(await this.isConnected(businessId))) return { success: false, error: 'Mailchimp is not connected' };
+    const auth = await this.mailchimpAuth(businessId);
+    if ('error' in auth) return { success: false, error: auth.error };
+    try {
+      const res = await fetch(`https://${auth.dc}.api.mailchimp.com/3.0/lists?count=100`, {
+        headers: this.mailchimpHeaders(auth.apiKey),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Mailchimp ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { lists?: Array<{ id: string; name: string; stats?: { member_count?: number } }> };
+      const lists = (data.lists ?? []).map((l) => ({
+        id: l.id,
+        name: l.name,
+        memberCount: l.stats?.member_count ?? 0,
+        provider: 'mailchimp' as const,
+      }));
+      await this.trackActivity(businessId);
+      return { success: true, lists };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async subscribeContacts(
+    businessId: string,
+    listId: string,
+    contactIds: string[],
+  ): Promise<{ success: boolean; created: number; updated: number; failed: number; errors: string[] }> {
+    if (!(await this.isConnected(businessId))) {
+      return { success: false, created: 0, updated: 0, failed: contactIds.length, errors: ['Mailchimp is not connected'] };
+    }
+    const auth = await this.mailchimpAuth(businessId);
+    if ('error' in auth) return { success: false, created: 0, updated: 0, failed: contactIds.length, errors: [auth.error] };
+    const contacts = await this.prisma.client.contact.findMany({
+      where: { id: { in: contactIds }, businessId, deletedAt: null, email: { not: null } },
+    });
+    if (contacts.length === 0) {
+      return { success: false, created: 0, updated: 0, failed: 0, errors: ['No contacts with email addresses'] };
+    }
+    const members = contacts.map((c) => ({
+      email_address: c.email!,
+      status_if_new: 'subscribed',
+      status: 'subscribed',
+      merge_fields: {
+        FNAME: c.firstName ?? '',
+        LNAME: c.lastName ?? '',
+      },
+    }));
+    try {
+      const res = await fetch(`https://${auth.dc}.api.mailchimp.com/3.0/lists/${encodeURIComponent(listId)}`, {
+        method: 'POST',
+        headers: this.mailchimpHeaders(auth.apiKey),
+        body: JSON.stringify({ members, update_existing: true }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, created: 0, updated: 0, failed: contacts.length, errors: [`Mailchimp ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}`] };
+      }
+      const data = (await res.json()) as { new_members?: unknown[]; updated_members?: unknown[]; errors?: Array<{ error: string }>; total_created?: number; total_updated?: number; error_count?: number };
+      const created = data.total_created ?? data.new_members?.length ?? 0;
+      const updated = data.total_updated ?? data.updated_members?.length ?? 0;
+      const failed = data.error_count ?? data.errors?.length ?? 0;
+      const errors = (data.errors ?? []).map((e) => e.error);
+      await this.trackActivity(businessId);
+      return { success: true, created, updated, failed, errors };
+    } catch (err) {
+      return { success: false, created: 0, updated: 0, failed: contacts.length, errors: [err instanceof Error ? err.message : 'Network error'] };
+    }
+  }
+
+  async listCampaigns(businessId: string): Promise<{ success: boolean; campaigns?: Array<{ id: string; name: string; status: string; emailsSent?: number }>; error?: string }> {
+    if (!(await this.isConnected(businessId))) return { success: false, error: 'Mailchimp is not connected' };
+    const auth = await this.mailchimpAuth(businessId);
+    if ('error' in auth) return { success: false, error: auth.error };
+    try {
+      const res = await fetch(`https://${auth.dc}.api.mailchimp.com/3.0/campaigns?count=50`, {
+        headers: this.mailchimpHeaders(auth.apiKey),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Mailchimp ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { campaigns?: Array<{ id: string; settings?: { title?: string; subject_line?: string }; status?: string; emails_sent?: number }> };
+      const campaigns = (data.campaigns ?? []).map((c) => ({
+        id: c.id,
+        name: c.settings?.title || c.settings?.subject_line || c.id,
+        status: c.status ?? 'unknown',
+        emailsSent: c.emails_sent,
+      }));
+      return { success: true, campaigns };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async triggerCampaign(businessId: string, campaignId: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await this.isConnected(businessId))) return { success: false, error: 'Mailchimp is not connected' };
+    const auth = await this.mailchimpAuth(businessId);
+    if ('error' in auth) return { success: false, error: auth.error };
+    try {
+      const res = await fetch(`https://${auth.dc}.api.mailchimp.com/3.0/campaigns/${encodeURIComponent(campaignId)}/actions/send`, {
+        method: 'POST',
+        headers: this.mailchimpHeaders(auth.apiKey),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Mailchimp ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      await this.trackActivity(businessId);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
   private async trackActivity(businessId: string) {
     await this.prisma.client.connectorStatus.upsert({
       where: { businessId_connectorType: { businessId, connectorType: CONNECTOR_TYPE } },

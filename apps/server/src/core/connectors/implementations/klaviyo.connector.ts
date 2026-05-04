@@ -147,6 +147,179 @@ export class KlaviyoConnector implements IConnector {
     return { contactId: resolved.contactId, event: opts.event };
   }
 
+  // ---------------------------------------------------------------------------
+  // Operability surface (used by /app/marketing/lists)
+  // ---------------------------------------------------------------------------
+
+  private klaviyoHeaders(apiKey: string): Record<string, string> {
+    return {
+      Authorization: `Klaviyo-API-Key ${apiKey}`,
+      Accept: 'application/vnd.api+json',
+      'Content-Type': 'application/vnd.api+json',
+      revision: '2024-10-15',
+    };
+  }
+
+  async listLists(businessId: string): Promise<{ success: boolean; lists?: Array<{ id: string; name: string; memberCount: number; provider: 'klaviyo' }>; error?: string }> {
+    if (!(await this.isConnected(businessId))) return { success: false, error: 'Klaviyo is not connected' };
+    const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'klaviyoApiKey');
+    if (!apiKey) return { success: false, error: 'No Klaviyo API key configured' };
+    try {
+      const res = await fetch('https://a.klaviyo.com/api/lists/?fields[list]=name,profile_count', {
+        headers: this.klaviyoHeaders(apiKey),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Klaviyo ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { data?: Array<{ id: string; attributes?: { name?: string; profile_count?: number } }> };
+      const lists = (data.data ?? []).map((l) => ({
+        id: l.id,
+        name: l.attributes?.name ?? l.id,
+        memberCount: l.attributes?.profile_count ?? 0,
+        provider: 'klaviyo' as const,
+      }));
+      await this.trackActivity(businessId);
+      return { success: true, lists };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async subscribeContacts(
+    businessId: string,
+    listId: string,
+    contactIds: string[],
+  ): Promise<{ success: boolean; created: number; updated: number; failed: number; errors: string[] }> {
+    if (!(await this.isConnected(businessId))) {
+      return { success: false, created: 0, updated: 0, failed: contactIds.length, errors: ['Klaviyo is not connected'] };
+    }
+    const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'klaviyoApiKey');
+    if (!apiKey) return { success: false, created: 0, updated: 0, failed: contactIds.length, errors: ['No Klaviyo API key configured'] };
+    const contacts = await this.prisma.client.contact.findMany({
+      where: { id: { in: contactIds }, businessId, deletedAt: null, email: { not: null } },
+    });
+    if (contacts.length === 0) {
+      return { success: false, created: 0, updated: 0, failed: 0, errors: ['No contacts with email addresses'] };
+    }
+
+    let created = 0;
+    let failed = 0;
+    const errors: string[] = [];
+    const profileIds: string[] = [];
+
+    for (const contact of contacts) {
+      try {
+        const profileBody = {
+          data: {
+            type: 'profile',
+            attributes: {
+              email: contact.email,
+              first_name: contact.firstName ?? undefined,
+              last_name: contact.lastName ?? undefined,
+              phone_number: contact.phone ?? undefined,
+            },
+          },
+        };
+        const profRes = await fetch('https://a.klaviyo.com/api/profiles/', {
+          method: 'POST',
+          headers: this.klaviyoHeaders(apiKey),
+          body: JSON.stringify(profileBody),
+        });
+        let profileId: string | null = null;
+        if (profRes.ok) {
+          const created201 = (await profRes.json()) as { data?: { id?: string } };
+          profileId = created201.data?.id ?? null;
+          created += 1;
+        } else if (profRes.status === 409) {
+          const conflict = (await profRes.json()) as { errors?: Array<{ meta?: { duplicate_profile_id?: string } }> };
+          profileId = conflict.errors?.[0]?.meta?.duplicate_profile_id ?? null;
+        } else {
+          const body = await profRes.text().catch(() => '');
+          failed += 1;
+          errors.push(`${contact.email}: ${profRes.status}${body ? ` ${body.slice(0, 80)}` : ''}`);
+          continue;
+        }
+        if (profileId) profileIds.push(profileId);
+      } catch (err) {
+        failed += 1;
+        errors.push(`${contact.email}: ${err instanceof Error ? err.message : 'Network error'}`);
+      }
+    }
+
+    let updated = 0;
+    if (profileIds.length > 0) {
+      try {
+        const subBody = {
+          data: profileIds.map((id) => ({ type: 'profile', id })),
+        };
+        const subRes = await fetch(`https://a.klaviyo.com/api/lists/${encodeURIComponent(listId)}/relationships/profiles/`, {
+          method: 'POST',
+          headers: this.klaviyoHeaders(apiKey),
+          body: JSON.stringify(subBody),
+        });
+        if (subRes.ok) {
+          updated = profileIds.length;
+        } else {
+          const body = await subRes.text().catch(() => '');
+          errors.push(`List subscribe ${subRes.status}${body ? `: ${body.slice(0, 120)}` : ''}`);
+          failed += profileIds.length;
+        }
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : 'Network error');
+        failed += profileIds.length;
+      }
+    }
+
+    await this.trackActivity(businessId);
+    return { success: errors.length === 0 || (created + updated) > 0, created, updated, failed, errors };
+  }
+
+  async listCampaigns(businessId: string): Promise<{ success: boolean; campaigns?: Array<{ id: string; name: string; status: string }>; error?: string }> {
+    if (!(await this.isConnected(businessId))) return { success: false, error: 'Klaviyo is not connected' };
+    const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'klaviyoApiKey');
+    if (!apiKey) return { success: false, error: 'No Klaviyo API key configured' };
+    try {
+      const res = await fetch("https://a.klaviyo.com/api/campaigns/?filter=equals(messages.channel,'email')&fields[campaign]=name,status", {
+        headers: this.klaviyoHeaders(apiKey),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Klaviyo ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      const data = (await res.json()) as { data?: Array<{ id: string; attributes?: { name?: string; status?: string } }> };
+      const campaigns = (data.data ?? []).map((c) => ({
+        id: c.id,
+        name: c.attributes?.name ?? c.id,
+        status: c.attributes?.status ?? 'unknown',
+      }));
+      return { success: true, campaigns };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  async triggerCampaign(businessId: string, campaignId: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await this.isConnected(businessId))) return { success: false, error: 'Klaviyo is not connected' };
+    const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'klaviyoApiKey');
+    if (!apiKey) return { success: false, error: 'No Klaviyo API key configured' };
+    try {
+      const res = await fetch('https://a.klaviyo.com/api/campaign-send-jobs/', {
+        method: 'POST',
+        headers: this.klaviyoHeaders(apiKey),
+        body: JSON.stringify({ data: { type: 'campaign-send-job', id: campaignId } }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { success: false, error: `Klaviyo ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
+      }
+      await this.trackActivity(businessId);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
   private async trackActivity(businessId: string) {
     await this.prisma.client.connectorStatus.upsert({
       where: { businessId_connectorType: { businessId, connectorType: CONNECTOR_TYPE } },
