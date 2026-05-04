@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -23,6 +24,12 @@ import {
   Upload,
   Loader2,
   ArrowRight,
+  UserPlus,
+  Sparkles,
+  ChevronDown,
+  Mail,
+  Phone,
+  Building2,
 } from "lucide-react";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 
@@ -398,6 +405,43 @@ function PipelineToolbarInner({
 
 export const PipelineToolbar = React.memo(PipelineToolbarInner);
 
+function AddContactButton({
+  onClick,
+  expanded,
+}: {
+  onClick: () => void;
+  expanded?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label="Add contact"
+      aria-expanded={expanded}
+      title="Add contact"
+      data-walkthrough="crm-add"
+      className="group relative inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white font-semibold text-xs shadow-lg shadow-[hsl(var(--kf-accent1))]/30 hover:shadow-[hsl(var(--kf-accent1))]/50 transition-all flex-shrink-0 overflow-hidden"
+      style={{
+        background:
+          "linear-gradient(135deg, hsl(var(--kf-accent1)) 0%, hsl(var(--kf-accent1)) 45%, hsl(var(--kf-accent2, var(--kf-accent1))) 100%)",
+      }}
+    >
+      <span
+        aria-hidden
+        className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out"
+        style={{
+          background:
+            "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.18) 50%, transparent 100%)",
+        }}
+      />
+      <span className="relative flex items-center justify-center w-5 h-5 rounded-md bg-white/15 group-hover:bg-white/25 transition-colors">
+        <UserPlus className="w-3.5 h-3.5" />
+      </span>
+      <span className="relative hidden sm:inline">Add contact</span>
+      <Sparkles className="relative w-3 h-3 opacity-70 hidden sm:inline-block" />
+    </button>
+  );
+}
+
 function AddContactControl({
   onQuickCreate,
   onOpenFullForm,
@@ -410,28 +454,39 @@ function AddContactControl({
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [company, setCompany] = useState("");
+  const [showMore, setShowMore] = useState(false);
   const [saving, setSaving] = useState(false);
-  const popRef = useRef<HTMLDivElement | null>(null);
+  const [mounted, setMounted] = useState(false);
   const firstRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      if (popRef.current && !popRef.current.contains(e.target as Node)) setOpen(false);
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onClick);
     window.addEventListener("keydown", onKey);
     requestAnimationFrame(() => firstRef.current?.focus());
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("mousedown", onClick);
       window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
     };
   }, [open]);
 
   const canQuick = !!onQuickCreate && (firstName.trim() || lastName.trim() || email.trim() || phone.trim());
+
+  const reset = useCallback(() => {
+    setFirstName("");
+    setLastName("");
+    setEmail("");
+    setPhone("");
+    setCompany("");
+    setShowMore(false);
+  }, []);
 
   const handleQuick = useCallback(async () => {
     if (!onQuickCreate || saving) return;
@@ -444,122 +499,211 @@ function AddContactControl({
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
       });
-      setFirstName("");
-      setLastName("");
-      setEmail("");
-      setPhone("");
+      reset();
       setOpen(false);
     } finally {
       setSaving(false);
     }
-  }, [onQuickCreate, saving, firstName, lastName, email, phone]);
+  }, [onQuickCreate, saving, firstName, lastName, email, phone, reset]);
 
   const onFieldKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void handleQuick();
     }
   };
 
+  const handleOpenFull = () => {
+    setOpen(false);
+    reset();
+    onOpenFullForm();
+  };
+
   if (!onQuickCreate) {
-    return (
-      <button
-        onClick={onOpenFullForm}
-        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[hsl(var(--kf-accent1))] text-white font-semibold text-xs shadow-sm hover:brightness-110 transition-all flex-shrink-0"
-        aria-label="Add contact"
-        title="Add contact"
-        data-walkthrough="crm-add"
-      >
-        <Plus className="w-4 h-4" />
-        <span className="hidden sm:inline">Add contact</span>
-      </button>
-    );
+    return <AddContactButton onClick={onOpenFullForm} />;
   }
 
-  return (
-    <div className="relative flex-shrink-0" ref={popRef}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[hsl(var(--kf-accent1))] text-white font-semibold text-xs shadow-sm hover:brightness-110 transition-all"
-        aria-label="Add contact"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        title="Add contact"
-        data-walkthrough="crm-add"
+  const inputCls =
+    "w-full px-3 py-2.5 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/60 placeholder:text-muted-foreground/50 transition-colors";
+
+  const modal = open && mounted ? createPortal(
+    <AnimatePresence>
+      <motion.div
+        key="backdrop"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.15 }}
+        className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm"
+        onClick={() => setOpen(false)}
+      />
+      <div
+        key="dialog-wrap"
+        className="fixed inset-0 z-[101] flex items-start sm:items-center justify-center p-4 sm:p-6 overflow-y-auto pointer-events-none"
       >
-        <Plus className="w-4 h-4" />
-        <span className="hidden sm:inline">Add contact</span>
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.12 }}
-            role="dialog"
-            aria-label="Add contact"
-            className="absolute right-0 top-full mt-2 z-50 w-[min(92vw,360px)] rounded-2xl bg-popover/95 backdrop-blur-xl border border-border/60 shadow-2xl p-3 space-y-2"
+        <motion.div
+          initial={{ opacity: 0, y: -8, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -8, scale: 0.98 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
+          role="dialog"
+          aria-label="Add contact"
+          aria-modal="true"
+          className="pointer-events-auto w-full max-w-[440px] mt-[10vh] sm:mt-0 rounded-2xl bg-popover/95 backdrop-blur-xl border border-border/60 shadow-2xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className="px-5 py-4 flex items-center justify-between border-b border-border/40"
+            style={{
+              background:
+                "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.12) 0%, hsl(var(--kf-accent2, var(--kf-accent1)) / 0.06) 100%)",
+            }}
           >
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--kf-accent1))]">
-                Quick add
-              </span>
+            <div className="flex items-center gap-2.5">
+              <div
+                className="flex items-center justify-center w-8 h-8 rounded-lg"
+                style={{ background: "hsl(var(--kf-accent1) / 0.18)" }}
+              >
+                <UserPlus className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold leading-tight">Add contact</h2>
+                <p className="text-[11px] text-muted-foreground/70 leading-tight mt-0.5">
+                  Just a name works. Add more anytime.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setOpen(false)}
+              className="p-1.5 rounded-lg hover:bg-white/[0.06] transition-colors"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4 text-muted-foreground" />
+            </button>
+          </div>
+
+          <div className="p-5 space-y-3">
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 mb-1.5">
+                  First name
+                </label>
+                <input
+                  ref={firstRef}
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  onKeyDown={onFieldKeyDown}
+                  placeholder="Jane"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 mb-1.5">
+                  Last name
+                </label>
+                <input
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  onKeyDown={onFieldKeyDown}
+                  placeholder="Doe"
+                  className={inputCls}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 mb-1.5">
+                Email
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={onFieldKeyDown}
+                  placeholder="jane@example.com"
+                  className={`${inputCls} pl-9`}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 mb-1.5">
+                Phone
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  onKeyDown={onFieldKeyDown}
+                  placeholder="+1 868 000 0000"
+                  className={`${inputCls} pl-9`}
+                />
+              </div>
+            </div>
+
+            <AnimatePresence initial={false}>
+              {showMore && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-1">
+                    <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 mb-1.5">
+                      Company
+                    </label>
+                    <div className="relative">
+                      <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
+                      <input
+                        value={company}
+                        onChange={(e) => setCompany(e.target.value)}
+                        onKeyDown={onFieldKeyDown}
+                        placeholder="Acme Co."
+                        className={`${inputCls} pl-9`}
+                      />
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground/60 leading-relaxed">
+                      Need address, tags, segment, lifecycle? Open the full form for everything.
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <button
+              onClick={() => setShowMore((v) => !v)}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground/70 hover:text-foreground transition-colors"
+            >
+              <ChevronDown className={`w-3 h-3 transition-transform ${showMore ? "rotate-180" : ""}`} />
+              {showMore ? "Show less" : "More fields"}
+            </button>
+          </div>
+
+          <div className="px-5 py-3 border-t border-border/40 bg-white/[0.02] flex items-center justify-between gap-2">
+            <button
+              onClick={handleOpenFull}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors px-1 py-1"
+            >
+              Open full form
+              <ArrowRight className="w-3 h-3" />
+            </button>
+            <div className="flex items-center gap-2">
+              <span className="hidden sm:inline text-[10px] text-muted-foreground/50 mr-1">⌘ + ↵</span>
               <button
                 onClick={() => setOpen(false)}
-                className="p-1 rounded-md hover:bg-white/[0.05]"
-                aria-label="Close"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.05] transition-colors"
               >
-                <X className="w-3.5 h-3.5 text-muted-foreground" />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                ref={firstRef}
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                onKeyDown={onFieldKeyDown}
-                placeholder="First name"
-                className="w-full px-2.5 py-2 text-xs bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40"
-              />
-              <input
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                onKeyDown={onFieldKeyDown}
-                placeholder="Last name"
-                className="w-full px-2.5 py-2 text-xs bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40"
-              />
-            </div>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={onFieldKeyDown}
-              placeholder="Email"
-              className="w-full px-2.5 py-2 text-xs bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40"
-            />
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              onKeyDown={onFieldKeyDown}
-              placeholder="Phone"
-              className="w-full px-2.5 py-2 text-xs bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40"
-            />
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  onOpenFullForm();
-                }}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors px-1 py-1"
-              >
-                Open full form
-                <ArrowRight className="w-3 h-3" />
+                Cancel
               </button>
               <button
                 onClick={() => void handleQuick()}
                 disabled={!canQuick || saving}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))] text-white text-xs font-semibold shadow-sm hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))] text-white text-xs font-semibold shadow-sm hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 {saving ? (
                   <>
@@ -569,14 +713,22 @@ function AddContactControl({
                 ) : (
                   <>
                     <Plus className="w-3.5 h-3.5" />
-                    Quick add
+                    Add contact
                   </>
                 )}
               </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+          </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>,
+    document.body,
+  ) : null;
+
+  return (
+    <>
+      <AddContactButton onClick={() => setOpen((v) => !v)} expanded={open} />
+      {modal}
+    </>
   );
 }
