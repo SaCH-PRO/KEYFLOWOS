@@ -270,7 +270,13 @@ export class GoogleSuiteService {
           return { ok: true, account: j.emailAddress ?? null, error: null };
         }
         case 'calendar': {
-          const r = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1', { headers: auth });
+          // We only request the `calendar.events` scope, which does NOT cover
+          // `calendarList`. Probe the primary calendar's events list instead —
+          // that endpoint is authorized by `calendar.events` alone.
+          const r = await fetch(
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=1&fields=items(id)',
+            { headers: auth },
+          );
           if (!r.ok) return { ok: false, account: null, error: await this.errMsg(r, 'Calendar') };
           return { ok: true, account: null, error: null };
         }
