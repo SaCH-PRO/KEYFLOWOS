@@ -193,7 +193,7 @@ export class PaymentsService {
   async handleStripeWebhook(
     rawPayload: string,
     signatureHeader: string | undefined,
-  ): Promise<{ ok: true; received?: boolean }> {
+  ): Promise<{ ok: true; received?: boolean; processed?: string }> {
     if (!rawPayload) throw new BadRequestException('Missing Stripe webhook payload');
 
     let event: { id?: string; type?: string; data?: { object?: any } };
@@ -204,86 +204,582 @@ export class PaymentsService {
     }
 
     const obj = event.data?.object || {};
+    const eventType = event.type || '';
+
+    // Verify signature using a webhook endpoint secret. Prefer the global env
+    // secret (one shared Stripe webhook endpoint per deployment); fall back to
+    // a per-business secret stored in business.metaData.stripeWebhookSecret
+    // when an invoice can be resolved from the event.
+    const candidateInvoiceId: string | undefined =
+      obj?.metadata?.invoiceId ||
+      obj?.client_reference_id ||
+      obj?.metadata?.invoice_id;
+
+    const envSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    let signatureOk = false;
+    if (envSecret && signatureHeader && this.verifyStripeSignature(rawPayload, signatureHeader, envSecret)) {
+      signatureOk = true;
+    } else if (candidateInvoiceId) {
+      const inv = await this.prisma.client.invoice.findUnique({
+        where: { id: candidateInvoiceId },
+        include: { business: { select: { metaData: true } } },
+      }).catch(() => null);
+      const businessSecret = (inv?.business.metaData as Record<string, any> | null)?.stripeWebhookSecret as string | undefined;
+      if (businessSecret && signatureHeader && this.verifyStripeSignature(rawPayload, signatureHeader, businessSecret)) {
+        signatureOk = true;
+      }
+    }
+
+    if (!signatureOk) {
+      if (!envSecret) {
+        this.logger.error('Stripe webhook secret not configured; rejecting webhook');
+      } else {
+        this.logger.warn(`Stripe webhook signature verification failed (event=${eventType})`);
+      }
+      throw new BadRequestException('Invalid Stripe webhook signature');
+    }
+
+    // Dispatch by event type. Unknown event types are acked but ignored so
+    // Stripe doesn't keep retrying them.
+    switch (eventType) {
+      case 'checkout.session.completed':
+        // Note: Stripe Payment Links surface as `checkout.session.completed`
+        // events with `payment_link` set on the session — there is no
+        // separate `payment_link.completed` event in the Stripe API.
+        await this.processStripeChargeOrSession(eventType, obj, event.id);
+        return { ok: true, received: true, processed: eventType };
+      case 'charge.succeeded':
+      case 'payment_intent.succeeded':
+        await this.processStripeChargeOrSession(eventType, obj, event.id);
+        return { ok: true, received: true, processed: eventType };
+      case 'charge.refunded':
+      case 'refund.created':
+      case 'charge.refund.updated':
+        await this.processStripeRefund(eventType, obj);
+        return { ok: true, received: true, processed: eventType };
+      default:
+        return { ok: true, received: true };
+    }
+  }
+
+  private async processStripeChargeOrSession(
+    eventType: string,
+    obj: any,
+    eventId: string | undefined,
+  ): Promise<void> {
+    // checkout.session.completed: invoiceId comes from session metadata or
+    // client_reference_id. payment_intent.succeeded / charge.succeeded:
+    // invoiceId is on the payment_intent / charge metadata if it was set
+    // during checkout.session creation (see createStripeCheckout above).
     const invoiceId: string | undefined =
-      obj?.metadata?.invoiceId || obj?.client_reference_id;
+      obj?.metadata?.invoiceId ||
+      obj?.client_reference_id ||
+      obj?.metadata?.invoice_id;
     if (!invoiceId) {
-      this.logger.warn('Stripe webhook missing invoiceId in metadata; ignoring');
-      return { ok: true, received: false };
+      this.logger.warn(`Stripe ${eventType} has no invoiceId in metadata; ignoring`);
+      return;
     }
 
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      include: { business: { select: { id: true, metaData: true } } },
     });
-    if (!invoice) throw new BadRequestException('Invoice not found for webhook');
-
-    const meta = (invoice.business.metaData as Record<string, any>) || {};
-    const webhookSecret =
-      meta.stripeWebhookSecret || process.env.STRIPE_WEBHOOK_SECRET;
-
-    if (!webhookSecret) {
-      this.logger.error('Stripe webhook secret not configured; rejecting webhook');
-      throw new BadRequestException('Stripe webhook secret not configured');
-    }
-    if (!signatureHeader || !this.verifyStripeSignature(rawPayload, signatureHeader, webhookSecret)) {
-      this.logger.warn(`Stripe webhook signature verification failed for invoice ${invoiceId}`);
-      throw new BadRequestException('Invalid Stripe webhook signature');
+    if (!invoice) {
+      this.logger.warn(`Stripe ${eventType} references unknown invoice ${invoiceId}`);
+      return;
     }
 
-    if (event.type !== 'checkout.session.completed') {
-      return { ok: true, received: true };
-    }
-
-    if (invoice.status === 'PAID') {
-      return { ok: true, received: true };
-    }
-
-    const providerPaymentId: string = obj.id || event.id || `stripe_${invoiceId}_${Date.now()}`;
+    const providerPaymentId: string = obj.id || eventId || `stripe_${invoiceId}_${Date.now()}`;
     const existing = await this.prisma.client.payment.findUnique({
       where: { providerPaymentId },
     }).catch(() => null);
-    if (existing) {
-      return { ok: true, received: true };
-    }
+    if (existing) return;
+
     const existingForInvoice = await this.prisma.client.payment.findFirst({
       where: { invoiceId, provider: 'stripe', status: 'SUCCESSFUL' },
     });
-    if (existingForInvoice) {
-      return { ok: true, received: true };
-    }
+    if (existingForInvoice) return;
 
-    const amountMinor: number = obj.amount_total ?? obj.amount_received ?? 0;
+    const amountMinor: number =
+      obj.amount_total ?? obj.amount_received ?? obj.amount ?? 0;
     const amount = amountMinor / 100;
     const currency = (obj.currency || invoice.currency || 'USD').toUpperCase();
-    const expectedAmount = Number(invoice.total);
 
     if (currency !== invoice.currency.toUpperCase()) {
       this.logger.warn(
-        `Stripe webhook currency mismatch for invoice ${invoiceId}: got ${currency}, expected ${invoice.currency}`,
+        `Stripe ${eventType} currency mismatch for invoice ${invoiceId}: got ${currency}, expected ${invoice.currency}`,
       );
       throw new BadRequestException('Stripe webhook currency mismatch');
     }
-    if (Math.abs(amount - expectedAmount) > 0.01) {
+    const expectedAmount = Number(invoice.total);
+    if (amount > 0 && Math.abs(amount - expectedAmount) > 0.01) {
       this.logger.warn(
-        `Stripe webhook amount mismatch for invoice ${invoiceId}: got ${amount}, expected ${expectedAmount}`,
+        `Stripe ${eventType} amount mismatch for invoice ${invoiceId}: got ${amount}, expected ${expectedAmount}`,
       );
       throw new BadRequestException('Stripe webhook amount mismatch');
     }
+
+    // Stash the related payment_intent / charge id in `reference` so that
+    // later refund events (which arrive keyed by charge id and contain the
+    // payment_intent) can correlate back to this row. Without this, a
+    // `checkout.session.completed` row stored as `cs_...` would be
+    // un-linkable from a `charge.refunded` event for the same payment.
+    const reference: string | null =
+      obj.payment_intent ||
+      obj.charge ||
+      (typeof obj.latest_charge === 'string' ? obj.latest_charge : null) ||
+      null;
 
     await this.prisma.client.payment.create({
       data: {
         provider: 'stripe',
         providerPaymentId,
-        amount,
+        amount: amount > 0 ? amount : expectedAmount,
         currency,
         status: 'SUCCESSFUL',
         invoiceId,
         businessId: invoice.businessId,
+        reference,
       },
     });
-    await this.commerceService.markInvoicePaid(invoiceId);
+    if (invoice.status !== 'PAID') {
+      await this.commerceService.markInvoicePaid(invoiceId);
+    }
+  }
 
-    return { ok: true, received: true };
+  private async processStripeRefund(eventType: string, obj: any): Promise<void> {
+    // For charge.refunded the object is a Charge with refunds.data[]. For
+    // refund.created / charge.refund.updated the object is a Refund itself.
+    const refunds: Array<{
+      id?: string;
+      amount?: number;
+      currency?: string;
+      charge?: string;
+      paymentIntent?: string | null;
+      status?: string;
+      reason?: string | null;
+    }> = [];
+
+    if (eventType === 'charge.refunded') {
+      const list: any[] = obj?.refunds?.data ?? [];
+      for (const r of list) {
+        refunds.push({
+          id: r.id,
+          amount: r.amount,
+          currency: r.currency,
+          charge: r.charge ?? obj.id,
+          paymentIntent: r.payment_intent ?? obj.payment_intent ?? null,
+          status: r.status,
+          reason: r.reason,
+        });
+      }
+      // If refunds.data is empty (older events) synthesize from amount_refunded
+      if (refunds.length === 0 && typeof obj.amount_refunded === 'number') {
+        refunds.push({
+          id: `re_synth_${obj.id}`,
+          amount: obj.amount_refunded,
+          currency: obj.currency,
+          charge: obj.id,
+          paymentIntent: obj.payment_intent ?? null,
+          status: 'succeeded',
+        });
+      }
+    } else {
+      refunds.push({
+        id: obj.id,
+        amount: obj.amount,
+        currency: obj.currency,
+        charge: obj.charge,
+        paymentIntent: obj.payment_intent ?? null,
+        status: obj.status,
+        reason: obj.reason,
+      });
+    }
+
+    for (const refund of refunds) {
+      if (!refund.id || !refund.charge) continue;
+      // Idempotent: skip if we already recorded this refund.
+      const existing = await this.prisma.client.payment.findUnique({
+        where: { providerPaymentId: refund.id },
+      }).catch(() => null);
+      if (existing) continue;
+
+      // Locate the original payment row to get invoiceId/businessId. The
+      // original may have been stored as: the charge id (charge.succeeded
+      // path), the session id with payment_intent stashed in reference
+      // (checkout.session.completed path), or the payment_intent id
+      // (payment_intent.succeeded path). Try every linkable identifier.
+      const lookupIds = [refund.charge, refund.paymentIntent].filter((v): v is string => !!v);
+      const original = await this.prisma.client.payment.findFirst({
+        where: {
+          provider: 'stripe',
+          OR: [
+            { providerPaymentId: { in: lookupIds } },
+            { reference: { in: lookupIds } },
+          ],
+        },
+      }).catch(() => null);
+
+      if (!original) {
+        this.logger.warn(
+          `Stripe ${eventType} could not locate original payment for charge ${refund.charge} (pi=${refund.paymentIntent ?? 'none'}); skipping`,
+        );
+        continue;
+      }
+
+      await this.prisma.client.payment.create({
+        data: {
+          provider: 'stripe',
+          providerPaymentId: refund.id,
+          amount: -Math.abs((refund.amount ?? 0) / 100),
+          currency: (refund.currency || original.currency || 'USD').toUpperCase(),
+          status: 'REFUNDED',
+          invoiceId: original.invoiceId,
+          businessId: original.businessId,
+          reference: refund.charge,
+          notes: refund.reason ?? null,
+        },
+      }).catch((e) => {
+        this.logger.warn(`Failed to persist Stripe refund ${refund.id}: ${e instanceof Error ? e.message : e}`);
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // PayPal webhook
+  // ---------------------------------------------------------------------------
+
+  private async verifyPaypalSignature(
+    headers: Record<string, string | undefined>,
+    rawPayload: string,
+    sandbox: boolean,
+    creds?: { clientId?: string | null; clientSecret?: string | null; webhookId?: string | null },
+  ): Promise<boolean> {
+    const webhookId = creds?.webhookId || process.env.PAYPAL_WEBHOOK_ID;
+    if (!webhookId) {
+      this.logger.error('PAYPAL_WEBHOOK_ID is not configured; cannot verify PayPal webhooks');
+      return false;
+    }
+    const clientId = creds?.clientId || process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = creds?.clientSecret || process.env.PAYPAL_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      this.logger.error('PayPal client credentials not configured; cannot verify PayPal webhooks');
+      return false;
+    }
+    const required = [
+      'paypal-transmission-id',
+      'paypal-transmission-time',
+      'paypal-transmission-sig',
+      'paypal-cert-url',
+      'paypal-auth-algo',
+    ] as const;
+    for (const h of required) {
+      if (!headers[h]) {
+        this.logger.warn(`PayPal webhook missing required header: ${h}`);
+        return false;
+      }
+    }
+    const base = sandbox ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com';
+    let token: string;
+    try {
+      const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      const tokenRes = await fetch(`${base}/v1/oauth2/token`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=client_credentials',
+      });
+      if (!tokenRes.ok) {
+        this.logger.warn(`PayPal token fetch for webhook verify failed: ${tokenRes.status}`);
+        return false;
+      }
+      const data = (await tokenRes.json()) as { access_token?: string };
+      if (!data.access_token) return false;
+      token = data.access_token;
+    } catch (e) {
+      this.logger.warn(`PayPal token fetch error: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+
+    let webhookEvent: unknown;
+    try {
+      webhookEvent = JSON.parse(rawPayload);
+    } catch {
+      return false;
+    }
+
+    try {
+      const verifyRes = await fetch(`${base}/v1/notifications/verify-webhook-signature`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          auth_algo: headers['paypal-auth-algo'],
+          cert_url: headers['paypal-cert-url'],
+          transmission_id: headers['paypal-transmission-id'],
+          transmission_sig: headers['paypal-transmission-sig'],
+          transmission_time: headers['paypal-transmission-time'],
+          webhook_id: webhookId,
+          webhook_event: webhookEvent,
+        }),
+      });
+      if (!verifyRes.ok) {
+        const body = await verifyRes.text().catch(() => '');
+        this.logger.warn(`PayPal verify-webhook-signature returned ${verifyRes.status}${body ? `: ${body.slice(0, 160)}` : ''}`);
+        return false;
+      }
+      const result = (await verifyRes.json()) as { verification_status?: string };
+      return result.verification_status === 'SUCCESS';
+    } catch (e) {
+      this.logger.warn(`PayPal verify-webhook-signature error: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+  }
+
+  async handlePaypalWebhook(
+    rawPayload: string,
+    headers: Record<string, string | undefined>,
+  ): Promise<{ ok: true; received?: boolean; processed?: string }> {
+    if (!rawPayload) throw new BadRequestException('Missing PayPal webhook payload');
+
+    let event: { id?: string; event_type?: string; resource?: any };
+    try {
+      event = JSON.parse(rawPayload);
+    } catch {
+      throw new BadRequestException('Invalid PayPal webhook payload');
+    }
+
+    const sandbox = process.env.PAYPAL_ENVIRONMENT !== 'production';
+
+    // Resolve per-business PayPal credentials before verifying signature, so
+    // multi-tenant deployments where each business has its own PayPal app
+    // (with its own webhook id) work correctly. We try to identify the
+    // business via custom_id/invoice_id/related order; if none match, fall
+    // back to env-level credentials.
+    const businessCreds = await this.resolvePaypalBusinessCreds(event.resource || {});
+    const verified = await this.verifyPaypalSignature(headers, rawPayload, sandbox, businessCreds ?? undefined);
+    if (!verified) {
+      throw new BadRequestException('Invalid PayPal webhook signature');
+    }
+
+    const eventType = event.event_type || '';
+    const resource = event.resource || {};
+
+    switch (eventType) {
+      case 'PAYMENT.CAPTURE.COMPLETED':
+        await this.processPaypalCaptureCompleted(resource);
+        return { ok: true, received: true, processed: eventType };
+      case 'CHECKOUT.ORDER.COMPLETED':
+        // For ORDER.COMPLETED, resource.id is the *order* id, not the
+        // capture id. Captures live under purchase_units[].payments.captures.
+        // Persist a Payment row per capture so refund linkage (which keys on
+        // capture id) keeps working, and idempotency stays intact even if
+        // PAYMENT.CAPTURE.COMPLETED also arrives for the same capture.
+        await this.processPaypalOrderCompleted(resource);
+        return { ok: true, received: true, processed: eventType };
+      case 'PAYMENT.CAPTURE.REFUNDED':
+      case 'PAYMENT.CAPTURE.REVERSED':
+        await this.processPaypalRefund(resource);
+        return { ok: true, received: true, processed: eventType };
+      default:
+        return { ok: true, received: true };
+    }
+  }
+
+  /**
+   * Look up the business behind a PayPal webhook resource (via the linked
+   * invoice) and return its PayPal app credentials, falling back to env.
+   * Returns null when no business can be resolved — the caller will then use
+   * env-level credentials only.
+   */
+  private async resolvePaypalBusinessCreds(
+    resource: any,
+  ): Promise<{ clientId: string | null; clientSecret: string | null; webhookId: string | null } | null> {
+    const link = await this.resolvePaypalInvoiceId(resource).catch(() => null);
+    if (!link) return null;
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: link.businessId },
+      select: { metaData: true },
+    }).catch(() => null);
+    const meta = (business?.metaData as Record<string, any> | null) ?? {};
+    const clientId = (meta.paypalClientId as string | undefined) ?? null;
+    const clientSecret = (meta.paypalClientSecret as string | undefined) ?? null;
+    const webhookId = (meta.paypalWebhookId as string | undefined) ?? null;
+    if (!clientId && !clientSecret && !webhookId) return null;
+    return { clientId, clientSecret, webhookId };
+  }
+
+  /**
+   * Walk an ORDER.COMPLETED resource and persist a payment row for each
+   * embedded capture. This is the only safe way to handle this event:
+   * resource.id is the order id (not a capture id), so persisting it
+   * directly would create a row that refund events cannot link to.
+   */
+  private async processPaypalOrderCompleted(resource: any): Promise<void> {
+    const orderId: string | undefined = resource?.id;
+    const purchaseUnits: any[] = Array.isArray(resource?.purchase_units) ? resource.purchase_units : [];
+    const captures: any[] = [];
+    for (const pu of purchaseUnits) {
+      const capList: any[] = pu?.payments?.captures ?? [];
+      for (const cap of capList) {
+        captures.push({
+          ...cap,
+          custom_id: cap?.custom_id ?? pu?.custom_id ?? resource?.custom_id,
+          invoice_id: cap?.invoice_id ?? pu?.invoice_id ?? resource?.invoice_id,
+          supplementary_data: {
+            related_ids: { order_id: orderId, ...(cap?.supplementary_data?.related_ids ?? {}) },
+          },
+        });
+      }
+    }
+    if (captures.length === 0) {
+      this.logger.log(
+        `PayPal order ${orderId ?? '<unknown>'} completed but no captures present; awaiting PAYMENT.CAPTURE.COMPLETED`,
+      );
+      return;
+    }
+    for (const cap of captures) {
+      await this.processPaypalCaptureCompleted(cap);
+    }
+  }
+
+  /**
+   * Resolve the local invoiceId for a PayPal resource. PayPal does not echo
+   * purchase_units back on capture events, so we rely on `custom_id` /
+   * `invoice_id` (set when the order was created) and fall back to looking up
+   * an existing payment row by the related order id.
+   */
+  private async resolvePaypalInvoiceId(resource: any): Promise<{ invoiceId: string; businessId: string } | null> {
+    const candidate: string | undefined =
+      resource?.custom_id ||
+      resource?.invoice_id ||
+      resource?.purchase_units?.[0]?.reference_id ||
+      resource?.purchase_units?.[0]?.custom_id;
+    if (candidate) {
+      const inv = await this.prisma.client.invoice.findUnique({
+        where: { id: candidate },
+        select: { id: true, businessId: true },
+      }).catch(() => null);
+      if (inv) return { invoiceId: inv.id, businessId: inv.businessId };
+    }
+    const orderId: string | undefined = resource?.supplementary_data?.related_ids?.order_id;
+    if (orderId) {
+      const existing = await this.prisma.client.payment.findFirst({
+        where: { provider: 'paypal', OR: [{ providerPaymentId: orderId }, { reference: orderId }] },
+        select: { invoiceId: true, businessId: true },
+      });
+      if (existing) return { invoiceId: existing.invoiceId, businessId: existing.businessId };
+    }
+    return null;
+  }
+
+  private async processPaypalCaptureCompleted(resource: any): Promise<void> {
+    const captureId: string | undefined = resource?.id;
+    if (!captureId) {
+      this.logger.warn('PayPal capture completed event missing capture id');
+      return;
+    }
+    const existing = await this.prisma.client.payment.findUnique({
+      where: { providerPaymentId: captureId },
+    }).catch(() => null);
+    if (existing) return;
+
+    const link = await this.resolvePaypalInvoiceId(resource);
+    if (!link) {
+      this.logger.warn(`PayPal capture ${captureId} could not be linked to a local invoice; skipping persist`);
+      return;
+    }
+
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: link.invoiceId },
+    });
+    if (!invoice) return;
+
+    const amount = Number(resource?.amount?.value ?? invoice.total);
+    const currency = (resource?.amount?.currency_code || invoice.currency || 'USD').toUpperCase();
+
+    await this.prisma.client.payment.create({
+      data: {
+        provider: 'paypal',
+        providerPaymentId: captureId,
+        amount,
+        currency,
+        status: 'SUCCESSFUL',
+        invoiceId: invoice.id,
+        businessId: invoice.businessId,
+        reference: resource?.supplementary_data?.related_ids?.order_id ?? null,
+      },
+    });
+
+    if (invoice.status !== 'PAID') {
+      await this.commerceService.markInvoicePaid(invoice.id);
+    }
+
+    const payer = resource?.payer as { email_address?: string; name?: { given_name?: string; surname?: string } } | undefined;
+    this.paypalConnector?.emitPaymentReceived(invoice.businessId, {
+      amount,
+      currency,
+      invoiceId: invoice.id,
+      payerEmail: payer?.email_address,
+      payerName: payer?.name ? `${payer.name.given_name ?? ''} ${payer.name.surname ?? ''}`.trim() : undefined,
+      externalId: captureId,
+    }).catch((e) => this.logger.warn(`PayPal connector event emission failed: ${e.message}`));
+  }
+
+  private async processPaypalRefund(resource: any): Promise<void> {
+    const refundId: string | undefined = resource?.id;
+    if (!refundId) {
+      this.logger.warn('PayPal refund event missing refund id');
+      return;
+    }
+    const existing = await this.prisma.client.payment.findUnique({
+      where: { providerPaymentId: refundId },
+    }).catch(() => null);
+    if (existing) return;
+
+    // The original capture id is in supplementary_data.related_ids.capture_id
+    const captureId: string | undefined =
+      resource?.supplementary_data?.related_ids?.capture_id ||
+      resource?.links?.find?.((l: any) => l.rel === 'up')?.href?.split('/').pop();
+
+    let original: { invoiceId: string; businessId: string; currency: string } | null = null;
+    if (captureId) {
+      original = await this.prisma.client.payment.findUnique({
+        where: { providerPaymentId: captureId },
+        select: { invoiceId: true, businessId: true, currency: true },
+      }).catch(() => null);
+    }
+    if (!original) {
+      const link = await this.resolvePaypalInvoiceId(resource);
+      if (link) {
+        const inv = await this.prisma.client.invoice.findUnique({
+          where: { id: link.invoiceId },
+          select: { id: true, businessId: true, currency: true },
+        });
+        if (inv) original = { invoiceId: inv.id, businessId: inv.businessId, currency: inv.currency };
+      }
+    }
+    if (!original) {
+      this.logger.warn(`PayPal refund ${refundId} could not be linked to a local payment; skipping`);
+      return;
+    }
+
+    const amount = Number(resource?.amount?.value ?? 0);
+    await this.prisma.client.payment.create({
+      data: {
+        provider: 'paypal',
+        providerPaymentId: refundId,
+        amount: -Math.abs(amount),
+        currency: (resource?.amount?.currency_code || original.currency || 'USD').toUpperCase(),
+        status: 'REFUNDED',
+        invoiceId: original.invoiceId,
+        businessId: original.businessId,
+        reference: captureId ?? null,
+        notes: resource?.note_to_payer ?? null,
+      },
+    }).catch((e) => {
+      this.logger.warn(`Failed to persist PayPal refund ${refundId}: ${e instanceof Error ? e.message : e}`);
+    });
   }
 
   async getInvoicePaymentStatus(invoiceId: string) {
@@ -487,6 +983,7 @@ export class PaymentsService {
           purchaseUnits: [
             {
               referenceId: invoiceId,
+              customId: invoiceId,
               description: `Invoice ${invoice.invoiceNumber} - ${invoice.business.name}`,
               amount: {
                 currencyCode: invoice.currency === 'USD' ? 'USD' : 'USD',
@@ -599,6 +1096,7 @@ export class PaymentsService {
           purchaseUnits: [
             {
               referenceId: input.orderId,
+              customId: input.orderId,
               description: `Store Order - ${business?.name ?? 'Store'}`,
               amount: {
                 currencyCode: input.currency === 'USD' ? 'USD' : 'USD',

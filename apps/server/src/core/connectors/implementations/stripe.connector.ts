@@ -224,6 +224,85 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
   }
 
   async listRecentTransactions(businessId: string, limit = 50): Promise<PaymentGatewayTransaction[]> {
+    // Local-first: webhooks (handlePaypalWebhook / handleStripeWebhook in
+    // payments.service) keep the local Payment table in sync, so the dashboard
+    // can render even when Stripe's API is slow or rate-limited. Live API data
+    // is fetched best-effort and merged on top to enrich rows we don't yet
+    // have locally and to surface activity that pre-dates webhook setup.
+    const local = await this.fetchLocalStripeTransactions(businessId, limit);
+    const byId = new Map<string, PaymentGatewayTransaction>();
+    for (const row of local) byId.set(row.id, row);
+
+    try {
+      const live = await this.fetchLiveStripeTransactions(businessId, limit);
+      for (const row of live) {
+        const existing = byId.get(row.id);
+        // Live data wins for enrichment (customer name/email/description) but
+        // we keep the locally-known invoiceId if the live row is missing it.
+        if (existing) {
+          byId.set(row.id, { ...existing, ...row, invoiceId: row.invoiceId ?? existing.invoiceId });
+        } else {
+          byId.set(row.id, row);
+        }
+      }
+      await this.trackActivity(businessId);
+    } catch (err) {
+      this.logger.warn(
+        `Stripe live transaction fetch failed; serving ${local.length} local row(s): ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
+    return Array.from(byId.values())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit);
+  }
+
+  private async fetchLocalStripeTransactions(
+    businessId: string,
+    limit: number,
+  ): Promise<PaymentGatewayTransaction[]> {
+    const rows = await this.prisma.client.payment.findMany({
+      where: { businessId, provider: 'stripe' },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit * 2, 200),
+      include: {
+        invoice: {
+          select: { id: true, contact: { select: { firstName: true, lastName: true, email: true } } },
+        },
+      },
+    }).catch(() => [] as Array<{
+      id: string; amount: number; currency: string; status: string;
+      providerPaymentId: string; createdAt: Date; invoiceId: string;
+      reference: string | null; notes: string | null;
+      invoice: { id: string; contact: { firstName: string | null; lastName: string | null; email: string | null } | null } | null;
+    }>);
+    return rows.map((p) => {
+      const contact = p.invoice?.contact;
+      const name = contact ? `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || null : null;
+      const isRefund = p.status === 'REFUNDED';
+      return {
+        id: p.providerPaymentId,
+        provider: 'stripe' as const,
+        type: (isRefund ? 'refund' : 'charge') as 'charge' | 'refund',
+        status: p.status.toLowerCase(),
+        amount: Math.abs(Number(p.amount)),
+        currency: p.currency,
+        customerName: name,
+        customerEmail: contact?.email ?? null,
+        description: p.notes ?? (p.invoice?.id ? `Invoice ${p.invoice.id}` : null),
+        invoiceId: p.invoiceId ?? null,
+        externalUrl: isRefund
+          ? `https://dashboard.stripe.com/refunds/${p.providerPaymentId}`
+          : `https://dashboard.stripe.com/payments/${p.providerPaymentId}`,
+        createdAt: p.createdAt,
+      };
+    });
+  }
+
+  private async fetchLiveStripeTransactions(
+    businessId: string,
+    limit: number,
+  ): Promise<PaymentGatewayTransaction[]> {
     const key = await this.getSecretKey(businessId);
     const charges = (await this.stripeRequest(key, 'GET', `/charges?limit=${Math.min(limit, 100)}`)) as {
       data?: Array<{
@@ -287,7 +366,6 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     } catch (err) {
       this.logger.warn(`Stripe refunds list failed: ${err instanceof Error ? err.message : err}`);
     }
-    await this.trackActivity(businessId);
     return out;
   }
 

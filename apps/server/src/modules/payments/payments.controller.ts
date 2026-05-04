@@ -83,4 +83,24 @@ export class PaymentsController {
     const raw = req.rawBody?.toString('utf8') || '';
     return this.payments.handleStripeWebhook(raw, signature);
   }
+
+  @PublicRateLimit(60, 60_000)
+  @Post('paypal/webhook')
+  async handlePaypalWebhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('paypal-transmission-id') transmissionId?: string,
+    @Headers('paypal-transmission-time') transmissionTime?: string,
+    @Headers('paypal-transmission-sig') transmissionSig?: string,
+    @Headers('paypal-cert-url') certUrl?: string,
+    @Headers('paypal-auth-algo') authAlgo?: string,
+  ) {
+    const raw = req.rawBody?.toString('utf8') || '';
+    return this.payments.handlePaypalWebhook(raw, {
+      'paypal-transmission-id': transmissionId,
+      'paypal-transmission-time': transmissionTime,
+      'paypal-transmission-sig': transmissionSig,
+      'paypal-cert-url': certUrl,
+      'paypal-auth-algo': authAlgo,
+    });
+  }
 }
