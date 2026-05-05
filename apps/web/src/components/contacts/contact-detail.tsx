@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { MessageSquare, Sparkles, ChevronUp } from "lucide-react";
+import { toast } from "sonner";
 import type { CrossJourneyResponse } from "@/lib/client";
+import { apiPost, apiGet } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContactDetailHeader } from "./contact-detail-header";
 import { ContactDetailStats, MomentumPrimaryCTA } from "./contact-detail-stats";
@@ -232,6 +234,47 @@ export function ContactDetail({
     });
   };
 
+  const handleExportClick = async () => {
+    if (!businessId) { toast.error("No active workspace"); return; }
+    const t = toast.loading("Preparing GDPR export…");
+    try {
+      const job = await apiPost<{ jobId: string; token: string; expiresAt: string }>({
+        path: `/crm/businesses/${businessId}/contacts/${contact.id}/export`,
+        body: {},
+      });
+      if (job.error || !job.data) throw new Error(job.error || "Export failed");
+      const dl = await apiGet<{ url: string; filename: string; expiresInSeconds: number }>(
+        `/crm/contact-exports/${job.data.token}/download?format=zip`,
+      );
+      if (dl.error || !dl.data) throw new Error(dl.error || "Could not resolve download");
+      toast.success("Export ready — opening download", { id: t });
+      window.open(dl.data.url, "_blank");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Export failed", { id: t });
+    }
+  };
+
+  const handleForgetClick = () => {
+    if (!businessId) { toast.error("No active workspace"); return; }
+    setConfirmState({
+      open: true,
+      action: async () => {
+        const t = toast.loading("Submitting forget request…");
+        try {
+          const res = await apiPost<{ purgeAt: string }>({
+            path: `/crm/businesses/${businessId}/contacts/${contact.id}/forget`,
+            body: { reason: "User-initiated GDPR forget request" },
+          });
+          if (res.error) throw new Error(res.error || "Forget failed");
+          toast.success("Contact scheduled for purge after grace window", { id: t });
+          if (onClose) onClose();
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : "Forget failed", { id: t });
+        }
+      },
+    });
+  };
+
   const handleDeleteNote = async (noteId: string) => {
     if (!onDeleteNote) return;
     setConfirmState({
@@ -266,6 +309,8 @@ export function ContactDetail({
           onClose={onClose}
           onEdit={onEdit}
           onDelete={onDelete ? handleDeleteClick : undefined}
+          onExport={businessId ? handleExportClick : undefined}
+          onForget={businessId ? handleForgetClick : undefined}
           onUpdateStatus={onUpdateStatus}
           onQuickAction={onQuickAction}
           onAddTask={onAddTask}

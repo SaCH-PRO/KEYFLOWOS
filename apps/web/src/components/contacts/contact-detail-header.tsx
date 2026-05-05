@@ -120,6 +120,8 @@ interface ContactDetailHeaderProps {
   onClose?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onExport?: () => void;
+  onForget?: () => void;
   onUpdateStatus?: (status: string) => Promise<void>;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
@@ -133,6 +135,8 @@ export function ContactDetailHeader({
   onClose,
   onEdit,
   onDelete,
+  onExport,
+  onForget,
   onUpdateStatus,
   onQuickAction,
   onAddTask,
@@ -283,7 +287,7 @@ export function ContactDetailHeader({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {(onEdit || onDelete) && (
+          {(onEdit || onDelete || onExport || onForget) && (
             <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
               {onEdit && (
                 <button
@@ -293,6 +297,26 @@ export function ContactDetailHeader({
                 >
                   <Pencil className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
                   <span className="hidden sm:inline text-xs text-muted-foreground">Edit</span>
+                </button>
+              )}
+              {onExport && (
+                <button
+                  onClick={onExport}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-blue-500/20 rounded-md transition-colors text-sm"
+                  title="Export contact data (GDPR)"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-blue-400"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  <span className="hidden sm:inline text-xs text-blue-400">Export</span>
+                </button>
+              )}
+              {onForget && (
+                <button
+                  onClick={onForget}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-orange-500/20 rounded-md transition-colors text-sm"
+                  title="Forget contact (GDPR right-to-be-forgotten)"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-orange-400"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9" y1="12" x2="15" y2="12"/></svg>
+                  <span className="hidden sm:inline text-xs text-orange-400">Forget</span>
                 </button>
               )}
               {onDelete && (

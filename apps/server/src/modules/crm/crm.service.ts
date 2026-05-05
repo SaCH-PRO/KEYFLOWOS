@@ -15,6 +15,20 @@ import { CrmTimelineService } from './crm-timeline.service';
 import { CrmStatsService } from './crm-stats.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmFlowService } from './crm-flow.service';
+import { ContactAuditService, ContactAuditActor } from './privacy/contact-audit.service';
+
+/**
+ * Optional request-scoped audit context that controllers can plumb
+ * through to mutation methods so per-contact audit entries capture
+ * actor/IP/UA. All fields are optional; when omitted the audit entry
+ * is recorded with a SYSTEM actor.
+ */
+export interface AuditContext {
+  actor?: ContactAuditActor | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  reason?: string | null;
+}
 import type { ContactMeta, ContactWithStats } from './crm-stats.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactWhere } from './contact-filters.helper';
@@ -110,7 +124,38 @@ export class CrmService {
     @Inject(CrmListsService) private readonly lists: CrmListsService,
     @Inject(CrmFlowService) private readonly flow: CrmFlowService,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+    @Inject(ContactAuditService) private readonly contactAudit: ContactAuditService,
   ) {}
+
+  /**
+   * Internal helper: write a per-contact audit entry. Always
+   * fire-and-forget — never block a mutation on its audit row.
+   */
+  private auditContact(opts: {
+    businessId: string;
+    contactId: string;
+    action: Parameters<ContactAuditService['write']>[0]['action'];
+    before?: unknown;
+    after?: unknown;
+    entityType?: Parameters<ContactAuditService['write']>[0]['entityType'];
+    entityId?: string | null;
+    ctx?: AuditContext | null;
+    extraReason?: string | null;
+  }): void {
+    void this.contactAudit.write({
+      businessId: opts.businessId,
+      contactId: opts.contactId,
+      action: opts.action,
+      entityType: opts.entityType,
+      entityId: opts.entityId,
+      before: opts.before,
+      after: opts.after,
+      actor: opts.ctx?.actor ?? { type: 'SYSTEM' },
+      ip: opts.ctx?.ip ?? null,
+      userAgent: opts.ctx?.userAgent ?? null,
+      reason: opts.extraReason ?? opts.ctx?.reason ?? null,
+    });
+  }
 
   async healthPing(): Promise<void> {
     await this.prisma.client.$queryRaw`SELECT 1`;
@@ -283,7 +328,7 @@ export class CrmService {
     sourceDetail?: string | null;
     tags?: string[];
     custom?: any;
-  } & ContactExtraAttributes) {
+  } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
@@ -362,6 +407,13 @@ export class CrmService {
         businessId: input.businessId,
       };
       this.events.emit('contact.created', payload);
+      this.auditContact({
+        businessId: input.businessId,
+        contactId: contact.id,
+        action: 'created',
+        after: contact,
+        ctx: _audit,
+      });
     }
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
@@ -507,7 +559,7 @@ export class CrmService {
     sourceDetail?: string | null;
     tags?: string[];
     custom?: any;
-  } & ContactExtraAttributes) {
+  } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
     const trimOptional = (value?: string | null) => {
       if (value === undefined) return undefined;
@@ -642,7 +694,21 @@ export class CrmService {
     };
     this.events.emit('contact.updated', payload);
 
-    
+    // Detect ownership changes -> "reassigned" action; everything
+    // else is recorded as a generic "updated" entry with diff.
+    const reassigned = existing?.ownerId !== updated.ownerId;
+    this.auditContact({
+      businessId: input.businessId,
+      contactId: updated.id,
+      action: reassigned ? 'reassigned' : 'updated',
+      before: existing as unknown as Record<string, unknown>,
+      after: updated as unknown as Record<string, unknown>,
+      ctx: _audit,
+      extraReason: reassigned
+        ? `owner ${existing?.ownerId ?? 'none'} → ${updated.ownerId ?? 'none'}`
+        : undefined,
+    });
+
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     const duration = Date.now() - start;
@@ -651,7 +717,7 @@ export class CrmService {
     return updated;
   }
 
-  async softDeleteContact(input: { businessId: string; contactId: string }) {
+  async softDeleteContact(input: { businessId: string; contactId: string }, _audit?: AuditContext) {
     const contact = await this.assertContact(input.businessId, input.contactId);
     await this.timeline.logEvent(
       input.businessId,
@@ -661,6 +727,14 @@ export class CrmService {
       { actorType: 'USER', source: 'crm' },
     );
     const deleted = await this.prisma.client.contact.update({ where: { id: input.contactId }, data: { deletedAt: new Date() } });
+    this.auditContact({
+      businessId: input.businessId,
+      contactId: input.contactId,
+      action: 'deleted',
+      before: { deletedAt: contact.deletedAt },
+      after: { deletedAt: deleted.deletedAt },
+      ctx: _audit,
+    });
     const deletedPayload: ContactDeletedPayload = {
       contact: deleted,
       businessId: input.businessId,
@@ -680,9 +754,26 @@ export class CrmService {
     priority?: string | null;
     favorite?: boolean;
     archived?: boolean;
-  }) {
+  }, _audit?: AuditContext) {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
+    }
+    const auditAfter = {
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.addTags ? { addedTags: input.addTags } : {}),
+      ...(input.relationshipType !== undefined ? { relationshipType: input.relationshipType } : {}),
+      ...(input.priority !== undefined ? { priority: input.priority } : {}),
+      ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
+      ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
+    };
+    for (const cid of input.contactIds) {
+      this.auditContact({
+        businessId: input.businessId,
+        contactId: cid,
+        action: 'bulk_updated',
+        after: auditAfter,
+        ctx: _audit,
+      });
     }
     const data: Record<string, unknown> = {};
     if (input.status) data.status = input.status;
@@ -748,7 +839,7 @@ export class CrmService {
     return { updated: result.count };
   }
 
-  async bulkDeleteContacts(input: { businessId: string; contactIds: string[] }) {
+  async bulkDeleteContacts(input: { businessId: string; contactIds: string[] }, _audit?: AuditContext) {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
     }
@@ -756,6 +847,14 @@ export class CrmService {
       this.timeline.logEvent(input.businessId, cid, 'contact.deleted', { bulk: true }),
     );
     await Promise.allSettled(eventOps);
+    for (const cid of input.contactIds) {
+      this.auditContact({
+        businessId: input.businessId,
+        contactId: cid,
+        action: 'bulk_deleted',
+        ctx: _audit,
+      });
+    }
     const result = await this.prisma.client.contact.updateMany({
       where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
       data: { deletedAt: new Date() },
@@ -765,7 +864,7 @@ export class CrmService {
     return { deleted: result.count };
   }
 
-  async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string; fieldOverrides?: Record<string, unknown>; actorId?: string; actorType?: string }) {
+  async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string; fieldOverrides?: Record<string, unknown>; actorId?: string; actorType?: string }, _audit?: AuditContext) {
     if (input.primaryId === input.duplicateId) {
       throw new BadRequestException('Cannot merge a contact into itself');
     }
@@ -1012,6 +1111,24 @@ export class CrmService {
         duplicateId: input.duplicateId,
       };
       this.events.emit('contact.merged', payload);
+      this.auditContact({
+        businessId: input.businessId,
+        contactId: input.primaryId,
+        action: 'merged',
+        before: primary as unknown as Record<string, unknown>,
+        after: merged as unknown as Record<string, unknown>,
+        ctx: _audit,
+        extraReason: `merged duplicate ${input.duplicateId} into primary`,
+      });
+      this.auditContact({
+        businessId: input.businessId,
+        contactId: input.duplicateId,
+        action: 'merged',
+        before: duplicate as unknown as Record<string, unknown>,
+        after: { mergedInto: input.primaryId },
+        ctx: _audit,
+        extraReason: `duplicate merged into ${input.primaryId}`,
+      });
     }
     this.stats.invalidateCache(input.businessId);
     return { ...merged, mergeId: result.mergeId, revertableUntil: expiresAt.toISOString() };
@@ -1235,11 +1352,13 @@ export class CrmService {
     return this.stats.getFavorites(businessId);
   }
 
-  addNote(input: { businessId: string; contactId: string; body: string; authorId?: string | null; source?: string }) {
-    return this.timeline.addNote(input);
+  async addNote(input: { businessId: string; contactId: string; body: string; authorId?: string | null; source?: string }, _audit?: AuditContext) {
+    const note = await this.timeline.addNote(input);
+    await this.auditContact({ businessId: input.businessId, contactId: input.contactId, action: 'note_added', entityType: 'note', entityId: (note as { id?: string })?.id ?? null, after: { body: input.body, source: input.source }, ctx: _audit });
+    return note;
   }
 
-  addTask(input: {
+  async addTask(input: {
     businessId: string;
     contactId: string;
     title: string;
@@ -1249,28 +1368,55 @@ export class CrmService {
     remindAt?: string | null;
     creatorId?: string | null;
     source?: string | null;
-  }) {
-    return this.timeline.addTask(input);
+  }, _audit?: AuditContext) {
+    const task = await this.timeline.addTask(input);
+    await this.auditContact({ businessId: input.businessId, contactId: input.contactId, action: "task_added", entityType: "task", entityId: (task as { id?: string })?.id ?? null, after: { title: input.title, dueDate: input.dueDate, priority: input.priority, assigneeId: input.assigneeId }, ctx: _audit });
+    return task;
   }
 
-  updateNote(input: { businessId: string; noteId: string; body?: string; source?: string }) {
-    return this.timeline.updateNote(input);
+  async updateNote(input: { businessId: string; noteId: string; body?: string; source?: string }, _audit?: AuditContext) {
+    const before = await this.prisma.client.contactNote.findUnique({ where: { id: input.noteId } });
+    const note = await this.timeline.updateNote(input);
+    if (before?.contactId) {
+      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "note_updated", entityType: "note", entityId: input.noteId, before: { body: before.body, source: before.source }, after: { body: input.body, source: input.source }, ctx: _audit });
+    }
+    return note;
   }
 
-  deleteNote(input: { businessId: string; noteId: string }) {
-    return this.timeline.deleteNote(input);
+  async deleteNote(input: { businessId: string; noteId: string }, _audit?: AuditContext) {
+    const before = await this.prisma.client.contactNote.findUnique({ where: { id: input.noteId } });
+    const result = await this.timeline.deleteNote(input);
+    if (before?.contactId) {
+      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "note_deleted", entityType: "note", entityId: input.noteId, before: { body: before.body, source: before.source }, ctx: _audit });
+    }
+    return result;
   }
 
-  updateTask(input: { businessId: string; taskId: string; title?: string; dueDate?: string; priority?: string; remindAt?: string }) {
-    return this.timeline.updateTask(input);
+  async updateTask(input: { businessId: string; taskId: string; title?: string; dueDate?: string; priority?: string; remindAt?: string }, _audit?: AuditContext) {
+    const before = await this.prisma.client.contactTask.findUnique({ where: { id: input.taskId } });
+    const task = await this.timeline.updateTask(input);
+    if (before?.contactId) {
+      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "task_updated", entityType: "task", entityId: input.taskId, before: { title: before.title, dueDate: before.dueDate, priority: before.priority }, after: { title: input.title, dueDate: input.dueDate, priority: input.priority }, ctx: _audit });
+    }
+    return task;
   }
 
-  deleteTask(input: { businessId: string; taskId: string }) {
-    return this.timeline.deleteTask(input);
+  async deleteTask(input: { businessId: string; taskId: string }, _audit?: AuditContext) {
+    const before = await this.prisma.client.contactTask.findUnique({ where: { id: input.taskId } });
+    const result = await this.timeline.deleteTask(input);
+    if (before?.contactId) {
+      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "task_deleted", entityType: "task", entityId: input.taskId, before: { title: before.title }, ctx: _audit });
+    }
+    return result;
   }
 
-  completeTask(input: { businessId: string; taskId: string }) {
-    return this.timeline.completeTask(input);
+  async completeTask(input: { businessId: string; taskId: string }, _audit?: AuditContext) {
+    const before = await this.prisma.client.contactTask.findUnique({ where: { id: input.taskId } });
+    const result = await this.timeline.completeTask(input);
+    if (before?.contactId) {
+      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "task_completed", entityType: "task", entityId: input.taskId, before: { status: before.status }, after: { status: "completed" }, ctx: _audit });
+    }
+    return result;
   }
 
   reopenTask(input: { businessId: string; taskId: string }) {
