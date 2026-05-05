@@ -8,7 +8,8 @@ import { PaymentsService } from '../payments/payments.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
-import { sanitize } from '../../core/utils/sanitize';
+import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
+import { sanitize, sanitizeObject } from '../../core/utils/sanitize';
 
 @Controller('site')
 export class SiteController {
@@ -164,10 +165,11 @@ export class SiteController {
     const storefront = await this.siteService.getPublicStorefront(slug);
     const businessId = storefront.business.id;
 
+    const cleanCode = sanitize(body.code ?? '', 100) ?? '';
     const totals = await this.storeOrderService.calculateOrderTotals(
       body.items,
       businessId,
-      body.code,
+      cleanCode,
     );
 
     return {
@@ -351,8 +353,9 @@ export class SiteController {
     return this.siteService.moderateReview(businessId, reviewId, body);
   }
 
-  @UseGuards(PublicRateLimitGuard)
+  @UseGuards(PublicRateLimitGuard, HoneypotGuard)
   @PublicRateLimit(5, 60_000)
+  @Honeypot('_hp', 'website_url', 'company_url')
   @Post('storefront/public/:slug/intake')
   submitIntake(
     @Param('slug') slug: string,
@@ -364,16 +367,19 @@ export class SiteController {
       description: string;
       budget?: string;
       urgency?: string;
+      _hp?: string;
+      _t?: number;
     },
   ) {
+    const allowedUrgency = new Set(['low', 'normal', 'high', 'urgent']);
     return this.intakeService.submitIntake(slug, {
-      name: sanitize(body.name ?? '') ?? '',
-      email: sanitize(body.email ?? '') ?? '',
-      phone: body.phone ? (sanitize(body.phone) ?? undefined) : undefined,
-      category: sanitize(body.category ?? '') ?? '',
-      description: sanitize(body.description ?? '') ?? '',
-      budget: body.budget ? (sanitize(body.budget) ?? undefined) : undefined,
-      urgency: body.urgency,
+      name: sanitize(body.name ?? '', 200) ?? '',
+      email: sanitize(body.email ?? '', 320) ?? '',
+      phone: body.phone ? (sanitize(body.phone, 50) ?? undefined) : undefined,
+      category: sanitize(body.category ?? '', 100) ?? '',
+      description: sanitize(body.description ?? '', 5000) ?? '',
+      budget: body.budget ? (sanitize(body.budget, 100) ?? undefined) : undefined,
+      urgency: body.urgency && allowedUrgency.has(body.urgency) ? body.urgency : 'normal',
     });
   }
 
@@ -439,7 +445,14 @@ export class SiteController {
     @Param('slug') slug: string,
     @Body() body: { answers: { questionId: string; answer: string; tags?: string[] }[] },
   ) {
-    return this.qualificationService.scoreAndRecommend(slug, body.answers ?? []);
+    const cleanAnswers = (body.answers ?? []).slice(0, 50).map((a) => ({
+      questionId: sanitize(a.questionId ?? '', 100) ?? '',
+      answer: sanitize(a.answer ?? '', 1000) ?? '',
+      tags: Array.isArray(a.tags)
+        ? a.tags.slice(0, 20).map((t) => sanitize(t, 100) ?? '').filter(Boolean)
+        : undefined,
+    }));
+    return this.qualificationService.scoreAndRecommend(slug, cleanAnswers);
   }
 
   @UseGuards(PublicRateLimitGuard)
@@ -449,16 +462,27 @@ export class SiteController {
     @Param('journeyId') journeyId: string,
     @Body() body: { productId: string; executionModel?: string; customer?: { name?: string; email?: string } },
   ) {
-    return this.qualificationService.selectPackage(journeyId, body.productId, body.executionModel, body.customer);
+    const cleanProductId = sanitize(body.productId ?? '', 100) ?? '';
+    const cleanExec = body.executionModel ? sanitize(body.executionModel, 100) ?? undefined : undefined;
+    const cleanCustomer = body.customer
+      ? {
+          name: body.customer.name ? sanitize(body.customer.name, 200) ?? undefined : undefined,
+          email: body.customer.email ? sanitize(body.customer.email, 320) ?? undefined : undefined,
+        }
+      : undefined;
+    return this.qualificationService.selectPackage(journeyId, cleanProductId, cleanExec, cleanCustomer);
   }
 
-  @UseGuards(PublicRateLimitGuard)
+  @UseGuards(PublicRateLimitGuard, HoneypotGuard)
   @PublicRateLimit(5, 60_000)
+  @Honeypot('_hp', 'website_url', 'company_url')
   @Post('storefront/public/qualification/:journeyId/intake')
   qualificationIntake(
     @Param('journeyId') journeyId: string,
     @Body() body: Record<string, any>,
   ) {
-    return this.qualificationService.submitAssetIntake(journeyId, body);
+    const { _hp: _hp, _t: _t, website_url: _wu, company_url: _cu, ...rest } = body ?? {};
+    const cleanBody = sanitizeObject(rest, 5000);
+    return this.qualificationService.submitAssetIntake(journeyId, cleanBody);
   }
 }

@@ -13,6 +13,7 @@ import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-
 import { CreateProductDto } from './dto/create-product.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
+import { sanitizeString } from '../../core/utils/sanitize';
 import { BulkProductsDto } from './dto/bulk-products.dto';
 import { ReceiptService } from './receipt.service';
 import { GmailService } from './gmail.service';
@@ -836,7 +837,12 @@ export class CommerceController {
     @Param('invoiceId') invoiceId: string,
     @Body() body: { method: string; amount?: number },
   ) {
-    return this.commerce.recordPublicPaymentIntent(invoiceId, body.method, body.amount);
+    const method = sanitizeString(body?.method ?? '', 50) ?? '';
+    const amount =
+      typeof body?.amount === 'number' && Number.isFinite(body.amount) && body.amount >= 0
+        ? body.amount
+        : undefined;
+    return this.commerce.recordPublicPaymentIntent(invoiceId, method, amount);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

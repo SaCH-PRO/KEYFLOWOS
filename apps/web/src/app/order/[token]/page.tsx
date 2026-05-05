@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Image from "next/image";
-import { Package, Truck, CheckCircle2, Clock, XCircle, ExternalLink, Phone, Mail } from "lucide-react";
+import { Package, Truck, CheckCircle2, Clock, XCircle, ExternalLink, Phone, Mail, MessageCircle } from "lucide-react";
+import { PublicPageState } from "@/components/ui/public-page-state";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -29,6 +31,8 @@ type OrderData = {
     name: string;
     email?: string;
     phone?: string;
+    whatsapp?: string;
+    slug?: string;
     logoUrl?: string;
     primaryColor?: string;
     secondaryColor?: string;
@@ -59,50 +63,60 @@ export default function OrderStatusPage() {
   const params = useParams();
   const token = params.token as string;
   const [order, setOrder] = useState<OrderData | null>(null);
+  const [errorBusiness, setErrorBusiness] = useState<OrderData["business"] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     if (!token) return;
+    let cancelled = false;
     fetch(`${API_BASE}/marketplace/order-status/${token}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Order not found");
-        return res.json();
+      .then(async (res) => {
+        const json = await res.json().catch(() => null);
+        if (!res.ok) {
+          if (json?.business && !cancelled) setErrorBusiness(json.business);
+          throw new Error(json?.message || "Order not found");
+        }
+        return json;
       })
       .then((data) => {
+        if (cancelled) return;
         setOrder(data);
         setLoading(false);
       })
       .catch(() => {
+        if (cancelled) return;
         setError("We couldn't find this order. Please check the link and try again.");
         setLoading(false);
       });
-  }, [token]);
+    return () => {
+      cancelled = true;
+    };
+  }, [token, retryNonce]);
+
+  const handleRetry = () => {
+    setOrder(null);
+    setError(null);
+    setLoading(true);
+    setRetryNonce((n) => n + 1);
+  };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#111113" }}>
-        <div className="animate-pulse text-center">
-          <Package className="w-8 h-8 mx-auto mb-3" style={{ color: "#71717a" }} />
-          <p style={{ color: "#71717a" }}>Loading order details...</p>
-        </div>
-      </div>
-    );
+    return <PublicPageState variant="loading" message="Loading order details..." />;
   }
 
   if (error || !order) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#111113" }}>
-        <div className="text-center max-w-md px-6">
-          <XCircle className="w-12 h-12 mx-auto mb-4" style={{ color: "#ef4444" }} />
-          <h1 className="text-lg font-semibold mb-2" style={{ color: "#fafafa" }}>
-            Order Not Found
-          </h1>
-          <p className="text-sm" style={{ color: "#71717a" }}>
-            {error}
-          </p>
-        </div>
-      </div>
+      <PublicPageState
+        variant="error"
+        title="Order Not Found"
+        message={error ?? "We couldn't find this order. Please check the link and try again."}
+        business={errorBusiness}
+        retry={handleRetry}
+        homeHref={errorBusiness?.slug ? `/book/${errorBusiness.slug}` : "/"}
+        homeLabel={errorBusiness?.slug ? "Back to store" : "Back to home"}
+      />
     );
   }
 
@@ -311,27 +325,43 @@ export default function OrderStatusPage() {
               <p className="text-xs font-medium mb-2" style={{ color: "#71717a" }}>
                 Contact {order.business.name}
               </p>
-              <div className="flex flex-wrap gap-3 text-sm">
-                {order.business.email && (
+              <div className="flex flex-col gap-2 text-sm">
+                {order.business.whatsapp && (
                   <a
-                    href={`mailto:${order.business.email}`}
-                    className="flex items-center gap-1.5"
-                    style={{ color: "#a1a1aa" }}
+                    href={buildWhatsAppLink(
+                      order.business.whatsapp,
+                      `Hi ${order.business.name}, I have a question about order #${order.orderNumber}.`,
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-xl font-medium bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-colors"
                   >
-                    <Mail className="w-3.5 h-3.5" />
-                    {order.business.email}
+                    <MessageCircle className="w-4 h-4" />
+                    Message on WhatsApp
                   </a>
                 )}
-                {order.business.phone && (
-                  <a
-                    href={`tel:${order.business.phone}`}
-                    className="flex items-center gap-1.5"
-                    style={{ color: "#a1a1aa" }}
-                  >
-                    <Phone className="w-3.5 h-3.5" />
-                    {order.business.phone}
-                  </a>
-                )}
+                <div className="flex flex-wrap gap-3">
+                  {order.business.email && (
+                    <a
+                      href={`mailto:${order.business.email}`}
+                      className="flex items-center gap-1.5 min-h-[44px]"
+                      style={{ color: "#a1a1aa" }}
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      {order.business.email}
+                    </a>
+                  )}
+                  {order.business.phone && (
+                    <a
+                      href={`tel:${order.business.phone}`}
+                      className="flex items-center gap-1.5 min-h-[44px]"
+                      style={{ color: "#a1a1aa" }}
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      {order.business.phone}
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
 
