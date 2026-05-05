@@ -12,6 +12,11 @@ const VALID_PRESETS: RevenueReportPreset[] = [
   'aging-buckets',
   'collected-vs-expected',
   'recurring-expected',
+  'margin-by-product',
+  'margin-by-contact',
+  'revenue-per-hour',
+  'time-to-pay',
+  'time-to-close-quote',
 ];
 
 @Controller('commerce')

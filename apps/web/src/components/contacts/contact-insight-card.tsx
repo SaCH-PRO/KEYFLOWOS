@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { apiGet } from "@/lib/api";
 import { motion } from "framer-motion";
 import {
   Sparkles,
@@ -34,6 +35,14 @@ interface ContactInsightCardProps {
     options?: { dueDate?: string; priority?: string; remindAt?: string },
   ) => Promise<void> | void;
   revenueSummary?: ContactRevenueSummary | null;
+  businessId?: string | null;
+}
+
+interface ContactTimeRollup {
+  totalMinutes: number;
+  totalCost: number;
+  currency: string;
+  revenuePerHour: number | null;
 }
 
 function formatCurrency(value: number, currency: string): string {
@@ -121,8 +130,24 @@ export function ContactInsightCard({
   onRefresh,
   onAddTask,
   revenueSummary,
+  businessId,
 }: ContactInsightCardProps) {
   const [acting, setActing] = useState(false);
+  const [timeRollup, setTimeRollup] = useState<ContactTimeRollup | null>(null);
+
+  useEffect(() => {
+    if (!businessId || !contact?.id) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await apiGet<ContactTimeRollup>(
+        `/commerce/businesses/${businessId}/time-cost/contact/${contact.id}`,
+      );
+      if (!cancelled && res.data) setTimeRollup(res.data);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId, contact?.id]);
 
   if (loading && !snapshot) {
     return <ContactInsightCardSkeleton />;
@@ -267,6 +292,25 @@ export function ContactInsightCard({
           >
             <Clock className="w-3 h-3" />
             {p.bestTimeWindow.label}
+          </span>
+        )}
+        {timeRollup && timeRollup.totalMinutes > 0 && (
+          <span
+            className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-full font-medium"
+            style={{
+              background: "hsl(var(--kf-accent1) / 0.08)",
+              border: "1px solid hsl(var(--kf-accent1) / 0.18)",
+              color: "hsl(var(--kf-accent1))",
+            }}
+            title={`Total time logged: ${(timeRollup.totalMinutes / 60).toFixed(1)}h${timeRollup.revenuePerHour != null ? ` · ${formatCurrency(timeRollup.revenuePerHour, timeRollup.currency)}/hr` : ""}`}
+          >
+            <Clock className="w-3 h-3" />
+            {(timeRollup.totalMinutes / 60).toFixed(1)}h
+            {timeRollup.revenuePerHour != null && (
+              <span className="text-muted-foreground/70">
+                · {formatCurrency(timeRollup.revenuePerHour, timeRollup.currency)}/hr
+              </span>
+            )}
           </span>
         )}
         {p.dominantTopics.slice(0, 4).map((topic) => (

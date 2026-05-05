@@ -9,7 +9,13 @@ export type RevenueReportPreset =
   | 'days-to-pay'
   | 'aging-buckets'
   | 'collected-vs-expected'
-  | 'recurring-expected';
+  | 'recurring-expected'
+  // R5: leverage / margin-aware variants
+  | 'margin-by-product'
+  | 'margin-by-contact'
+  | 'revenue-per-hour'
+  | 'time-to-pay'
+  | 'time-to-close-quote';
 
 export interface RevenueReportRange {
   start: Date;
@@ -147,9 +153,370 @@ export class RevenueReportingService {
         return this.collectedVsExpected(businessId, range);
       case 'recurring-expected':
         return this.recurringExpected(businessId);
+      case 'margin-by-product':
+        return this.marginByProduct(businessId, range);
+      case 'margin-by-contact':
+        return this.marginByContact(businessId, range);
+      case 'revenue-per-hour':
+        return this.revenuePerHour(businessId, range);
+      case 'time-to-pay':
+        return this.timeToPay(businessId, range);
+      case 'time-to-close-quote':
+        return this.timeToCloseQuote(businessId, range);
       default:
         throw new Error(`Unknown revenue report preset: ${preset as string}`);
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // R5: margin-aware + time-leverage variants
+  // ---------------------------------------------------------------------
+
+  /**
+   * Per-product revenue with landed-cost subtracted to give a real gross
+   * profit number. Joins to MarginSnapshot rows linked by invoiceId (written
+   * by MarginOnPaymentListener) so we use the snapshot the operator actually
+   * saw on the invoice rather than recomputing on read.
+   */
+  async marginByProduct(businessId: string, range: RevenueReportRange) {
+    const currency = await this.businessCurrency(businessId);
+    const items = await this.prisma.client.invoiceItem.findMany({
+      where: {
+        invoice: {
+          businessId,
+          deletedAt: null,
+          status: 'PAID',
+          paidAt: { gte: range.start, lte: range.end },
+        },
+        productId: { not: null },
+      },
+      select: {
+        productId: true,
+        quantity: true,
+        total: true,
+        invoiceId: true,
+        product: { select: { name: true } },
+      },
+    });
+
+    const invoiceIds = Array.from(new Set(items.map((i) => i.invoiceId)));
+    const snapshots = invoiceIds.length === 0
+      ? []
+      : await this.prisma.client.marginSnapshot.findMany({
+          where: { invoiceId: { in: invoiceIds } },
+          select: { productId: true, invoiceId: true, landedCostEstimate: true, grossProfit: true, quantity: true },
+        });
+    const snapByKey = new Map<string, { landed: number; profit: number; qty: number }>();
+    for (const s of snapshots) {
+      snapByKey.set(`${s.productId}:${s.invoiceId}`, {
+        landed: Number(s.landedCostEstimate ?? 0),
+        profit: Number(s.grossProfit ?? 0),
+        qty: Number(s.quantity ?? 0),
+      });
+    }
+
+    const map = new Map<string, { productId: string; name: string; revenue: number; cost: number; profit: number; units: number }>();
+    for (const it of items) {
+      const productId = it.productId as string;
+      const key = productId;
+      const total = Number(it.total ?? 0);
+      const snap = snapByKey.get(`${productId}:${it.invoiceId}`);
+      const cost = snap ? snap.landed * (snap.qty || it.quantity || 1) : 0;
+      const profit = snap ? snap.profit : total - cost;
+      const existing = map.get(key);
+      if (existing) {
+        existing.revenue += total;
+        existing.cost += cost;
+        existing.profit += profit;
+        existing.units += it.quantity ?? 0;
+      } else {
+        map.set(key, { productId, name: it.product?.name ?? 'Product', revenue: total, cost, profit, units: it.quantity ?? 0 });
+      }
+    }
+
+    const rows = Array.from(map.values())
+      .map((r) => ({
+        ...r,
+        revenue: Math.round(r.revenue * 100) / 100,
+        cost: Math.round(r.cost * 100) / 100,
+        profit: Math.round(r.profit * 100) / 100,
+        marginPct: r.revenue > 0 ? Math.round((r.profit / r.revenue) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.profit - a.profit);
+
+    const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
+    const totalCost = rows.reduce((s, r) => s + r.cost, 0);
+    const totalProfit = rows.reduce((s, r) => s + r.profit, 0);
+    return {
+      rows,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      totalCost: Math.round(totalCost * 100) / 100,
+      totalProfit: Math.round(totalProfit * 100) / 100,
+      currency,
+    };
+  }
+
+  /**
+   * Per-contact revenue, landed cost (from product margin snapshots) and time
+   * cost (from TimeCostEntry) — i.e. "what did this customer actually leave
+   * on the table for us after we paid for goods + paid the team to serve
+   * them?".
+   */
+  async marginByContact(businessId: string, range: RevenueReportRange) {
+    const currency = await this.businessCurrency(businessId);
+    const [invoices, snapshots, timeEntries] = await Promise.all([
+      this.prisma.client.invoice.findMany({
+        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: range.start, lte: range.end } },
+        select: {
+          id: true,
+          total: true,
+          contact: { select: { id: true, displayName: true, firstName: true, lastName: true, companyName: true } },
+        },
+      }),
+      this.prisma.client.marginSnapshot.findMany({
+        where: { invoiceId: { not: null }, createdAt: { gte: range.start, lte: range.end } },
+        select: { invoiceId: true, landedCostEstimate: true, quantity: true, grossProfit: true },
+      }),
+      this.prisma.client.timeCostEntry.findMany({
+        where: { businessId, occurredAt: { gte: range.start, lte: range.end }, contactId: { not: null } },
+        select: { contactId: true, costAmount: true, minutes: true },
+      }),
+    ]);
+
+    const costByInvoice = new Map<string, number>();
+    for (const s of snapshots) {
+      if (!s.invoiceId) continue;
+      const c = Number(s.landedCostEstimate ?? 0) * Number(s.quantity ?? 1);
+      costByInvoice.set(s.invoiceId, (costByInvoice.get(s.invoiceId) ?? 0) + c);
+    }
+
+    const map = new Map<string, { contactId: string | null; name: string; revenue: number; goodsCost: number; timeCost: number; minutes: number }>();
+    for (const inv of invoices) {
+      const id = inv.contact?.id ?? 'unknown';
+      const existing = map.get(id);
+      const total = Number(inv.total ?? 0);
+      const goods = costByInvoice.get(inv.id) ?? 0;
+      if (existing) {
+        existing.revenue += total;
+        existing.goodsCost += goods;
+      } else {
+        map.set(id, {
+          contactId: inv.contact?.id ?? null,
+          name: this.contactDisplayName(inv.contact),
+          revenue: total,
+          goodsCost: goods,
+          timeCost: 0,
+          minutes: 0,
+        });
+      }
+    }
+    for (const t of timeEntries) {
+      const id = t.contactId as string;
+      const existing = map.get(id);
+      const cost = Number(t.costAmount ?? 0);
+      if (existing) {
+        existing.timeCost += cost;
+        existing.minutes += t.minutes;
+      } else {
+        map.set(id, { contactId: id, name: 'Unknown', revenue: 0, goodsCost: 0, timeCost: cost, minutes: t.minutes });
+      }
+    }
+
+    const rows = Array.from(map.values())
+      .map((r) => {
+        const profit = r.revenue - r.goodsCost - r.timeCost;
+        return {
+          ...r,
+          revenue: Math.round(r.revenue * 100) / 100,
+          goodsCost: Math.round(r.goodsCost * 100) / 100,
+          timeCost: Math.round(r.timeCost * 100) / 100,
+          profit: Math.round(profit * 100) / 100,
+          marginPct: r.revenue > 0 ? Math.round((profit / r.revenue) * 1000) / 10 : 0,
+        };
+      })
+      .sort((a, b) => b.profit - a.profit);
+
+    return {
+      rows,
+      totalRevenue: Math.round(rows.reduce((s, r) => s + r.revenue, 0) * 100) / 100,
+      totalGoodsCost: Math.round(rows.reduce((s, r) => s + r.goodsCost, 0) * 100) / 100,
+      totalTimeCost: Math.round(rows.reduce((s, r) => s + r.timeCost, 0) * 100) / 100,
+      totalProfit: Math.round(rows.reduce((s, r) => s + r.profit, 0) * 100) / 100,
+      currency,
+    };
+  }
+
+  /**
+   * Per-staff revenue-per-hour: total paid invoices attributed to a staff
+   * member (via RevenueAttribution.staffId or Booking.staffId) divided by
+   * total minutes that staff member logged in the same period.
+   */
+  async revenuePerHour(businessId: string, range: RevenueReportRange) {
+    const currency = await this.businessCurrency(businessId);
+    const [attributions, bookings, time] = await Promise.all([
+      this.prisma.client.revenueAttribution.findMany({
+        where: { businessId, occurredAt: { gte: range.start, lte: range.end }, staffId: { not: null } },
+        select: { staffId: true, amount: true, attributionPercent: true, revenueType: true, revenueId: true },
+      }),
+      this.prisma.client.booking.findMany({
+        where: {
+          businessId,
+          deletedAt: null,
+          staffId: { not: null },
+          invoice: { is: { status: 'PAID', deletedAt: null, paidAt: { gte: range.start, lte: range.end } } },
+        },
+        select: { id: true, staffId: true, invoice: { select: { total: true, id: true } } },
+      }),
+      this.prisma.client.timeCostEntry.findMany({
+        where: { businessId, occurredAt: { gte: range.start, lte: range.end }, staffId: { not: null } },
+        select: { staffId: true, minutes: true, costAmount: true },
+      }),
+    ]);
+
+    // Dedupe: a booking is already counted if its invoice or its own id has
+    // an attribution row credited to the same staff. This prevents double-
+    // counting when both layers (attribution + the legacy booking->invoice
+    // join) fire for the same revenue event.
+    const coveredKeys = new Set<string>();
+    const map = new Map<string, { staffId: string; name: string; revenue: number; minutes: number; cost: number }>();
+    for (const a of attributions) {
+      const id = a.staffId as string;
+      const credited = Number(a.amount ?? 0) * (Number(a.attributionPercent ?? 100) / 100);
+      const existing = map.get(id);
+      if (existing) existing.revenue += credited;
+      else map.set(id, { staffId: id, name: '', revenue: credited, minutes: 0, cost: 0 });
+      coveredKeys.add(`${id}|${a.revenueType}|${a.revenueId}`);
+    }
+    for (const b of bookings) {
+      const id = b.staffId as string;
+      const invoiceId = b.invoice?.id;
+      const isCovered =
+        coveredKeys.has(`${id}|BOOKING|${b.id}`) ||
+        (invoiceId ? coveredKeys.has(`${id}|INVOICE|${invoiceId}`) : false);
+      if (isCovered) continue;
+      const existing = map.get(id);
+      const total = Number(b.invoice?.total ?? 0);
+      if (existing) existing.revenue += total;
+      else map.set(id, { staffId: id, name: '', revenue: total, minutes: 0, cost: 0 });
+    }
+    for (const t of time) {
+      const id = t.staffId as string;
+      const existing = map.get(id);
+      if (existing) {
+        existing.minutes += t.minutes;
+        existing.cost += Number(t.costAmount ?? 0);
+      } else {
+        map.set(id, { staffId: id, name: '', revenue: 0, minutes: t.minutes, cost: Number(t.costAmount ?? 0) });
+      }
+    }
+
+    const staffIds = Array.from(map.keys());
+    if (staffIds.length > 0) {
+      const staff = await this.prisma.client.staffMember.findMany({
+        where: { id: { in: staffIds }, businessId },
+        select: { id: true, name: true },
+      });
+      for (const s of staff) {
+        const r = map.get(s.id);
+        if (r) r.name = s.name;
+      }
+    }
+
+    const rows = Array.from(map.values())
+      .map((r) => {
+        const hours = r.minutes / 60;
+        const revenuePerHour = hours > 0 ? Math.round((r.revenue / hours) * 100) / 100 : null;
+        return {
+          ...r,
+          revenue: Math.round(r.revenue * 100) / 100,
+          cost: Math.round(r.cost * 100) / 100,
+          hours: Math.round(hours * 100) / 100,
+          revenuePerHour,
+          profit: Math.round((r.revenue - r.cost) * 100) / 100,
+        };
+      })
+      .sort((a, b) => (b.revenuePerHour ?? 0) - (a.revenuePerHour ?? 0));
+
+    return {
+      rows,
+      totalRevenue: Math.round(rows.reduce((s, r) => s + r.revenue, 0) * 100) / 100,
+      totalHours: Math.round(rows.reduce((s, r) => s + r.hours, 0) * 100) / 100,
+      currency,
+    };
+  }
+
+  /**
+   * Time-to-pay distribution: time between invoice.sentAt and invoice.paidAt
+   * for invoices paid in `range`. Differs from `daysToPay` by emitting a
+   * histogram + median in addition to the per-contact / per-segment averages.
+   */
+  async timeToPay(businessId: string, range: RevenueReportRange) {
+    const invoices = await this.prisma.client.invoice.findMany({
+      where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: range.start, lte: range.end } },
+      select: { issueDate: true, sentAt: true, paidAt: true, total: true },
+    });
+    const samples: number[] = [];
+    let revenuePaidLate = 0;
+    let revenuePaidOnTime = 0;
+    for (const inv of invoices) {
+      const start = inv.sentAt ?? inv.issueDate;
+      if (!start || !inv.paidAt) continue;
+      const days = (new Date(inv.paidAt).getTime() - new Date(start).getTime()) / 86_400_000;
+      if (days < 0) continue;
+      samples.push(days);
+      if (days > 14) revenuePaidLate += Number(inv.total ?? 0);
+      else revenuePaidOnTime += Number(inv.total ?? 0);
+    }
+    samples.sort((a, b) => a - b);
+    const buckets = [
+      { label: '0-3d', min: 0, max: 3 },
+      { label: '4-7d', min: 4, max: 7 },
+      { label: '8-14d', min: 8, max: 14 },
+      { label: '15-30d', min: 15, max: 30 },
+      { label: '30+d', min: 31, max: Number.POSITIVE_INFINITY },
+    ].map((b) => ({ ...b, count: samples.filter((s) => s >= b.min && s <= b.max).length }));
+    const avg = samples.length > 0 ? samples.reduce((s, n) => s + n, 0) / samples.length : 0;
+    const median = samples.length > 0 ? samples[Math.floor(samples.length / 2)] : 0;
+    return {
+      sampleCount: samples.length,
+      avgDays: Math.round(avg * 10) / 10,
+      medianDays: Math.round(median * 10) / 10,
+      buckets,
+      revenuePaidOnTime: Math.round(revenuePaidOnTime * 100) / 100,
+      revenuePaidLate: Math.round(revenuePaidLate * 100) / 100,
+    };
+  }
+
+  /**
+   * Time-to-close on quotes: quote.sentAt → quote.acceptedAt.
+   */
+  async timeToCloseQuote(businessId: string, range: RevenueReportRange) {
+    const quotes = await this.prisma.client.quote.findMany({
+      where: {
+        businessId,
+        deletedAt: null,
+        acceptedAt: { gte: range.start, lte: range.end, not: null },
+      },
+      select: { sentAt: true, acceptedAt: true, total: true },
+    });
+    const samples: number[] = [];
+    let totalValue = 0;
+    for (const q of quotes) {
+      if (!q.sentAt || !q.acceptedAt) continue;
+      const days = (new Date(q.acceptedAt).getTime() - new Date(q.sentAt).getTime()) / 86_400_000;
+      if (days < 0) continue;
+      samples.push(days);
+      totalValue += Number(q.total ?? 0);
+    }
+    samples.sort((a, b) => a - b);
+    const avg = samples.length > 0 ? samples.reduce((s, n) => s + n, 0) / samples.length : 0;
+    const median = samples.length > 0 ? samples[Math.floor(samples.length / 2)] : 0;
+    return {
+      sampleCount: samples.length,
+      avgDays: Math.round(avg * 10) / 10,
+      medianDays: Math.round(median * 10) / 10,
+      totalAcceptedValue: Math.round(totalValue * 100) / 100,
+    };
   }
 
   /**

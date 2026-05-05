@@ -23,6 +23,20 @@ export interface RecordRevenueInput {
   referralCode?: string | null;
   visitorId?: string | null;
   occurredAt?: Date;
+  campaignId?: string | null;
+  staffId?: string | null;
+  attributionPercent?: number | null;
+}
+
+export interface UpdateRevenueAttributionInput {
+  source?: RevenueSource | string;
+  sourceDetail?: string | null;
+  contactId?: string | null;
+  referralCode?: string | null;
+  campaignId?: string | null;
+  staffId?: string | null;
+  attributionPercent?: number;
+  editedBy?: string | null;
 }
 
 /**
@@ -96,6 +110,9 @@ export class RevenueAttributionService {
         referralContactId,
         referralCode: input.referralCode ?? null,
         visitorId: input.visitorId ?? null,
+        campaignId: input.campaignId ?? null,
+        staffId: input.staffId ?? null,
+        attributionPercent: input.attributionPercent ?? 100,
         amount: input.amount,
         currency: input.currency ?? 'TTD',
         occurredAt,
@@ -107,7 +124,130 @@ export class RevenueAttributionService {
         referralContactId: referralContactId ?? undefined,
         referralCode: input.referralCode ?? undefined,
         visitorId: input.visitorId ?? undefined,
+        // Only seed campaign/staff/percent on initial record. Manual edits via
+        // `update()` are preserved across re-records.
         occurredAt,
+      },
+    });
+  }
+
+  /**
+   * Manual edit of an attribution row. Used by the invoice/order detail UI
+   * when the operator wants to override the auto-attributed source/staff/
+   * campaign/percent. Stamps `editedAt` + `editedBy` for audit.
+   */
+  async update(
+    businessId: string,
+    revenueType: RevenueType,
+    revenueId: string,
+    patch: UpdateRevenueAttributionInput,
+  ) {
+    const existing = await this.prisma.client.revenueAttribution.findUnique({
+      where: {
+        businessId_revenueType_revenueId: { businessId, revenueType, revenueId },
+      },
+    });
+    if (!existing) {
+      // No row yet — synthesize one from the underlying revenue artifact so
+      // the operator can override attribution before a payment ever lands.
+      // We pull amount/contact/currency from the artifact itself.
+      const seed = await this.deriveSeedFromArtifact(businessId, revenueType, revenueId);
+      if (!seed) return null;
+      await this.record({
+        businessId,
+        revenueType,
+        revenueId,
+        amount: seed.amount,
+        currency: seed.currency,
+        contactId: seed.contactId,
+        source: (patch.source as RevenueSource) ?? 'manual',
+        sourceDetail: patch.sourceDetail ?? null,
+        campaignId: patch.campaignId ?? null,
+        staffId: patch.staffId ?? null,
+        attributionPercent: patch.attributionPercent ?? 100,
+        referralCode: patch.referralCode ?? null,
+        occurredAt: seed.occurredAt,
+      });
+      return this.findOne(businessId, revenueType, revenueId);
+    }
+
+    let attributionPercent = patch.attributionPercent;
+    if (typeof attributionPercent === 'number') {
+      attributionPercent = Math.max(0, Math.min(100, attributionPercent));
+    }
+
+    return this.prisma.client.revenueAttribution.update({
+      where: { id: existing.id },
+      data: {
+        source: patch.source ?? undefined,
+        sourceDetail: patch.sourceDetail === undefined ? undefined : patch.sourceDetail,
+        contactId: patch.contactId === undefined ? undefined : patch.contactId,
+        referralCode: patch.referralCode === undefined ? undefined : patch.referralCode,
+        campaignId: patch.campaignId === undefined ? undefined : patch.campaignId,
+        staffId: patch.staffId === undefined ? undefined : patch.staffId,
+        attributionPercent: attributionPercent ?? undefined,
+        editedAt: new Date(),
+        editedBy: patch.editedBy ?? null,
+      },
+    });
+  }
+
+  /**
+   * Look up the underlying revenue artifact (invoice / booking / order) so
+   * we can synthesize an attribution row when the operator wants to edit one
+   * before a payment lands.
+   */
+  private async deriveSeedFromArtifact(
+    businessId: string,
+    revenueType: RevenueType,
+    revenueId: string,
+  ): Promise<{ amount: number; currency: string; contactId: string | null; occurredAt: Date } | null> {
+    if (revenueType === 'INVOICE') {
+      const inv = await this.prisma.client.invoice.findFirst({
+        where: { id: revenueId, businessId, deletedAt: null },
+        select: { total: true, currency: true, contactId: true, paidAt: true, issueDate: true, createdAt: true },
+      });
+      if (!inv) return null;
+      return {
+        amount: Math.max(0.01, Number(inv.total ?? 0)),
+        currency: inv.currency ?? 'TTD',
+        contactId: inv.contactId ?? null,
+        occurredAt: inv.paidAt ?? inv.issueDate ?? inv.createdAt,
+      };
+    }
+    if (revenueType === 'BOOKING') {
+      const b = await this.prisma.client.booking.findFirst({
+        where: { id: revenueId, businessId, deletedAt: null },
+        select: { contactId: true, startTime: true, createdAt: true, invoice: { select: { total: true, currency: true } } },
+      });
+      if (!b) return null;
+      return {
+        amount: Math.max(0.01, Number(b.invoice?.total ?? 0)),
+        currency: b.invoice?.currency ?? 'TTD',
+        contactId: b.contactId ?? null,
+        occurredAt: b.startTime ?? b.createdAt,
+      };
+    }
+    if (revenueType === 'ORDER') {
+      const o = await this.prisma.client.marketplaceOrder.findFirst({
+        where: { id: revenueId, businessId },
+        select: { total: true, currency: true, createdAt: true },
+      });
+      if (!o) return null;
+      return {
+        amount: Math.max(0.01, Number(o.total ?? 0)),
+        currency: o.currency ?? 'TTD',
+        contactId: null,
+        occurredAt: o.createdAt,
+      };
+    }
+    return null;
+  }
+
+  async findOne(businessId: string, revenueType: RevenueType, revenueId: string) {
+    return this.prisma.client.revenueAttribution.findUnique({
+      where: {
+        businessId_revenueType_revenueId: { businessId, revenueType, revenueId },
       },
     });
   }

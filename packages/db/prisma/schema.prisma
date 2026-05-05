@@ -4675,10 +4675,21 @@ model MarginSnapshot {
   currency           String @default("TTD")
   snapshotReason     String? @map("snapshot_reason") // e.g. price_change, cost_update, manual
 
+  // R5: optional link from a margin snapshot to the revenue event that
+  // triggered it. Populated by the payment-received-for-product-order hook
+  // so the invoice detail drawer can display the margin chip and the
+  // RevenueReportingService can join margin to revenue.
+  invoiceId   String? @map("invoice_id")
+  orderId     String? @map("order_id")
+  quantity    Float?  // units sold on the linked revenue event
+  grossProfit Float?  @map("gross_profit")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([productId])
   @@index([productId, createdAt])
+  @@index([invoiceId])
+  @@index([orderId])
   @@map("margin_snapshots")
 }
 
@@ -5865,18 +5876,67 @@ model RevenueAttribution {
   referralCode       String?  @map("referral_code")
   visitorId          String?  @map("visitor_id")
 
+  // R5: optional secondary attribution targets so a revenue row can be linked
+  // to the campaign / staff member that drove it. Single dominant source is
+  // assumed for v1 (no multi-touch); `attributionPercent` defaults to 100.
+  campaignId         String?  @map("campaign_id")
+  staffId            String?  @map("staff_id")
+  attributionPercent Float    @default(100) @map("attribution_percent")
+  editedAt           DateTime? @map("edited_at")
+  editedBy           String?  @map("edited_by")
+
   amount             Float
   currency           String   @default("TTD")
 
   occurredAt         DateTime @default(now()) @map("occurred_at")
   createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@unique([businessId, revenueType, revenueId])
   @@index([businessId, occurredAt])
   @@index([businessId, source, occurredAt])
   @@index([businessId, referralContactId])
   @@index([businessId, contactId])
+  @@index([businessId, campaignId])
+  @@index([businessId, staffId])
   @@map("revenue_attributions")
+}
+
+/// R5: Time-cost ledger. One row = one block of minutes spent on a related
+/// invoice/quote/booking/project/order, with optional staff cost rate so we
+/// can compute revenue-per-hour and "what did this client cost us in time?"
+/// rollups.
+///
+/// `refType` is one of: INVOICE | QUOTE | BOOKING | PROJECT | ORDER. The
+/// `refId` is intentionally NOT a foreign key because the kind varies; we
+/// treat it as a polymorphic pointer + always carry `businessId` for tenant
+/// isolation.
+model TimeCostEntry {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+
+  refType     String   @map("ref_type")
+  refId       String   @map("ref_id")
+  contactId   String?  @map("contact_id")
+  staffId     String?  @map("staff_id")
+  userId      String?  @map("user_id")
+
+  minutes     Int
+  costRate    Float?   @map("cost_rate")    // per-hour cost in business currency
+  costAmount  Float?   @map("cost_amount")  // computed = minutes/60 * costRate
+  currency    String   @default("TTD")
+  notes       String?
+  source      String   @default("manual")   // manual | timer | import
+
+  occurredAt  DateTime @default(now()) @map("occurred_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, refType, refId])
+  @@index([businessId, contactId, occurredAt])
+  @@index([businessId, staffId, occurredAt])
+  @@index([businessId, occurredAt])
+  @@map("time_cost_entries")
 }
 
 /// Daily aggregate of storefront conversion funnel events.

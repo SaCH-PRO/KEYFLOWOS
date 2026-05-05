@@ -38,6 +38,9 @@ import { InvoiceTemplateRenderer } from "./invoice-templates/template-renderer";
 import { printFromRef } from "./invoice-templates/print-document";
 import type { TemplateId, InvoiceTemplateData } from "./invoice-templates/template-types";
 import { InvoiceTimeline } from "./invoice-timeline";
+import { TimeLogWidget } from "./time-log-widget";
+import { AttributionEditor } from "./attribution-editor";
+import { LeverageMetricsSection } from "./leverage-metrics-section";
 
 export interface BusinessDataForPreview {
   name: string;
@@ -733,6 +736,32 @@ export function BillingDetailModal({
                 invoiceId={itemId}
                 accentColor={theme.accentColor}
                 refreshKey={timelineRefreshKey}
+              />
+            )}
+
+            {itemId && businessIdForTimeline && (type === "invoice" || type === "quote") && (
+              <LeverageMetricsSection
+                businessId={businessIdForTimeline}
+                type={type}
+                itemId={itemId}
+                accentColor={theme.accentColor}
+              />
+            )}
+
+            {itemId && businessIdForTimeline && (type === "invoice" || type === "quote") && (
+              <TimeLogWidget
+                businessId={businessIdForTimeline}
+                refType={type === "invoice" ? "INVOICE" : "QUOTE"}
+                refId={itemId}
+                accentColor={theme.accentColor}
+              />
+            )}
+            {itemId && businessIdForTimeline && type === "invoice" && (
+              <AttributionEditor
+                businessId={businessIdForTimeline}
+                revenueType="INVOICE"
+                revenueId={itemId}
+                accentColor={theme.accentColor}
               />
             )}
 

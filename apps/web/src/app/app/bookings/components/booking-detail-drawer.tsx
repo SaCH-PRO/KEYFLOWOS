@@ -31,6 +31,7 @@ import { STATUS_STYLE, formatTime, formatFullDate, contactName } from "./booking
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 import Link from "next/link";
 import { googleDeepLinks } from "@/lib/google-deep-links";
+import { TimeLogWidget } from "../../commerce/components/time-log-widget";
 
 interface BookingDetailDrawerProps {
   selectedBooking: Booking;
@@ -49,6 +50,7 @@ interface BookingDetailDrawerProps {
   ) => void;
   onCreateInvoice?: (booking: Booking) => void;
   calendarConnected: boolean;
+  businessId?: string | null;
 }
 
 function toDateStr(d: Date): string {
@@ -186,6 +188,7 @@ export default function BookingDetailDrawer({
   onUpdateLocation,
   onCreateInvoice,
   calendarConnected,
+  businessId,
 }: BookingDetailDrawerProps) {
   const [showReschedule, setShowReschedule] = useState(false);
   const [editingNotes, setEditingNotes] = useState(false);
@@ -693,6 +696,15 @@ export default function BookingDetailDrawer({
               </Link>
             </div>
           </div>
+        )}
+
+        {businessId && (
+          <TimeLogWidget
+            businessId={businessId}
+            refType="BOOKING"
+            refId={selectedBooking.id}
+            accentColor="hsl(var(--kf-accent1))"
+          />
         )}
       </motion.div>
     </motion.div>
