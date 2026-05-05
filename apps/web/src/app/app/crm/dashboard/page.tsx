@@ -13,6 +13,7 @@ import {
   fetchDueTasks,
   fetchSegmentSummary,
 } from "@/lib/client";
+import { NextActionsWidget } from "./next-actions-widget";
 
 type SegmentCounts = { [key: string]: number };
 
@@ -203,6 +204,8 @@ export default function CrmDashboardPage() {
           </div>
         </SectionCard>
       </CardGrid>
+
+      <NextActionsWidget windowDays={7} limit={25} />
 
       <SectionCard
         title="Recent activity"
