@@ -31,6 +31,8 @@ import { BookingsView } from "./components/bookings-view";
 import { MarketingView } from "./components/marketing-view";
 import { CashFlowForecastView } from "./components/cash-flow-forecast-view";
 import { exportReportPDF, exportReportCSV } from "./components/export-pdf";
+import { RevenueReportsView } from "./components/revenue-reports-view";
+import type { RevenueReportPreset } from "@/lib/client";
 
 const REPORT_TAB_KEYS = REPORT_TABS.map((t) => t.id);
 
@@ -72,7 +74,7 @@ export default function ReportsPage() {
   const generateReport = useCallback(async (overrideTab?: ReportType) => {
     const tab = overrideTab || activeTab;
     if (!businessId) return;
-    if (tab === "cash-flow") {
+    if (tab === "cash-flow" || tab === "revenue-detail") {
       setLoading(false);
       setGenerating(false);
       return;
@@ -269,6 +271,13 @@ export default function ReportsPage() {
         )}
         {activeTab === "cash-flow" && !report && !loading ? (
           <CashFlowForecastView businessId={businessId} />
+        ) : activeTab === "revenue-detail" ? (
+          <RevenueReportsView
+            businessId={businessId}
+            startDate={(datePreset === "custom" && customStart) ? new Date(customStart).toISOString() : (datePreset !== "custom" ? getDateRange(datePreset).start : undefined)}
+            endDate={(datePreset === "custom" && customEnd) ? new Date(customEnd).toISOString() : (datePreset !== "custom" ? getDateRange(datePreset).end : undefined)}
+            initialPreset={(searchParams.get("rev") as RevenueReportPreset | null) || undefined}
+          />
         ) : loading && !report ? (
           <div className="space-y-6">
             <div className="flex items-center gap-3 py-4">

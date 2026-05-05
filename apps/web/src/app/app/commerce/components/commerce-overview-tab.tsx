@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useEffect, useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   DollarSign,
@@ -326,6 +327,16 @@ export function CommerceOverviewTab({
   if (loading && !stats) return <OverviewSkeleton />;
 
   const rk = revenueOverview?.kpis;
+  // Build deep-link query for the matching Revenue Reports preset.
+  // We pre-apply the current month so the report opens with the same period
+  // operators see in the Overview KPIs.
+  const reportHref = (preset: string) => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const end = now.toISOString();
+    const qs = new URLSearchParams({ tab: "revenue-detail", rev: preset, startDate: start, endDate: end });
+    return `/app/reports?${qs.toString()}`;
+  };
   const kpiCards = rk
     ? [
         {
@@ -333,36 +344,42 @@ export function CommerceOverviewTab({
           label: "Collected this month",
           value: formatCurrencyCompact(rk.collectedThisMonth, currency),
           color: "#10b981",
+          href: reportHref("collected-vs-expected"),
         },
         {
           icon: Clock,
           label: "Outstanding",
           value: formatCurrencyCompact(rk.outstanding, currency),
           color: "#f59e0b",
+          href: reportHref("aging-buckets"),
         },
         {
           icon: AlertTriangle,
           label: "Overdue",
           value: rk.overdueCount > 0 ? formatCurrencyCompact(rk.overdue, currency) : "—",
           color: rk.overdueCount > 0 ? "#ef4444" : "#6b7280",
+          href: reportHref("aging-buckets"),
         },
         {
           icon: FileText,
           label: "Quote pipeline",
           value: formatCurrencyCompact(rk.quotePipeline, currency),
           color: "#a855f7",
+          href: reportHref("quote-conversion"),
         },
         {
           icon: Repeat,
           label: "Recurring expected",
           value: formatCurrencyCompact(rk.recurringExpected, currency),
           color: "#6366f1",
+          href: reportHref("recurring-expected"),
         },
         {
           icon: Percent,
           label: "Cash collection rate",
           value: `${Math.round(rk.cashCollectionRate * 100)}%`,
           color: "hsl(142 76% 36%)",
+          href: reportHref("days-to-pay"),
         },
       ]
     : [
@@ -371,36 +388,42 @@ export function CommerceOverviewTab({
           label: "Collected this month",
           value: formatCurrencyCompact(kpi.collected, currency),
           color: "#10b981",
+          href: reportHref("collected-vs-expected"),
         },
         {
           icon: Clock,
           label: "Outstanding",
           value: formatCurrencyCompact(kpi.outstanding, currency),
           color: "#f59e0b",
+          href: reportHref("aging-buckets"),
         },
         {
           icon: AlertTriangle,
           label: "Overdue",
           value: kpi.overdueCount > 0 ? formatCurrencyCompact(kpi.overdue, currency) : "—",
           color: kpi.overdueCount > 0 ? "#ef4444" : "#6b7280",
+          href: reportHref("aging-buckets"),
         },
         {
           icon: FileText,
           label: "Quote pipeline",
           value: "—",
           color: "#a855f7",
+          href: reportHref("quote-conversion"),
         },
         {
           icon: Repeat,
           label: "Recurring expected",
           value: "—",
           color: "#6366f1",
+          href: reportHref("recurring-expected"),
         },
         {
           icon: Percent,
           label: "Cash collection rate",
           value: "—",
           color: "hsl(142 76% 36%)",
+          href: reportHref("days-to-pay"),
         },
       ];
 
@@ -413,9 +436,11 @@ export function CommerceOverviewTab({
     >
       <motion.div variants={stagger.item} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {kpiCards.map((card) => (
-          <div
+          <Link
             key={card.label}
-            className="rounded-xl border border-border/50 bg-card p-3 hover:border-border/80 transition-colors"
+            href={card.href}
+            title="View detailed reports"
+            className="block rounded-xl border border-border/50 bg-card p-3 hover:border-[hsl(var(--kf-accent1))]/50 transition-colors"
           >
             <div className="flex items-center gap-1.5 mb-1.5">
               <card.icon className="w-3.5 h-3.5 shrink-0" style={{ color: card.color }} />
@@ -426,9 +451,18 @@ export function CommerceOverviewTab({
             <div className="text-lg font-bold tracking-tight" style={{ color: card.color }}>
               {card.value}
             </div>
-          </div>
+          </Link>
         ))}
       </motion.div>
+
+      <div className="flex justify-end">
+        <Link
+          href={reportHref("by-source")}
+          className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[hsl(var(--kf-accent1))] hover:underline"
+        >
+          View detailed reports →
+        </Link>
+      </div>
 
       {revenueOverview && (
         <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-3 gap-3">
