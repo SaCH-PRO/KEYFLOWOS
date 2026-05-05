@@ -24,7 +24,10 @@ import {
   updateContact,
   fetchContactPlaybook,
   updateContactPlaybook,
+  setContactRelationshipHealthOverride,
+  clearContactRelationshipHealthOverride,
 } from "@/lib/client";
+import { CONTACT_RELATIONSHIP_HEALTH_VALUES } from "@keyflow/shared";
 import {
   getContactAgeGroupLabel,
   getContactRelationshipTypeLabel,
@@ -486,11 +489,20 @@ export default function ContactDetailPage() {
               Relationship: {getContactRelationshipTypeLabel(c.relationshipType)}
             </div>
           )}
-          {c.relationshipHealth && (
-            <div className="text-xs text-muted-foreground mt-1">
-              Health: {getContactRelationshipHealthLabel(c.relationshipHealth)}
-            </div>
-          )}
+          <RelationshipHealthControl
+            contact={c}
+            onUpdated={(updated) => {
+              setData((prev) =>
+                prev && prev.contact
+                  ? {
+                      ...prev,
+                      contact: { ...prev.contact, ...updated } as ContactWithTags,
+                    }
+                  : prev,
+              );
+            }}
+          />
+
           {c.priority && (
             <div className="text-xs text-muted-foreground mt-1">
               Priority: {getContactPriorityLabel(c.priority)}
@@ -822,5 +834,86 @@ function highlightMentions(text: string) {
         ),
       )}
     </span>
+  );
+}
+
+function RelationshipHealthControl({
+  contact,
+  onUpdated,
+}: {
+  contact: ContactWithTags;
+  onUpdated: (next: Partial<ContactWithTags>) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const override = (contact.custom as Record<string, unknown> | null | undefined)
+    ?.relationshipHealthOverride as
+    | { manual?: boolean; value?: string; at?: string }
+    | undefined;
+  const isManual = !!override?.manual;
+  const current = contact.relationshipHealth ?? "";
+
+  const apply = async (value: string) => {
+    if (!value || value === current) return;
+    setBusy(true);
+    const { data, error } = await setContactRelationshipHealthOverride(
+      "default",
+      contact.id,
+      value as "HOT" | "WARM" | "COLD" | "DORMANT" | "AT_RISK",
+    );
+    setBusy(false);
+    if (error || !data) {
+      toast.error(error ?? "Could not update relationship health");
+      return;
+    }
+    onUpdated(data as Partial<ContactWithTags>);
+    toast.success(`Health set to ${getContactRelationshipHealthLabel(value)} (manual)`);
+  };
+
+  const reset = async () => {
+    setBusy(true);
+    const { data, error } = await clearContactRelationshipHealthOverride("default", contact.id);
+    setBusy(false);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    if (data) onUpdated(data as Partial<ContactWithTags>);
+    toast.success("Health reset to auto-computed");
+  };
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <span className="text-xs text-muted-foreground">Health:</span>
+      <select
+        disabled={busy}
+        value={current}
+        onChange={(e) => void apply(e.target.value)}
+        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs"
+      >
+        <option value="" disabled>
+          Select…
+        </option>
+        {CONTACT_RELATIONSHIP_HEALTH_VALUES.map((v) => (
+          <option key={v} value={v}>
+            {getContactRelationshipHealthLabel(v)}
+          </option>
+        ))}
+      </select>
+      {isManual ? (
+        <>
+          <Badge tone="info">Manual</Badge>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void reset()}
+            className="text-xs text-blue-600 underline disabled:opacity-50"
+          >
+            Reset to auto
+          </button>
+        </>
+      ) : (
+        <Badge tone="default">Auto</Badge>
+      )}
+    </div>
   );
 }

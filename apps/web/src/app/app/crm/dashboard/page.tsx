@@ -5,9 +5,11 @@ import { useReturnNavigation } from "@/lib/use-return-navigation";
 import Link from "next/link";
 import { Badge, Button, Card, CardGrid, ContentContainer, Drawer, Input, PageHeader } from "@keyflow/ui";
 import {
+  AtRiskContact,
   Contact,
   ContactEvent,
   ContactTask,
+  fetchAtRiskContacts,
   fetchContacts,
   fetchContactEvents,
   fetchDueTasks,
@@ -48,6 +50,7 @@ export default function CrmDashboardPage() {
   const [tasks, setTasks] = useState<ContactTask[]>([]);
   const [events, setEvents] = useState<ContactEvent[]>([]);
   const [topContacts, setTopContacts] = useState<Contact[]>([]);
+  const [atRisk, setAtRisk] = useState<AtRiskContact[]>([]);
   const [search, setSearch] = useState("");
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [, startTransition] = useTransition();
@@ -57,6 +60,7 @@ export default function CrmDashboardPage() {
       void fetchSegmentSummary().then(({ data }) => setSegments(data ?? {}));
       void fetchDueTasks().then(({ data }) => setTasks(data ?? []));
       void fetchContactEvents("").then(() => {});
+      void fetchAtRiskContacts(undefined, 8).then(({ data }) => setAtRisk(data ?? []));
     });
   }, []);
 
@@ -89,6 +93,8 @@ export default function CrmDashboardPage() {
       { key: "lost", label: "Lost", tone: "warning" },
       { key: "unpaid", label: "Unpaid", tone: "danger" },
       { key: "stale", label: "Stale", tone: "warning" },
+      { key: "dormant", label: "Dormant", tone: "warning" },
+      { key: "atRisk", label: "At Risk", tone: "danger" },
       { key: "newThisWeek", label: "New This Week", tone: "info" },
     ];
 
@@ -206,6 +212,48 @@ export default function CrmDashboardPage() {
       </CardGrid>
 
       <NextActionsWidget windowDays={7} limit={25} />
+
+      <SectionCard
+        title="At-risk & dormant contacts"
+        action={<Badge tone="danger">{atRisk.length}</Badge>}
+      >
+        {atRisk.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            No contacts have gone dormant. Nice work staying in touch!
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {atRisk.map((c) => {
+              const name =
+                `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() ||
+                c.email ||
+                c.phone ||
+                "Unnamed contact";
+              const tone = c.relationshipHealth === "AT_RISK" ? "danger" : "warning";
+              return (
+                <Link
+                  key={c.id}
+                  href={`/app/crm/contacts/${c.id}`}
+                  className="block rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm hover:shadow-md transition-shadow"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-slate-900">{name}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {c.status ?? "—"}
+                        {c.daysSinceLastContact !== null
+                          ? ` · ${c.daysSinceLastContact}d since last contact`
+                          : " · never contacted"}
+                      </div>
+                    </div>
+                    <Badge tone={tone}>{c.relationshipHealth}</Badge>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
 
       <SectionCard
         title="Recent activity"

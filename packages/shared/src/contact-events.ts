@@ -30,6 +30,7 @@ export const CONTACT_EVENT_TYPES_BY_CATEGORY = {
     'contact.imported',
     'contact.imported_from_media',
     'status.changed',
+    'relationship_health.changed',
     'bulk.updated',
     'note.created',
     'note.updated',
@@ -241,6 +242,7 @@ export const CONTACT_EVENT_LABELS: Record<ContactEventType, string> = {
   'autopilot.executed': 'Autopilot executed',
   'autopilot.payment_recovery': 'Payment recovery',
   'autopilot.lead_reactivation': 'Lead reactivation',
+  'relationship_health.changed': 'Relationship health changed',
 };
 
 export function getContactEventLabel(type: string): string {

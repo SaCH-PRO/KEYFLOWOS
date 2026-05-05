@@ -508,6 +508,28 @@ export class CrmService {
       return sanitize(value);
     };
 
+    // When `relationshipHealth` is explicitly set via the API, we treat that as
+    // a manual override so the daily auto-warn scheduler will preserve it. The
+    // override metadata is stamped onto `Contact.custom`.
+    let mergedCustom: any = input.custom ?? undefined;
+    if (input.relationshipHealth !== undefined && input.relationshipHealth !== null) {
+      const baseCustom =
+        (input.custom as Record<string, unknown>) ??
+        ((await this.prisma.client.contact.findFirst({
+          where: contactWhereWithId(input.businessId, input.contactId),
+          select: { custom: true },
+        }))?.custom as Record<string, unknown>) ??
+        {};
+      mergedCustom = {
+        ...baseCustom,
+        relationshipHealthOverride: {
+          manual: true,
+          value: input.relationshipHealth,
+          at: new Date().toISOString(),
+        },
+      };
+    }
+
     const data: Prisma.ContactUpdateInput = {
       firstName: sanitizeOptional(trimOptional(input.firstName)),
       lastName: sanitizeOptional(trimOptional(input.lastName)),
@@ -518,7 +540,7 @@ export class CrmService {
       status: input.status ?? undefined,
       source: input.source ?? undefined,
       tags,
-      custom: input.custom ?? undefined,
+      custom: mergedCustom,
       sourceDetail: trimOptional(input.sourceDetail),
       displayName: trimOptional(input.displayName),
       secondaryEmail: trimOptional(input.secondaryEmail),

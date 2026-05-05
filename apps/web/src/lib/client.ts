@@ -856,9 +856,93 @@ export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_
       unpaid: z.number(),
       stale: z.number(),
       newThisWeek: z.number(),
+      atRisk: z.number().optional().default(0),
+      dormant: z.number().optional().default(0),
     }),
-    { lead: 0, prospect: 0, client: 0, lost: 0, unpaid: 0, stale: 0, newThisWeek: 0 },
+    { lead: 0, prospect: 0, client: 0, lost: 0, unpaid: 0, stale: 0, newThisWeek: 0, atRisk: 0, dormant: 0 },
     { signal: opts?.signal },
+  );
+}
+
+// -- Relationship-Health (auto-warn) endpoints ---------------------------
+
+const relationshipHealthThresholdsSchema = z.object({
+  hot: z.number(),
+  warm: z.number(),
+  cold: z.number(),
+  atRiskClientDays: z.number(),
+});
+export type RelationshipHealthThresholds = z.infer<typeof relationshipHealthThresholdsSchema>;
+
+export async function fetchRelationshipHealthSettings(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/relationship-health/settings`,
+    z.object({ thresholds: relationshipHealthThresholdsSchema }),
+    { thresholds: { hot: 14, warm: 45, cold: 90, atRiskClientDays: 60 } },
+  );
+}
+
+export async function updateRelationshipHealthSettings(
+  businessId: string,
+  body: Partial<RelationshipHealthThresholds> | { reset: true },
+) {
+  return apiPatch<{ thresholds: RelationshipHealthThresholds }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/relationship-health/settings`,
+    body,
+  );
+}
+
+const atRiskContactSchema = z.object({
+  id: z.string(),
+  firstName: z.string().nullable(),
+  lastName: z.string().nullable(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  status: z.string().nullable(),
+  relationshipHealth: z.string().nullable(),
+  lastContactedAt: z.string().nullable(),
+  priority: z.string().nullable(),
+  daysSinceLastContact: z.number().nullable(),
+});
+export type AtRiskContact = z.infer<typeof atRiskContactSchema>;
+
+export async function fetchAtRiskContacts(businessId: string = DEFAULT_BUSINESS_ID, limit = 10) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/relationship-health/at-risk?limit=${limit}`,
+    z.array(atRiskContactSchema),
+    [],
+  );
+}
+
+export async function recomputeRelationshipHealth(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  body?: { dryRun?: boolean },
+) {
+  return apiPostSimple<{
+    scanned: number;
+    updated: number;
+    skipped: number;
+    byHealth: Record<string, number>;
+  }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/relationship-health/recompute`,
+    body ?? {},
+  );
+}
+
+export async function setContactRelationshipHealthOverride(
+  businessId: string,
+  contactId: string,
+  value: "HOT" | "WARM" | "COLD" | "DORMANT" | "AT_RISK",
+) {
+  return apiPut<Contact>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/relationship-health`,
+    { value },
+  );
+}
+
+export async function clearContactRelationshipHealthOverride(businessId: string, contactId: string) {
+  return apiDelete<Contact>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/relationship-health`,
   );
 }
 
