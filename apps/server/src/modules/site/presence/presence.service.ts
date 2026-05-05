@@ -432,6 +432,8 @@ export class PresenceService {
         id: true, name: true, slug: true, logoUrl: true, tagline: true, description: true,
         address: true, city: true, country: true, phone: true, email: true, whatsapp: true,
         primaryColor: true, secondaryColor: true, businessHours: true,
+        industry: true, headline: true, currency: true, website: true,
+        facebook: true, instagram: true, twitter: true, linkedin: true, tiktok: true, youtube: true,
       },
     });
     if (!business) return null;
@@ -454,12 +456,55 @@ export class PresenceService {
         select: { id: true, name: true, description: true, price: true, currency: true, imageUrl: true, sku: true },
       }).catch(() => [] as Array<{ id: string; name: string; description: string | null; price: number | null; currency: string | null; imageUrl: string | null; sku: string | null }>),
     ]);
+
+    // Resolve the active plan tier so the public renderer can decide whether
+    // to show the Powered-by KeyFlow badge (free tier only). Direct Prisma
+    // lookup avoids importing SubscriptionsModule (which would create a
+    // module dependency cycle through CrmModule -> NotificationsModule).
+    let plan: 'FREE' | 'FLOW' | 'KEYFLOW' = 'FREE';
+    try {
+      const sub = await this.prisma.client.subscription.findFirst({
+        where: { businessId: business.id, status: { in: ['ACTIVE', 'TRIALING'] } },
+        orderBy: { createdAt: 'desc' },
+        select: { plan: true, status: true, trialEndsAt: true },
+      });
+      if (sub) {
+        const trialExpired = sub.status === 'TRIALING' && sub.trialEndsAt && sub.trialEndsAt < new Date();
+        if (!trialExpired && (sub.plan === 'FLOW' || sub.plan === 'KEYFLOW')) {
+          plan = sub.plan as 'FLOW' | 'KEYFLOW';
+        }
+      }
+    } catch {
+      // Non-fatal — default to FREE.
+    }
+
+    // Canonical directory metadata exposed on the public payload so the
+    // community directory + third-party crawlers can build uniform listings
+    // without re-querying private tables.
+    const directoryListing = {
+      slug: business.slug,
+      name: business.name,
+      logoUrl: business.logoUrl,
+      tagline: business.tagline,
+      headline: business.headline,
+      industry: business.industry,
+      city: business.city,
+      country: business.country,
+      website: business.website,
+      services: services.slice(0, 10).map((s) => ({ id: s.id, name: s.name, price: s.price ?? null })),
+      products: products.slice(0, 10).map((p) => ({ id: p.id, name: p.name, price: p.price ?? null, currency: p.currency ?? null })),
+      serviceCount: services.length,
+      productCount: products.length,
+    };
+
     return {
       business,
       payload: fromJson(published.payload),
       version: published.version,
       publishedAt: published.publishedAt,
       catalog: { services, products },
+      plan,
+      directoryListing,
     };
   }
 
