@@ -43,6 +43,7 @@ export interface CalendarUrlState {
   assignedToMe: boolean;
   visibility: "PRIVATE" | "TEAM" | "PUBLIC" | null;
   search: string;
+  conflictsOnly: boolean;
 }
 
 function parseDate(s: string | null): Date {
@@ -92,6 +93,7 @@ export function useCalendarUrlState(): {
       assignedToMe: parseBool(params.get("mine")) === true,
       visibility: (params.get("visibility") as CalendarUrlState["visibility"]) || null,
       search: params.get("q") || "",
+      conflictsOnly: parseBool(params.get("conflictsOnly")) === true,
     };
   }, [params]);
 
@@ -128,6 +130,8 @@ export function useCalendarUrlState(): {
         setOrDel("mine", patch.assignedToMe ? "true" : null);
       if ("visibility" in patch) setOrDel("visibility", patch.visibility ?? null);
       if ("search" in patch) setOrDel("q", patch.search ?? null);
+      if ("conflictsOnly" in patch)
+        setOrDel("conflictsOnly", patch.conflictsOnly ? "true" : null);
 
       const qs = next.toString();
       router.replace(qs ? `?${qs}` : "?", { scroll: false });

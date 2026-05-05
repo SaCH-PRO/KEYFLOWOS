@@ -12,11 +12,14 @@ import {
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  fetchCalendarConflicts,
   fetchCalendarEvents,
   patchCalendarEvent,
   type CalendarEvent,
   type CalendarEventFilters,
+  type CalendarTypedConflict,
 } from "@/lib/client";
+import { ConflictsProvider } from "./conflicts-context";
 import {
   endOfDay,
   endOfMonth,
@@ -102,6 +105,7 @@ export function MasterCalendar({
   const [createDate, setCreateDate] = useState<Date | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [conflicts, setConflicts] = useState<CalendarTypedConflict[]>([]);
   const dragRef = useRef<CalendarEvent | null>(null);
 
   const range = useMemo(() => {
@@ -153,6 +157,31 @@ export function MasterCalendar({
     };
   }, [businessId, filters, reloadKey]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchCalendarConflicts(
+      businessId,
+      range.from.toISOString(),
+      range.to.toISOString(),
+    )
+      .then((res) => {
+        if (cancelled) return;
+        if (res.data) setConflicts(res.data.conflicts);
+      })
+      .catch(() => {
+        if (!cancelled) setConflicts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId, range.from, range.to, reloadKey]);
+
+  const conflictedIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of conflicts) for (const id of c.eventIds) set.add(id);
+    return set;
+  }, [conflicts]);
+
   const filtered = useMemo(() => {
     let list = events;
     const q = state.search.trim().toLowerCase();
@@ -170,8 +199,11 @@ export function MasterCalendar({
       // Best-effort: server should normally apply this; UI hint until C7.
       list = list.filter((e) => !!e.assigneeId);
     }
+    if (state.conflictsOnly) {
+      list = list.filter((e) => conflictedIds.has(e.id));
+    }
     return list;
-  }, [events, state.search, state.visibility, state.assignedToMe]);
+  }, [events, state.search, state.visibility, state.assignedToMe, state.conflictsOnly, conflictedIds]);
 
   const headerLabel = useMemo(() => {
     if (state.preset) {
@@ -461,36 +493,38 @@ export function MasterCalendar({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)_300px] gap-3">
-        {!compact && (
-          <div className={`${filterOpen ? "block" : "hidden"} lg:block`}>
-            <FilterSidebar state={state} update={update} reset={reset} />
+      <ConflictsProvider conflicts={conflicts}>
+        <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)_300px] gap-3">
+          {!compact && (
+            <div className={`${filterOpen ? "block" : "hidden"} lg:block`}>
+              <FilterSidebar state={state} update={update} reset={reset} />
+            </div>
+          )}
+          <div className="kf-card p-3 sm:p-4 min-h-[400px]">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={state.view + state.cursor.toDateString() + (state.preset ?? "")}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.15 }}
+              >
+                {renderView()}
+              </motion.div>
+            </AnimatePresence>
           </div>
-        )}
-        <div className="kf-card p-3 sm:p-4 min-h-[400px]">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={state.view + state.cursor.toDateString() + (state.preset ?? "")}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.15 }}
-            >
-              {renderView()}
-            </motion.div>
-          </AnimatePresence>
+          {!hideRail && (
+            <div className="hidden lg:block">
+              <TimeIntelligenceRail
+                businessId={businessId}
+                rangeFrom={range.from}
+                rangeTo={range.to}
+                reloadKey={reloadKey}
+              />
+            </div>
+          )}
         </div>
-        {!hideRail && (
-          <div className="hidden lg:block">
-            <TimeIntelligenceRail
-              businessId={businessId}
-              rangeFrom={range.from}
-              rangeTo={range.to}
-              reloadKey={reloadKey}
-            />
-          </div>
-        )}
-      </div>
+      </ConflictsProvider>
 
       <CalendarEventDrawer
         open={drawerOpen}

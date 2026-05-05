@@ -233,6 +233,14 @@ export function FilterSidebar({ state, update, reset }: Props) {
             />
             Assigned to me
           </label>
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={state.conflictsOnly}
+              onChange={(e) => update({ conflictsOnly: e.target.checked })}
+            />
+            Conflicts only
+          </label>
         </div>
       </div>
 

@@ -40,6 +40,8 @@ import {
   CalendarSyncService,
   CalendarSyncSettings,
 } from './calendar-sync.service';
+import { CalendarConflictService } from './calendar-conflict.service';
+import { CalendarInsightService } from './calendar-insight.service';
 
 interface AuthedRequest {
   user?: { id?: string; role?: string };
@@ -52,6 +54,10 @@ export class CalendarController {
     private readonly query: CalendarQueryService,
     @Inject(CalendarSyncService)
     private readonly sync: CalendarSyncService,
+    @Inject(CalendarConflictService)
+    private readonly conflictService: CalendarConflictService,
+    @Inject(CalendarInsightService)
+    private readonly insightService: CalendarInsightService,
   ) {}
 
   // ----- Google Calendar sync (platform connection) ---------------------
@@ -242,7 +248,7 @@ export class CalendarController {
       throw new BadRequestException('from and to are required');
     }
     const userId = requireUser(req);
-    return this.query.conflicts(
+    return this.conflictService.detect(
       businessId,
       userId,
       req.user?.role,
@@ -266,12 +272,71 @@ export class CalendarController {
       throw new BadRequestException('from and to are required');
     }
     const userId = requireUser(req);
-    return this.query.insights(
+    const [base, conflictResult] = await Promise.all([
+      this.query.insights(businessId, userId, req.user?.role, fromDate, toDate),
+      this.conflictService.detect(
+        businessId,
+        userId,
+        req.user?.role,
+        fromDate,
+        toDate,
+      ),
+    ]);
+    const hints = conflictResult.conflicts.slice(0, 8).map((c) => ({
+      kind: c.kind,
+      message: c.message,
+    }));
+    return { ...base, hints, conflicts: conflictResult.conflicts };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'read')
+  @Get('businesses/:businessId/daily-plan')
+  async dailyPlan(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+    @Query('day') day?: string,
+    @Query('refresh') refresh?: string,
+  ) {
+    const userId = requireUser(req);
+    const target = day ? parseDate(day, 'day') : new Date();
+    if (!target) throw new BadRequestException('day must be a valid date');
+    return this.insightService.generateDailyPlan(
       businessId,
       userId,
       req.user?.role,
-      fromDate,
-      toDate,
+      target,
+      { force: refresh === '1' || refresh === 'true' },
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'read')
+  @Get('businesses/:businessId/weekly-capacity')
+  async weeklyCapacity(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+    @Query('weekStart') weekStart?: string,
+    @Query('refresh') refresh?: string,
+  ) {
+    const userId = requireUser(req);
+    let start: Date;
+    if (weekStart) {
+      const parsed = parseDate(weekStart, 'weekStart');
+      if (!parsed) throw new BadRequestException('weekStart must be valid');
+      start = parsed;
+    } else {
+      const now = new Date();
+      now.setUTCHours(0, 0, 0, 0);
+      now.setUTCDate(now.getUTCDate() - now.getUTCDay());
+      start = now;
+    }
+    return this.insightService.generateWeeklyCapacity(
+      businessId,
+      userId,
+      req.user?.role,
+      start,
+      { force: refresh === '1' || refresh === 'true' },
     );
   }
 

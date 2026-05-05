@@ -1,10 +1,14 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { BookingsModule } from '../bookings/bookings.module';
+import { AiModule } from '../ai/ai.module';
 import { CalendarController } from './calendar.controller';
 import { CalendarPermissionService } from './calendar-permission.service';
 import { CalendarProjectionService } from './calendar-projection.service';
 import { CalendarQueryService } from './calendar-query.service';
+import { CalendarConflictService } from './calendar-conflict.service';
+import { CalendarInsightService } from './calendar-insight.service';
+import { CalendarInsightSchedulerService } from './calendar-insight-scheduler.service';
 import { CalendarBackfillService } from './backfill';
 import { CalendarSyncService } from './calendar-sync.service';
 import { CalendarSyncScheduler } from './calendar-sync.scheduler';
@@ -16,7 +20,7 @@ import { CalendarProjectsListener } from './listeners/projects.listener';
 import { CalendarOrdersListener } from './listeners/orders.listener';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => BookingsModule)],
+  imports: [PrismaModule, AiModule, forwardRef(() => BookingsModule)],
   controllers: [CalendarController],
   providers: [
     CalendarProjectionService,
@@ -25,6 +29,9 @@ import { CalendarOrdersListener } from './listeners/orders.listener';
     CalendarQueryService,
     CalendarSyncService,
     CalendarSyncScheduler,
+    CalendarConflictService,
+    CalendarInsightService,
+    CalendarInsightSchedulerService,
     CalendarBookingsListener,
     CalendarMarketingListener,
     CalendarCrmListener,
@@ -38,6 +45,8 @@ import { CalendarOrdersListener } from './listeners/orders.listener';
     CalendarPermissionService,
     CalendarQueryService,
     CalendarSyncService,
+    CalendarConflictService,
+    CalendarInsightService,
   ],
 })
 export class CalendarModule {}

@@ -84,6 +84,39 @@ export interface ChatResponseContract {
   dataReferences?: string[];
 }
 
+export interface DailyPlanContract {
+  date: string;
+  greeting: string;
+  summary: string;
+  topPriorities: Array<{
+    title: string;
+    why: string;
+    kind: string;
+    eventId?: string;
+    suggestedTime?: string;
+  }>;
+  focusBlocks: Array<{
+    startAt: string;
+    endAt: string;
+    label: string;
+  }>;
+  warnings: string[];
+}
+
+export interface WeeklyCapacityContract {
+  weekStart: string;
+  totalScheduledHours: number;
+  byDay: Array<{
+    date: string;
+    hours: number;
+    eventCount: number;
+    capacityPct: number;
+  }>;
+  overloadedDays: string[];
+  underutilizedDays: string[];
+  recommendations: string[];
+}
+
 export type ContractType =
   | 'intent_parse'
   | 'workflow_plan'
@@ -92,7 +125,9 @@ export type ContractType =
   | 'lead_score'
   | 'quote_recommendation'
   | 'business_model'
-  | 'chat_response';
+  | 'chat_response'
+  | 'daily_plan'
+  | 'weekly_capacity';
 
 interface ValidationResult {
   valid: boolean;
@@ -180,6 +215,47 @@ export function validateOutputContract(
 
     case 'chat_response':
       errors.push(...validateRequiredFields(obj, ['reply']));
+      break;
+
+    case 'daily_plan':
+      errors.push(
+        ...validateRequiredFields(obj, [
+          'date',
+          'greeting',
+          'summary',
+          'topPriorities',
+          'focusBlocks',
+          'warnings',
+        ]),
+      );
+      errors.push(...validateArrayField(obj, 'topPriorities'));
+      errors.push(...validateArrayField(obj, 'focusBlocks'));
+      errors.push(...validateArrayField(obj, 'warnings'));
+      if (Array.isArray(obj.topPriorities)) {
+        for (const p of obj.topPriorities as Record<string, unknown>[]) {
+          if (!p.title || typeof p.title !== 'string') {
+            errors.push('Each priority must have a title');
+            break;
+          }
+        }
+      }
+      break;
+
+    case 'weekly_capacity':
+      errors.push(
+        ...validateRequiredFields(obj, [
+          'weekStart',
+          'totalScheduledHours',
+          'byDay',
+          'overloadedDays',
+          'underutilizedDays',
+          'recommendations',
+        ]),
+      );
+      errors.push(...validateArrayField(obj, 'byDay'));
+      errors.push(...validateArrayField(obj, 'overloadedDays'));
+      errors.push(...validateArrayField(obj, 'underutilizedDays'));
+      errors.push(...validateArrayField(obj, 'recommendations'));
       break;
   }
 

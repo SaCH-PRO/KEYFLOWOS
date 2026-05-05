@@ -10,9 +10,11 @@ import {
   CalendarClock,
   Lock,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import type { CalendarEvent } from "@/lib/client";
 import { fmtMoney, fmtTime, moduleMeta, reschedulePolicy } from "./calendar-utils";
+import { useEventConflicts } from "./conflicts-context";
 
 interface Props {
   event: CalendarEvent;
@@ -41,6 +43,22 @@ export function EventCard({
       : fmtTime(start);
   const policy = reschedulePolicy(event);
   const isDraggable = draggable && !policy.locked;
+  const conflicts = useEventConflicts(event.id);
+  const conflictSeverity = conflicts.reduce<"low" | "medium" | "high" | null>(
+    (acc, c) => {
+      if (c.severity === "high") return "high";
+      if (c.severity === "medium" && acc !== "high") return "medium";
+      if (!acc) return c.severity;
+      return acc;
+    },
+    null,
+  );
+  const conflictColor =
+    conflictSeverity === "high"
+      ? "text-rose-400 bg-rose-500/15 border-rose-500/40"
+      : conflictSeverity === "medium"
+        ? "text-amber-400 bg-amber-500/15 border-amber-500/40"
+        : "text-yellow-400 bg-yellow-500/10 border-yellow-500/30";
 
   return (
     <div
@@ -58,8 +76,24 @@ export function EventCard({
       className={`group relative rounded-lg border border-border/40 bg-card/40 hover:bg-card/80 transition-colors cursor-pointer overflow-hidden ${
         compact ? "p-1.5" : "p-2.5"
       }`}
-      style={{ borderLeft: `3px solid ${event.color || meta.color}` }}
-      title={policy.locked ? policy.reason : policy.needsConfirm ? `${policy.reason} (drag to reschedule with confirmation)` : "Drag to reschedule"}
+      style={{
+        borderLeft: `3px solid ${
+          conflictSeverity === "high"
+            ? "#f43f5e"
+            : conflictSeverity === "medium"
+              ? "#f59e0b"
+              : event.color || meta.color
+        }`,
+      }}
+      title={
+        conflicts.length > 0
+          ? conflicts.map((c) => c.message).join(" · ")
+          : policy.locked
+            ? policy.reason
+            : policy.needsConfirm
+              ? `${policy.reason} (drag to reschedule with confirmation)`
+              : "Drag to reschedule"
+      }
     >
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
@@ -92,6 +126,15 @@ export function EventCard({
                 className="w-3 h-3 text-emerald-400/70"
                 aria-label="Synced to Google"
               />
+            )}
+            {conflictSeverity && (
+              <span
+                className={`inline-flex items-center gap-1 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-full font-medium border ${conflictColor}`}
+                aria-label={`${conflicts.length} conflict${conflicts.length === 1 ? "" : "s"}`}
+              >
+                <AlertTriangle className="w-3 h-3" />
+                {conflicts.length > 1 ? `${conflicts.length} conflicts` : "conflict"}
+              </span>
             )}
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground flex-wrap">

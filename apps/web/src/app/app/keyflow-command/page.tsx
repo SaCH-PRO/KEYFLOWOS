@@ -31,6 +31,7 @@ import { RiskAlerts } from "../control-tower/components/risk-alerts";
 import { StorefrontIntel } from "../control-tower/components/storefront-intel";
 import { ServiceLinkWidget } from "../commerce/components/service-link-widget";
 import UnifiedCalendar from "./components/unified-calendar";
+import { TodaysPlanCard } from "./components/todays-plan-card";
 import { NextActionsWidget } from "../crm/dashboard/next-actions-widget";
 import { AskKeyButton, KeyNoticedStream } from "@/components/key";
 import {
@@ -319,6 +320,8 @@ export default function KeyflowCommandPage() {
             />
 
             <NextActionsWidget businessId={d.businessId} windowDays={7} limit={25} />
+
+            <TodaysPlanCard businessId={d.businessId} />
 
             <div id="keyflow-calendar">
               <UnifiedCalendar
