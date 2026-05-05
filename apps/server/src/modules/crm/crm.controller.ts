@@ -1,6 +1,9 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req, Res, Sse, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Observable } from 'rxjs';
 import { CrmActionsService } from './crm-actions.service';
+import { CrmCommunicationService, type ConversationChannel, type ConversationDirection } from './crm-communication.service';
 import { CrmFlowService } from './crm-flow.service';
 import { CrmImportService } from './crm-import.service';
 import { CrmJourneyService } from './crm-journey.service';
@@ -49,6 +52,7 @@ export class CrmController {
     @Inject(CrmDuplicateDetectionService) private readonly duplicates: CrmDuplicateDetectionService,
     @Inject(CrmSavedViewsService) private readonly savedViews: CrmSavedViewsService,
     @Inject(CrmRelationshipHealthService) private readonly relationshipHealth: CrmRelationshipHealthService,
+    @Inject(CrmCommunicationService) private readonly communication: CrmCommunicationService,
   ) {}
 
   @Get('health')
@@ -1189,5 +1193,101 @@ export class CrmController {
     @Param('contactId') contactId: string,
   ) {
     return this.crm.toggleFavorite(businessId, contactId);
+  }
+
+  // ---------- M2 Unified Communication Inbox ----------
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/conversations')
+  listConversations(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('channel') channel?: string,
+    @Query('direction') direction?: string,
+    @Query('since') since?: string,
+    @Query('until') until?: string,
+  ) {
+    const validChannels: ConversationChannel[] = ['whatsapp', 'email', 'sms', 'call', 'meeting', 'note'];
+    const validDirections: ConversationDirection[] = ['in', 'out', 'internal'];
+    return this.communication.list({
+      businessId,
+      contactId,
+      cursor: cursor || null,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      channel: channel && validChannels.includes(channel as ConversationChannel) ? (channel as ConversationChannel) : null,
+      direction: direction && validDirections.includes(direction as ConversationDirection) ? (direction as ConversationDirection) : null,
+      since: since || null,
+      until: until || null,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(60, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/conversations/read')
+  async markConversationRead(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    const state = await this.communication.markRead(businessId, userId, contactId);
+    return { ok: true, lastReadAt: state.lastReadAt.toISOString() };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/unread-counts')
+  async unreadCounts(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.id;
+    if (!userId) return { counts: {} };
+    const counts = await this.communication.unreadCounts(businessId, userId);
+    return { counts };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/conversations/reply')
+  async replyConversation(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: { channel?: string; body?: string },
+    @Req() req: any,
+  ) {
+    const validChannels: ConversationChannel[] = ['whatsapp', 'email', 'sms', 'call', 'meeting', 'note'];
+    if (!body?.channel || !validChannels.includes(body.channel as ConversationChannel)) {
+      throw new BadRequestException('Valid channel is required');
+    }
+    if (!body?.body || !body.body.trim()) {
+      throw new BadRequestException('Message body is required');
+    }
+    return this.communication.reply({
+      businessId,
+      contactId,
+      channel: body.channel as ConversationChannel,
+      body: body.body,
+      actorId: req?.user?.id,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @Sse('businesses/:businessId/contacts/:contactId/conversations/stream')
+  conversationStream(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ): Observable<{ data: { type: string; contactId: string; eventId?: string } }> {
+    const { observable } = this.communication.subscribe(businessId, contactId);
+    return observable.asObservable();
   }
 }

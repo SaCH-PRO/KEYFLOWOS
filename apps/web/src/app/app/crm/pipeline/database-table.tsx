@@ -164,6 +164,7 @@ interface DatabaseTableProps {
   columns: ColumnDef[];
   favoriteIds?: Set<string>;
   onToggleFavorite?: (id: string) => void;
+  unreadCounts?: Record<string, number>;
 }
 
 function TagsCell({ value, search }: { value: string; search: string }) {
@@ -206,6 +207,7 @@ function DatabaseTableInner({
   columns,
   favoriteIds,
   onToggleFavorite,
+  unreadCounts,
 }: DatabaseTableProps) {
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
 
@@ -331,7 +333,18 @@ function DatabaseTableInner({
                     />
                   </td>
                   <td className="px-3 py-2.5 text-[10px] text-muted-foreground/60 font-mono">
-                    {(page - 1) * pageSize + idx + 1}
+                    <div className="flex items-center gap-1">
+                      <span>{(page - 1) * pageSize + idx + 1}</span>
+                      {(unreadCounts?.[contact.id] ?? 0) > 0 && (
+                        <span
+                          className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-[hsl(var(--kf-accent1))] text-white text-[9px] font-semibold leading-none"
+                          title={`${unreadCounts![contact.id]} unread message${unreadCounts![contact.id] === 1 ? "" : "s"}`}
+                          aria-label={`${unreadCounts![contact.id]} unread`}
+                        >
+                          {unreadCounts![contact.id] > 99 ? "99+" : unreadCounts![contact.id]}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   {onToggleFavorite && (
                     <td className="px-1 py-2.5 w-[32px]" onClick={(e) => e.stopPropagation()}>

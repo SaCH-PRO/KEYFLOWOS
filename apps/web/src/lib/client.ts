@@ -9399,3 +9399,123 @@ export async function fetchTransactionLink(businessId: string, transactionId: st
     `/payments/businesses/${encodeURIComponent(businessId)}/transactions/${encodeURIComponent(transactionId)}/link`,
   );
 }
+
+// ============================================================================
+// M2: Unified Communication Inbox
+// ============================================================================
+
+const conversationEntrySchema = z.object({
+  id: z.string(),
+  source: z.enum(["event", "whatsapp", "note"]),
+  channel: z.enum(["whatsapp", "email", "sms", "call", "meeting", "note"]),
+  direction: z.enum(["in", "out", "internal"]),
+  body: z.string(),
+  timestamp: z.string(),
+  status: z.string().nullable().optional(),
+  actorId: z.string().nullable().optional(),
+  actorType: z.string().nullable().optional(),
+  meta: z.record(z.unknown()).optional(),
+});
+
+export type ConversationEntry = z.infer<typeof conversationEntrySchema>;
+
+const conversationListSchema = z.object({
+  entries: z.array(conversationEntrySchema),
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+
+export type ConversationList = z.infer<typeof conversationListSchema>;
+
+export async function fetchContactConversations(
+  contactId: string,
+  opts?: {
+    businessId?: string;
+    cursor?: string | null;
+    limit?: number;
+    channel?: "whatsapp" | "email" | "sms" | "call" | "meeting" | "note" | null;
+    direction?: "in" | "out" | "internal" | null;
+    since?: string | null;
+    until?: string | null;
+    signal?: AbortSignal;
+  },
+) {
+  const businessId = opts?.businessId ?? DEFAULT_BUSINESS_ID;
+  const params = new URLSearchParams();
+  if (opts?.cursor) params.set("cursor", opts.cursor);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.channel) params.set("channel", opts.channel);
+  if (opts?.direction) params.set("direction", opts.direction);
+  if (opts?.since) params.set("since", opts.since);
+  if (opts?.until) params.set("until", opts.until);
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations${params.toString() ? `?${params.toString()}` : ""}`,
+    conversationListSchema,
+    { entries: [], nextCursor: null, hasMore: false },
+    { signal: opts?.signal },
+  );
+}
+
+export async function markContactConversationsRead(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<{ ok: boolean; lastReadAt: string }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/read`,
+    body: {},
+  });
+}
+
+export async function fetchUnreadCounts(businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/unread-counts`,
+    z.object({ counts: z.record(z.number()) }),
+    { counts: {} },
+    { signal: opts?.signal },
+  );
+}
+
+export async function sendContactReply(
+  contactId: string,
+  input: { channel: "whatsapp" | "email" | "sms" | "call" | "meeting" | "note"; body: string },
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPost<{ ok: boolean; channel: string; fallback?: string; error?: string }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/reply`,
+    body: input,
+  });
+}
+
+/**
+ * Subscribe to live conversation events via SSE.
+ * Returns a cleanup function. Falls back silently if EventSource is unavailable.
+ */
+export function subscribeContactConversationStream(
+  contactId: string,
+  onEvent: (payload: { type: string; contactId: string; eventId?: string }) => void,
+  businessId: string = DEFAULT_BUSINESS_ID,
+): () => void {
+  if (typeof window === "undefined" || typeof EventSource === "undefined") return () => {};
+  const token = window.localStorage?.getItem("kf_token");
+  // EventSource doesn't support Authorization headers; pass token via query string.
+  const url =
+    `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/stream` +
+    (token ? `?access_token=${encodeURIComponent(token)}` : "");
+  let es: EventSource | null = null;
+  try {
+    es = new EventSource(url, { withCredentials: false });
+    es.onmessage = (msg: MessageEvent) => {
+      try {
+        const payload = JSON.parse(msg.data);
+        onEvent(payload);
+      } catch {
+        // ignore parse errors
+      }
+    };
+    es.onerror = () => {
+      // Browser will auto-reconnect; nothing to do.
+    };
+  } catch {
+    return () => {};
+  }
+  return () => {
+    try { es?.close(); } catch {}
+  };
+}

@@ -611,6 +611,22 @@ model ContactEvent {
   @@map("contact_events")
 }
 
+model ContactReadState {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  userId      String   @map("user_id")
+  contactId   String   @map("contact_id")
+  lastReadAt  DateTime @default(now()) @map("last_read_at")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, userId, contactId])
+  @@index([businessId, userId])
+  @@index([contactId])
+  @@map("contact_read_states")
+}
+
 model ContactNote {
   id         String   @id @default(cuid())
   businessId String   @map("business_id")

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense, useState } from "react";
-import { MessageSquare, ListTodo, History, AlertCircle, Loader2 } from "lucide-react";
+import { MessageSquare, ListTodo, History, AlertCircle, Loader2, MessageCircle } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
 import type { CrossJourneyResponse } from "@/lib/client";
@@ -9,6 +9,8 @@ import type { CrossJourneyResponse } from "@/lib/client";
 const NotesTabPanel = React.lazy(() => import("./notes-tab-panel").then(m => ({ default: m.NotesTabPanel })));
 const TasksTabPanel = React.lazy(() => import("./tasks-tab-panel").then(m => ({ default: m.TasksTabPanel })));
 const TimelineTabPanel = React.lazy(() => import("./timeline-tab-panel").then(m => ({ default: m.TimelineTabPanel })));
+const ConversationsTabPanel = React.lazy(() => import("./conversations-tab-panel").then(m => ({ default: m.ConversationsTabPanel })));
+type ConversationsContactLite = import("./conversations-tab-panel").ContactLite;
 
 class TabErrorBoundary extends React.Component<
   { children: React.ReactNode; resetKey: string },
@@ -116,12 +118,17 @@ export function ContactDetailTabs({
   }
 
   const timelineCount = events.length + notes.length + tasks.length + (invoices?.length ?? 0) + (bookings?.length ?? 0);
+  const conversationsCount = events.filter((e) => {
+    const t = e.type ?? "";
+    return t.startsWith("communication.") || t.startsWith("email.") || t.startsWith("whatsapp.") || t.startsWith("sms.") || t.startsWith("message.") || t.startsWith("call.") || t === "lead_form.submitted" || t === "form.submitted";
+  }).length;
 
   return (
     <div className="flex flex-col min-h-0">
       <div className="flex border-b border-border overflow-x-auto shrink-0" role="tablist">
         {[
           { key: "timeline", label: "Timeline", icon: History, count: timelineCount },
+          { key: "conversations", label: "Conversations", icon: MessageCircle, count: conversationsCount },
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
         ].map(({ key, label, icon: Icon, count }) => (
@@ -173,6 +180,13 @@ export function ContactDetailTabs({
                   onAddNote={onAddNote}
                   onAddTask={onAddTask}
                 />
+              </TabErrorBoundary>
+            </div>
+          )}
+          {activatedTabs.has("conversations") && (
+            <div className={`space-y-3 pt-3 pb-6 ${normalized === "conversations" ? "" : "hidden"}`}>
+              <TabErrorBoundary resetKey="conversations">
+                <ConversationsTabPanel contact={contact as unknown as ConversationsContactLite} businessId={businessId} />
               </TabErrorBoundary>
             </div>
           )}
