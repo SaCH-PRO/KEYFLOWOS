@@ -89,8 +89,10 @@ export const QUOTE_STATUS_FILTERS = [
   { value: "ALL", label: "All Quotes" },
   { value: "DRAFT", label: "Draft" },
   { value: "SENT", label: "Sent" },
+  { value: "VIEWED", label: "Viewed" },
   { value: "ACCEPTED", label: "Accepted" },
   { value: "REJECTED", label: "Rejected" },
+  { value: "EXPIRED", label: "Expired" },
 ] as const;
 
 export function generateItemId() {

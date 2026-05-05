@@ -57,6 +57,11 @@ interface BillingDetailModalProps {
   type: BillingDocType;
   number: string;
   status: string;
+  // R2: server-derived current step on the lifecycle pipeline. When
+  // present (quotes), it overrides `status` for pipeline rendering so
+  // VIEWED/INVOICED/PAID can highlight even though the persisted status
+  // is still SENT/ACCEPTED.
+  lifecycleStep?: string;
   contact: {
     firstName?: string | null;
     lastName?: string | null;
@@ -96,7 +101,11 @@ interface BillingDetailModalProps {
   allInvoices?: Array<{ id: string; contactId?: string | null; status?: string; total?: number; invoiceNumber?: string | null; createdAt?: string | Date | null; dueDate?: string | null }>;
 }
 
-const STATUS_ORDER_QUOTE = ["DRAFT", "SENT", "ACCEPTED", "REJECTED"];
+// R2: Quote lifecycle is the visual state machine in the detail drawer.
+// Drafted → Sent → Viewed → Accepted → Invoiced → Paid (with REJECTED as
+// an off-ramp). The current step is provided by the server via
+// quote.lifecycleStep so the UI never has to recompute it.
+const STATUS_ORDER_QUOTE = ["DRAFT", "SENT", "VIEWED", "ACCEPTED", "INVOICED", "PAID"];
 const STATUS_ORDER_INVOICE = ["DRAFT", "SENT", "PAID", "OVERDUE", "VOID"];
 
 function StatusPipeline({
@@ -109,13 +118,29 @@ function StatusPipeline({
   accentColor: string;
 }) {
   const steps = type === "quote" ? STATUS_ORDER_QUOTE : STATUS_ORDER_INVOICE;
-  const currentIdx = steps.indexOf(status);
+  // REJECTED isn't part of the happy-path pipeline; render it as an
+  // off-ramp pinned at the SENT step.
+  const effectiveStatus = type === "quote" && status === "REJECTED" ? "SENT" : status;
+  const currentIdx = steps.indexOf(effectiveStatus);
+  const isRejected = type === "quote" && status === "REJECTED";
+
+  const stepLabels: Record<string, string> = {
+    DRAFT: "Drafted",
+    SENT: "Sent",
+    VIEWED: "Viewed",
+    ACCEPTED: "Accepted",
+    INVOICED: "Invoiced",
+    PAID: "Paid",
+    OVERDUE: "Overdue",
+    VOID: "Void",
+  };
+  const rejectColor = "rgb(248,113,113)";
 
   return (
     <div className="flex items-center gap-1">
       {steps.map((step, idx) => {
-        const isActive = step === status;
-        const isPast = idx < currentIdx;
+        const isActive = step === effectiveStatus;
+        const isPast = currentIdx >= 0 && idx < currentIdx;
         return (
           <div key={step} className="flex items-center gap-1">
             {idx > 0 && (
@@ -143,11 +168,26 @@ function StatusPipeline({
                     : { color: "rgba(148,163,184,0.55)" }
               }
             >
-              {step.charAt(0) + step.slice(1).toLowerCase()}
+              {stepLabels[step] ?? step.charAt(0) + step.slice(1).toLowerCase()}
             </span>
           </div>
         );
       })}
+      {isRejected && (
+        <>
+          <ChevronRight className="w-3 h-3 shrink-0" style={{ color: rejectColor }} />
+          <span
+            className="text-[10px] font-semibold px-2 py-0.5 rounded-md"
+            style={{
+              backgroundColor: `${rejectColor}22`,
+              color: rejectColor,
+              border: `1px solid ${rejectColor}44`,
+            }}
+          >
+            Rejected
+          </span>
+        </>
+      )}
     </div>
   );
 }
@@ -156,6 +196,7 @@ export function BillingDetailModal({
   type,
   number,
   status,
+  lifecycleStep,
   contact,
   contactId,
   total,
@@ -323,7 +364,7 @@ export function BillingDetailModal({
                   </div>
                   <div className="mt-1">
                     <StatusPipeline
-                      status={status}
+                      status={lifecycleStep ?? status}
                       type={type}
                       accentColor={theme.accentColor}
                     />

@@ -1,6 +1,16 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { QuoteCreatedPayload, QuoteSentPayload, QuoteConvertedPayload } from '../../core/event-bus/events.types';
+import {
+  QuoteCreatedPayload,
+  QuoteSentPayload,
+  QuoteViewedPayload,
+  QuoteAcceptedPayload,
+  QuoteRejectedPayload,
+  QuoteStalePayload,
+  QuoteConvertedPayload,
+  InvoiceCreatedPayload,
+} from '../../core/event-bus/events.types';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { Service } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
@@ -181,6 +191,12 @@ export class CommerceService {
       data,
       include: { items: true, contact: true },
     });
+    this.events.emit('invoice.created', {
+      invoice,
+      businessId: input.businessId,
+      source: 'manual',
+      quoteId: null,
+    } as InvoiceCreatedPayload);
     this.statsCache.invalidateCache(input.businessId);
     return invoice;
   }
@@ -426,10 +442,12 @@ export class CommerceService {
     quoteId: string;
     status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED';
     actorId?: string | null;
+    source?: 'public' | 'internal';
+    reason?: string | null;
   }) {
     const existingQuote = await this.prisma.client.quote.findUnique({
       where: { id: params.quoteId },
-      select: { businessId: true },
+      select: { businessId: true, status: true, viewToken: true },
     });
     if (!existingQuote) {
       throw new Error('Quote not found');
@@ -442,20 +460,57 @@ export class CommerceService {
         throw new Error('Not authorized to update this quote');
       }
     }
+    const now = new Date();
+    const data: Record<string, any> = { status: params.status };
+    if (params.status === 'SENT') {
+      data.sentAt = now;
+      // Make sure a public-link token exists so the email URL works.
+      if (!existingQuote.viewToken) {
+        data.viewToken = this.generateQuoteToken();
+      }
+    } else if (params.status === 'ACCEPTED') {
+      data.acceptedAt = now;
+    } else if (params.status === 'REJECTED') {
+      data.rejectedAt = now;
+    }
     const quote = await this.prisma.client.quote.update({
       where: { id: params.quoteId },
-      data: { status: params.status },
+      data,
       include: { contact: true },
     });
-    if (params.status === 'SENT') {
+    const source = params.source ?? 'internal';
+    if (params.status === 'SENT' && existingQuote.status !== 'SENT') {
       this.events.emit('quote.sent', { quote, businessId: quote.businessId } as QuoteSentPayload);
+    }
+    if (params.status === 'ACCEPTED' && existingQuote.status !== 'ACCEPTED') {
+      this.events.emit('quote.accepted', {
+        quote,
+        businessId: quote.businessId,
+        acceptedAt: now,
+        source,
+      } as QuoteAcceptedPayload);
+    }
+    if (params.status === 'REJECTED' && existingQuote.status !== 'REJECTED') {
+      this.events.emit('quote.rejected', {
+        quote,
+        businessId: quote.businessId,
+        rejectedAt: now,
+        source,
+        reason: params.reason ?? null,
+      } as QuoteRejectedPayload);
     }
     if (quote.contactId) {
       await this.crm.logContactEvent({
         businessId: quote.businessId,
         contactId: quote.contactId,
         type: `quote.${params.status.toLowerCase()}`,
-        data: { quoteId: quote.id, total: quote.total, currency: quote.currency },
+        data: {
+          quoteId: quote.id,
+          total: quote.total,
+          currency: quote.currency,
+          source,
+          reason: params.reason ?? undefined,
+        },
         actorType: params.actorId ? 'USER' : 'SYSTEM',
         actorId: params.actorId ?? undefined,
         source: 'commerce',
@@ -463,6 +518,58 @@ export class CommerceService {
     }
     this.statsCache.invalidateCache(existingQuote.businessId);
     return quote;
+  }
+
+  // R2: how many days a SENT quote can sit without a view/accept before
+  // we surface it as a stale-quote candidate for the Action Queue.
+  static readonly QUOTE_STALE_DAYS = 7;
+
+  private generateQuoteToken(): string {
+    return randomBytes(24).toString('base64url');
+  }
+
+  private isStaleQuote(quote: {
+    status: string;
+    sentAt?: Date | null;
+    viewedAt?: Date | null;
+    acceptedAt?: Date | null;
+    rejectedAt?: Date | null;
+  }, now: Date = new Date()): boolean {
+    if (quote.status !== 'SENT') return false;
+    if (quote.viewedAt || quote.acceptedAt || quote.rejectedAt) return false;
+    if (!quote.sentAt) return false;
+    const daysSinceSent = (now.getTime() - new Date(quote.sentAt).getTime()) / (1000 * 60 * 60 * 24);
+    return daysSinceSent >= CommerceService.QUOTE_STALE_DAYS;
+  }
+
+  private decorateQuote<T extends {
+    status: string;
+    expiryDate?: Date | null;
+    sentAt?: Date | null;
+    viewedAt?: Date | null;
+    acceptedAt?: Date | null;
+    rejectedAt?: Date | null;
+    invoiceId?: string | null;
+    invoice?: { status?: string | null } | null;
+  }>(quote: T, now: Date = new Date()): T & { isStale: boolean; isExpired: boolean; lifecycleStep: string } {
+    const isExpired =
+      !!quote.expiryDate &&
+      new Date(quote.expiryDate).getTime() < now.getTime() &&
+      quote.status !== 'ACCEPTED' &&
+      !quote.invoiceId;
+    let lifecycleStep: string = 'DRAFT';
+    if (quote.invoice?.status === 'PAID') lifecycleStep = 'PAID';
+    else if (quote.invoiceId) lifecycleStep = 'INVOICED';
+    else if (quote.status === 'ACCEPTED') lifecycleStep = 'ACCEPTED';
+    else if (quote.status === 'REJECTED') lifecycleStep = 'REJECTED';
+    else if (quote.viewedAt && quote.status === 'SENT') lifecycleStep = 'VIEWED';
+    else if (quote.status === 'SENT') lifecycleStep = 'SENT';
+    return {
+      ...quote,
+      isStale: this.isStaleQuote(quote, now),
+      isExpired,
+      lifecycleStep,
+    };
   }
 
   async updateInvoiceStatus(params: {
@@ -533,11 +640,60 @@ export class CommerceService {
       }),
       this.prisma.client.quote.count({ where }),
     ]);
-    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+    const now = new Date();
+    return {
+      data: data.map((q) => this.decorateQuote(q, now)),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
+  /**
+   * R2: returns SENT quotes that have been sitting `daysThreshold` days
+   * without a view/accept/reject. R3 consumes this for the Action Queue.
+   */
+  async getStaleQuotes(businessId: string, daysThreshold = CommerceService.QUOTE_STALE_DAYS) {
+    const cutoff = new Date(Date.now() - daysThreshold * 24 * 60 * 60 * 1000);
+    const stale = await this.prisma.client.quote.findMany({
+      where: {
+        businessId,
+        deletedAt: null,
+        status: 'SENT',
+        viewedAt: null,
+        acceptedAt: null,
+        rejectedAt: null,
+        sentAt: { lte: cutoff },
+      },
+      include: { contact: true, items: true, invoice: true },
+      orderBy: { sentAt: 'asc' },
+    });
+    const now = new Date();
+    const decoratedRows = stale.map((q) => {
+      const decorated = this.decorateQuote(q, now);
+      const daysSinceSent = q.sentAt
+        ? Math.floor((now.getTime() - new Date(q.sentAt).getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+      return { ...decorated, daysSinceSent };
+    });
+    // Emit one canonical quote.stale event per stale row so the Action
+    // Queue / notification consumers can pick them up. Idempotency is
+    // delegated to the caller (typically a once-per-day scheduled scan)
+    // so we never silently swallow events here.
+    for (const row of decoratedRows) {
+      this.events.emit('quote.stale', {
+        quote: row,
+        businessId,
+        sentAt: row.sentAt ?? now,
+        daysSinceSent: row.daysSinceSent,
+      } as QuoteStalePayload);
+    }
+    return decoratedRows;
   }
 
   async getQuote(quoteId: string) {
-    return this.prisma.client.quote.findUnique({
+    const quote = await this.prisma.client.quote.findUnique({
       where: { id: quoteId },
       include: {
         contact: {
@@ -563,6 +719,119 @@ export class CommerceService {
         },
       },
     });
+    if (!quote) return null;
+    return this.decorateQuote(quote);
+  }
+
+  // ----- R2: public quote-view + accept/reject by signed token -----
+
+  async getQuoteByToken(token: string) {
+    if (!token) return null;
+    const quote = await this.prisma.client.quote.findUnique({
+      where: { viewToken: token },
+      include: {
+        contact: { select: { firstName: true, lastName: true, email: true } },
+        items: true,
+        invoice: { select: { id: true, invoiceNumber: true, status: true, total: true } },
+        business: {
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+            address: true,
+            phone: true,
+            email: true,
+            website: true,
+            primaryColor: true,
+          },
+        },
+      },
+    });
+    if (!quote || quote.deletedAt) return null;
+    return this.decorateQuote(quote);
+  }
+
+  async markQuoteViewedByToken(token: string) {
+    const quote = await this.prisma.client.quote.findUnique({
+      where: { viewToken: token },
+      select: {
+        id: true,
+        businessId: true,
+        status: true,
+        viewedAt: true,
+        deletedAt: true,
+        contactId: true,
+      },
+    });
+    if (!quote || quote.deletedAt) return null;
+    // Only flip the first time someone views it; later visits are no-ops
+    // so we never spam quote.viewed events.
+    if (quote.viewedAt || quote.status !== 'SENT') {
+      return this.getQuoteByToken(token);
+    }
+    const now = new Date();
+    const updated = await this.prisma.client.quote.update({
+      where: { id: quote.id },
+      data: { viewedAt: now },
+      include: { contact: true },
+    });
+    this.events.emit('quote.viewed', {
+      quote: updated,
+      businessId: quote.businessId,
+      viewedAt: now,
+      source: 'public',
+    } as QuoteViewedPayload);
+    if (quote.contactId) {
+      await this.crm.logContactEvent({
+        businessId: quote.businessId,
+        contactId: quote.contactId,
+        type: 'quote.viewed',
+        data: { quoteId: quote.id, source: 'public' },
+        actorType: 'SYSTEM',
+        source: 'commerce',
+      });
+    }
+    this.statsCache.invalidateCache(quote.businessId);
+    return this.getQuoteByToken(token);
+  }
+
+  async respondToQuoteByToken(token: string, decision: 'accept' | 'reject', reason?: string) {
+    const quote = await this.prisma.client.quote.findUnique({
+      where: { viewToken: token },
+      select: {
+        id: true,
+        businessId: true,
+        status: true,
+        invoiceId: true,
+        deletedAt: true,
+        expiryDate: true,
+      },
+    });
+    if (!quote || quote.deletedAt) {
+      throw new NotFoundException('Quote not found');
+    }
+    if (quote.invoiceId) {
+      throw new BadRequestException('This quote has already been converted to an invoice.');
+    }
+    // Only quotes the business has explicitly sent can be acted on via
+    // the public link — a draft (or already-decided) quote must not be
+    // accepted/rejected by a token holder.
+    if (quote.status !== 'SENT') {
+      if (quote.status === 'ACCEPTED' || quote.status === 'REJECTED') {
+        throw new BadRequestException(`This quote has already been ${quote.status.toLowerCase()}.`);
+      }
+      throw new BadRequestException('This quote is not available for a response yet.');
+    }
+    if (quote.expiryDate && new Date(quote.expiryDate).getTime() < Date.now()) {
+      throw new BadRequestException('This quote has expired and can no longer be responded to.');
+    }
+    const target: 'ACCEPTED' | 'REJECTED' = decision === 'accept' ? 'ACCEPTED' : 'REJECTED';
+    return this.updateQuoteStatus({
+      quoteId: quote.id,
+      status: target,
+      source: 'public',
+      reason: reason ?? null,
+    });
   }
 
   async createQuote(input: {
@@ -584,6 +853,9 @@ export class CommerceService {
     const discountAmount = input.discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
     const total = subtotal + taxAmount - discountAmount;
     
+    // R2: viewToken is intentionally NOT generated at draft time. The
+    // public accept/reject URL is minted only when the quote is sent so
+    // pre-send drafts can never be acted on via a leaked link.
     const quote = await this.prisma.client.quote.create({
       data: {
         businessId: input.businessId,
@@ -755,42 +1027,54 @@ export class CommerceService {
     }
     const total = subtotal + taxAmount - discountAmount;
 
-    const invoice = await this.prisma.client.invoice.create({
-      data: {
-        businessId: quote.businessId,
-        contactId: quote.contactId,
-        invoiceNumber: `INV-${Date.now()}`,
-        status: 'DRAFT',
-        issueDate: new Date(),
-        dueDate: input.dueDate ? new Date(input.dueDate) : null,
-        subtotal,
-        taxRate,
-        taxAmount,
-        discountType: input.discountType ?? null,
-        discountValue: input.discountValue ?? null,
-        discountAmount,
-        total,
-        currency: quote.currency,
-        notes: input.notes ?? null,
-        items: {
-          create: quote.items.map((item) => ({
-            description: item.description,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            total: item.total,
-            productId: item.productId ?? null,
-          })),
+    // R2: do the invoice insert + the quote.invoiceId backlink in a single
+    // transaction so we never end up with a quote that thinks it was
+    // converted but no invoice (or an invoice that has no parent quote).
+    const invoice = await this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.invoice.create({
+        data: {
+          businessId: quote.businessId,
+          contactId: quote.contactId,
+          invoiceNumber: `INV-${Date.now()}`,
+          status: 'DRAFT',
+          issueDate: new Date(),
+          dueDate: input.dueDate ? new Date(input.dueDate) : null,
+          subtotal,
+          taxRate,
+          taxAmount,
+          discountType: input.discountType ?? null,
+          discountValue: input.discountValue ?? null,
+          discountAmount,
+          total,
+          currency: quote.currency,
+          notes: input.notes ?? null,
+          quoteId: quote.id,
+          items: {
+            create: quote.items.map((item) => ({
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              total: item.total,
+              productId: item.productId ?? null,
+            })),
+          },
         },
-      },
-      include: { items: true, contact: true },
-    });
-
-    await this.prisma.client.quote.update({
-      where: { id: quote.id },
-      data: { invoiceId: invoice.id },
+        include: { items: true, contact: true },
+      });
+      await tx.quote.update({
+        where: { id: quote.id },
+        data: { invoiceId: created.id },
+      });
+      return created;
     });
 
     this.events.emit('quote.converted', { quote, invoice, businessId: quote.businessId } as QuoteConvertedPayload);
+    this.events.emit('invoice.created', {
+      invoice,
+      businessId: quote.businessId,
+      source: 'quote',
+      quoteId: quote.id,
+    } as InvoiceCreatedPayload);
 
     if (quote.contactId) {
       await this.crm.logContactEvent({

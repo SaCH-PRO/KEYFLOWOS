@@ -399,9 +399,52 @@ export class CommerceController {
     );
   }
 
+  // R2: surfaced as a list endpoint so R3's Action Queue can subscribe
+  // without having to recompute the staleness rule.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/quotes/stale')
+  listStaleQuotes(
+    @Param('businessId') businessId: string,
+    @Query('days') days?: string,
+  ) {
+    const threshold = days ? Math.max(parseInt(days, 10) || 0, 1) : undefined;
+    return this.commerce.getStaleQuotes(businessId, threshold);
+  }
+
   @Get('quotes/:quoteId')
   getQuote(@Param('quoteId') quoteId: string) {
     return this.commerce.getQuote(quoteId);
+  }
+
+  // ----- R2: public endpoints (signed-token authenticated) -----
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(60, 60_000)
+  @Get('public/quotes/:token')
+  async getPublicQuote(@Param('token') token: string) {
+    const quote = await this.commerce.markQuoteViewedByToken(token);
+    if (!quote) {
+      throw new ForbiddenException('Quote not found');
+    }
+    return quote;
+  }
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(20, 60_000)
+  @Post('public/quotes/:token/accept')
+  acceptPublicQuote(@Param('token') token: string) {
+    return this.commerce.respondToQuoteByToken(token, 'accept');
+  }
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(20, 60_000)
+  @Post('public/quotes/:token/reject')
+  rejectPublicQuote(
+    @Param('token') token: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.commerce.respondToQuoteByToken(token, 'reject', body?.reason);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -613,14 +656,34 @@ export class CommerceController {
     @Param('quoteId') quoteId: string,
     @Body() body: { recipientEmail: string; message?: string },
   ) {
+    const existing = await this.commerce.getQuote(quoteId);
+    if (!existing || existing.businessId !== businessId) {
+      throw new Error('Quote not found');
+    }
+
+    // Transition to SENT *before* composing the email so the public
+    // accept/reject viewToken is minted and present in the URL we send.
+    // Without this, draft → first-send would email a `/quote/{id}` link
+    // that the public endpoint can't resolve.
+    if (existing.status === 'DRAFT') {
+      await this.commerce.updateQuoteStatus({
+        quoteId,
+        status: 'SENT',
+        actorId: undefined,
+      });
+    }
     const quote = await this.commerce.getQuote(quoteId);
-    if (!quote || quote.businessId !== businessId) {
+    if (!quote) {
       throw new Error('Quote not found');
     }
 
     const business = quote.business;
     const contact = quote.contact;
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://keyflowos.replit.app';
+
+    if (!quote.viewToken) {
+      throw new Error('Quote view token missing — cannot send email.');
+    }
 
     const emailHtml = buildQuoteEmailHtml({
       businessName: business.name,
@@ -648,7 +711,7 @@ export class CommerceController {
       total: quote.total,
       currency: quote.currency,
       notes: quote.notes,
-      quoteUrl: `${appUrl}/quote/${quote.id}`,
+      quoteUrl: `${appUrl}/quote/${quote.viewToken}`,
       customMessage: body.message,
     });
 
@@ -659,13 +722,7 @@ export class CommerceController {
       htmlBody: emailHtml,
     });
 
-    await this.commerce.updateQuoteStatus({
-      quoteId,
-      status: 'SENT',
-      actorId: undefined,
-    });
-
-    return { success: true };
+    return { success: true, quote };
   }
 
   // ========== PARTIAL PAYMENTS ==========

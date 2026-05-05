@@ -1319,7 +1319,7 @@ model Product {
 model Quote {
   id          String   @id @default(cuid())
   quoteNumber String   @map("quote_number")
-  status      String   @default("DRAFT") // DRAFT, SENT, ACCEPTED, REJECTED
+  status      String   @default("DRAFT") // DRAFT, SENT, ACCEPTED, REJECTED (VIEWED/EXPIRED/INVOICED/PAID derived)
   subtotal    Float    @default(0)
   taxRate     Float?   @default(0) @map("tax_rate")
   taxAmount   Float?   @default(0) @map("tax_amount")
@@ -1331,6 +1331,14 @@ model Quote {
   notes       String?
   issueDate   DateTime @default(now()) @map("issue_date")
   expiryDate  DateTime? @map("expiry_date")
+
+  // Public-link signed token (R2). Anyone with the URL can view, accept
+  // or reject the quote without an authenticated session.
+  viewToken  String?  @unique @map("view_token")
+  sentAt     DateTime? @map("sent_at")
+  viewedAt   DateTime? @map("viewed_at")
+  acceptedAt DateTime? @map("accepted_at")
+  rejectedAt DateTime? @map("rejected_at")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -1347,6 +1355,7 @@ model Quote {
 
   @@unique([businessId, quoteNumber])
   @@index([businessId, contactId])
+  @@index([businessId, status, sentAt])
   @@map("quotes")
 }
 

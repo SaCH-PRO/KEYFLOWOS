@@ -2115,6 +2115,16 @@ export type Quote = {
   invoiceId?: string | null;
   invoice?: Invoice | null;
   createdAt: string;
+  // R2 lifecycle fields.
+  viewToken?: string | null;
+  sentAt?: string | null;
+  viewedAt?: string | null;
+  acceptedAt?: string | null;
+  rejectedAt?: string | null;
+  // Server-decorated flags.
+  isStale?: boolean;
+  isExpired?: boolean;
+  lifecycleStep?: "DRAFT" | "SENT" | "VIEWED" | "ACCEPTED" | "REJECTED" | "INVOICED" | "PAID";
 };
 
 export async function listQuotes(businessId?: string) {
@@ -2257,6 +2267,32 @@ export async function sendQuoteEmail(input: {
       recipientEmail: input.recipientEmail,
       message: input.message,
     },
+  });
+}
+
+// R2: stale-quote candidates for the Action Queue.
+export async function fetchStaleQuotes(businessId?: string, days?: number) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const qs = days ? `?days=${days}` : "";
+  return apiGetSimple<Quote[]>(`/commerce/businesses/${encodeURIComponent(bId)}/quotes/stale${qs}`);
+}
+
+// R2: public quote-view (signed-token authenticated; no auth header sent).
+export async function fetchPublicQuote(token: string) {
+  return apiGetSimple<Quote>(`/commerce/public/quotes/${encodeURIComponent(token)}`);
+}
+
+export async function acceptPublicQuote(token: string) {
+  return apiPost<Quote>({
+    path: `/commerce/public/quotes/${encodeURIComponent(token)}/accept`,
+    body: {},
+  });
+}
+
+export async function rejectPublicQuote(token: string, reason?: string) {
+  return apiPost<Quote>({
+    path: `/commerce/public/quotes/${encodeURIComponent(token)}/reject`,
+    body: { reason },
   });
 }
 

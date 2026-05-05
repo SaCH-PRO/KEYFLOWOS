@@ -162,10 +162,46 @@ export class QuoteSentPayload {
   businessId!: string;
 }
 
+export class QuoteViewedPayload {
+  quote!: Quote & { contact?: Contact | null };
+  businessId!: string;
+  viewedAt!: Date;
+  source!: 'public' | 'internal';
+}
+
+export class QuoteAcceptedPayload {
+  quote!: Quote & { contact?: Contact | null };
+  businessId!: string;
+  acceptedAt!: Date;
+  source!: 'public' | 'internal';
+}
+
+export class QuoteRejectedPayload {
+  quote!: Quote & { contact?: Contact | null };
+  businessId!: string;
+  rejectedAt!: Date;
+  source!: 'public' | 'internal';
+  reason?: string | null;
+}
+
+export class QuoteStalePayload {
+  quote!: Quote & { contact?: Contact | null };
+  businessId!: string;
+  sentAt!: Date;
+  daysSinceSent!: number;
+}
+
 export class QuoteConvertedPayload {
   quote!: Quote;
   invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact | null };
   businessId!: string;
+}
+
+export class InvoiceCreatedPayload {
+  invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact | null };
+  businessId!: string;
+  source!: 'manual' | 'quote' | 'recurring' | 'booking' | 'campaign';
+  quoteId?: string | null;
 }
 
 export class CampaignCreatedPayload {
@@ -560,7 +596,12 @@ export interface KeyFlowEventMap {
   'catalog.service.deleted': CatalogServiceDeletedPayload;
   'quote.created': QuoteCreatedPayload;
   'quote.sent': QuoteSentPayload;
+  'quote.viewed': QuoteViewedPayload;
+  'quote.accepted': QuoteAcceptedPayload;
+  'quote.rejected': QuoteRejectedPayload;
+  'quote.stale': QuoteStalePayload;
   'quote.converted': QuoteConvertedPayload;
+  'invoice.created': InvoiceCreatedPayload;
   'campaign.created': CampaignCreatedPayload;
   'campaign.sent': CampaignSentPayload;
   'campaign.briefing_generated': CampaignBriefingGeneratedPayload;
