@@ -18,6 +18,7 @@ import {
   type CalendarEvent,
   type CalendarEventFilters,
   type CalendarTypedConflict,
+  type CalendarEventType,
 } from "@/lib/client";
 import { ConflictsProvider } from "./conflicts-context";
 import {
@@ -51,6 +52,8 @@ interface Props {
   businessId: string;
   /** When set, locks the view to a specific module (used by C6 scoped views). */
   scopeModule?: CalendarEventFilters["modules"];
+  /** When set, locks the view to a specific set of event types (used by C6 scoped views). */
+  scopeTypes?: CalendarEventType[];
   /** When set, locks the view to a specific source (used by C6 scoped views). */
   scopeSourceType?: string;
   /** Hide the filter sidebar (e.g. embedded scoped view). */
@@ -91,6 +94,7 @@ function navigate(view: CalendarViewMode, cursor: Date, dir: 1 | -1): Date {
 export function MasterCalendar({
   businessId,
   scopeModule,
+  scopeTypes,
   scopeSourceType,
   compact,
   hideRail,
@@ -121,7 +125,7 @@ export function MasterCalendar({
       start: range.from.toISOString(),
       end: range.to.toISOString(),
       modules: scopeModule ?? (state.modules.length ? state.modules : undefined),
-      types: state.types.length ? state.types : undefined,
+      types: scopeTypes ?? (state.types.length ? state.types : undefined),
       statuses: state.statuses.length ? state.statuses : undefined,
       contactId: state.contactId ?? undefined,
       staffId: state.staffId ?? undefined,
@@ -136,7 +140,7 @@ export function MasterCalendar({
       includeExternal: true,
       limit: 500,
     };
-  }, [range, scopeModule, scopeSourceType, state]);
+  }, [range, scopeModule, scopeTypes, scopeSourceType, state]);
 
   useEffect(() => {
     let cancelled = false;

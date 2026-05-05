@@ -249,7 +249,8 @@ const secondaryNav: Record<string, NavItem[]> = {
   workspaces: [
     { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
     { label: "Inbox", href: "/app/inbox", icon: Mail },
-    { label: "Calendar", href: "/app/bookings", icon: Calendar },
+    { label: "Calendar", href: "/app/calendar", icon: Calendar },
+    { label: "Bookings", href: "/app/bookings", icon: Calendar },
     { label: "Revenue", href: "/app/commerce", icon: CreditCard },
     { label: "Payments", href: "/app/payments", icon: CreditCard },
     { label: "Content", href: "/app/marketing", icon: Megaphone },
@@ -293,6 +294,7 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/commerce", "workspaces"],
   ["/app/payments", "workspaces"],
   ["/app/bookings", "workspaces"],
+  ["/app/calendar", "workspaces"],
   ["/app/marketing", "workspaces"],
   ["/app/automations", "workspaces"],
   ["/app/projects", "workspaces"],
@@ -317,7 +319,7 @@ function detectPrimarySection(pathname: string): PrimarySectionId {
 const mobileBottomNav = [
   { label: "KEYFLOW", href: "/app/keyflow-command", icon: Radar },
   { label: "Revenue", href: "/app/commerce", icon: CreditCard },
-  { label: "Calendar", href: "/app/bookings", icon: Calendar },
+  { label: "Calendar", href: "/app/calendar", icon: Calendar },
   { label: "Clients", href: "/app/crm/clients", icon: Users },
   { label: "More", href: "#more", icon: MoreHorizontal },
 ];

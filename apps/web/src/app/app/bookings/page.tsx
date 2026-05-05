@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar,
@@ -18,7 +18,6 @@ import {
   Contact,
   BookingStats,
   ScheduleHealth,
-  GoogleCalendarEvent,
   createBooking,
   rescheduleBooking,
   updateBookingNotes,
@@ -27,14 +26,11 @@ import {
   fetchServices,
   fetchStaff,
   fetchContacts,
-  getCalendarAuthUrl,
   getCalendarStatus,
-  disconnectCalendar,
   syncBookingToCalendar,
   updateBookingStatus,
   fetchBookingStats,
   fetchScheduleHealth,
-  fetchGoogleCalendarEvents,
   getBusinessById,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
@@ -50,7 +46,8 @@ import { WorkspaceError } from "@/components/ui/workspace-error";
 import { moduleEvents } from "@/lib/module-events";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
-import CalendarView from "./calendar/calendar-view";
+import { MasterCalendar } from "../calendar/master-calendar";
+import { ExternalLink } from "lucide-react";
 import BookingDetailDrawer from "./components/booking-detail-drawer";
 import BookingSideSheet from "./components/booking-side-sheet";
 import TodayStrip from "./components/today-strip";
@@ -131,8 +128,6 @@ export default function BookingsPage() {
 
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
-  const [calendarLoading, setCalendarLoading] = useState(false);
-  const [googleEvents, setGoogleEvents] = useState<GoogleCalendarEvent[]>([]);
   const [banner, setBanner] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
 
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
@@ -252,24 +247,6 @@ export default function BookingsPage() {
 
   useEffect(() => { void loadData(); }, [loadData]);
 
-  const loadGoogleEvents = useCallback(async () => {
-    if (!businessId || !calendarConnected) {
-      setGoogleEvents([]);
-      return;
-    }
-    try {
-      const now = new Date();
-      const timeMin = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
-      const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, 1).toISOString();
-      const res = await fetchGoogleCalendarEvents(businessId, timeMin, timeMax);
-      setGoogleEvents(res.data ?? []);
-    } catch {
-      setGoogleEvents([]);
-    }
-  }, [businessId, calendarConnected]);
-
-  useEffect(() => { void loadGoogleEvents(); }, [loadGoogleEvents]);
-
   useEffect(() => {
     if (businessId) {
       ai.updateContext({ businessId, activeView: tab });
@@ -285,33 +262,6 @@ export default function BookingsPage() {
       }).catch(() => {});
     }
   }, [businessId, tab, ai]);
-
-  const filteredBookings = useMemo(() => {
-    let result = bookings;
-    if (staffFilter) result = result.filter((b) => b.staff?.id === staffFilter);
-    if (serviceFilter) result = result.filter((b) => b.serviceId === serviceFilter);
-    if (statusFilter !== "ALL") result = result.filter((b) => b.status === statusFilter);
-    return result;
-  }, [bookings, staffFilter, serviceFilter, statusFilter]);
-
-  async function handleConnectCalendar() {
-    if (!businessId) return;
-    setCalendarLoading(true);
-    const res = await getCalendarAuthUrl(businessId);
-    if (res.data?.url) window.location.href = res.data.url;
-    else setBanner({ text: "Failed to start calendar connection.", type: "error" });
-    setCalendarLoading(false);
-  }
-
-  async function handleDisconnectCalendar() {
-    if (!businessId) return;
-    setCalendarLoading(true);
-    await disconnectCalendar(businessId);
-    setCalendarConnected(false);
-    setCalendarEmail(null);
-    setBanner({ text: "Google Calendar disconnected.", type: "info" });
-    setCalendarLoading(false);
-  }
 
   async function handleCreateBooking(data: {
     date: string;
@@ -443,12 +393,6 @@ export default function BookingsPage() {
     }
   }
 
-  const handleCalendarCreate = useCallback((prefill: { date: string; time?: string }) => {
-    setPrefillDate(prefill.date);
-    setPrefillTime(prefill.time);
-    setShowCreateBooking(true);
-  }, []);
-
   const handleCreateInvoice = useCallback((booking: Booking) => {
     moduleEvents.emit("booking:create_invoice", "bookings", {
       contactId: booking.contact?.id,
@@ -458,18 +402,6 @@ export default function BookingsPage() {
     });
     router.push("/app/commerce?tab=invoices&action=new-invoice");
   }, [router]);
-
-  const handleSmartAction = useCallback((booking: Booking, action: string) => {
-    if (action === "INVOICE") {
-      handleCreateInvoice(booking);
-    } else if (action === "REBOOK") {
-      setPrefillDate(undefined);
-      setPrefillTime(undefined);
-      setShowCreateBooking(true);
-    } else {
-      void handleStatusChange(booking.id, action);
-    }
-  }, [handleCreateInvoice, handleStatusChange]);
 
   async function handleCreateStaff() {
     if (!businessId || !staffForm.name.trim()) return;
@@ -708,13 +640,24 @@ export default function BookingsPage() {
                 onServiceChange={setServiceFilter}
                 onStatusChange={setStatusFilter}
               />
-              <CalendarView
-                bookings={filteredBookings}
-                googleEvents={googleEvents}
-                onSelectBooking={setSelectedBooking}
-                onCreateBooking={handleCalendarCreate}
-                onSmartAction={handleSmartAction}
-              />
+              <div className="flex items-center justify-end">
+                <Link
+                  href="/app/calendar?modules=BOOKINGS"
+                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Open in Master Calendar
+                  <ExternalLink className="w-3 h-3" />
+                </Link>
+              </div>
+              {businessId && (
+                <MasterCalendar
+                  businessId={businessId}
+                  scopeModule={["BOOKINGS"]}
+                  scopeTypes={["BOOKING", "EXTERNAL_GOOGLE_EVENT"]}
+                  compact
+                  hideRail
+                />
+              )}
             </div>
           )}
           {tab === "performance" && (
@@ -738,9 +681,6 @@ export default function BookingsPage() {
               onDeleteStaff={handleDeleteStaff}
               calendarConnected={calendarConnected}
               calendarEmail={calendarEmail}
-              calendarLoading={calendarLoading}
-              onConnectCalendar={handleConnectCalendar}
-              onDisconnectCalendar={handleDisconnectCalendar}
               loading={loading}
               businessId={businessId}
               businessHoursSet={businessHoursSet}
