@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CatalogService } from '../catalog/catalog.service';
 
 @Injectable()
 export class TemplatesService {
@@ -7,6 +8,7 @@ export class TemplatesService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
   async listTemplates() {
@@ -41,29 +43,25 @@ export class TemplatesService {
 
     if (config.products && Array.isArray(config.products)) {
       for (const product of config.products) {
-        await this.prisma.client.product.create({
-          data: {
-            businessId,
-            name: product.name,
-            description: product.description ?? null,
-            price: product.price ?? 0,
-            category: product.category ?? 'PRODUCT',
-            duration: product.duration ?? null,
-          },
+        await this.catalog.createProduct({
+          businessId,
+          name: product.name,
+          description: product.description ?? null,
+          price: product.price ?? 0,
+          category: product.category ?? 'PRODUCT',
+          duration: product.duration ?? null,
         });
       }
     }
 
     if (config.services && Array.isArray(config.services)) {
       for (const service of config.services) {
-        await this.prisma.client.service.create({
-          data: {
-            businessId,
-            name: service.name,
-            description: service.description ?? null,
-            price: service.price ?? 0,
-            duration: service.duration ?? 60,
-          },
+        await this.catalog.createService({
+          businessId,
+          name: service.name,
+          description: service.description ?? null,
+          price: service.price ?? 0,
+          duration: service.duration ?? 60,
         });
       }
     }

@@ -2,6 +2,7 @@ import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CommerceStatsService } from './commerce-stats.service';
+import { CatalogService } from '../catalog/catalog.service';
 import {
   buildCommerceCommandPrompt,
   buildRevenueAnalysisPrompt,
@@ -25,6 +26,7 @@ export class CommerceAiService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(CommerceStatsService) private readonly stats: CommerceStatsService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
   private get db() {
@@ -865,10 +867,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         case 'deactivate_product': {
           const product = await this.findProduct(businessId, params);
           if (!product) return { success: false, error: 'Product not found' };
-          await this.db.product.update({
-            where: { id: product.id },
-            data: { isActive: false },
-          });
+          await this.catalog.deactivateProduct(businessId, product.id);
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Product "${product.name}" deactivated`, productId: product.id };
         }
@@ -876,29 +875,27 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         case 'update_product': {
           const product = await this.findProduct(businessId, params);
           if (!product) return { success: false, error: 'Product not found' };
-          const updateData: Record<string, any> = {};
-          if (params.price !== undefined) updateData.price = Number(params.price);
-          if (params.description !== undefined) updateData.description = String(params.description);
-          if (params.category !== undefined) updateData.category = String(params.category);
-          if (params.name !== undefined && params.name !== params.productName) updateData.name = String(params.name);
-          if (Object.keys(updateData).length === 0) return { success: false, error: 'No fields to update' };
-          const updated = await this.db.product.update({ where: { id: product.id }, data: updateData });
+          const patch: Record<string, any> = { businessId, productId: product.id };
+          if (params.price !== undefined) patch.price = Number(params.price);
+          if (params.description !== undefined) patch.description = String(params.description);
+          if (params.category !== undefined) patch.category = String(params.category);
+          if (params.name !== undefined && params.name !== params.productName) patch.name = String(params.name);
+          if (Object.keys(patch).length === 2) return { success: false, error: 'No fields to update' };
+          const updated = await this.catalog.updateProduct(patch as any);
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Product "${updated.name}" updated`, productId: updated.id };
         }
 
         case 'create_product': {
           if (!params.name || !params.price) return { success: false, error: 'Product name and price are required' };
-          const product = await this.db.product.create({
-            data: {
-              businessId,
-              name: params.name,
-              price: Number(params.price),
-              currency: 'TTD',
-              category: params.category || 'SERVICE',
-              description: params.description || null,
-              isActive: true,
-            },
+          const product = await this.catalog.createProduct({
+            businessId,
+            name: params.name,
+            price: Number(params.price),
+            currency: 'TTD',
+            category: params.category || 'SERVICE',
+            description: params.description || null,
+            isActive: true,
           });
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Product "${product.name}" created at $${product.price} TTD`, productId: product.id };

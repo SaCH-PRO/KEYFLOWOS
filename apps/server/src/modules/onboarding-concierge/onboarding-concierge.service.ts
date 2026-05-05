@@ -2,6 +2,7 @@ import { Injectable, Inject, Logger, NotFoundException, BadRequestException } fr
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { CatalogService } from '../catalog/catalog.service';
 import { matchIndustryTemplate, getTemplateById, IndustryTemplate, INDUSTRY_TEMPLATES } from './industry-templates';
 
 export interface SetupStatus {
@@ -77,6 +78,7 @@ export class OnboardingConciergeService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
   async getSetupStatus(businessId: string): Promise<SetupStatus> {
@@ -179,17 +181,15 @@ export class OnboardingConciergeService {
         if (existingProducts === 0) {
           let createdCount = 0;
           for (const p of template.defaultProducts) {
-            await tx.product.create({
-              data: {
-                businessId,
-                name: p.name,
-                price: p.price,
-                currency: p.currency,
-                category: p.category,
-                duration: p.duration ?? null,
-                description: p.description ?? null,
-                isActive: true,
-              },
+            await this.catalog.createProduct({
+              businessId,
+              name: p.name,
+              price: p.price,
+              currency: p.currency,
+              category: p.category,
+              duration: p.duration ?? null,
+              description: p.description ?? null,
+              isActive: true,
             });
             createdCount++;
           }

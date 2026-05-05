@@ -2,12 +2,16 @@ import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NormalizedProduct } from './supplier-adapter.interface';
+import { CatalogService } from '../catalog/catalog.service';
 
 @Injectable()
 export class ProductNormalizationService {
   private readonly logger = new Logger(ProductNormalizationService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
+  ) {}
 
   private cleanTitle(title: string): string {
     return title
@@ -140,19 +144,17 @@ export class ProductNormalizationService {
     const productName = overrides?.name ?? supplierProduct.normalizedTitle ?? supplierProduct.externalId;
     const productPrice = overrides?.price ?? supplierProduct.normalizedPrice ?? 0;
 
-    const product = await this.prisma.client.product.create({
-      data: {
-        businessId,
-        name: productName,
-        description: supplierProduct.normalizedDescription,
-        price: productPrice,
-        currency: supplierProduct.currency,
-        imageUrl: supplierProduct.normalizedImages[0] ?? null,
-        category: overrides?.category ?? 'PRODUCT',
-        fulfillmentModel: overrides?.fulfillmentModel ?? 'dropship',
-        inventoryMode: 'virtual',
-        isActive: true,
-      },
+    const product = await this.catalog.createProduct({
+      businessId,
+      name: productName,
+      description: supplierProduct.normalizedDescription,
+      price: productPrice,
+      currency: supplierProduct.currency,
+      imageUrl: supplierProduct.normalizedImages[0] ?? null,
+      category: overrides?.category ?? 'PRODUCT',
+      fulfillmentModel: overrides?.fulfillmentModel ?? 'dropship',
+      inventoryMode: 'virtual',
+      isActive: true,
     });
 
     await this.prisma.client.productSourceLink.create({
@@ -189,12 +191,11 @@ export class ProductNormalizationService {
       throw new NotFoundException('Supplier product not found');
     }
 
-    const updatedProduct = await this.prisma.client.product.update({
-      where: { id: productId },
-      data: {
-        description: supplierProduct.normalizedDescription,
-        imageUrl: supplierProduct.normalizedImages[0] ?? product.imageUrl,
-      },
+    const updatedProduct = await this.catalog.updateProduct({
+      businessId,
+      productId,
+      description: supplierProduct.normalizedDescription,
+      imageUrl: supplierProduct.normalizedImages[0] ?? product.imageUrl,
     });
 
     await this.prisma.client.productSourceLink.updateMany({

@@ -8,6 +8,7 @@ import { AuthModule } from './core/auth/auth.module';
 import { TrpcModule } from './trpc.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { CrmModule } from './modules/crm/crm.module';
+import { CatalogModule } from './modules/catalog/catalog.module';
 import { CommerceModule } from './modules/commerce/commerce.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { SocialModule } from './modules/social/social.module';
@@ -64,6 +65,7 @@ import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module
     // Feature Modules
     IdentityModule,
     CrmModule,
+    CatalogModule,
     CommerceModule,
     BookingsModule,
     SocialModule,

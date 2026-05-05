@@ -9,6 +9,7 @@ import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
+import { CatalogService } from '../catalog/catalog.service';
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
@@ -185,6 +186,7 @@ export class FlowOrchestratorService {
     @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
   async chat(
@@ -978,16 +980,14 @@ export class FlowOrchestratorService {
       }
 
       case 'commerce_create_product': {
-        const product = await this.prisma.client.product.create({
-          data: {
-            businessId,
-            name: args.name,
-            price: args.price,
-            currency: args.currency ?? 'TTD',
-            description: args.description ?? null,
-            category: args.category ?? 'PRODUCT',
-            isActive: true,
-          },
+        const product = await this.catalog.createProduct({
+          businessId,
+          name: args.name,
+          price: args.price,
+          currency: args.currency ?? 'TTD',
+          description: args.description ?? null,
+          category: args.category ?? 'PRODUCT',
+          isActive: true,
         });
         return { product, id: product.id };
       }
@@ -1870,10 +1870,7 @@ export class FlowOrchestratorService {
 
         if (Object.keys(updateData).length === 0) throw new Error('No updates specified');
 
-        const updated = await this.prisma.client.product.update({
-          where: { id: args.productId },
-          data: updateData,
-        });
+        const updated = await this.catalog.updateProduct({ businessId, productId: args.productId, ...updateData });
 
         return {
           id: updated.id,

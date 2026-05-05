@@ -1,5 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CatalogService } from '../catalog/catalog.service';
 
 export interface StoreGraphMapping {
   productId: string;
@@ -86,6 +87,7 @@ export class StoreReadinessService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
   private get db() {
@@ -120,10 +122,7 @@ export class StoreReadinessService {
     for (const svc of services) {
       const productId = productByName.get(svc.name.toLowerCase().trim());
       if (productId && !alreadyLinked.has(productId)) {
-        await this.db.service.update({
-          where: { id: svc.id },
-          data: { sourceProductId: productId },
-        });
+        await this.catalog.linkServiceToProduct(businessId, svc.id, productId);
         alreadyLinked.add(productId);
         backfilled++;
       }
