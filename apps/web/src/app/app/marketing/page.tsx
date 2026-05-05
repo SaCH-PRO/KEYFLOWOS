@@ -49,7 +49,9 @@ import { LeadFormsPanel } from "./components/lead-forms-panel";
 import { CampaignActionQueue } from "./components/campaign-action-queue";
 import { FormOptimizationQueue } from "./components/form-optimization-queue";
 import { SocialTabContent } from "./components/social-tab-content";
-import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
+import { MasterCalendar } from "../calendar/master-calendar";
+import Link from "next/link";
+import { ExternalLink } from "lucide-react";
 import { AudienceHealthSection } from "./components/campaign-intelligence-cards";
 import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
 import { AudienceHealthDashboard } from "./components/audience-health-dashboard";
@@ -1059,7 +1061,24 @@ export default function ContentPage() {
             {activeTab === "calendar" && (
               <div className="space-y-4">
                 <CalendarInsightStrip campaigns={mk.campaigns} socialPosts={mk.socialPosts} />
-                <MarketingCalendarTab campaigns={mk.campaigns} socialPosts={mk.socialPosts} onTabChange={handleTabChange} />
+                <div className="flex items-center justify-end">
+                  <Link
+                    href="/app/calendar?modules=MARKETING"
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Open in Master Calendar
+                    <ExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+                {mk.businessId && (
+                  <MasterCalendar
+                    businessId={mk.businessId}
+                    scopeModule={["MARKETING"]}
+                    scopeTypes={["CONTENT_POST", "EMAIL_CAMPAIGN"]}
+                    compact
+                    hideRail
+                  />
+                )}
               </div>
             )}
             {activeTab === "audience" && (
