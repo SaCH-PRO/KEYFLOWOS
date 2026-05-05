@@ -5,17 +5,20 @@ import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
 import { AdapterRegistryService } from './adapters/adapter-registry.service';
 import { ContentAiService } from './content-ai.service';
+import { InboundCommunicationsService } from './inbound-communications.service';
+import { InboundCommunicationsController } from './inbound-communications.controller';
 import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [AiModule],
-  controllers: [CommunicationsController],
+  controllers: [CommunicationsController, InboundCommunicationsController],
   providers: [
     ChannelConnectionService,
     OutboundContentService,
     DeliveryQueueService,
     AdapterRegistryService,
     ContentAiService,
+    InboundCommunicationsService,
   ],
   exports: [
     ChannelConnectionService,
@@ -23,6 +26,7 @@ import { AiModule } from '../ai/ai.module';
     DeliveryQueueService,
     AdapterRegistryService,
     ContentAiService,
+    InboundCommunicationsService,
   ],
 })
 export class CommunicationsModule {}
