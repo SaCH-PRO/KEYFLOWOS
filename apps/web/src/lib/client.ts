@@ -11594,6 +11594,73 @@ export async function syncPresenceActionCards(businessId: string) {
   );
 }
 
+export type PresenceInsightCategory =
+  | "money"
+  | "time"
+  | "people"
+  | "services"
+  | "goods";
+export type PresenceInsightSeverity = "info" | "warning" | "success";
+export interface PresenceInsight {
+  id: string;
+  category: PresenceInsightCategory;
+  title: string;
+  detail: string;
+  severity: PresenceInsightSeverity;
+  actionable: boolean;
+  metric?: { label: string; value: string };
+  actionType?: string;
+  cta?: { label: string; href: string };
+  relatedType?: string;
+  relatedId?: string;
+  sampleSize: number;
+}
+export interface PresenceInsightCategoryBlock {
+  summary: string;
+  insights: PresenceInsight[];
+}
+export interface PresenceInsightSnapshotPayload {
+  version: number;
+  windowDays: number;
+  generatedAt: string;
+  narrative: {
+    headline: string;
+    body: string;
+    source: "ai" | "template";
+    modelUsed: string | null;
+  };
+  categories: Record<PresenceInsightCategory, PresenceInsightCategoryBlock>;
+}
+export interface PresenceInsightSnapshotResponse {
+  snapshot: PresenceInsightSnapshotPayload;
+  stale: boolean;
+  computedAt: string;
+  narrativeSource: "ai" | "template";
+}
+
+export async function fetchPresenceInsights(businessId: string, days = 30) {
+  return apiGetSimple<PresenceInsightSnapshotResponse>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/insights?days=${days}`,
+  );
+}
+
+export async function regeneratePresenceInsights(businessId: string, days = 30) {
+  return apiPostSimple<PresenceInsightSnapshotResponse>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/insights/regenerate`,
+    { days },
+  );
+}
+
+export async function delegatePresenceInsight(
+  businessId: string,
+  insightId: string,
+) {
+  return apiPostSimple<{ created: boolean; revenueActionId: string }>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/insights/${encodeURIComponent(insightId)}/delegate`,
+    {},
+  );
+}
+
 export interface PresenceLead {
   id: string;
   firstName: string | null;

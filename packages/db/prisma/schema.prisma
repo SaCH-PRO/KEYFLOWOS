@@ -124,6 +124,7 @@ model Business {
   publicEvents        PublicEvent[]
   publicVisitors      PublicVisitor[]
   presenceDailyStats  PresenceDailyStat[]
+  presenceInsightSnapshot PresenceInsightSnapshot?
   contactChannelStats ContactChannelStat[]
   contactNotes     ContactNote[]
   contactTasks     ContactTask[]
@@ -5992,6 +5993,38 @@ model PublicVisitor {
 /// share, whatsapp_click, form_submit, etc. `dimension` describes how
 /// `dimKey` is keyed: 'all' | 'page' | 'product' | 'service' | 'source'
 /// | 'medium' | 'campaign' | 'referrer'.
+model PresenceInsightSnapshot {
+  id            String   @id @default(cuid())
+  businessId    String   @unique @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  /// Schema version for the payload shape so older cached rows can be evicted.
+  version       Int      @default(1)
+
+  /// Window (UTC days) used to derive these insights.
+  windowDays    Int      @default(30) @map("window_days")
+
+  /// Full snapshot payload — see StorefrontIntelligenceService for the typed
+  /// shape ({ generatedAt, narrative, categories: { money, time, people, services, goods } }).
+  payload       Json
+
+  /// True when underlying data has changed and a recompute is pending.
+  stale         Boolean  @default(false)
+
+  /// "ai" when narration was produced by the AI gateway, "template" when the
+  /// deterministic fallback was used.
+  narrativeSource String? @map("narrative_source")
+  modelUsed     String?  @map("model_used")
+
+  computedAt    DateTime @default(now()) @map("computed_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, computedAt])
+  @@index([businessId, stale])
+  @@map("presence_insight_snapshots")
+}
+
 model PresenceDailyStat {
   id         String   @id @default(cuid())
   businessId String   @map("business_id")

@@ -117,6 +117,18 @@ export interface WeeklyCapacityContract {
   recommendations: string[];
 }
 
+export interface PresenceInsightsContract {
+  headline: string;
+  narrative: string;
+  categories: {
+    money: string;
+    time: string;
+    people: string;
+    services: string;
+    goods: string;
+  };
+}
+
 export type ContractType =
   | 'intent_parse'
   | 'workflow_plan'
@@ -127,7 +139,8 @@ export type ContractType =
   | 'business_model'
   | 'chat_response'
   | 'daily_plan'
-  | 'weekly_capacity';
+  | 'weekly_capacity'
+  | 'presence_insights';
 
 interface ValidationResult {
   valid: boolean;
@@ -238,6 +251,20 @@ export function validateOutputContract(
             break;
           }
         }
+      }
+      break;
+
+    case 'presence_insights':
+      errors.push(...validateRequiredFields(obj, ['headline', 'narrative', 'categories']));
+      if (obj.categories && typeof obj.categories === 'object') {
+        const cats = obj.categories as Record<string, unknown>;
+        for (const k of ['money', 'time', 'people', 'services', 'goods']) {
+          if (typeof cats[k] !== 'string' || (cats[k] as string).length === 0) {
+            errors.push(`categories.${k} must be a non-empty string`);
+          }
+        }
+      } else {
+        errors.push('categories must be an object');
       }
       break;
 

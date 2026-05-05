@@ -70,10 +70,9 @@ const TABS: {
   {
     key: "insights",
     label: "Insights",
-    href: "/app/commerce/insights",
+    href: "/app/presence/insights",
     Icon: BarChart3,
-    match: () => false,
-    external: true,
+    match: (p) => p.startsWith("/app/presence/insights"),
   },
   {
     key: "settings",
