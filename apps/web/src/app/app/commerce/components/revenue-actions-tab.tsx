@@ -18,6 +18,9 @@ import {
   type RevenueAction, type RevenueActionType,
 } from "@/lib/client";
 import { openKey } from "@/components/key/key-agent";
+import { CollectionsScoringPanel } from "./collections-scoring-panel";
+import { PaymentPlanPanel } from "./payment-plan-panel";
+import { QuoteFollowUpPanel } from "./quote-follow-up-panel";
 
 interface Props {
   businessId: string | null;
@@ -46,6 +49,11 @@ function priorityLabel(p: number) {
   return p === 1 ? "High" : p === 2 ? "Medium" : "Low";
 }
 
+type AiPanelTarget =
+  | { kind: "payment-plan"; invoiceId: string; invoiceNumber: string; invoiceAmount: number }
+  | { kind: "quote-follow-up"; quoteId: string; quoteNumber: string; quoteAmount: number }
+  | null;
+
 export function RevenueActionsTab({
   businessId, currency, onOpenInvoice, onOpenQuote, onOpenContact, onNavigate,
 }: Props) {
@@ -53,6 +61,27 @@ export function RevenueActionsTab({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [reconciling, setReconciling] = useState(false);
+  const [aiPanel, setAiPanel] = useState<AiPanelTarget>(null);
+
+  const openAiPanel = useCallback((a: RevenueAction) => {
+    if (!a.relatedId) return;
+    const amount = a.amountAtRisk ?? 0;
+    if (a.type === "OVERDUE_INVOICE") {
+      setAiPanel({
+        kind: "payment-plan",
+        invoiceId: a.relatedId,
+        invoiceNumber: a.title || a.relatedId.slice(0, 8),
+        invoiceAmount: amount,
+      });
+    } else if (a.type === "STALE_QUOTE") {
+      setAiPanel({
+        kind: "quote-follow-up",
+        quoteId: a.relatedId,
+        quoteNumber: a.title || a.relatedId.slice(0, 8),
+        quoteAmount: amount,
+      });
+    }
+  }, []);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -388,6 +417,16 @@ export function RevenueActionsTab({
                                 >
                                   <Sparkles className="w-3 h-3" /> Ask AI
                                 </button>
+                                {(a.type === "OVERDUE_INVOICE" || a.type === "STALE_QUOTE") && a.relatedId && (
+                                  <button
+                                    onClick={() => openAiPanel(a)}
+                                    className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-border/40 hover:bg-white/[0.04] inline-flex items-center gap-1"
+                                    style={{ color: "hsl(var(--kf-accent1))", borderColor: "hsl(var(--kf-accent1) / 0.3)" }}
+                                  >
+                                    <Sparkles className="w-3 h-3" />
+                                    {a.type === "OVERDUE_INVOICE" ? "AI Payment Plan" : "AI Follow-up"}
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleAction(a.id, "complete")}
                                   disabled={busyId === a.id}
@@ -422,6 +461,50 @@ export function RevenueActionsTab({
           </div>
         );
       })}
+
+      <CollectionsScoringPanel businessId={businessId} />
+
+      {aiPanel?.kind === "payment-plan" && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+          onClick={() => setAiPanel(null)}
+        >
+          <div
+            className="w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <PaymentPlanPanel
+              businessId={businessId}
+              invoiceId={aiPanel.invoiceId}
+              invoiceNumber={aiPanel.invoiceNumber}
+              invoiceAmount={aiPanel.invoiceAmount}
+              currency={currency}
+              onClose={() => setAiPanel(null)}
+            />
+          </div>
+        </div>
+      )}
+
+      {aiPanel?.kind === "quote-follow-up" && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+          onClick={() => setAiPanel(null)}
+        >
+          <div
+            className="w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <QuoteFollowUpPanel
+              businessId={businessId}
+              quoteId={aiPanel.quoteId}
+              quoteNumber={aiPanel.quoteNumber}
+              quoteAmount={aiPanel.quoteAmount}
+              currency={currency}
+              onClose={() => setAiPanel(null)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
