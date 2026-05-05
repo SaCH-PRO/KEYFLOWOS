@@ -3,6 +3,28 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CommerceService } from '../src/modules/commerce/commerce.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 
+function makeWorkflowMock(prisma: any, events: any) {
+  return {
+    transition: vi.fn(async (invoiceId: string, to: string, extra: any = {}) => {
+      const data: any = { status: to };
+      if (extra.sentAt) data.sentAt = extra.sentAt;
+      if (extra.dueDate !== undefined) data.dueDate = extra.dueDate;
+      if (to === 'PAID') data.paidAt = extra.paidAt ?? new Date();
+      const updated = prisma.client.invoice.update({ where: { id: invoiceId }, data });
+      if (to === 'PAID') {
+        events.emit?.('invoice.paid', { invoice: updated, businessId: updated.businessId, eventName: 'invoice.paid' });
+      } else if (to === 'SENT' || to === 'OVERDUE' || to === 'VOID') {
+        events.emit?.(`invoice.${to.toLowerCase()}`, { invoice: updated, businessId: updated.businessId, status: to, eventName: `invoice.${to.toLowerCase()}` });
+      }
+      return updated;
+    }),
+    reconcileFromPayments: vi.fn(async () => ({ status: 'PAID', balance: { remaining: 0 }, changed: true })),
+    assertNewProviderEvent: vi.fn(async () => true),
+    assertLegalTransition: vi.fn(),
+    getBalance: vi.fn(),
+  };
+}
+
 class PrismaMock implements Partial<PrismaService> {
   private invoices: any[] = [{ id: 'inv_1', businessId: 'biz_1', status: 'DRAFT', paidAt: null }];
   private products: any[] = [];
@@ -63,7 +85,7 @@ describe('CommerceService', () => {
     const events = { emit } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any);
 
     const invoice = await service.markInvoicePaid('inv_1');
 
@@ -81,7 +103,7 @@ describe('CommerceService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any);
 
     await service.createProduct({ businessId: 'biz_1', name: 'Plan', price: 10 });
     const products = await service.listProducts('biz_1');
@@ -94,7 +116,7 @@ describe('CommerceService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any);
 
     const invoice = await service.createInvoiceForService('biz_1', 'contact_1', {
       id: 'service_1',
@@ -117,7 +139,7 @@ describe('CommerceService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any);
 
     const quote = await service.updateQuoteStatus({ quoteId: 'quote_1', status: 'ACCEPTED', actorId: 'user_1' });
 

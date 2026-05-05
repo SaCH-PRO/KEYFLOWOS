@@ -1,11 +1,12 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { InvoicePaidPayload, InvoiceStatusPayload, ProductCreatedPayload, ProductUpdatedPayload, ProductDeactivatedPayload, QuoteCreatedPayload, QuoteSentPayload, QuoteConvertedPayload } from '../../core/event-bus/events.types';
+import { ProductCreatedPayload, ProductUpdatedPayload, ProductDeactivatedPayload, QuoteCreatedPayload, QuoteSentPayload, QuoteConvertedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { Service } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
+import { InvoiceWorkflowService, InvoiceStatus } from './invoice-workflow.service';
 
 @Injectable()
 export class CommerceService {
@@ -15,6 +16,7 @@ export class CommerceService {
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(CommerceStatsService) private readonly statsCache: CommerceStatsService,
+    @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
   ) {}
 
   async listProducts(businessId: string, page = 1, pageSize = 50) {
@@ -248,30 +250,38 @@ export class CommerceService {
   }
 
   async bulkUpdateInvoices(businessId: string, ids: string[], action: 'send' | 'void' | 'delete') {
-    const where = { id: { in: ids }, businessId, deletedAt: null };
-    let result: { count: number };
-    switch (action) {
-      case 'send':
-        result = await this.prisma.client.invoice.updateMany({
-          where: { ...where, status: 'DRAFT' },
-          data: { status: 'SENT', sentAt: new Date() },
-        });
-        break;
-      case 'void':
-        result = await this.prisma.client.invoice.updateMany({
-          where: { ...where, status: { notIn: ['PAID', 'PARTIALLY_PAID'] } },
-          data: { status: 'VOID' },
-        });
-        break;
-      case 'delete':
-        result = await this.prisma.client.invoice.updateMany({
-          where: { ...where, status: { notIn: ['PAID', 'PARTIALLY_PAID'] } },
-          data: { deletedAt: new Date() },
-        });
-        break;
+    if (action === 'delete') {
+      // Delete is not a state transition; gated by status check.
+      const result = await this.prisma.client.invoice.updateMany({
+        where: { id: { in: ids }, businessId, deletedAt: null, status: { notIn: ['PAID', 'PARTIALLY_PAID'] } },
+        data: { deletedAt: new Date() },
+      });
+      this.statsCache.invalidateCache(businessId);
+      return { updated: result.count, action };
+    }
+    // 'send' / 'void' route through the workflow so the state machine is
+    // enforced per-row; illegal transitions silently no-op (the bulk caller
+    // does not want a single bad row to fail the whole batch).
+    const target: InvoiceStatus = action === 'send' ? 'SENT' : 'VOID';
+    const candidates = await this.prisma.client.invoice.findMany({
+      where: { id: { in: ids }, businessId, deletedAt: null },
+      select: { id: true, status: true },
+    });
+    let updated = 0;
+    for (const row of candidates) {
+      try {
+        await this.invoiceWorkflow.transition(
+          row.id,
+          target,
+          target === 'SENT' ? { sentAt: new Date() } : {},
+        );
+        updated++;
+      } catch {
+        // 409 illegal transition -> skip silently in bulk mode.
+      }
     }
     this.statsCache.invalidateCache(businessId);
-    return { updated: result.count, action };
+    return { updated, action };
   }
 
   async bulkUpdateQuotes(businessId: string, ids: string[], action: 'send' | 'reject' | 'delete') {
@@ -379,7 +389,7 @@ export class CommerceService {
   async markInvoicePaid(invoiceId: string, actorId?: string | null) {
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      select: { businessId: true },
+      select: { businessId: true, status: true },
     });
     if (!existingInvoice) {
       throw new Error('Invoice not found');
@@ -392,21 +402,21 @@ export class CommerceService {
         throw new Error('Not authorized to update this invoice');
       }
     }
-    const invoice = await this.prisma.client.invoice.update({
-      where: { id: invoiceId },
-      data: { status: 'PAID', paidAt: new Date() },
-      include: { items: true, contact: true, booking: true },
-    });
+    // Delegate the state mutation + invoice.paid event emission to the
+    // workflow service so the (DRAFT|SENT|...) -> PAID transition is
+    // enforced through the canonical state machine. Idempotent: callers
+    // can re-invoke and we just re-load the row.
+    let invoice;
+    if (existingInvoice.status === 'PAID') {
+      invoice = await this.prisma.client.invoice.findUnique({
+        where: { id: invoiceId },
+        include: { items: true, contact: true, booking: true },
+      });
+    } else {
+      invoice = await this.invoiceWorkflow.transition(invoiceId, 'PAID');
+    }
+    if (!invoice) throw new Error('Invoice not found');
 
-    const payload: InvoicePaidPayload = {
-      invoice,
-      businessId: invoice.businessId,
-      // For wildcard consumers that want the event name
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      eventName: 'invoice.paid',
-    };
-    this.events.emit('invoice.paid', payload);
     if (invoice.contactId) {
       await this.crm.logContactEvent({
         businessId: invoice.businessId,
@@ -444,11 +454,7 @@ export class CommerceService {
         throw new Error('Not authorized to update this invoice');
       }
     }
-    const invoice = await this.prisma.client.invoice.update({
-      where: { id: invoiceId },
-      data: { status: 'FAILED' },
-      include: { contact: true },
-    });
+    const invoice = await this.invoiceWorkflow.transition(invoiceId, 'FAILED');
     if (invoice.contactId) {
       await this.crm.logContactEvent({
         businessId: invoice.businessId,
@@ -528,14 +534,11 @@ export class CommerceService {
         throw new Error('Not authorized to update this invoice');
       }
     }
-    const invoice = await this.prisma.client.invoice.update({
-      where: { id: params.invoiceId },
-      data: {
-        status: params.status,
-        sentAt: params.sentAt ? new Date(params.sentAt) : undefined,
-        dueDate: params.dueDate ? new Date(params.dueDate) : undefined,
-      },
-      include: { contact: true, booking: true },
+    // Route through the workflow so transitions like PAID -> SENT throw
+    // 409 instead of silently corrupting the row.
+    const invoice = await this.invoiceWorkflow.transition(params.invoiceId, params.status, {
+      sentAt: params.sentAt ? new Date(params.sentAt) : undefined,
+      dueDate: params.dueDate ? new Date(params.dueDate) : undefined,
     });
 
     if (invoice.contactId) {
@@ -555,18 +558,8 @@ export class CommerceService {
         source: 'commerce',
       });
     }
-    if (params.status === 'SENT' || params.status === 'OVERDUE') {
-      const payload: InvoiceStatusPayload = {
-        invoice,
-        businessId: invoice.businessId,
-        status: params.status,
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        eventName: `invoice.${params.status.toLowerCase()}`,
-      };
-      this.events.emit(`invoice.${params.status.toLowerCase()}`, payload);
-    }
-    
+    // (Event emission is handled inside InvoiceWorkflowService.transition.)
+
     this.statsCache.invalidateCache(existingInvoice.businessId);
     return invoice;
   }
@@ -904,25 +897,15 @@ export class CommerceService {
       },
     });
 
+    // Single source of truth: workflow recomputes status from payment rows
+    // and emits the appropriate event (invoice.paid / invoice.payment_recorded).
+    const reconciled = await this.invoiceWorkflow.reconcileFromPayments(invoiceId);
     const newPaidTotal = existingPaid + paymentAmount;
-    const newStatus = newPaidTotal >= Number(invoice.total) ? 'PAID' : 'PARTIALLY_PAID';
-
-    const updatedInvoice = await this.prisma.client.invoice.update({
+    const newStatus = reconciled.status;
+    const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      data: {
-        status: newStatus,
-        ...(newStatus === 'PAID' ? { paidAt: new Date() } : {}),
-      },
       include: { payments: true, contact: true, items: true },
     });
-
-    if (newStatus === 'PAID') {
-      this.events.emit('invoice.paid', {
-        invoice: updatedInvoice,
-        businessId,
-        eventName: 'invoice.paid',
-      } as any);
-    }
 
     if (invoice.contactId) {
       await this.crm.logContactEvent({

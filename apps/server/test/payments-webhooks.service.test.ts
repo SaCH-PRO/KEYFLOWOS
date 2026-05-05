@@ -3,6 +3,34 @@ import { createHmac } from 'crypto';
 import { PaymentsService } from '../src/modules/payments/payments.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { CommerceService } from '../src/modules/commerce/commerce.service';
+import { InvoiceWorkflowService } from '../src/modules/commerce/invoice-workflow.service';
+
+function makeWorkflowMock(prisma?: PrismaMock): {
+  workflow: InvoiceWorkflowService;
+  seen: Set<string>;
+  reconcile: ReturnType<typeof vi.fn>;
+  transition: ReturnType<typeof vi.fn>;
+} {
+  const seen = new Set<string>();
+  const reconcile = vi.fn(async (invoiceId: string) => {
+    return { status: 'PAID' as const, balance: { remaining: 0 }, changed: true };
+  });
+  const transition = vi.fn(async () => undefined);
+  const workflow = {
+    assertNewProviderEvent: vi.fn(async (provider: string, eventId?: string) => {
+      if (!eventId) return true;
+      const key = `${provider}:${eventId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+    transition,
+    reconcileFromPayments: reconcile,
+    getBalance: vi.fn(),
+    assertLegalTransition: vi.fn(),
+  } as unknown as InvoiceWorkflowService;
+  return { workflow, seen, reconcile, transition };
+}
 
 class PrismaMock {
   invoices = new Map<string, any>([
@@ -62,13 +90,22 @@ describe('PaymentsService Stripe webhooks', () => {
   let prisma: PrismaMock;
   let commerce: { markInvoicePaid: ReturnType<typeof vi.fn> };
   let svc: PaymentsService;
+  let workflowSeen: Set<string>;
+  let reconcile: ReturnType<typeof vi.fn>;
   const SECRET = 'whsec_test';
 
   beforeEach(() => {
     prisma = new PrismaMock();
     commerce = { markInvoicePaid: vi.fn(async () => undefined) };
     process.env.STRIPE_WEBHOOK_SECRET = SECRET;
-    svc = new PaymentsService(prisma as unknown as PrismaService, commerce as unknown as CommerceService);
+    const wf = makeWorkflowMock();
+    workflowSeen = wf.seen;
+    reconcile = wf.reconcile;
+    svc = new PaymentsService(
+      prisma as unknown as PrismaService,
+      commerce as unknown as CommerceService,
+      wf.workflow,
+    );
   });
 
   it('rejects bad signature', async () => {
@@ -94,7 +131,7 @@ describe('PaymentsService Stripe webhooks', () => {
       amount: 50,
       invoiceId: 'inv_1',
     });
-    expect(commerce.markInvoicePaid).toHaveBeenCalledWith('inv_1');
+    expect(reconcile).toHaveBeenCalledWith('inv_1');
   });
 
   it('is idempotent on duplicate charge.succeeded', async () => {
@@ -103,6 +140,63 @@ describe('PaymentsService Stripe webhooks', () => {
     await svc.handleStripeWebhook(payload, stripeSig(payload, SECRET));
     await svc.handleStripeWebhook(payload, stripeSig(payload, SECRET));
     expect(prisma.payments).toHaveLength(1);
+  });
+
+  it('replayed webhook with the same event id is a no-op (dedup table catches it)', async () => {
+    const obj = {
+      id: 'cs_replay_1',
+      amount_total: 5000,
+      currency: 'usd',
+      metadata: { invoiceId: 'inv_1' },
+    };
+    const payload = JSON.stringify({
+      id: 'evt_replay_1',
+      type: 'checkout.session.completed',
+      data: { object: obj },
+    });
+    const sig = stripeSig(payload, SECRET);
+    await svc.handleStripeWebhook(payload, sig);
+    expect(prisma.payments).toHaveLength(1);
+    expect(reconcile).toHaveBeenCalledTimes(1);
+
+    // Replay: dedup short-circuits before any side-effect runs.
+    await svc.handleStripeWebhook(payload, sig);
+    expect(prisma.payments).toHaveLength(1);
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(workflowSeen.has('stripe:evt_replay_1')).toBe(true);
+  });
+
+  it('accumulates partial payments — second successful charge does NOT short-circuit', async () => {
+    // Bumping invoice total so partials are well-defined: 100 USD invoice,
+    // two 50 USD captures arrive on different Stripe events. Both must be
+    // recorded; reconcile is invoked twice so the workflow can flip the
+    // invoice from SENT -> PARTIALLY_PAID -> PAID. This guards against the
+    // "first payment wins, ignore the rest" regression.
+    prisma.invoices.set('inv_1', {
+      id: 'inv_1', businessId: 'biz_1', status: 'SENT', total: 100, currency: 'USD',
+    });
+    const mk = (id: string) => JSON.stringify({
+      id: `evt_${id}`,
+      type: 'charge.succeeded',
+      data: { object: { id, amount: 5000, currency: 'usd', metadata: { invoiceId: 'inv_1' } } },
+    });
+    const p1 = mk('ch_partial_1');
+    const p2 = mk('ch_partial_2');
+    await svc.handleStripeWebhook(p1, stripeSig(p1, SECRET));
+    await svc.handleStripeWebhook(p2, stripeSig(p2, SECRET));
+    expect(prisma.payments).toHaveLength(2);
+    expect(reconcile).toHaveBeenCalledTimes(2);
+  });
+
+  it('createStripeCheckout rejects DRAFT invoices (DRAFT->PAID is illegal)', async () => {
+    prisma.invoices.set('inv_draft', {
+      id: 'inv_draft', businessId: 'biz_1', status: 'DRAFT', total: 50, currency: 'USD',
+      contact: { email: 'x@y.z' },
+      business: { id: 'biz_1', name: 'b', metaData: { stripeSecretKey: 'sk_test' } },
+    });
+    await expect(
+      svc.createStripeCheckout('inv_draft', 'https://example.com/ok', 'https://example.com/cancel'),
+    ).rejects.toThrow(/draft/i);
   });
 
   it('records refund on charge.refunded with negative amount', async () => {
@@ -204,7 +298,11 @@ describe('PaymentsService PayPal webhooks', () => {
     process.env.PAYPAL_WEBHOOK_ID = 'WH-TEST';
     process.env.PAYPAL_CLIENT_ID = 'cid';
     process.env.PAYPAL_CLIENT_SECRET = 'csec';
-    svc = new PaymentsService(prisma as unknown as PrismaService, commerce as unknown as CommerceService);
+    svc = new PaymentsService(
+      prisma as unknown as PrismaService,
+      commerce as unknown as CommerceService,
+      makeWorkflowMock().workflow,
+    );
   });
 
   it('rejects when signature verification fails', async () => {
@@ -312,6 +410,24 @@ describe('PaymentsService PayPal webhooks', () => {
     verifySpy.mockRestore();
   });
 
+  it('replayed PayPal webhook with same event id is a no-op', async () => {
+    const verifySpy = vi.spyOn(svc as any, 'verifyPaypalSignature').mockResolvedValue(true);
+    const event = {
+      id: 'WH-EVT-REPLAY',
+      event_type: 'PAYMENT.CAPTURE.COMPLETED',
+      resource: {
+        id: 'CAPT_REPLAY',
+        custom_id: 'inv_1',
+        amount: { value: '50.00', currency_code: 'USD' },
+      },
+    };
+    await svc.handlePaypalWebhook(JSON.stringify(event), {});
+    expect(prisma.payments).toHaveLength(1);
+    await svc.handlePaypalWebhook(JSON.stringify(event), {});
+    expect(prisma.payments).toHaveLength(1);
+    verifySpy.mockRestore();
+  });
+
   it('records capture and refund when verifier passes (mocked)', async () => {
     // Bypass network verifier
     const verifySpy = vi
@@ -337,8 +453,6 @@ describe('PaymentsService PayPal webhooks', () => {
       invoiceId: 'inv_1',
       amount: 50,
     });
-    expect(commerce.markInvoicePaid).toHaveBeenCalledWith('inv_1');
-
     const refundEvent = {
       event_type: 'PAYMENT.CAPTURE.REFUNDED',
       resource: {

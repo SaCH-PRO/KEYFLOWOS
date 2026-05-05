@@ -6,6 +6,8 @@ import { CommerceInsightsController } from './commerce-insights.controller';
 import { FinancialCopilotController } from './financial-copilot.controller';
 import { CommerceService } from './commerce.service';
 import { CommerceStatsService } from './commerce-stats.service';
+import { InvoiceWorkflowService } from './invoice-workflow.service';
+import { InvoiceOverdueScheduler } from './invoice-overdue.scheduler';
 import { CommerceAiService } from './commerce-ai.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { RecurringInvoiceService } from './recurring-invoice.service';
@@ -31,6 +33,8 @@ import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
   providers: [
     CommerceService,
     CommerceStatsService,
+    InvoiceWorkflowService,
+    InvoiceOverdueScheduler,
     CommerceAiService,
     CommerceVisionService,
     RecurringInvoiceService,
@@ -50,6 +54,7 @@ import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
   exports: [
     CommerceService,
     CommerceStatsService,
+    InvoiceWorkflowService,
     RecurringInvoiceService,
     GmailService,
     FinancialCopilotService,

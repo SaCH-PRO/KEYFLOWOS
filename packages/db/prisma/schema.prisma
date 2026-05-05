@@ -1155,6 +1155,23 @@ model Payment {
   @@map("payments")
 }
 
+/// Idempotency / dedup table for inbound payment-provider webhooks. We
+/// upsert on (provider, providerEventId) BEFORE running side-effects so a
+/// re-delivered event becomes a no-op even if the per-row Payment unique
+/// constraint would otherwise allow duplicate processing.
+model WebhookEvent {
+  id              String   @id @default(cuid())
+  provider        String   // 'stripe' | 'paypal' | 'wipay'
+  providerEventId String   @map("provider_event_id")
+  eventType       String?  @map("event_type")
+  businessId      String?  @map("business_id")
+  receivedAt      DateTime @default(now()) @map("received_at")
+
+  @@unique([provider, providerEventId])
+  @@index([businessId, receivedAt])
+  @@map("webhook_events")
+}
+
 model PaymentLink {
   id        String   @id @default(cuid())
   token     String   @unique @default(cuid())
