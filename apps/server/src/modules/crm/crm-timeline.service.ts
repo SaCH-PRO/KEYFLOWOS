@@ -209,6 +209,7 @@ export class CrmTimelineService {
           },
           { actorType: 'USER', actorId: input.creatorId ?? undefined, source: input.source ?? 'crm' },
         );
+        this.events.emit('contact_task.created', { task, businessId: input.businessId });
         return task;
       });
   }
@@ -254,6 +255,10 @@ export class CrmTimelineService {
       data,
     });
     await this.logEvent(input.businessId, task.contactId, 'task.updated', { taskId: task.id, title: updated.title });
+    this.events.emit('contact_task.updated', { task: updated, businessId: input.businessId });
+    if (input.dueDate !== undefined && input.dueDate !== (task.dueDate?.toISOString?.() ?? null)) {
+      this.events.emit('contact_task.rescheduled', { task: updated, businessId: input.businessId });
+    }
     return updated;
   }
 
@@ -264,6 +269,7 @@ export class CrmTimelineService {
     if (!task) throw new NotFoundException('Task not found');
     await this.prisma.client.contactTask.delete({ where: { id: input.taskId } });
     await this.logEvent(input.businessId, task.contactId, 'task.deleted', { taskId: task.id, title: task.title });
+    this.events.emit('contact_task.deleted', { businessId: input.businessId, taskId: task.id });
     return { deleted: true };
   }
 
@@ -278,6 +284,7 @@ export class CrmTimelineService {
       data: { status: 'DONE', completedAt: new Date() },
     });
     await this.logEvent(input.businessId, task.contactId, 'task.completed', { taskId: task.id, title: task.title });
+    this.events.emit('contact_task.completed', { task: updated, businessId: input.businessId });
     return updated;
   }
 
@@ -292,6 +299,7 @@ export class CrmTimelineService {
       data: { status: 'OPEN', completedAt: null },
     });
     await this.logEvent(input.businessId, task.contactId, 'task.reopened', { taskId: task.id, title: task.title });
+    this.events.emit('contact_task.reopened', { task: updated, businessId: input.businessId });
     return updated;
   }
 

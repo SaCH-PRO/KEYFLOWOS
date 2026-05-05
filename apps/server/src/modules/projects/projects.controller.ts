@@ -1,45 +1,28 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { PrismaService } from '../../core/prisma/prisma.service';
+import { ProjectsService } from './projects.service';
 
 @Controller('projects')
 @UseGuards(AuthGuard, BusinessGuard)
 export class ProjectsController {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(@Inject(ProjectsService) private readonly projects: ProjectsService) {}
 
   @Get('businesses/:businessId')
-  async listProjects(@Param('businessId') businessId: string) {
-    return this.prisma.client.project.findMany({
-      where: { businessId, deletedAt: null },
-      include: {
-        tasks: {
-          where: { deletedAt: null },
-          orderBy: { sortOrder: 'asc' },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  listProjects(@Param('businessId') businessId: string) {
+    return this.projects.listProjects(businessId);
   }
 
   @Get('businesses/:businessId/projects/:projectId')
-  async getProject(
+  getProject(
     @Param('businessId') businessId: string,
     @Param('projectId') projectId: string,
   ) {
-    return this.prisma.client.project.findFirst({
-      where: { id: projectId, businessId, deletedAt: null },
-      include: {
-        tasks: {
-          where: { deletedAt: null },
-          orderBy: { sortOrder: 'asc' },
-        },
-      },
-    });
+    return this.projects.getProject(businessId, projectId);
   }
 
   @Post('businesses/:businessId')
-  async createProject(
+  createProject(
     @Param('businessId') businessId: string,
     @Body() body: {
       name: string;
@@ -53,25 +36,11 @@ export class ProjectsController {
       dueDate?: string;
     },
   ) {
-    return this.prisma.client.project.create({
-      data: {
-        businessId,
-        name: body.name,
-        description: body.description,
-        status: body.status || 'ACTIVE',
-        priority: body.priority || 'NORMAL',
-        color: body.color,
-        contactId: body.contactId,
-        invoiceId: body.invoiceId,
-        bookingId: body.bookingId,
-        dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
-      },
-      include: { tasks: true },
-    });
+    return this.projects.createProject(businessId, body);
   }
 
   @Patch('businesses/:businessId/projects/:projectId')
-  async updateProject(
+  updateProject(
     @Param('businessId') businessId: string,
     @Param('projectId') projectId: string,
     @Body() body: {
@@ -86,30 +55,19 @@ export class ProjectsController {
       dueDate?: string | null;
     },
   ) {
-    const data: any = { ...body };
-    if (body.dueDate !== undefined) {
-      data.dueDate = body.dueDate ? new Date(body.dueDate) : null;
-    }
-    return this.prisma.client.project.update({
-      where: { id: projectId, businessId },
-      data,
-      include: { tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } } },
-    });
+    return this.projects.updateProject(businessId, projectId, body);
   }
 
   @Delete('businesses/:businessId/projects/:projectId')
-  async deleteProject(
+  deleteProject(
     @Param('businessId') businessId: string,
     @Param('projectId') projectId: string,
   ) {
-    return this.prisma.client.project.update({
-      where: { id: projectId, businessId },
-      data: { deletedAt: new Date() },
-    });
+    return this.projects.deleteProject(businessId, projectId);
   }
 
   @Post('businesses/:businessId/projects/:projectId/tasks')
-  async addTask(
+  addTask(
     @Param('businessId') businessId: string,
     @Param('projectId') projectId: string,
     @Body() body: {
@@ -120,26 +78,11 @@ export class ProjectsController {
       assigneeId?: string;
     },
   ) {
-    const maxSort = await this.prisma.client.projectTask.aggregate({
-      where: { projectId, businessId, deletedAt: null },
-      _max: { sortOrder: true },
-    });
-    return this.prisma.client.projectTask.create({
-      data: {
-        projectId,
-        businessId,
-        title: body.title,
-        description: body.description,
-        priority: body.priority || 'NORMAL',
-        dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
-        assigneeId: body.assigneeId,
-        sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
-      },
-    });
+    return this.projects.addTask(businessId, projectId, body);
   }
 
   @Patch('businesses/:businessId/tasks/:taskId')
-  async updateTask(
+  updateTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
     @Body() body: {
@@ -152,94 +95,44 @@ export class ProjectsController {
       assigneeId?: string | null;
     },
   ) {
-    const data: any = { ...body };
-    if (body.dueDate !== undefined) {
-      data.dueDate = body.dueDate ? new Date(body.dueDate) : null;
-    }
-    return this.prisma.client.projectTask.update({
-      where: { id: taskId, businessId },
-      data,
-    });
+    return this.projects.updateTask(businessId, taskId, body);
   }
 
   @Delete('businesses/:businessId/tasks/:taskId')
-  async deleteTask(
+  deleteTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
   ) {
-    return this.prisma.client.projectTask.update({
-      where: { id: taskId, businessId },
-      data: { deletedAt: new Date() },
-    });
+    return this.projects.deleteTask(businessId, taskId);
   }
 
   @Get('businesses/:businessId/templates')
-  async listTemplates(@Param('businessId') businessId: string) {
-    return this.prisma.client.projectTemplate.findMany({
-      where: { businessId },
-      include: { product: { select: { id: true, name: true } } },
-      orderBy: { name: 'asc' },
-    });
+  listTemplates(@Param('businessId') businessId: string) {
+    return this.projects.listTemplates(businessId);
   }
 
   @Post('businesses/:businessId/templates')
-  async createTemplate(
+  createTemplate(
     @Param('businessId') businessId: string,
     @Body() body: { name: string; taskTitles: string[]; productId?: string },
   ) {
-    return this.prisma.client.projectTemplate.create({
-      data: {
-        businessId,
-        name: body.name,
-        taskTitles: body.taskTitles,
-        productId: body.productId || undefined,
-      },
-    });
+    return this.projects.createTemplate(businessId, body);
   }
 
   @Delete('businesses/:businessId/templates/:templateId')
-  async deleteTemplate(
+  deleteTemplate(
     @Param('businessId') businessId: string,
     @Param('templateId') templateId: string,
   ) {
-    return this.prisma.client.projectTemplate.delete({
-      where: { id: templateId, businessId },
-    });
+    return this.projects.deleteTemplate(businessId, templateId);
   }
 
   @Post('businesses/:businessId/from-template/:templateId')
-  async createFromTemplate(
+  createFromTemplate(
     @Param('businessId') businessId: string,
     @Param('templateId') templateId: string,
     @Body() body: { name?: string; contactId?: string; invoiceId?: string; bookingId?: string },
   ) {
-    const template = await this.prisma.client.projectTemplate.findFirst({
-      where: { id: templateId, businessId },
-    });
-    if (!template) throw new Error('Template not found');
-
-    const taskTitles = Array.isArray(template.taskTitles) ? template.taskTitles as string[] : [];
-
-    const project = await this.prisma.client.project.create({
-      data: {
-        businessId,
-        name: body.name || template.name,
-        status: 'ACTIVE',
-        priority: 'NORMAL',
-        contactId: body.contactId,
-        invoiceId: body.invoiceId,
-        bookingId: body.bookingId,
-        tasks: {
-          create: taskTitles.map((title, i) => ({
-            businessId,
-            title,
-            sortOrder: i + 1,
-          })),
-        },
-      },
-      include: { tasks: true },
-    });
-
-    return project;
+    return this.projects.createFromTemplate(businessId, templateId, body);
   }
 }

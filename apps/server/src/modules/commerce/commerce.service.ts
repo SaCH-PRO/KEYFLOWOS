@@ -294,6 +294,7 @@ export class CommerceService {
       where: { id: invoiceId },
       data: { deletedAt: new Date() },
     });
+    this.events.emit('invoice.deleted', { businessId, invoiceId });
     this.statsCache.invalidateCache(businessId);
     return result;
   }
@@ -970,6 +971,16 @@ export class CommerceService {
       data: updateData,
       include: { items: true, contact: true },
     });
+    const prevExp = quote.expiryDate ? new Date(quote.expiryDate).getTime() : null;
+    const newExp = updated.expiryDate ? new Date(updated.expiryDate).getTime() : null;
+    if (input.expiryDate !== undefined && prevExp !== newExp) {
+      this.events.emit('quote.expiry_changed', {
+        quote: updated,
+        businessId: input.businessId,
+        previousExpiryDate: quote.expiryDate ?? null,
+      });
+    }
+    this.events.emit('quote.updated', { quote: updated, businessId: input.businessId });
     this.statsCache.invalidateCache(input.businessId);
     return updated;
   }
@@ -988,6 +999,7 @@ export class CommerceService {
       where: { id: quoteId },
       data: { deletedAt: new Date() },
     });
+    this.events.emit('quote.deleted', { businessId, quoteId });
     this.statsCache.invalidateCache(businessId);
     return result;
   }
@@ -1411,6 +1423,16 @@ export class CommerceService {
       data: updateData,
       include: { items: true, contact: true },
     });
+    const prevDue = invoice.dueDate ? new Date(invoice.dueDate).getTime() : null;
+    const newDue = result.dueDate ? new Date(result.dueDate).getTime() : null;
+    if (input.dueDate !== undefined && prevDue !== newDue) {
+      this.events.emit('invoice.due_date_changed', {
+        invoice: result,
+        businessId: input.businessId,
+        previousDueDate: invoice.dueDate ?? null,
+      });
+    }
+    this.events.emit('invoice.updated', { invoice: result, businessId: input.businessId });
     this.statsCache.invalidateCache(input.businessId);
     return result;
   }

@@ -16,9 +16,9 @@ export class SocialService {
     @Optional() @Inject(MetaSocialConnector) private readonly metaConnector?: MetaSocialConnector,
   ) {}
 
-  createDraft(businessId: string, content: string, mediaUrls: string[], scheduledAt?: string, channelIds?: string[]) {
+  async createDraft(businessId: string, content: string, mediaUrls: string[], scheduledAt?: string, channelIds?: string[]) {
     const status = scheduledAt ? 'SCHEDULED' : 'DRAFT';
-    return this.prisma.client.socialPost.create({
+    const post = await this.prisma.client.socialPost.create({
       data: {
         businessId,
         content,
@@ -28,6 +28,11 @@ export class SocialService {
         channelIds: channelIds ?? [],
       },
     });
+    this.events.emit('social_post.created', { post, businessId });
+    if (scheduledAt) {
+      this.events.emit('social_post.scheduled', { post, businessId });
+    }
+    return post;
   }
 
   async updatePost(businessId: string, postId: string, data: { content?: string; scheduledAt?: string | null; channelIds?: string[]; mediaUrls?: string[] }) {
@@ -45,10 +50,15 @@ export class SocialService {
     if (data.channelIds !== undefined) updateData.channelIds = data.channelIds;
     if (data.mediaUrls !== undefined) updateData.mediaUrls = data.mediaUrls;
 
-    return this.prisma.client.socialPost.update({
+    const updated = await this.prisma.client.socialPost.update({
       where: { id: post.id },
       data: updateData,
     });
+    this.events.emit('social_post.updated', { post: updated, businessId });
+    if (data.scheduledAt) {
+      this.events.emit('social_post.scheduled', { post: updated, businessId });
+    }
+    return updated;
   }
 
   async deletePost(businessId: string, postId: string) {
@@ -57,10 +67,12 @@ export class SocialService {
     });
     if (!post) throw new NotFoundException('Post not found');
 
-    return this.prisma.client.socialPost.update({
+    const result = await this.prisma.client.socialPost.update({
       where: { id: post.id },
       data: { deletedAt: new Date() },
     });
+    this.events.emit('social_post.deleted', { businessId, postId: post.id });
+    return result;
   }
 
   async publishPost(businessId: string, postId: string, channelIds?: string[]) {

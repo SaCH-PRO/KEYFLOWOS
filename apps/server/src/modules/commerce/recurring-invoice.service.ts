@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
@@ -9,6 +10,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   onModuleInit() {
@@ -104,7 +106,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     }
     const total = subtotal + taxAmount - discountAmount;
 
-    return this.prisma.client.recurringInvoice.create({
+    const recurringInvoice = await this.prisma.client.recurringInvoice.create({
       data: {
         businessId: input.businessId,
         name: input.name,
@@ -123,6 +125,11 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
       },
       include: { contact: true },
     });
+    this.events.emit('recurring_invoice.created', {
+      recurringInvoice,
+      businessId: input.businessId,
+    });
+    return recurringInvoice;
   }
 
   async updateRecurringInvoice(input: {
@@ -198,18 +205,25 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
       updateData.total = total;
     }
 
-    return this.prisma.client.recurringInvoice.update({
+    const recurringInvoice = await this.prisma.client.recurringInvoice.update({
       where: { id: input.id },
       data: updateData,
       include: { contact: true },
     });
+    this.events.emit('recurring_invoice.updated', {
+      recurringInvoice,
+      businessId: input.businessId,
+    });
+    return recurringInvoice;
   }
 
-  deleteRecurringInvoice(businessId: string, id: string) {
-    return this.prisma.client.recurringInvoice.update({
+  async deleteRecurringInvoice(businessId: string, id: string) {
+    const result = await this.prisma.client.recurringInvoice.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+    this.events.emit('recurring_invoice.deleted', { businessId, recurringInvoiceId: id });
+    return result;
   }
 
   async toggleActive(businessId: string, id: string) {
@@ -219,11 +233,13 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     if (!existing) {
       throw new NotFoundException('Recurring invoice not found');
     }
-    return this.prisma.client.recurringInvoice.update({
+    const recurringInvoice = await this.prisma.client.recurringInvoice.update({
       where: { id },
       data: { isActive: !existing.isActive },
       include: { contact: true },
     });
+    this.events.emit('recurring_invoice.updated', { recurringInvoice, businessId });
+    return recurringInvoice;
   }
 
   async processRecurringInvoices() {
@@ -290,7 +306,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
 
         const nextRunDate = this.calculateNextRunDate(recurring.nextRunDate, recurring.frequency);
 
-        await this.prisma.client.recurringInvoice.update({
+        const updatedRecurring = await this.prisma.client.recurringInvoice.update({
           where: { id: recurring.id },
           data: {
             lastRunDate: now,
@@ -300,6 +316,17 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
             lastError: null,
             lastFailureAt: null,
           },
+          include: { contact: true },
+        });
+
+        this.events.emit('recurring_invoice.generated', {
+          recurringInvoice: updatedRecurring,
+          invoice,
+          businessId: recurring.businessId,
+        });
+        this.events.emit('invoice.created', {
+          invoice,
+          businessId: recurring.businessId,
         });
 
         this.logger.log(`Generated invoice ${invoice.invoiceNumber} from recurring "${recurring.name}"`);

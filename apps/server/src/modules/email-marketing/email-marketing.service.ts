@@ -60,6 +60,10 @@ export class EmailMarketingService {
       },
     });
     this.events.emit('campaign.created', { campaign, businessId: input.businessId } as CampaignCreatedPayload);
+    this.events.emit('email_campaign.created', { campaign, businessId: input.businessId });
+    if (campaign.scheduledAt) {
+      this.events.emit('email_campaign.scheduled', { campaign, businessId: input.businessId });
+    }
     this.invalidateStatsCache(input.businessId);
     return campaign;
   }
@@ -73,7 +77,7 @@ export class EmailMarketingService {
     segmentFilter?: any;
     scheduledAt?: string;
   }) {
-    return this.prisma.client.emailCampaign.update({
+    const campaign = await this.prisma.client.emailCampaign.update({
       where: { id: input.id, businessId: input.businessId },
       data: {
         ...(input.name !== undefined && { name: input.name }),
@@ -83,6 +87,11 @@ export class EmailMarketingService {
         ...(input.scheduledAt !== undefined && { scheduledAt: new Date(input.scheduledAt) }),
       },
     });
+    this.events.emit('email_campaign.updated', { campaign, businessId: input.businessId });
+    if (input.scheduledAt !== undefined) {
+      this.events.emit('email_campaign.scheduled', { campaign, businessId: input.businessId });
+    }
+    return campaign;
   }
 
   async deleteCampaign(businessId: string, id: string) {
@@ -90,6 +99,7 @@ export class EmailMarketingService {
       where: { id, businessId },
       data: { deletedAt: new Date() },
     });
+    this.events.emit('email_campaign.deleted', { businessId, campaignId: id });
     this.invalidateStatsCache(businessId);
     return result;
   }
@@ -437,6 +447,7 @@ export class EmailMarketingService {
         },
       });
       this.events.emit('campaign.sent', { campaign: updatedCampaign, businessId, recipientCount: recipientData.length } as CampaignSentPayload);
+      this.events.emit('email_campaign.sent', { campaign: updatedCampaign, businessId, recipientCount: recipientData.length });
       this.invalidateStatsCache(businessId);
 
       const warning = !gmailConnected && recipientData.length > 0
@@ -481,6 +492,7 @@ export class EmailMarketingService {
         scheduledAt: scheduleDate,
       },
     });
+    this.events.emit('email_campaign.scheduled', { campaign: result, businessId });
     this.invalidateStatsCache(businessId);
     return result;
   }
@@ -494,13 +506,15 @@ export class EmailMarketingService {
       throw new Error('Scheduled campaign not found');
     }
 
-    return this.prisma.client.emailCampaign.update({
+    const result = await this.prisma.client.emailCampaign.update({
       where: { id, businessId },
       data: {
         status: 'DRAFT',
         scheduledAt: null,
       },
     });
+    this.events.emit('email_campaign.cancelled', { campaign: result, businessId });
+    return result;
   }
 
   async getCampaignStats(businessId: string, id: string) {
