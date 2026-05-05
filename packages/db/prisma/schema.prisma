@@ -228,6 +228,7 @@ model Business {
   whatsappContacts     WhatsAppContact[]
   whatsappMessages     WhatsAppMessage[]
   conversationAiInsights ConversationAIInsight[]
+  contactInsightSnapshots ContactInsightSnapshot[]
 
   // SEO Operations Engine
   seoPages          SeoPage[]
@@ -527,6 +528,7 @@ model Contact {
   conversationInsights ConversationAIInsight[]
   relationshipsFrom   ContactRelationship[] @relation("ContactRelationshipFrom")
   relationshipsTo     ContactRelationship[] @relation("ContactRelationshipTo")
+  insightSnapshot      ContactInsightSnapshot?
 
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
@@ -893,6 +895,38 @@ model ConversationAIInsight {
   @@index([businessId, contactId, createdAt])
   @@index([businessId, hash])
   @@map("conversation_ai_insights")
+}
+
+/// Cached AI-generated insight card for a contact. One snapshot per contact;
+/// recomputed in background when relationship-changing events fire.
+model ContactInsightSnapshot {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  contactId  String   @unique @map("contact_id")
+
+  /// Schema version for the payload shape so older cached rows can be evicted.
+  version    Int      @default(1)
+
+  /// Full snapshot payload (relationship summary, channels, topics, lifetime value,
+  /// open deals, churn risk, suggested next action, etc.). See ContactInsightService
+  /// for the typed shape.
+  payload    Json
+
+  /// True when an event has invalidated this snapshot and a recompute is pending.
+  stale      Boolean  @default(false)
+
+  modelUsed  String?  @map("model_used")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt      @map("updated_at")
+
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, stale])
+  @@index([businessId, computedAt])
+  @@map("contact_insight_snapshots")
 }
 
 model ContactNote {

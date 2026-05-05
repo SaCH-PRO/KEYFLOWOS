@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { CrmAiService } from './crm-ai.service';
 import { CrmJourneyService } from './crm-journey.service';
+import { ContactInsightService } from './contact-insight.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
@@ -13,7 +14,31 @@ export class CrmAiController {
   constructor(
     @Inject(CrmAiService) private readonly crmAi: CrmAiService,
     @Inject(CrmJourneyService) private readonly journey: CrmJourneyService,
+    @Inject(ContactInsightService) private readonly contactInsight: ContactInsightService,
   ) {}
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/insight-card')
+  getInsightCard(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.contactInsight.getSnapshot(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/insight-card/recompute')
+  recomputeInsightCard(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    checkAiRateLimit(businessId);
+    return this.contactInsight.recompute(businessId, contactId);
+  }
 
   @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
   @RequireFeature('ai_tools')

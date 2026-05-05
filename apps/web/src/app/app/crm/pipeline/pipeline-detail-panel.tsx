@@ -13,7 +13,7 @@ import type { HealthMetrics } from "@/components/contacts/contact-health-score";
 import type { JourneyMilestone } from "@/components/contacts/relationship-timeline";
 import type { ConversationContextData } from "@/components/contacts/conversation-context";
 import type { AiInsight } from "@/components/contacts/ai-copilot";
-import type { CrossJourneyResponse } from "@/lib/client";
+import type { ContactInsightSnapshot, CrossJourneyResponse } from "@/lib/client";
 
 export interface PipelineDetailPanelProps {
   contact: ContactDetailData | null;
@@ -31,6 +31,9 @@ export interface PipelineDetailPanelProps {
   conversationContext: ConversationContextData | null;
   aiInsight: AiInsight | null;
   aiInsightLoading: boolean;
+  insightSnapshot: ContactInsightSnapshot | null;
+  insightLoading: boolean;
+  onRecomputeInsight?: () => Promise<void> | void;
   onTogglePin: (id: string) => void;
   onAddNote: (body: string, source?: string) => Promise<void>;
   onAddTask: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
@@ -69,6 +72,9 @@ function PipelineDetailPanelInner({
   conversationContext,
   aiInsight,
   aiInsightLoading,
+  insightSnapshot,
+  insightLoading,
+  onRecomputeInsight,
   onTogglePin,
   onAddNote,
   onAddTask,
@@ -140,6 +146,9 @@ function PipelineDetailPanelInner({
         conversationContext={conversationContext}
         aiInsight={aiInsight}
         aiInsightLoading={aiInsightLoading}
+        insightSnapshot={insightSnapshot}
+        insightLoading={insightLoading}
+        onRecomputeInsight={onRecomputeInsight}
         onGenerateAiInsight={onGenerateAiInsight}
         onRefreshConversationContext={onRefreshConversationContext}
         relatedContacts={relatedContacts}
