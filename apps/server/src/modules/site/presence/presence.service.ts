@@ -509,7 +509,100 @@ export class PresenceService {
   }
 
   /**
-   * Compute the section completion contributions toward Presence Health Score.
+     * Public directory listing of every business that has a current published
+     * presence (no unpublishedAt). Returns the canonical directoryListing
+     * shape used by the storefront payload so the public /directory page and
+     * any third-party crawlers see consistent data. Supports lightweight
+     * server-side filtering and pagination so the list scales as the
+     * platform grows.
+     */
+    async listDirectory(opts: {
+      industry?: string;
+      city?: string;
+      q?: string;
+      page?: number;
+      pageSize?: number;
+    } = {}) {
+      const safePage = Number.isFinite(opts.page) ? Math.floor(opts.page as number) : 1;
+      const safePageSize = Number.isFinite(opts.pageSize) ? Math.floor(opts.pageSize as number) : 24;
+      const page = Math.max(1, safePage);
+      const pageSize = Math.min(60, Math.max(1, safePageSize));
+      const baseAggWhere: Prisma.BusinessWhereInput = {
+        deletedAt: null,
+        slug: { not: null },
+        sitePagePublished: { is: { unpublishedAt: null } },
+      };
+      const businessWhere: Prisma.BusinessWhereInput = { ...baseAggWhere };
+      if (opts.industry) businessWhere.industry = { equals: opts.industry, mode: 'insensitive' };
+      if (opts.city) businessWhere.city = { equals: opts.city, mode: 'insensitive' };
+      if (opts.q && opts.q.trim()) {
+        const q = opts.q.trim().slice(0, 80);
+        businessWhere.OR = [
+          { name: { contains: q, mode: 'insensitive' } },
+          { tagline: { contains: q, mode: 'insensitive' } },
+          { headline: { contains: q, mode: 'insensitive' } },
+          { description: { contains: q, mode: 'insensitive' } },
+        ];
+      }
+      const [total, businesses, industriesAgg, citiesAgg] = await Promise.all([
+        this.prisma.client.business.count({ where: businessWhere }),
+        this.prisma.client.business.findMany({
+          where: businessWhere,
+          orderBy: [{ name: 'asc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: {
+            id: true, slug: true, name: true, logoUrl: true, tagline: true,
+            headline: true, industry: true, city: true, country: true, website: true,
+            sitePagePublished: { select: { publishedAt: true, version: true } },
+          },
+        }),
+        this.prisma.client.business.groupBy({
+          by: ['industry'],
+          where: { ...baseAggWhere, industry: { not: null } },
+          _count: { _all: true },
+          orderBy: { _count: { industry: 'desc' } },
+          take: 30,
+        }).catch(() => [] as Array<{ industry: string | null; _count: { _all: number } }>),
+        this.prisma.client.business.groupBy({
+          by: ['city'],
+          where: { ...baseAggWhere, city: { not: null } },
+          _count: { _all: true },
+          orderBy: { _count: { city: 'desc' } },
+          take: 30,
+        }).catch(() => [] as Array<{ city: string | null; _count: { _all: number } }>),
+      ]);
+      const items = businesses.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        logoUrl: b.logoUrl,
+        tagline: b.tagline,
+        headline: b.headline,
+        industry: b.industry,
+        city: b.city,
+        country: b.country,
+        website: b.website,
+        publishedAt: b.sitePagePublished?.publishedAt ?? null,
+      }));
+      return {
+        items,
+        total,
+        page,
+        pageSize,
+        pageCount: Math.max(1, Math.ceil(total / pageSize)),
+        filters: {
+          industries: industriesAgg
+            .filter((g) => typeof g.industry === 'string' && (g.industry as string).length > 0)
+            .map((g) => ({ value: g.industry as string, count: g._count._all })),
+          cities: citiesAgg
+            .filter((g) => typeof g.city === 'string' && (g.city as string).length > 0)
+            .map((g) => ({ value: g.city as string, count: g._count._all })),
+        },
+      };
+    }
+
+    /**
+     * Compute the section completion contributions toward Presence Health Score.
    * Each visible required section that has meaningful content scores 1; the
    * sibling Health Score task aggregates these with branding/SEO checks.
    */
