@@ -17,6 +17,7 @@ const softDeleteExtension = softDelete([
   "Project",
   "ProjectTask",
   "Site",
+  "CalendarEvent",
 ]);
 
 // Create a connection pool using the DATABASE_URL
