@@ -28,8 +28,15 @@ import {
   DollarSign,
   CreditCard,
   Receipt,
+  Sparkles,
 } from "lucide-react";
+import nextDynamic from "next/dynamic";
 import { InvoiceMobileActions } from "../components/invoice-mobile-actions";
+
+const PaymentPlanPanel = nextDynamic(
+  () => import("../components/payment-plan-panel").then((m) => m.PaymentPlanPanel),
+  { ssr: false, loading: () => null },
+);
 import {
   createProduct,
   createInvoice,
@@ -220,6 +227,7 @@ export default function InvoicesPanel({
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
   const [paymentModal, setPaymentModal] = useState<{ invoice: Invoice } | null>(null);
+  const [paymentPlanFor, setPaymentPlanFor] = useState<Invoice | null>(null);
   const [paymentForm, setPaymentForm] = useState({ amount: "", method: "Cash", reference: "", notes: "" });
   const [recordingPayment, setRecordingPayment] = useState(false);
   const [paymentHistory, setPaymentHistory] = useState<Record<string, PaymentRecord[]>>({});
@@ -1121,6 +1129,9 @@ export default function InvoicesPanel({
                       {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
                         <OverflowMenuItem icon={DollarSign} label="Record payment" onClick={() => openPaymentModal(inv)} />
                       )}
+                      {(inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
+                        <OverflowMenuItem icon={Sparkles} label="AI Payment Plan" onClick={() => setPaymentPlanFor(inv)} />
+                      )}
                       {(inv.status === "DRAFT" || inv.status === "SENT") && (
                         <OverflowMenuItem icon={CheckCircle} label="Mark paid" onClick={() => handleMarkPaid(inv.id, inv)} disabled={!!actionLoading[inv.id]} />
                       )}
@@ -1486,6 +1497,27 @@ export default function InvoicesPanel({
         onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
         onCancel={() => setConfirmState({open: false, action: () => {}})}
       />
+
+      {paymentPlanFor && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+          onClick={() => setPaymentPlanFor(null)}
+        >
+          <div
+            className="w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <PaymentPlanPanel
+              businessId={businessId}
+              invoiceId={paymentPlanFor.id}
+              invoiceNumber={paymentPlanFor.invoiceNumber ?? paymentPlanFor.id.slice(0, 8)}
+              invoiceAmount={Number(paymentPlanFor.total ?? 0)}
+              currency={paymentPlanFor.currency ?? currency}
+              onClose={() => setPaymentPlanFor(null)}
+            />
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

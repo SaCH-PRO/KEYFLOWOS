@@ -26,7 +26,14 @@ import {
   ArrowUpDown,
   CalendarClock,
   Clock,
+  Sparkles,
 } from "lucide-react";
+import nextDynamic from "next/dynamic";
+
+const QuoteFollowUpPanel = nextDynamic(
+  () => import("../components/quote-follow-up-panel").then((m) => m.QuoteFollowUpPanel),
+  { ssr: false, loading: () => null },
+);
 import {
   createProduct,
   createQuote,
@@ -203,6 +210,7 @@ export default function QuotesPanel({
   }, [initialStatusFilter]);
   const [sortKey, setSortKey] = useState<BillingSortKey>("date-desc");
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [followUpFor, setFollowUpFor] = useState<Quote | null>(null);
   const [extendDate, setExtendDate] = useState("");
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [showAcceptPrompt, setShowAcceptPrompt] = useState(false);
@@ -1055,6 +1063,7 @@ export default function QuotesPanel({
                     <OverflowMenuItem icon={Eye} label="View details" onClick={() => setSelectedQuote(quote)} />
                     <OverflowMenuItem icon={Pencil} label="Edit" onClick={() => openEditQuote(quote)} />
                     <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateQuote(quote)} />
+                    <OverflowMenuItem icon={Sparkles} label="AI Follow-up" onClick={() => setFollowUpFor(quote)} />
                     <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareQuoteViaWhatsApp(quote)} />
                     {(quote.status === "DRAFT" || quote.status === "SENT") && (
                       <OverflowMenuItem icon={Mail} label="Send via email" onClick={() => { setSelectedQuote(quote); setShowEmailModal(true); }} />
@@ -1522,6 +1531,27 @@ export default function QuotesPanel({
         onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
         onCancel={() => setConfirmState({open: false, action: () => {}})}
       />
+
+      {followUpFor && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+          onClick={() => setFollowUpFor(null)}
+        >
+          <div
+            className="w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <QuoteFollowUpPanel
+              businessId={businessId}
+              quoteId={followUpFor.id}
+              quoteNumber={followUpFor.quoteNumber ?? followUpFor.id.slice(0, 8)}
+              quoteAmount={Number(followUpFor.total ?? 0)}
+              currency={followUpFor.currency ?? currency}
+              onClose={() => setFollowUpFor(null)}
+            />
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

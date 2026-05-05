@@ -19,8 +19,16 @@ import {
 } from "@/lib/client";
 import { openKey } from "@/components/key/key-agent";
 import { CollectionsScoringPanel } from "./collections-scoring-panel";
-import { PaymentPlanPanel } from "./payment-plan-panel";
-import { QuoteFollowUpPanel } from "./quote-follow-up-panel";
+import nextDynamic from "next/dynamic";
+
+const PaymentPlanPanel = nextDynamic(
+  () => import("./payment-plan-panel").then((m) => m.PaymentPlanPanel),
+  { ssr: false, loading: () => null },
+);
+const QuoteFollowUpPanel = nextDynamic(
+  () => import("./quote-follow-up-panel").then((m) => m.QuoteFollowUpPanel),
+  { ssr: false, loading: () => null },
+);
 
 interface Props {
   businessId: string | null;

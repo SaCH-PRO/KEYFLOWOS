@@ -31,8 +31,8 @@ work.
 - `MissionsButton` — shell header right cluster (`apps/app/layout.tsx`), lazy-loaded, shown next to Notifications.
 - `NextBestActionWidget` — KEYFLOW home (`/app/keyflow-command`) below NextActionsWidget.
 - `RelationshipHealthStrip` — top of contact detail (`/app/crm/contacts/[id]`).
-- `PaymentPlanPanel` — drawer on `/app/commerce?tab=actions` (overlay; opened from overdue invoice action card via `onOpenPaymentPlan` callback).
-- `QuoteFollowUpPanel` — drawer on `/app/commerce?tab=actions` (overlay; opened from stale quote action card via `onOpenQuoteFollowUp` callback).
+- `PaymentPlanPanel` — overlay drawer; primary entry: invoice row "AI Payment Plan" overflow menu item on `/app/commerce?tab=invoices` (overdue/partially-paid invoices). Also reachable from overdue-invoice action cards on `/app/commerce?tab=actions`. Lazy-loaded.
+- `QuoteFollowUpPanel` — overlay drawer; primary entry: quote row "AI Follow-up" overflow menu item on `/app/commerce?tab=quotes`. Also reachable from stale-quote action cards on `/app/commerce?tab=actions`. Lazy-loaded.
 - `ChurnRiskPanel` — bottom of `/app/commerce?tab=overview` (CommerceOverviewTab).
 - `CollectionsScoringPanel` — bottom of `/app/commerce?tab=actions` (RevenueActionsTab).
 - `PlaybookPanel` — Playbooks tab on `/app/projects`.
