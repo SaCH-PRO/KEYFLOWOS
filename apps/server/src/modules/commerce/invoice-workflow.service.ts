@@ -1,0 +1,283 @@
+import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaService } from '../../core/prisma/prisma.service';
+
+/**
+ * Canonical invoice statuses. Mirrors the string-typed `Invoice.status`
+ * column in the schema; the workflow service is the single owner of all
+ * transitions between these states.
+ */
+export type InvoiceStatus =
+  | 'DRAFT'
+  | 'SENT'
+  | 'PARTIALLY_PAID'
+  | 'PAID'
+  | 'OVERDUE'
+  | 'VOID'
+  | 'FAILED'
+  | 'PENDING';
+
+/**
+ * Allowed transitions. Server-side enforcement; UI/clients can request
+ * a transition but the workflow throws 409 ConflictException for anything
+ * not in this map.
+ */
+const ALLOWED_TRANSITIONS: Record<InvoiceStatus, ReadonlySet<InvoiceStatus>> = {
+  DRAFT: new Set<InvoiceStatus>(['SENT', 'VOID']),
+  SENT: new Set<InvoiceStatus>(['PARTIALLY_PAID', 'PAID', 'OVERDUE', 'VOID', 'FAILED', 'PENDING']),
+  PENDING: new Set<InvoiceStatus>(['SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'VOID', 'FAILED']),
+  PARTIALLY_PAID: new Set<InvoiceStatus>(['PARTIALLY_PAID', 'PAID', 'OVERDUE', 'FAILED']),
+  OVERDUE: new Set<InvoiceStatus>(['PARTIALLY_PAID', 'PAID', 'VOID', 'FAILED']),
+  FAILED: new Set<InvoiceStatus>(['SENT', 'PARTIALLY_PAID', 'PAID', 'VOID']),
+  // PAID can be re-opened to PARTIALLY_PAID by a refund (driven by
+  // reconcileFromPayments after a refund row lands). All other transitions
+  // out of PAID are terminal.
+  PAID: new Set<InvoiceStatus>(['PARTIALLY_PAID']),
+  VOID: new Set<InvoiceStatus>([]),
+};
+
+/** Currency-aware rounding to 2 decimals. Avoids float drift on TTD/USD. */
+export function roundMoney(amount: number, currency = 'TTD'): number {
+  // No 0-decimal currencies in scope (TTD/USD/JMD/etc all 2dp). Centralised so
+  // adding JPY etc. only changes one place.
+  void currency;
+  return Math.round(amount * 100) / 100;
+}
+
+export interface PaymentLike {
+  amount: number;
+  status: string; // 'SUCCESSFUL' | 'PENDING' | 'FAILED' | 'REFUNDED'
+}
+
+export interface BalanceSummary {
+  total: number;
+  paid: number;
+  refunded: number;
+  net: number;
+  remaining: number;
+  isFullyPaid: boolean;
+  isOverpaid: boolean;
+}
+
+/**
+ * Compute the canonical invoice balance from the invoice total + payment rows.
+ * - SUCCESSFUL contributes positively
+ * - REFUNDED contributes negatively (refund rows are stored with negative
+ *   `amount` by convention; we abs them so the sign convention is irrelevant)
+ * - PENDING / FAILED are ignored
+ *
+ * `remaining` is clamped at zero (overpayments don't drive remaining negative).
+ * `isOverpaid` flags overpayment for downstream surfacing.
+ */
+export function computeBalance(total: number, payments: PaymentLike[], currency = 'TTD'): BalanceSummary {
+  let paid = 0;
+  let refunded = 0;
+  for (const p of payments) {
+    if (p.status === 'SUCCESSFUL') paid += Number(p.amount) || 0;
+    else if (p.status === 'REFUNDED') refunded += Math.abs(Number(p.amount) || 0);
+  }
+  paid = roundMoney(paid, currency);
+  refunded = roundMoney(refunded, currency);
+  const net = roundMoney(paid - refunded, currency);
+  const totalRounded = roundMoney(total, currency);
+  // Tolerance ≈ half a cent — covers float drift in currency conversions.
+  const isFullyPaid = net + 0.005 >= totalRounded && totalRounded > 0;
+  const remaining = Math.max(0, roundMoney(totalRounded - net, currency));
+  return {
+    total: totalRounded,
+    paid,
+    refunded,
+    net,
+    remaining,
+    isFullyPaid,
+    isOverpaid: net - 0.005 > totalRounded,
+  };
+}
+
+/**
+ * Compute the resulting invoice status after a payment is applied. Pure
+ * function — no DB. Used by `applyPayment` and by tests.
+ */
+export function deriveStatusAfterPayment(
+  currentStatus: InvoiceStatus,
+  balance: BalanceSummary,
+): InvoiceStatus {
+  if (currentStatus === 'VOID') return 'VOID';
+  if (balance.isFullyPaid) return 'PAID';
+  // Refund reopening: PAID drops below total -> PARTIALLY_PAID.
+  if (balance.net > 0) return 'PARTIALLY_PAID';
+  return currentStatus;
+}
+
+export function isLegalTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
+  if (from === to) return true;
+  return ALLOWED_TRANSITIONS[from]?.has(to) ?? false;
+}
+
+@Injectable()
+export class InvoiceWorkflowService {
+  private readonly logger = new Logger(InvoiceWorkflowService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
+  ) {}
+
+  /**
+   * Throws 409 if `to` is not reachable from `from`. Pure check, useful from
+   * controllers that already loaded the invoice.
+   */
+  assertLegalTransition(from: InvoiceStatus, to: InvoiceStatus): void {
+    if (!isLegalTransition(from, to)) {
+      throw new ConflictException(
+        `Illegal invoice status transition: ${from} -> ${to}`,
+      );
+    }
+  }
+
+  /** Loads invoice + payments and returns the canonical balance summary. */
+  async getBalance(invoiceId: string): Promise<BalanceSummary> {
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { payments: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    return computeBalance(Number(invoice.total), invoice.payments as PaymentLike[], invoice.currency);
+  }
+
+  /**
+   * Recompute status from payments and persist if it changed. Centralises
+   * the PARTIALLY_PAID / PAID transition path used by every webhook + the
+   * manual recordPayment flow. Returns the updated invoice + balance.
+   */
+  async reconcileFromPayments(
+    invoiceId: string,
+  ): Promise<{ status: InvoiceStatus; balance: BalanceSummary; changed: boolean }> {
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { payments: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    const balance = computeBalance(
+      Number(invoice.total),
+      invoice.payments as PaymentLike[],
+      invoice.currency,
+    );
+    const current = invoice.status as InvoiceStatus;
+    const next = deriveStatusAfterPayment(current, balance);
+    if (next === current) {
+      return { status: current, balance, changed: false };
+    }
+    this.assertLegalTransition(current, next);
+    const updated = await this.prisma.client.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        status: next,
+        ...(next === 'PAID' ? { paidAt: new Date() } : {}),
+      },
+      include: { items: true, contact: true, booking: true },
+    });
+    if (next === 'PAID') {
+      this.events.emit('invoice.paid', {
+        invoice: updated,
+        businessId: updated.businessId,
+        eventName: 'invoice.paid',
+      });
+    } else if (next === 'PARTIALLY_PAID') {
+      this.events.emit('invoice.payment_recorded', {
+        invoice: updated,
+        businessId: updated.businessId,
+        balance,
+        eventName: 'invoice.payment_recorded',
+      });
+    }
+    return { status: next, balance, changed: true };
+  }
+
+  /**
+   * Generic transition entry-point used by callers that already know the
+   * target status (UI mark-paid, void, send, mark-overdue scheduler, etc).
+   * Enforces the allowed-transitions map and emits the matching event.
+   */
+  async transition(
+    invoiceId: string,
+    to: InvoiceStatus,
+    extra: { sentAt?: Date; dueDate?: Date | null; paidAt?: Date } = {},
+  ) {
+    const existing = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { id: true, status: true, businessId: true },
+    });
+    if (!existing) throw new NotFoundException('Invoice not found');
+    this.assertLegalTransition(existing.status as InvoiceStatus, to);
+
+    const data: Record<string, unknown> = { status: to };
+    if (extra.sentAt) data.sentAt = extra.sentAt;
+    if (extra.dueDate !== undefined) data.dueDate = extra.dueDate;
+    if (to === 'PAID') data.paidAt = extra.paidAt ?? new Date();
+
+    const updated = await this.prisma.client.invoice.update({
+      where: { id: invoiceId },
+      data,
+      include: { items: true, contact: true, booking: true },
+    });
+
+    const lower = to.toLowerCase();
+    if (to === 'PAID') {
+      this.events.emit('invoice.paid', {
+        invoice: updated,
+        businessId: updated.businessId,
+        eventName: 'invoice.paid',
+      });
+    } else if (to === 'SENT' || to === 'OVERDUE' || to === 'VOID') {
+      this.events.emit(`invoice.${lower}`, {
+        invoice: updated,
+        businessId: updated.businessId,
+        status: to,
+        eventName: `invoice.${lower}`,
+      });
+    } else if (to === 'FAILED') {
+      this.events.emit('invoice.payment_failed', {
+        invoice: updated,
+        businessId: updated.businessId,
+        eventName: 'invoice.payment_failed',
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Idempotent webhook ingestion guard. Returns true if this is the first
+   * time we've seen the (provider, providerEventId) pair; false if it's a
+   * replay. Callers should short-circuit (ack 200, do nothing) on false.
+   */
+  async assertNewProviderEvent(
+    provider: string,
+    providerEventId: string | undefined,
+    eventType?: string,
+    businessId?: string | null,
+  ): Promise<boolean> {
+    if (!providerEventId) return true; // Some legacy WiPay callbacks have no event id; fall through to per-row dedup.
+    try {
+      await this.prisma.client.webhookEvent.create({
+        data: {
+          provider,
+          providerEventId,
+          eventType: eventType ?? null,
+          businessId: businessId ?? null,
+        },
+      });
+      return true;
+    } catch (e: unknown) {
+      // P2002 unique-constraint -> already processed.
+      const code = (e as { code?: string })?.code;
+      if (code === 'P2002') {
+        this.logger.log(
+          `Duplicate ${provider} webhook ${providerEventId} (${eventType ?? 'unknown'}) — ignored`,
+        );
+        return false;
+      }
+      throw e;
+    }
+  }
+}

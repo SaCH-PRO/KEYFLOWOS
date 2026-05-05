@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nest
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
+import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
@@ -27,6 +28,7 @@ export class PaymentsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommerceService) private readonly commerceService: CommerceService,
+    @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
     @Optional() @Inject(WiPayConnector) private readonly wipayConnector?: WiPayConnector,
     @Optional() @Inject(PayPalConnector) private readonly paypalConnector?: PayPalConnector,
   ) {}
@@ -97,6 +99,25 @@ export class PaymentsService {
     return gateways;
   }
 
+  /**
+   * Centralised payment-eligibility gate. Checkout/order/redirect endpoints
+   * must call this before creating an external session — DRAFT invoices
+   * MUST NOT be paid (they have no commitment), and PAID/VOID/FAILED are
+   * terminal. Allowed states: SENT, OVERDUE, PARTIALLY_PAID, PENDING.
+   */
+  private assertInvoicePayable(status: string, invoiceId: string): void {
+    const allowed = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PENDING']);
+    if (allowed.has(status)) return;
+    if (status === 'PAID') throw new BadRequestException('Invoice is already paid');
+    if (status === 'VOID') throw new BadRequestException('Invoice is void');
+    if (status === 'DRAFT') {
+      throw new BadRequestException(
+        `Invoice ${invoiceId} is still a draft — send it before collecting payment`,
+      );
+    }
+    throw new BadRequestException(`Invoice ${invoiceId} is not in a payable state (${status})`);
+  }
+
   async createStripeCheckout(
     invoiceId: string,
     successUrl: string,
@@ -110,7 +131,7 @@ export class PaymentsService {
       },
     });
     if (!invoice) throw new BadRequestException('Invoice not found');
-    if (invoice.status === 'PAID') throw new BadRequestException('Invoice is already paid');
+    this.assertInvoicePayable(invoice.status, invoiceId);
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const secretKey = meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY;
@@ -239,6 +260,19 @@ export class PaymentsService {
       throw new BadRequestException('Invalid Stripe webhook signature');
     }
 
+    // Provider-event-id idempotency: if Stripe re-delivers this `evt_...`,
+    // ack it as received but skip all side-effects. Belt-and-suspenders with
+    // the per-Payment.providerPaymentId unique constraint downstream.
+    const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
+      'stripe',
+      event.id,
+      eventType,
+      undefined,
+    );
+    if (!fresh) {
+      return { ok: true, received: true };
+    }
+
     // Dispatch by event type. Unknown event types are acked but ignored so
     // Stripe doesn't keep retrying them.
     switch (eventType) {
@@ -294,10 +328,10 @@ export class PaymentsService {
     }).catch(() => null);
     if (existing) return;
 
-    const existingForInvoice = await this.prisma.client.payment.findFirst({
-      where: { invoiceId, provider: 'stripe', status: 'SUCCESSFUL' },
-    });
-    if (existingForInvoice) return;
+    // NOTE: We deliberately do NOT block subsequent successful payments for
+    // the same invoice — partial payments must accumulate. The dedup above
+    // (providerPaymentId @unique + the WebhookEvent table) already guards
+    // against double-counting the same Stripe event/charge.
 
     const amountMinor: number =
       obj.amount_total ?? obj.amount_received ?? obj.amount ?? 0;
@@ -310,12 +344,13 @@ export class PaymentsService {
       );
       throw new BadRequestException('Stripe webhook currency mismatch');
     }
+    // Allow over- and under-payments (partials). Workflow reconciliation
+    // decides whether the invoice flips PARTIALLY_PAID or PAID.
     const expectedAmount = Number(invoice.total);
-    if (amount > 0 && Math.abs(amount - expectedAmount) > 0.01) {
+    if (amount > expectedAmount + 0.01) {
       this.logger.warn(
-        `Stripe ${eventType} amount mismatch for invoice ${invoiceId}: got ${amount}, expected ${expectedAmount}`,
+        `Stripe ${eventType} overpayment for invoice ${invoiceId}: got ${amount}, expected ${expectedAmount}`,
       );
-      throw new BadRequestException('Stripe webhook amount mismatch');
     }
 
     // Stash the related payment_intent / charge id in `reference` so that
@@ -341,9 +376,11 @@ export class PaymentsService {
         reference,
       },
     });
-    if (invoice.status !== 'PAID') {
-      await this.commerceService.markInvoicePaid(invoiceId);
-    }
+    // Workflow recomputes the invoice balance from ALL payment rows and
+    // decides PARTIALLY_PAID vs PAID. Single source of truth for state.
+    await this.invoiceWorkflow.reconcileFromPayments(invoiceId).catch((e) => {
+      this.logger.warn(`Stripe reconcile failed for invoice ${invoiceId}: ${e instanceof Error ? e.message : e}`);
+    });
   }
 
   private async processStripeRefund(eventType: string, obj: any): Promise<void> {
@@ -426,7 +463,7 @@ export class PaymentsService {
         continue;
       }
 
-      await this.prisma.client.payment.create({
+      const persisted = await this.prisma.client.payment.create({
         data: {
           provider: 'stripe',
           providerPaymentId: refund.id,
@@ -440,7 +477,14 @@ export class PaymentsService {
         },
       }).catch((e) => {
         this.logger.warn(`Failed to persist Stripe refund ${refund.id}: ${e instanceof Error ? e.message : e}`);
+        return null;
       });
+      // Reopen the invoice if the refund moves the balance below total.
+      if (persisted) {
+        await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId).catch((e) => {
+          this.logger.warn(`Stripe refund reconcile failed for invoice ${original.invoiceId}: ${e instanceof Error ? e.message : e}`);
+        });
+      }
     }
   }
 
@@ -560,6 +604,16 @@ export class PaymentsService {
     const verified = await this.verifyPaypalSignature(headers, rawPayload, sandbox, businessCreds ?? undefined);
     if (!verified) {
       throw new BadRequestException('Invalid PayPal webhook signature');
+    }
+
+    const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
+      'paypal',
+      event.id,
+      event.event_type,
+      undefined,
+    );
+    if (!fresh) {
+      return { ok: true, received: true };
     }
 
     const eventType = event.event_type || '';
@@ -711,9 +765,9 @@ export class PaymentsService {
       },
     });
 
-    if (invoice.status !== 'PAID') {
-      await this.commerceService.markInvoicePaid(invoice.id);
-    }
+    await this.invoiceWorkflow.reconcileFromPayments(invoice.id).catch((e) => {
+      this.logger.warn(`PayPal reconcile failed for invoice ${invoice.id}: ${e instanceof Error ? e.message : e}`);
+    });
 
     const payer = resource?.payer as { email_address?: string; name?: { given_name?: string; surname?: string } } | undefined;
     this.paypalConnector?.emitPaymentReceived(invoice.businessId, {
@@ -765,7 +819,7 @@ export class PaymentsService {
     }
 
     const amount = Number(resource?.amount?.value ?? 0);
-    await this.prisma.client.payment.create({
+    const persisted = await this.prisma.client.payment.create({
       data: {
         provider: 'paypal',
         providerPaymentId: refundId,
@@ -779,7 +833,13 @@ export class PaymentsService {
       },
     }).catch((e) => {
       this.logger.warn(`Failed to persist PayPal refund ${refundId}: ${e instanceof Error ? e.message : e}`);
+      return null;
     });
+    if (persisted) {
+      await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId).catch((e) => {
+        this.logger.warn(`PayPal refund reconcile failed for invoice ${original.invoiceId}: ${e instanceof Error ? e.message : e}`);
+      });
+    }
   }
 
   async getInvoicePaymentStatus(invoiceId: string) {
@@ -799,7 +859,7 @@ export class PaymentsService {
     });
 
     if (!invoice) throw new Error('Invoice not found');
-    if (invoice.status === 'PAID') throw new Error('Invoice is already paid');
+    this.assertInvoicePayable(invoice.status, invoiceId);
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const developerId = meta.wipayApiKey || process.env.WIPAY_API_KEY || '1';
@@ -873,12 +933,44 @@ export class PaymentsService {
       return { success: false, message: 'Invoice not found' };
     }
 
-    if (hash && transaction_id && total) {
+    // Signature verification is mandatory — a callback with no hash, or
+    // missing the fields needed to compute one, is treated as forged. This
+    // closes the previous loophole where hash was only checked when present.
+    const isSuccessfulStatus = status === 'success' || status === '1';
+    if (isSuccessfulStatus) {
+      if (!hash || !transaction_id || !total) {
+        this.logger.error(`WiPay callback missing signature fields for order ${order_id} — rejecting`);
+        throw new BadRequestException('Invalid WiPay callback signature');
+      }
       const expectedHash = createHash('md5')
         .update(`${transaction_id}${order_id}${total}${status}`)
         .digest('hex');
       if (hash !== expectedHash) {
-        this.logger.warn(`WiPay hash mismatch for order ${order_id}`);
+        this.logger.error(`WiPay hash mismatch for order ${order_id} — rejecting callback`);
+        throw new BadRequestException('Invalid WiPay callback signature');
+      }
+    } else if (hash && transaction_id && total) {
+      // Failure callbacks: still verify when WiPay supplies the fields.
+      const expectedHash = createHash('md5')
+        .update(`${transaction_id}${order_id}${total}${status}`)
+        .digest('hex');
+      if (hash !== expectedHash) {
+        this.logger.error(`WiPay hash mismatch on failure callback for order ${order_id} — rejecting`);
+        throw new BadRequestException('Invalid WiPay callback signature');
+      }
+    }
+
+    // Provider-event-id idempotency. WiPay's transaction_id uniquely
+    // identifies a callback delivery; re-deliveries become no-ops.
+    if (transaction_id) {
+      const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
+        'wipay',
+        transaction_id,
+        status,
+        invoice.businessId,
+      );
+      if (!fresh) {
+        return { success: true, invoiceId: order_id, message: 'Duplicate callback ignored' };
       }
     }
 
@@ -903,7 +995,9 @@ export class PaymentsService {
             },
           });
 
-          await this.commerceService.markInvoicePaid(order_id);
+          await this.invoiceWorkflow.reconcileFromPayments(order_id).catch((e) => {
+            this.logger.warn(`WiPay reconcile failed for invoice ${order_id}: ${e instanceof Error ? e.message : e}`);
+          });
 
           this.wipayConnector?.emitPaymentReceived(invoice.businessId, {
             amount: parseFloat(total || String(invoice.total)),
@@ -967,7 +1061,7 @@ export class PaymentsService {
     });
 
     if (!invoice) throw new Error('Invoice not found');
-    if (invoice.status === 'PAID') throw new Error('Invoice is already paid');
+    this.assertInvoicePayable(invoice.status, invoiceId);
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
@@ -1131,7 +1225,7 @@ export class PaymentsService {
     });
 
     if (!invoice) throw new Error('Invoice not found');
-    if (invoice.status === 'PAID') throw new Error('Invoice is already paid');
+    this.assertInvoicePayable(invoice.status, invoiceId);
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
@@ -1161,7 +1255,9 @@ export class PaymentsService {
           },
         });
 
-        await this.commerceService.markInvoicePaid(invoiceId);
+        await this.invoiceWorkflow.reconcileFromPayments(invoiceId).catch((e) => {
+          this.logger.warn(`PayPal capture reconcile failed for invoice ${invoiceId}: ${e instanceof Error ? e.message : e}`);
+        });
 
         const payer = result.payer as { emailAddress?: string; name?: { givenName?: string; surname?: string } } | undefined;
         this.paypalConnector?.emitPaymentReceived(invoice.businessId, {
