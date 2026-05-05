@@ -339,14 +339,16 @@ export class BookingsController {
 
     const parsedState = this.calendar.verifyState(state);
     if (!parsedState) {
-      return res.redirect(`${frontendUrl}/app/bookings?calendar=error&reason=invalid_state`);
+      return res.redirect(
+        `${frontendUrl}/app/settings/connections?calendar=error&reason=invalid_state`,
+      );
     }
 
     try {
       await this.calendar.saveCalendarCredentials(parsedState.businessId, code);
-      return res.redirect(`${frontendUrl}/app/bookings?calendar=success`);
+      return res.redirect(`${frontendUrl}/app/settings/connections?calendar=success`);
     } catch {
-      return res.redirect(`${frontendUrl}/app/bookings?calendar=error`);
+      return res.redirect(`${frontendUrl}/app/settings/connections?calendar=error`);
     }
   }
 

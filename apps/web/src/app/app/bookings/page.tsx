@@ -40,6 +40,7 @@ import {
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useOpenComposer } from "@/hooks/use-open-composer";
 import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import type { Tab, StatusFilter } from "./components/bookings-types";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
@@ -583,22 +584,37 @@ export default function BookingsPage() {
               </button>
             </>
           )}
-          <RichTooltip title="Calendar Sync" description={calendarConnected ? `Connected to ${calendarEmail ?? "Google Calendar"}. Bookings sync automatically.` : "Click to connect Google Calendar and sync your bookings."} side="bottom">
-          <button
-            onClick={handleConnectCalendar}
-            className="inline-flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] rounded-lg text-[11px] transition-colors"
-            style={{
-              background: calendarConnected ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--muted) / 0.3)",
-              color: calendarConnected ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
-              borderWidth: 1,
-              borderColor: calendarConnected ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--border))",
-            }}
-            title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Connect Google Calendar"}
-            disabled={calendarLoading || calendarConnected}
+          <RichTooltip
+            title={calendarConnected ? "Synced to Google Calendar" : "Google Calendar not connected"}
+            description={
+              calendarConnected
+                ? `Bookings sync to ${calendarEmail ?? "Google Calendar"} automatically. Manage in Settings → Connections.`
+                : "Connect Google Calendar in Settings → Connections."
+            }
+            side="bottom"
           >
-            <Link2 className="w-4 h-4" />
-            {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
-          </button>
+            <Link
+              href="/app/settings/connections"
+              className="inline-flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] px-2 rounded-lg text-[11px] transition-colors"
+              style={{
+                background: calendarConnected ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--muted) / 0.3)",
+                color: calendarConnected ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
+                borderWidth: 1,
+                borderColor: calendarConnected ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--border))",
+              }}
+              aria-label={calendarConnected ? "Synced to Google Calendar" : "Connect Google Calendar in Settings"}
+            >
+              <Link2 className="w-4 h-4" />
+              {calendarConnected && (
+                <div
+                  className="w-1.5 h-1.5 rounded-full animate-pulse"
+                  style={{ background: "hsl(var(--kf-success))" }}
+                />
+              )}
+              <span className="hidden sm:inline">
+                {calendarConnected ? "Synced" : "Connect"}
+              </span>
+            </Link>
           </RichTooltip>
         </div>
       }

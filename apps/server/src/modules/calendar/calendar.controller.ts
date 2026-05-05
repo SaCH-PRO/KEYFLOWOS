@@ -10,8 +10,11 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { appUrl } from '../../core/config/runtime-urls';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import {
@@ -32,6 +35,11 @@ import {
   CalendarFilters,
   CalendarQueryService,
 } from './calendar-query.service';
+import {
+  CALENDAR_SYNC_EVENT_TYPES,
+  CalendarSyncService,
+  CalendarSyncSettings,
+} from './calendar-sync.service';
 
 interface AuthedRequest {
   user?: { id?: string; role?: string };
@@ -42,7 +50,107 @@ export class CalendarController {
   constructor(
     @Inject(CalendarQueryService)
     private readonly query: CalendarQueryService,
+    @Inject(CalendarSyncService)
+    private readonly sync: CalendarSyncService,
   ) {}
+
+  // ----- Google Calendar sync (platform connection) ---------------------
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/sync/status')
+  async syncStatus(@Param('businessId') businessId: string) {
+    return this.sync.getStatus(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/sync/settings')
+  async getSyncSettings(@Param('businessId') businessId: string) {
+    return this.sync.getSettings(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/sync/settings')
+  async patchSyncSettings(
+    @Param('businessId') businessId: string,
+    @Body() body: Partial<CalendarSyncSettings>,
+  ) {
+    if (!body || typeof body !== 'object') {
+      throw new BadRequestException('Body required');
+    }
+    const allowedKeys = new Set<string>([
+      ...CALENDAR_SYNC_EVENT_TYPES,
+      'pullExternal',
+      'defaultVisibility',
+      'calendarId',
+      'syncDirection',
+      'syncEnabled',
+    ]);
+    const filtered: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(body)) {
+      if (allowedKeys.has(k)) {
+        filtered[k] = v;
+      }
+    }
+    return this.sync.patchSettings(
+      businessId,
+      filtered as Partial<CalendarSyncSettings> & {
+        calendarId?: string | null;
+        syncDirection?: string;
+        syncEnabled?: boolean;
+      },
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/sync/calendars')
+  async listSyncCalendars(@Param('businessId') businessId: string) {
+    return this.sync.listAvailableCalendars(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sync/google/connect')
+  syncConnect(@Param('businessId') businessId: string) {
+    return { url: this.sync.getAuthUrl(businessId) };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sync/google/disconnect')
+  async syncDisconnect(@Param('businessId') businessId: string) {
+    await this.sync.disconnect(businessId);
+    return { success: true };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sync/google/resync')
+  async syncResync(@Param('businessId') businessId: string) {
+    return this.sync.manualResync(businessId);
+  }
+
+  /**
+   * Platform-owned Google OAuth callback. Replaces the bookings-scoped one
+   * so the connection lives under CalendarModule. The `state` param is
+   * signed in CalendarSyncService.getAuthUrl and carries the businessId.
+   */
+  @Get('sync/google/callback')
+  async syncOauthCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Res() res: Response,
+  ) {
+    const frontendUrl = appUrl();
+    const parsed = this.sync.verifyState(state);
+    if (!parsed) {
+      return res.redirect(
+        `${frontendUrl}/app/settings/connections?calendar=error&reason=invalid_state`,
+      );
+    }
+    try {
+      await this.sync.completeOAuth(parsed.businessId, code);
+      return res.redirect(`${frontendUrl}/app/settings/connections?calendar=success`);
+    } catch {
+      return res.redirect(`${frontendUrl}/app/settings/connections?calendar=error`);
+    }
+  }
 
   // ----- Read -----------------------------------------------------------
 
