@@ -9728,6 +9728,109 @@ export async function markContactConversationsRead(contactId: string, businessId
   });
 }
 
+// ---------------------------------------------------------------------------
+// M6: Data quality engine
+// ---------------------------------------------------------------------------
+export type DataQualityKind =
+  | "invalid_email"
+  | "invalid_phone"
+  | "missing_required"
+  | "stale_data"
+  | "suspected_duplicate";
+
+export type DataQualityIssue = {
+  id: string;
+  contactId: string;
+  kind: DataQualityKind;
+  severity: "low" | "medium" | "high";
+  field: string | null;
+  message: string;
+  recommendedFix: Record<string, unknown> | null;
+  status: "open" | "resolved" | "dismissed";
+  createdAt: string;
+  contact?: {
+    id: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    displayName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    companyName?: string | null;
+    dataQualityScore?: number | null;
+    relationshipType?: string | null;
+  };
+};
+
+export type DataQualityStats = {
+  totalContacts: number;
+  averageScore: number;
+  issueCounts: Record<DataQualityKind, number>;
+  lastRunAt: string | null;
+  staleDays: number;
+};
+
+export type DataQualityListResponse = {
+  items: DataQualityIssue[];
+  total: number;
+  limit: number;
+  offset: number;
+  byKind: Record<string, number>;
+};
+
+export async function fetchDataQualityStats(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<DataQualityStats>(`/crm/businesses/${encodeURIComponent(businessId)}/data-quality/stats`);
+}
+
+export async function fetchDataQualityIssues(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  opts?: {
+    kinds?: DataQualityKind[];
+    severities?: Array<"low" | "medium" | "high">;
+    status?: "open" | "resolved" | "dismissed";
+    search?: string;
+    limit?: number;
+    offset?: number;
+  },
+) {
+  const params = new URLSearchParams();
+  if (opts?.kinds?.length) params.set("kinds", opts.kinds.join(","));
+  if (opts?.severities?.length) params.set("severities", opts.severities.join(","));
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.search) params.set("search", opts.search);
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.offset !== undefined) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  return apiGetSimple<DataQualityListResponse>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/issues${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function fetchDataQualityWizard(businessId: string = DEFAULT_BUSINESS_ID, limit = 25) {
+  return apiGetSimple<{ items: DataQualityIssue[] }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/wizard?limit=${encodeURIComponent(String(limit))}`,
+  );
+}
+
+export async function fetchContactDataQuality(businessId: string, contactId: string) {
+  return apiGetSimple<{ items: DataQualityIssue[] }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/data-quality`,
+  );
+}
+
+export async function runDataQualityScan(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<{
+    businessId: string;
+    scanned: number;
+    issuesUpserted: number;
+    issuesResolved: number;
+    averageScore: number;
+    durationMs: number;
+  }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/scan`,
+    body: {},
+  });
+}
+
 export async function fetchUnreadCounts(businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/unread-counts`,
@@ -10008,5 +10111,37 @@ export async function referContact(input: {
       phone: input.target.phone,
       note: input.note ?? null,
     },
+  });
+}
+
+export async function applyDataQualityFix(
+  businessId: string,
+  issueId: string,
+  override?: Record<string, unknown>,
+) {
+  return apiPost<{ issueId: string; status: string; applied: boolean }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/issues/${encodeURIComponent(issueId)}/apply`,
+    body: { override },
+  });
+}
+
+export async function dismissDataQualityIssue(businessId: string, issueId: string) {
+  return apiPost<{ issueId: string; status: string }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/issues/${encodeURIComponent(issueId)}/dismiss`,
+    body: {},
+  });
+}
+
+export async function bulkApplyDataQualityFix(businessId: string, issueIds: string[]) {
+  return apiPost<{ applied: number; failed: number; results: Array<{ issueId: string; ok: boolean; error?: string }> }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/bulk-apply`,
+    body: { issueIds },
+  });
+}
+
+export async function updateDataQualitySettings(businessId: string, body: { staleDays?: number }) {
+  return apiPatch<{ dataQualityStaleDays: number; dataQualityLastRunAt: string | null }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/settings`,
+    body,
   });
 }

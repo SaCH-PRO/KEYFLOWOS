@@ -15,6 +15,8 @@ import { CrmRevenueService } from './crm-revenue.service';
 import { CrmRelationshipHealthService } from './crm-relationship-health.service';
 import { CrmStatsService } from './crm-stats.service';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
+import { CrmDataQualityService } from './crm-data-quality.service';
+import { DATA_QUALITY_KINDS, type DataQualityKind } from './crm-data-quality.util';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmService } from './crm.service';
 import { CrmSavedViewsService } from './crm-saved-views.service';
@@ -54,6 +56,7 @@ export class CrmController {
     @Inject(CrmRevenueService) private readonly revenue: CrmRevenueService,
     @Inject(CrmJourneyService) private readonly journey: CrmJourneyService,
     @Inject(CrmDuplicateDetectionService) private readonly duplicates: CrmDuplicateDetectionService,
+    @Inject(CrmDataQualityService) private readonly dataQuality: CrmDataQualityService,
     @Inject(CrmSavedViewsService) private readonly savedViews: CrmSavedViewsService,
     @Inject(CrmRelationshipHealthService) private readonly relationshipHealth: CrmRelationshipHealthService,
     @Inject(CrmCommunicationService) private readonly communication: CrmCommunicationService,
@@ -478,6 +481,134 @@ export class CrmController {
       actorId: req?.user?.id,
       actorType: req?.user?.id ? 'USER' : 'SYSTEM',
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // M6: Data quality engine
+  // ---------------------------------------------------------------------------
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/data-quality/stats')
+  dqStats(@Param('businessId') businessId: string) {
+    return this.dataQuality.getStats(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/data-quality/issues')
+  dqIssues(
+    @Param('businessId') businessId: string,
+    @Query('kinds') kinds?: string | string[],
+    @Query('severities') severities?: string | string[],
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const toArr = (v?: string | string[]) => (Array.isArray(v) ? v : v ? v.split(',') : undefined);
+    const allowedKinds = new Set<string>(DATA_QUALITY_KINDS);
+    const filteredKinds = (toArr(kinds) ?? []).filter((k) => allowedKinds.has(k)) as DataQualityKind[];
+    const filteredSeverities = (toArr(severities) ?? []).filter((s) => ['low', 'medium', 'high'].includes(s)) as Array<'low' | 'medium' | 'high'>;
+    const allowedStatus = ['open', 'resolved', 'dismissed'] as const;
+    const safeStatus = allowedStatus.find((s) => s === status) ?? 'open';
+    return this.dataQuality.listIssues({
+      businessId,
+      kinds: filteredKinds.length ? filteredKinds : undefined,
+      severities: filteredSeverities.length ? filteredSeverities : undefined,
+      status: safeStatus,
+      search: search?.trim() || undefined,
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/data-quality/wizard')
+  dqWizard(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.dataQuality.wizardQueue(businessId, limit ? Number(limit) : 25);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/data-quality')
+  dqContactIssues(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+    return this.dataQuality.getContactIssues(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Post('businesses/:businessId/data-quality/scan')
+  async dqScan(@Param('businessId') businessId: string) {
+    return this.dataQuality.scanBusiness(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(60, 60_000)
+  @Post('businesses/:businessId/data-quality/issues/:issueId/apply')
+  dqApply(
+    @Param('businessId') businessId: string,
+    @Param('issueId') issueId: string,
+    @Body() body: { override?: Record<string, unknown> } | undefined,
+    @Req() req: any,
+  ) {
+    return this.dataQuality.applyFix({ businessId, issueId, override: body?.override, actorId: req?.user?.id });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(60, 60_000)
+  @Post('businesses/:businessId/data-quality/issues/:issueId/dismiss')
+  dqDismiss(
+    @Param('businessId') businessId: string,
+    @Param('issueId') issueId: string,
+    @Req() req: any,
+  ) {
+    return this.dataQuality.dismissIssue({ businessId, issueId, actorId: req?.user?.id });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(20, 60_000)
+  @Post('businesses/:businessId/data-quality/bulk-apply')
+  dqBulkApply(
+    @Param('businessId') businessId: string,
+    @Body() body: { issueIds: string[] },
+    @Req() req: any,
+  ) {
+    if (!body?.issueIds || !Array.isArray(body.issueIds)) {
+      throw new BadRequestException('issueIds is required');
+    }
+    return this.dataQuality.bulkApplyFix({ businessId, issueIds: body.issueIds, actorId: req?.user?.id });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(20, 60_000)
+  @Patch('businesses/:businessId/data-quality/settings')
+  dqUpdateSettings(
+    @Param('businessId') businessId: string,
+    @Body() body: { staleDays?: number },
+  ) {
+    return this.dataQuality.updateSettings({ businessId, staleDays: body?.staleDays });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/data-quality/mark-verified')
+  async dqMarkVerified(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+    await this.dataQuality.scanBusiness(businessId);
+    return { ok: true };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

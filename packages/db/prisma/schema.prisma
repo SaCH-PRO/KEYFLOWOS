@@ -344,6 +344,11 @@ model Business {
   // Business Hours (JSON: { "mon": { "open": "09:00", "close": "17:00", "closed": false }, ... })
   businessHours Json? @map("business_hours")
 
+  // Data Quality (M6)
+  dataQualityStaleDays Int @default(180) @map("data_quality_stale_days")
+  dataQualityLastRunAt DateTime? @map("data_quality_last_run_at")
+  dataQualityIssues    ContactDataIssue[]
+
   // Field for UI/UX: Gamification, Onboarding, etc.
   metaData  Json?     @default("{}") @map("meta_data")
 
@@ -516,6 +521,12 @@ model Contact {
   leadScore        Int?      @map("lead_score")
   lastInteractionAt DateTime? @map("last_interaction_at")
 
+  // Data Quality (M6)
+  dataQualityScore   Int?      @map("data_quality_score")
+  dataQualityCheckedAt DateTime? @map("data_quality_checked_at")
+  lastVerifiedAt     DateTime? @map("last_verified_at")
+  dataIssues         ContactDataIssue[]
+
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at") // Soft delete
 
@@ -527,6 +538,7 @@ model Contact {
   @@index([businessId, deletedAt, status])
   @@index([businessId, deletedAt, createdAt])
   @@index([businessId, lastMergeId])
+  @@index([businessId, dataQualityScore])
   @@index([businessId, relationshipType])
   @@index([businessId, pipelineStage])
   @@index([businessId, priority])
@@ -646,6 +658,35 @@ model ContactShare {
   @@index([businessId, userId])
   @@index([contactId])
   @@map("contact_shares")
+}
+
+/// Persistent data-quality issues detected by the nightly scanner. One row per
+/// (contact, kind) so we never duplicate the same issue. The recommendedFix
+/// payload is consumed by the bulk-fix UI and the "Clean my contacts" wizard.
+model ContactDataIssue {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  contactId     String   @map("contact_id")
+  kind          String   // invalid_email | invalid_phone | missing_required | stale_data | suspected_duplicate
+  severity      String   @default("medium") // low | medium | high
+  field         String?  // contact field this issue refers to (e.g. "email")
+  message       String
+  recommendedFix Json?   @map("recommended_fix")
+  status        String   @default("open") // open | resolved | dismissed
+  resolvedAt    DateTime? @map("resolved_at")
+  resolvedBy    String?   @map("resolved_by")
+
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contact       Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  @@unique([contactId, kind])
+  @@index([businessId, status])
+  @@index([businessId, kind, status])
+  @@index([businessId, severity, status])
+  @@map("contact_data_issues")
 }
 
 model ContactExternalMapping {

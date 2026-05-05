@@ -25,6 +25,8 @@ import { CrmRelationshipHealthService } from './crm-relationship-health.service'
 import { CrmRelationshipHealthSchedulerService } from './crm-relationship-health-scheduler.service';
 import { CrmStatsService } from './crm-stats.service';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
+import { CrmDataQualityService } from './crm-data-quality.service';
+import { CrmDataQualityScheduler } from './crm-data-quality.scheduler';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCommunicationService } from './crm-communication.service';
 import { ConversationAiService } from './conversation-ai.service';
@@ -60,6 +62,8 @@ import { CommunityModule } from '../community/community.module';
     CrmSavedViewsService,
     CrmStatsService,
     CrmDuplicateDetectionService,
+    CrmDataQualityService,
+    CrmDataQualityScheduler,
     CrmImportService,
     CrmPlaybookService,
     CrmGoogleService,
@@ -92,6 +96,7 @@ import { CommunityModule } from '../community/community.module';
     CrmSavedViewsService,
     CrmStatsService,
     CrmDuplicateDetectionService,
+    CrmDataQualityService,
     CrmImportService,
     CrmPlaybookService,
     CrmGoogleService,
