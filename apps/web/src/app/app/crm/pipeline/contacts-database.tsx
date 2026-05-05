@@ -24,6 +24,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useDatabaseState, ALL_COLUMNS } from "./hooks/use-database-state";
 import type { ColumnKey } from "./hooks/use-database-state";
 import { DatabaseTable } from "./database-table";
+import { fetchUnreadCounts } from "@/lib/client";
 import { DatabaseBulkBar } from "./database-bulk-bar";
 import { ContactLists } from "./contact-lists";
 import {
@@ -89,6 +90,38 @@ export function ContactsDatabase({
 
   const setSearchInput = db.setSearchInput;
   const handleClearSearch = useCallback(() => setSearchInput(""), [setSearchInput]);
+
+  // M2 Unified Inbox: per-user unread counts + filter
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [hasUnreadFilter, setHasUnreadFilter] = useState(false);
+
+  const refreshUnread = useCallback(async () => {
+    if (!businessId) return;
+    const res = await fetchUnreadCounts(businessId);
+    if (res.data) setUnreadCounts(res.data.counts ?? {});
+  }, [businessId]);
+
+  useEffect(() => {
+    void refreshUnread();
+    const interval = setInterval(() => { void refreshUnread(); }, 30_000);
+    const onRead = (e: Event) => {
+      const detail = (e as CustomEvent<{ contactId: string }>).detail;
+      if (!detail?.contactId) return;
+      setUnreadCounts((prev) => {
+        if (!(detail.contactId in prev)) return prev;
+        const next = { ...prev };
+        delete next[detail.contactId];
+        return next;
+      });
+    };
+    window.addEventListener("kf:contact-read", onRead);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("kf:contact-read", onRead);
+    };
+  }, [refreshUnread]);
+
+  const unreadTotal = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
 
   useEffect(() => {
     if (!db.showExport) return;
@@ -557,6 +590,23 @@ export function ContactsDatabase({
             ★ Favorites
           </button>
           <button
+            onClick={() => setHasUnreadFilter((v) => !v)}
+            className={`px-2 py-1 text-[11px] rounded-md transition-all whitespace-nowrap shrink-0 inline-flex items-center gap-1 ${
+              hasUnreadFilter
+                ? "bg-[hsl(var(--kf-accent1))]/15 border border-[hsl(var(--kf-accent1))]/40 text-[hsl(var(--kf-accent1))]"
+                : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+            }`}
+            aria-pressed={hasUnreadFilter}
+            title="Show only contacts with unread messages"
+          >
+            Unread
+            {unreadTotal > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-[hsl(var(--kf-accent1))] text-white text-[9px] font-semibold leading-none">
+                {unreadTotal > 99 ? "99+" : unreadTotal}
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => db.setIncludeArchived(!db.includeArchived)}
             className={`px-2 py-1 text-[11px] rounded-md transition-all whitespace-nowrap shrink-0 ${
               db.includeArchived
@@ -570,7 +620,8 @@ export function ContactsDatabase({
         </div>
 
         <DatabaseTable
-          contacts={db.paginatedContacts}
+          contacts={hasUnreadFilter ? db.paginatedContacts.filter((c) => (unreadCounts[c.id] ?? 0) > 0) : db.paginatedContacts}
+          unreadCounts={unreadCounts}
           page={db.page}
           pageSize={db.pageSize}
           sortField={db.sortField}
