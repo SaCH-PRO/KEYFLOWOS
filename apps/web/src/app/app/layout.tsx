@@ -53,6 +53,7 @@ import {
   Award,
   Lock,
   Search as SearchIcon2,
+  Landmark,
 } from "lucide-react";
 
 interface ResolvedFeatureFlag {
@@ -251,6 +252,7 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Inbox", href: "/app/inbox", icon: Mail },
     { label: "Calendar", href: "/app/calendar", icon: Calendar },
     { label: "Bookings", href: "/app/bookings", icon: Calendar },
+    { label: "Finance", href: "/app/finance", icon: Landmark },
     { label: "Revenue", href: "/app/commerce", icon: CreditCard },
     { label: "Payments", href: "/app/payments", icon: CreditCard },
     { label: "Content", href: "/app/marketing", icon: Megaphone },
@@ -299,6 +301,15 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/automations", "workspaces"],
   ["/app/projects", "workspaces"],
   ["/app/expenses", "workspaces"],
+  ["/app/finance", "workspaces"],
+  ["/app/finance/revenue", "workspaces"],
+  ["/app/finance/expenses", "workspaces"],
+  ["/app/finance/cashflow", "workspaces"],
+  ["/app/finance/accounts", "workspaces"],
+  ["/app/finance/reconciliation", "workspaces"],
+  ["/app/finance/reports", "workspaces"],
+  ["/app/finance/tax", "workspaces"],
+  ["/app/finance/actions", "workspaces"],
   ["/app/reports", "workspaces"],
   ["/app/documents", "workspaces"],
   ["/app/seo", "workspaces"],

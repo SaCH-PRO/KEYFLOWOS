@@ -28,6 +28,7 @@ import {
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { FinanceBanner } from "../finance/components/finance-banner";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -569,6 +570,7 @@ export default function CommercePage() {
       }
       banners={
         <>
+          <FinanceBanner from="commerce" />
           <ResumePrompt
             module="commerce"
             onResume={(task) => {

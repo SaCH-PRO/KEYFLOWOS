@@ -8,12 +8,18 @@ import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 import { RevenuePostingService } from './revenue-posting.service';
 import { ReceivablesService } from './receivables.service';
+import { FinanceOverviewService } from './finance-overview.service';
+import { FinanceAccountsService } from './finance-accounts.service';
+import { FinanceCoaService } from './finance-coa.service';
+import { FinanceTaxRateService } from './finance-tax-rate.service';
+import { FinanceSettingsService } from './finance-settings.service';
 import { FinanceController } from './finance.controller';
 
 /**
  * FIN1/FIN2 — Finance OS foundation + revenue/receivables read APIs.
- * Exports posting + receivables services so downstream modules
- * (commerce, payments, scripts) can wire revenue events through here.
+ * FIN5 — Adds the unified `/finance/businesses/:bid/*` controller for the
+ * new Finance cockpit (Overview, Accounts CRUD, COA CRUD, Tax Rates,
+ * Settings) plus its sub-services.
  */
 @Module({
   imports: [PrismaModule, AuthModule],
@@ -26,6 +32,11 @@ import { FinanceController } from './finance.controller';
     FinancialAccountSeederService,
     RevenuePostingService,
     ReceivablesService,
+    FinanceOverviewService,
+    FinanceAccountsService,
+    FinanceCoaService,
+    FinanceTaxRateService,
+    FinanceSettingsService,
   ],
   exports: [
     PostingService,
@@ -35,6 +46,11 @@ import { FinanceController } from './finance.controller';
     FinancialAccountSeederService,
     RevenuePostingService,
     ReceivablesService,
+    FinanceOverviewService,
+    FinanceAccountsService,
+    FinanceCoaService,
+    FinanceTaxRateService,
+    FinanceSettingsService,
   ],
 })
 export class FinanceModule {}
