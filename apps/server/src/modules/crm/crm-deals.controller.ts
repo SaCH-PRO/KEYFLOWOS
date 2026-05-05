@@ -156,6 +156,7 @@ export class CrmDealsController {
     @Query('expectedCloseTo') expectedCloseTo?: string,
     @Query('search') search?: string,
     @Query('tags') tags?: string | string[],
+    @Query('accountId') accountId?: string,
     @Query('skip') skip?: string,
     @Query('take') take?: string,
   ) {
@@ -173,6 +174,7 @@ export class CrmDealsController {
       expectedCloseTo: expectedCloseTo ? new Date(expectedCloseTo) : undefined,
       search: search || undefined,
       tags: toArr(tags),
+      accountId: accountId || undefined,
       skip: skip ? Number(skip) : undefined,
       take: take ? Number(take) : undefined,
     });

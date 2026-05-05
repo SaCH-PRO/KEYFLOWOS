@@ -12,6 +12,8 @@ import { DealIntelligenceSchedulerService } from './deal-intelligence-scheduler.
 import { WonLostReasonService } from './won-lost-reason.service';
 import { AutopilotModule } from '../autopilot/autopilot.module';
 import { forwardRef } from '@nestjs/common';
+import { CrmAccountsController } from './crm-accounts.controller';
+import { CrmAccountsService } from './crm-accounts.service';
 import { ContactPrivacyController } from './privacy/contact-privacy.controller';
 import { ContactAuditService } from './privacy/contact-audit.service';
 import { ContactPrivacyService } from './privacy/contact-privacy.service';
@@ -60,6 +62,7 @@ import { CommunityModule } from '../community/community.module';
     CrmGoogleController,
     CrmSequenceController,
     CrmDealsController,
+    CrmAccountsController,
     ContactPrivacyController,
   ],
   providers: [
@@ -92,6 +95,7 @@ import { CommunityModule } from '../community/community.module';
     DealHealthService,
     DealIntelligenceSchedulerService,
     WonLostReasonService,
+    CrmAccountsService,
     BestChannelService,
     BestChannelListener,
     BestChannelSchedulerService,
@@ -127,6 +131,7 @@ import { CommunityModule } from '../community/community.module';
     CrmRelationshipHealthService,
     CrmRelationshipHealthSchedulerService,
     CrmDealsService,
+    CrmAccountsService,
     BestChannelService,
     ContactInsightService,
     ContactAuditService,

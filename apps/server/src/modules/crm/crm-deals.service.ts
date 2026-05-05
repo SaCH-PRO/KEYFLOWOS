@@ -35,6 +35,7 @@ export type DealListFilters = {
   expectedCloseTo?: Date;
   search?: string;
   tags?: string[];
+  accountId?: string;
   skip?: number;
   take?: number;
 };
@@ -160,6 +161,7 @@ export class CrmDealsService {
     notes?: string | null;
     expectedCloseAt?: string | null;
     probability?: number | null;
+    accountId?: string | null;
     actorId?: string;
   }) {
     const title = input.title?.trim();
@@ -174,10 +176,15 @@ export class CrmDealsService {
     const stage = await this.resolveStageForCreate(input.businessId, input.stageId);
     const status = stage.category === 'WON' ? 'WON' : stage.category === 'LOST' ? 'LOST' : 'OPEN';
 
+    // Auto-suggest the contact's account when caller didn't pass one explicitly.
+    const accountId =
+      input.accountId === undefined ? contact.accountId ?? null : input.accountId;
+
     const deal = await this.prisma.client.deal.create({
       data: {
         businessId: input.businessId,
         contactId: input.contactId,
+        accountId,
         title,
         description: input.description ?? null,
         companyName: input.companyName ?? contact.companyName ?? null,
@@ -235,6 +242,7 @@ export class CrmDealsService {
     notes?: string | null;
     expectedCloseAt?: string | null;
     probability?: number | null;
+    accountId?: string | null;
     actorId?: string;
   }) {
     const deal = await this.getDeal({ businessId: input.businessId, dealId: input.dealId });
@@ -245,6 +253,7 @@ export class CrmDealsService {
         title: input.title?.trim() || undefined,
         description: input.description === undefined ? undefined : input.description,
         companyName: input.companyName === undefined ? undefined : input.companyName,
+        accountId: input.accountId === undefined ? undefined : input.accountId,
         value: input.value === undefined ? undefined : input.value,
         currency: input.currency ?? undefined,
         ownerUserId: input.ownerUserId === undefined ? undefined : input.ownerUserId,
@@ -442,6 +451,7 @@ export class CrmDealsService {
       deletedAt: null,
     };
     if (input.contactId) where.contactId = input.contactId;
+    if (input.accountId) where.accountId = input.accountId;
     if (input.stageIds && input.stageIds.length > 0) where.stageId = { in: input.stageIds };
     if (input.ownerId) where.ownerUserId = input.ownerId;
     if (input.status && input.status !== 'ALL') where.status = input.status;

@@ -10,6 +10,7 @@ import {
   fetchDealForecast,
   fetchDealVelocity,
   fetchWonLostReasons,
+  fetchDealsByAccountPivot,
   bulkMoveDealStage,
   winDeal,
   loseDeal,
@@ -149,6 +150,8 @@ export default function DealsPage() {
   const [filters, setFilters] = useState<DealListFilters>({ status: "OPEN", take: 100 });
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("");
+  const [pivot, setPivot] = useState<"deals" | "account">("deals");
+  const [accountBuckets, setAccountBuckets] = useState<Array<{ accountId: string | null; label: string; count: number; openValue: number; wonValue: number; currency: string }>>([]);
 
   useEffect(() => {
     (async () => {
@@ -161,7 +164,7 @@ export default function DealsPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [s, d, f, v, r] = await Promise.all([
+      const [s, d, f, v, r, pv] = await Promise.all([
         fetchDealStages(businessId),
         fetchDeals({
           ...filters,
@@ -171,6 +174,7 @@ export default function DealsPage() {
         fetchDealForecast({ windowDays: 30 }, businessId),
         fetchDealVelocity(businessId),
         fetchWonLostReasons({}, businessId),
+        pivot === "account" ? fetchDealsByAccountPivot(businessId) : Promise.resolve({ data: { buckets: [] } } as { data: { buckets: typeof accountBuckets } }),
       ]);
       if (s.data) setStages(s.data);
       if (d.data) {
@@ -180,10 +184,11 @@ export default function DealsPage() {
       if (f.data) setForecast(f.data);
       if (v.data) setVelocity(v.data);
       if (r.data) setReasons(r.data);
+      if (pv.data) setAccountBuckets(pv.data.buckets);
     } finally {
       setLoading(false);
     }
-  }, [businessId, filters, search, stageFilter]);
+  }, [businessId, filters, search, stageFilter, pivot]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -277,6 +282,11 @@ export default function DealsPage() {
         </div>
       </div>
 
+      <div className="inline-flex rounded-md border border-border overflow-hidden mb-3 text-xs">
+        <button onClick={() => setPivot("deals")} className={`px-3 py-1.5 ${pivot === "deals" ? "bg-[hsl(var(--kf-accent2))] text-white" : "bg-background text-muted-foreground"}`}>By deal</button>
+        <button onClick={() => setPivot("account")} className={`px-3 py-1.5 ${pivot === "account" ? "bg-[hsl(var(--kf-accent2))] text-white" : "bg-background text-muted-foreground"}`}>By account</button>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -338,7 +348,42 @@ export default function DealsPage() {
         </div>
       )}
 
-      {loading ? (
+      {pivot === "account" ? (
+        loading ? (
+          <div className="flex items-center justify-center py-16"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+        ) : accountBuckets.length === 0 ? (
+          <div className="text-center py-16 border border-dashed border-border rounded-lg">
+            <p className="text-sm text-muted-foreground">No deals yet.</p>
+          </div>
+        ) : (
+          <div className="border border-border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/30 text-xs text-muted-foreground">
+                <tr>
+                  <th className="p-2 text-left">Account</th>
+                  <th className="p-2 text-right">Deals</th>
+                  <th className="p-2 text-right">Open $</th>
+                  <th className="p-2 text-right">Won $</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accountBuckets.map((b, i) => (
+                  <tr key={`${b.accountId ?? "u"}:${i}`} className="border-t border-border hover:bg-muted/10">
+                    <td className="p-2">
+                      {b.accountId
+                        ? <Link href={`/app/crm/accounts/${b.accountId}`} className="text-[hsl(var(--kf-accent2))] hover:underline">{b.label}</Link>
+                        : <span className="text-muted-foreground">{b.label}</span>}
+                    </td>
+                    <td className="p-2 text-right tabular-nums">{b.count}</td>
+                    <td className="p-2 text-right tabular-nums">{fmtMoney(b.openValue, b.currency)}</td>
+                    <td className="p-2 text-right tabular-nums">{fmtMoney(b.wonValue, b.currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      ) : loading ? (
         <div className="flex items-center justify-center py-16"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
       ) : deals.length === 0 ? (
         <div className="text-center py-16 border border-dashed border-border rounded-lg">
