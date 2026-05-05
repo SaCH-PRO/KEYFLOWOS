@@ -30,6 +30,9 @@ import {
   type PresenceHealthScore,
 } from "@/lib/client";
 
+const PERIOD_OPTIONS = [7, 30, 90] as const;
+type PeriodDays = (typeof PERIOD_OPTIONS)[number];
+
 export default function PresenceOverviewPage() {
   const [businessId] = useState<string | null>(() =>
     typeof window === "undefined" ? null : getStoredBusinessId(),
@@ -38,20 +41,26 @@ export default function PresenceOverviewPage() {
   const [loading, setLoading] = useState(() => !!businessId);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [days, setDays] = useState<PeriodDays>(30);
 
   useEffect(() => {
     if (!businessId) return;
     let cancelled = false;
-    fetchPresenceCommandOverview(businessId).then((res) => {
+    fetchPresenceCommandOverview(businessId, days).then((res) => {
       if (cancelled) return;
       if (res.error) setError(res.error);
-      else setData(res.data);
+      else {
+        setData(res.data);
+        setError(null);
+      }
       setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [businessId]);
+  }, [businessId, days]);
+
+  const refetching = !!data && data.period.days !== days;
 
   const handleSync = async () => {
     if (!businessId) return;
@@ -92,6 +101,12 @@ export default function PresenceOverviewPage() {
   return (
     <div className="p-4 space-y-4">
       <SiteStatusBanner data={data} />
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+          Visitor analytics · last {days} days
+        </div>
+        <PeriodSelector value={days} onChange={setDays} loading={loading || refetching} />
+      </div>
       <KpiGrid data={data} />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-1">
@@ -106,6 +121,38 @@ export default function PresenceOverviewPage() {
         </div>
       </div>
       <TopItemsRow data={data} />
+    </div>
+  );
+}
+
+function PeriodSelector({
+  value,
+  onChange,
+  loading,
+}: {
+  value: PeriodDays;
+  onChange: (d: PeriodDays) => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="inline-flex rounded-md border border-border/40 bg-slate-900/40 p-0.5">
+      {PERIOD_OPTIONS.map((d) => (
+        <button
+          key={d}
+          type="button"
+          disabled={loading}
+          onClick={() => onChange(d)}
+          className={cn(
+            "px-2.5 py-1 text-xs rounded-sm transition-colors",
+            value === d
+              ? "bg-orange-500/20 text-orange-200"
+              : "text-muted-foreground hover:text-foreground",
+            loading && "opacity-60 cursor-not-allowed",
+          )}
+        >
+          {d}d
+        </button>
+      ))}
     </div>
   );
 }
