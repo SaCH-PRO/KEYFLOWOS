@@ -425,6 +425,15 @@ export default function QuotesPanel({
     const counts: Record<string, number> = { ALL: quotes.length };
     for (const q of quotes) {
       counts[q.status] = (counts[q.status] || 0) + 1;
+      // VIEWED + EXPIRED are derived facets driven by the server-decorated
+      // lifecycleStep / isExpired flags so the filter chips stay in sync
+      // with the canonical state machine.
+      if (q.lifecycleStep === "VIEWED") {
+        counts.VIEWED = (counts.VIEWED || 0) + 1;
+      }
+      if (q.isExpired) {
+        counts.EXPIRED = (counts.EXPIRED || 0) + 1;
+      }
     }
     return counts;
   }, [quotes]);
@@ -455,6 +464,12 @@ export default function QuotesPanel({
 
   const statusFiltered = useMemo(() => {
     if (quoteStatusFilter === "ALL") return dateFiltered;
+    if (quoteStatusFilter === "VIEWED") {
+      return dateFiltered.filter((q) => q.lifecycleStep === "VIEWED");
+    }
+    if (quoteStatusFilter === "EXPIRED") {
+      return dateFiltered.filter((q) => q.isExpired);
+    }
     return dateFiltered.filter((q) => q.status === quoteStatusFilter);
   }, [dateFiltered, quoteStatusFilter]);
 
@@ -978,6 +993,18 @@ export default function QuotesPanel({
                     {daysRemaining.label}
                   </span>
                 )}
+                {quote.lifecycleStep === "VIEWED" && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-cyan-500/15 text-cyan-300 border-cyan-500/30">
+                    <Eye className="w-3 h-3" />
+                    Viewed
+                  </span>
+                )}
+                {quote.isStale && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-orange-500/15 text-orange-300 border-orange-500/30" title="Sent over 7 days ago with no response">
+                    <Clock className="w-3 h-3" />
+                    Stale
+                  </span>
+                )}
                 {renderTimelineBadge?.(quote)}
               </>
             );
@@ -1246,6 +1273,7 @@ export default function QuotesPanel({
             type="quote"
             number={selectedQuote.quoteNumber}
             status={selectedQuote.status}
+            lifecycleStep={selectedQuote.lifecycleStep}
             contact={selectedQuote.contact ?? null}
             contactId={selectedQuote.contactId}
             total={Number(selectedQuote.total)}
