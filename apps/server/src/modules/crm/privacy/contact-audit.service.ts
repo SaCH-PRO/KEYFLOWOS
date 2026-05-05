@@ -26,6 +26,7 @@ export type ContactAuditAction =
   | 'shared'
   | 'imported'
   | 'exported'
+  | 'export_downloaded'
   | 'forget_requested'
   | 'forget_cancelled'
   | 'forget_purged'

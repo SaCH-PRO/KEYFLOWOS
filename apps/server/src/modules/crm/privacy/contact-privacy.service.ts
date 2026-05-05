@@ -281,7 +281,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     await this.audit.write({
       businessId: job.businessId,
       contactId: job.contactId,
-      action: 'exported',
+      action: 'export_downloaded',
       entityType: 'contact',
       entityId: job.id,
       actor: { type: 'SYSTEM', label: 'export-download' },
