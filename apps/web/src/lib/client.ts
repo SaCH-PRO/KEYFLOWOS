@@ -2277,6 +2277,17 @@ export async function fetchStaleQuotes(businessId?: string, days?: number) {
   return apiGetSimple<Quote[]>(`/commerce/businesses/${encodeURIComponent(bId)}/quotes/stale${qs}`);
 }
 
+// R3: one-click "Send reminder" used by the Action Queue stale-quote
+// card. Stamps `lastFollowUpAt` server-side and resolves any matching
+// pending approval items.
+export async function sendStaleQuoteFollowUp(input: { quoteId: string; businessId?: string }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ success: boolean; resolvedApprovals: number }>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}/follow-up`,
+    body: {},
+  });
+}
+
 // R2: public quote-view (signed-token authenticated; no auth header sent).
 export async function fetchPublicQuote(token: string) {
   return apiGetSimple<Quote>(`/commerce/public/quotes/${encodeURIComponent(token)}`);

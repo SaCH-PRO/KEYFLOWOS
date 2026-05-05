@@ -18,6 +18,7 @@ import {
   fetchAiPendingApprovals,
   fetchAiApprovalHistory,
   resolveAiApproval,
+  sendStaleQuoteFollowUp,
   type AiApprovalItem,
 } from "@/lib/client";
 import { VerificationCard } from "./verification-card";
@@ -102,6 +103,31 @@ export function ActionQueue({ maxItems, showFilters = true, onCountChange }: Act
     if (!businessId) return;
     setResolving(approvalId);
     try {
+      // R3: stale-quote cards have a side-effect on approve — call the
+      // commerce follow-up endpoint, which both stamps lastFollowUpAt
+      // and resolves the matching approval row server-side.
+      const item = pendingItems.find((i) => i.id === approvalId);
+      if (resolution === "approved" && item?.toolName === "commerce_send_quote_reminder") {
+        const quoteId = (item.inputPayload as Record<string, unknown> | null)?.quoteId;
+        if (typeof quoteId === "string") {
+          const followRes = await sendStaleQuoteFollowUp({ quoteId, businessId });
+          if (followRes.error) {
+            toast.error(followRes.error);
+            setResolving(null);
+            return;
+          }
+          setPendingItems((prev) => prev.filter((i) => i.id !== approvalId));
+          setHandledItems((prev) => [
+            { ...item, status: "approved", resolution: "approved", resolvedAt: new Date().toISOString() },
+            ...prev,
+          ]);
+          toast.success("Reminder queued");
+          const remaining = pendingItems.filter((i) => i.id !== approvalId && i.status === "pending").length;
+          onCountChange?.(remaining);
+          setResolving(null);
+          return;
+        }
+      }
       const res = await resolveAiApproval(businessId, approvalId, resolution);
       if (res.data) {
         const resolved = pendingItems.find(i => i.id === approvalId);

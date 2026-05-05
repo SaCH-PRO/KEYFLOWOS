@@ -535,12 +535,18 @@ export class CommerceService {
     viewedAt?: Date | null;
     acceptedAt?: Date | null;
     rejectedAt?: Date | null;
+    lastFollowUpAt?: Date | null;
   }, now: Date = new Date()): boolean {
     if (quote.status !== 'SENT') return false;
     if (quote.viewedAt || quote.acceptedAt || quote.rejectedAt) return false;
     if (!quote.sentAt) return false;
-    const daysSinceSent = (now.getTime() - new Date(quote.sentAt).getTime()) / (1000 * 60 * 60 * 24);
-    return daysSinceSent >= CommerceService.QUOTE_STALE_DAYS;
+    // R3: a recent follow-up reminder clears the stale state until the
+    // quote ages another QUOTE_STALE_DAYS without progress.
+    const reference = quote.lastFollowUpAt && new Date(quote.lastFollowUpAt) > new Date(quote.sentAt)
+      ? new Date(quote.lastFollowUpAt)
+      : new Date(quote.sentAt);
+    const daysSinceReference = (now.getTime() - reference.getTime()) / (1000 * 60 * 60 * 24);
+    return daysSinceReference >= CommerceService.QUOTE_STALE_DAYS;
   }
 
   private decorateQuote<T extends {
@@ -656,8 +662,9 @@ export class CommerceService {
    * without a view/accept/reject. R3 consumes this for the Action Queue.
    */
   async getStaleQuotes(businessId: string, daysThreshold = CommerceService.QUOTE_STALE_DAYS) {
-    const cutoff = new Date(Date.now() - daysThreshold * 24 * 60 * 60 * 1000);
-    const stale = await this.prisma.client.quote.findMany({
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - daysThreshold * 24 * 60 * 60 * 1000);
+    const candidates = await this.prisma.client.quote.findMany({
       where: {
         businessId,
         deletedAt: null,
@@ -670,12 +677,20 @@ export class CommerceService {
       include: { contact: true, items: true, invoice: true },
       orderBy: { sentAt: 'asc' },
     });
-    const now = new Date();
+    // R3: filter out quotes that were nudged within the last
+    // QUOTE_STALE_DAYS so we don't keep re-surfacing the same row in
+    // the Action Queue every day.
+    const stale = candidates.filter((q) => {
+      if (!q.lastFollowUpAt) return true;
+      const lastFollowUp = new Date(q.lastFollowUpAt);
+      return lastFollowUp.getTime() <= cutoff.getTime();
+    });
     const decoratedRows = stale.map((q) => {
       const decorated = this.decorateQuote(q, now);
-      const daysSinceSent = q.sentAt
-        ? Math.floor((now.getTime() - new Date(q.sentAt).getTime()) / (1000 * 60 * 60 * 24))
-        : 0;
+      const reference = q.lastFollowUpAt && new Date(q.lastFollowUpAt) > new Date(q.sentAt!)
+        ? new Date(q.lastFollowUpAt)
+        : new Date(q.sentAt!);
+      const daysSinceSent = Math.floor((now.getTime() - reference.getTime()) / (1000 * 60 * 60 * 24));
       return { ...decorated, daysSinceSent };
     });
     // Emit one canonical quote.stale event per stale row so the Action
@@ -691,6 +706,44 @@ export class CommerceService {
       } as QuoteStalePayload);
     }
     return decoratedRows;
+  }
+
+  /**
+   * R3: stamp a follow-up timestamp on a quote so it's no longer
+   * considered stale until it ages another QUOTE_STALE_DAYS without
+   * progress. Returns the updated quote.
+   */
+  async markQuoteFollowedUp(params: {
+    quoteId: string;
+    businessId: string;
+    actorId?: string | null;
+  }) {
+    const existing = await this.prisma.client.quote.findFirst({
+      where: { id: params.quoteId, businessId: params.businessId, deletedAt: null },
+      select: { id: true, status: true, contactId: true },
+    });
+    if (!existing) throw new NotFoundException('Quote not found');
+    if (existing.status !== 'SENT') {
+      throw new BadRequestException(`Quote is ${existing.status} — only SENT quotes can be followed up`);
+    }
+    const now = new Date();
+    const updated = await this.prisma.client.quote.update({
+      where: { id: params.quoteId },
+      data: { lastFollowUpAt: now },
+      include: { contact: true, items: true, invoice: true },
+    });
+    if (existing.contactId) {
+      await this.crm.logContactEvent({
+        businessId: params.businessId,
+        contactId: existing.contactId,
+        type: 'quote.follow_up_sent',
+        data: { quoteId: params.quoteId, followUpAt: now.toISOString() },
+        actorType: params.actorId ? 'USER' : 'SYSTEM',
+        actorId: params.actorId ?? undefined,
+        source: 'commerce',
+      }).catch(() => undefined);
+    }
+    return this.decorateQuote(updated, now);
   }
 
   async getQuote(quoteId: string) {
