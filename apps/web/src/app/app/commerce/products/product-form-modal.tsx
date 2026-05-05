@@ -657,6 +657,51 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                       </div>
                     )}
                   </div>
+
+                  {productForm.category === "PRODUCT" && (
+                    <div className="grid grid-cols-2 gap-3 mt-3">
+                      <div>
+                        <label className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
+                          Inventory mode
+                        </label>
+                        <select
+                          value={productForm.inventoryMode ?? "tracked"}
+                          onChange={(e) =>
+                            setProductForm((f) => ({
+                              ...f,
+                              inventoryMode: e.target.value as "tracked" | "untracked" | "virtual",
+                            }))
+                          }
+                          className={inputClass}
+                        >
+                          <option value="tracked">Tracked (count stock)</option>
+                          <option value="untracked">Untracked (always available)</option>
+                          <option value="virtual">Virtual / digital</option>
+                        </select>
+                      </div>
+                      {(productForm.inventoryMode ?? "tracked") === "tracked" && (
+                        <div>
+                          <label className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
+                            When out of stock
+                          </label>
+                          <select
+                            value={productForm.outOfStockBehavior ?? "hide"}
+                            onChange={(e) =>
+                              setProductForm((f) => ({
+                                ...f,
+                                outOfStockBehavior: e.target.value as "hide" | "show_oos" | "allow_backorder",
+                              }))
+                            }
+                            className={inputClass}
+                          >
+                            <option value="hide">Hide from storefront</option>
+                            <option value="show_oos">Show as &ldquo;Sold Out&rdquo;</option>
+                            <option value="allow_backorder">Allow backorder</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </section>
 

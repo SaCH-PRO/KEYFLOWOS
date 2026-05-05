@@ -9,6 +9,8 @@ export type ProductForm = {
   imageUrl: string;
   sku: string;
   isActive: boolean;
+  inventoryMode?: "tracked" | "untracked" | "virtual";
+  outOfStockBehavior?: "hide" | "show_oos" | "allow_backorder";
 };
 
 export type InvoiceLineItem = {

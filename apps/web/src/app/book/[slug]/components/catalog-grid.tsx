@@ -336,13 +336,21 @@ export function CatalogGrid({
                   </button>
                 </div>
               )
+            ) : item.purchasable === false ? (
+              <button
+                disabled
+                onClick={(e) => e.stopPropagation()}
+                className={`${ts.buttonRadius} px-3 py-1.5 text-[11px] font-medium min-h-[44px] cursor-not-allowed bg-gray-100 text-gray-400 border border-gray-200`}
+              >
+                Sold Out
+              </button>
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); addToCart(item); }}
                 className={`${btnStyles.className} shadow-sm hover:shadow-md active:scale-95 min-h-[44px]`}
                 style={btnStyles.style}
               >
-                <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Add</span>
+                <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">{item.stockStatus === "backorder" ? "Pre-order" : "Add"}</span>
               </button>
             )}
           </div>
@@ -350,6 +358,22 @@ export function CatalogGrid({
 
         {hasHighRating && (
           <div className="absolute bottom-0 left-0 right-0 h-[2px]" style={{ background: `linear-gradient(90deg, #f59e0b, ${primaryColor})` }} />
+        )}
+
+        {item.stockStatus === "out_of_stock" && (
+          <span className="absolute top-2.5 left-2.5 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/90 text-white shadow-md z-10">
+            Out of Stock
+          </span>
+        )}
+        {item.stockStatus === "backorder" && (
+          <span className="absolute top-2.5 left-2.5 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/90 text-white shadow-md z-10">
+            Backorder
+          </span>
+        )}
+        {item.stockStatus === "low" && typeof item.availableQuantity === "number" && item.availableQuantity > 0 && (
+          <span className="absolute bottom-2.5 left-2.5 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 shadow-sm z-10">
+            Only {item.availableQuantity} left
+          </span>
         )}
       </div>
     );
@@ -484,13 +508,41 @@ export function CatalogGrid({
                 </div>
               )
             ) : (
-              <button
-                onClick={(e) => { e.stopPropagation(); addToCart(item); }}
-                className={`${btnStyles.className} shadow-sm hover:shadow-md active:scale-95`}
-                style={btnStyles.style}
+              item.purchasable === false ? (
+                <button
+                  disabled
+                  onClick={(e) => e.stopPropagation()}
+                  className={`${ts.buttonRadius} px-3 py-1.5 text-xs font-medium cursor-not-allowed bg-gray-100 text-gray-400 border border-gray-200`}
+                >
+                  Sold Out
+                </button>
+              ) : (
+                <button
+                  onClick={(e) => { e.stopPropagation(); addToCart(item); }}
+                  className={`${btnStyles.className} shadow-sm hover:shadow-md active:scale-95`}
+                  style={btnStyles.style}
+                >
+                  <Plus className="w-3.5 h-3.5" /> {item.stockStatus === "backorder" ? "Pre-order" : "Add"}
+                </button>
+              )
+            )}
+            {(item.stockStatus === "out_of_stock" || item.stockStatus === "backorder" ||
+              (item.stockStatus === "low" && typeof item.availableQuantity === "number" && item.availableQuantity > 0)) && (
+              <span
+                className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                  item.stockStatus === "out_of_stock"
+                    ? "bg-red-100 text-red-700"
+                    : item.stockStatus === "backorder"
+                    ? "bg-amber-100 text-amber-800"
+                    : "bg-amber-50 text-amber-700"
+                }`}
               >
-                <Plus className="w-3.5 h-3.5" /> Add
-              </button>
+                {item.stockStatus === "out_of_stock"
+                  ? "Out of Stock"
+                  : item.stockStatus === "backorder"
+                  ? "Backorder"
+                  : `Only ${item.availableQuantity} left`}
+              </span>
             )}
           </div>
         </div>

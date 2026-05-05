@@ -35,4 +35,12 @@ export class CreateProductDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsString()
+  @IsOptional()
+  inventoryMode?: string; // tracked, untracked, virtual
+
+  @IsString()
+  @IsOptional()
+  outOfStockBehavior?: string; // hide, show_oos, allow_backorder
 }

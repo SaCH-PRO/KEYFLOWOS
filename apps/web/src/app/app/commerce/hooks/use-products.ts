@@ -46,6 +46,8 @@ function buildProductPayload(form: ProductForm, imageUrl: string | null) {
     imageUrl: imageUrl ?? undefined,
     sku: form.sku || undefined,
     isActive: form.isActive,
+    inventoryMode: form.inventoryMode || undefined,
+    outOfStockBehavior: form.outOfStockBehavior || undefined,
   };
 }
 
@@ -86,6 +88,8 @@ export function useProducts(
       imageUrl: product.imageUrl || "",
       sku: product.sku || "",
       isActive: product.isActive ?? true,
+      inventoryMode: ((product as { inventoryMode?: string }).inventoryMode as "tracked" | "untracked" | "virtual" | undefined) ?? undefined,
+      outOfStockBehavior: ((product as { outOfStockBehavior?: string }).outOfStockBehavior as "hide" | "show_oos" | "allow_backorder" | undefined) ?? undefined,
     });
     const cached = cachedImages[product.id] ?? null;
     if (cached) {

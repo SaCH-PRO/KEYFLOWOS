@@ -132,6 +132,7 @@ function PublicBookingPageInner() {
 
   const addToCart = useCallback(
     (item: CatalogItem) => {
+      if (item.purchasable === false) return;
       setCart((prev) => {
         const existing = prev.find((c) => c.id === item.id && c.itemType === item.itemType);
         let next: CartItem[];
@@ -457,6 +458,11 @@ function PublicBookingPageInner() {
     const storeServiceNames = new Set(services.map((s) => s.name));
     for (const p of products) {
       if (!p.isActive) continue;
+      const stockFields = {
+        availableQuantity: p.availableQuantity,
+        stockStatus: p.stockStatus,
+        purchasable: p.purchasable,
+      };
       if (p.category === "PRODUCT") {
         items.push({
           id: p.id,
@@ -468,6 +474,7 @@ function PublicBookingPageInner() {
           imageUrl: p.imageUrl,
           itemType: "product",
           requiresBooking: false,
+          ...stockFields,
         });
       } else if (p.category === "PACKAGE") {
         items.push({
@@ -480,6 +487,7 @@ function PublicBookingPageInner() {
           imageUrl: p.imageUrl,
           itemType: "package",
           requiresBooking: false,
+          ...stockFields,
         });
       } else if (p.category === "SERVICE" && !storeServiceNames.has(p.name)) {
         items.push({
@@ -492,6 +500,7 @@ function PublicBookingPageInner() {
           imageUrl: p.imageUrl,
           itemType: "service",
           requiresBooking: false,
+          ...stockFields,
         });
       }
     }
