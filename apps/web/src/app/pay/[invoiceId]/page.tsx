@@ -5,7 +5,8 @@ import { useParams, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { Button } from "@keyflow/ui";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
-import { initPresence, trackPageView, pickBusinessId } from "@/app/_lib/presence-sdk";
+import { pickBusinessId } from "@/app/_lib/presence-sdk";
+import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 import { formatPrice } from "@/lib/format";
 import { PublicPageState } from "@/components/ui/public-page-state";
 import {
@@ -164,12 +165,6 @@ function PublicPaymentPageInner() {
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    initPresence({ apiBase: API_BASE });
-    const bizId = pickBusinessId(invoice);
-    if (bizId) trackPageView(bizId);
-  }, [invoice]);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [paid, setPaid] = useState(false);
@@ -527,6 +522,7 @@ function PublicPaymentPageInner() {
   if (loading) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center">
+        <PresenceTracker businessId={pickBusinessId(invoice) ?? null} />
         <div className="text-center space-y-4">
           <div className="relative">
             <div
@@ -547,19 +543,23 @@ function PublicPaymentPageInner() {
 
   if (error && !invoice) {
     return (
-      <PublicPageState
-        variant="error"
-        title="Invoice Not Found"
-        message="This invoice link may be invalid or expired. If you were sent this by a business, please contact them for a new link."
-        retry={() => window.location.reload()}
-        primaryColor={primaryColor}
-      />
+      <>
+        <PresenceTracker businessId={pickBusinessId(invoice) ?? null} />
+        <PublicPageState
+          variant="error"
+          title="Invoice Not Found"
+          message="This invoice link may be invalid or expired. If you were sent this by a business, please contact them for a new link."
+          retry={() => window.location.reload()}
+          primaryColor={primaryColor}
+        />
+      </>
     );
   }
 
   if (paid && invoice) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center px-4">
+        <PresenceTracker businessId={pickBusinessId(invoice) ?? null} />
         {showConfetti && <ConfettiParticles />}
         <div className={`max-w-md w-full ${glassCard} overflow-hidden`}>
           <div
@@ -644,6 +644,7 @@ function PublicPaymentPageInner() {
   if (offlineConfirmed && invoice) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center px-4">
+        <PresenceTracker businessId={pickBusinessId(invoice) ?? null} />
         <div className={`max-w-md w-full ${glassCard} overflow-hidden`}>
           <div
             className="h-1.5 w-full"
@@ -706,6 +707,7 @@ function PublicPaymentPageInner() {
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-8">
+      <PresenceTracker businessId={pickBusinessId(invoice) ?? null} />
       <div className="mx-auto max-w-2xl space-y-6">
 
         {business && (

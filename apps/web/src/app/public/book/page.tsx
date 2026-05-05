@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
 import { DEFAULT_BUSINESS_ID } from "@/lib/client";
 import { motion } from "framer-motion";
-import { initPresence, trackPageView } from "@/app/_lib/presence-sdk";
+import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
 const serviceOptions = [
   { id: "svc_consult", label: "Consultation · TTD 500" },
@@ -18,11 +18,6 @@ const staffOptions = [
 
 export default function PublicBookPage() {
   const [businessId, setBusinessId] = useState(DEFAULT_BUSINESS_ID);
-
-  useEffect(() => {
-    initPresence({ apiBase: API_BASE });
-    if (businessId) trackPageView(businessId);
-  }, [businessId]);
   const [serviceId, setServiceId] = useState(serviceOptions[0]?.id ?? "");
   const [staffId, setStaffId] = useState(staffOptions[0]?.id ?? "");
   const [startTime, setStartTime] = useState("");
@@ -66,6 +61,7 @@ export default function PublicBookPage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-10">
+      <PresenceTracker businessId={businessId || null} />
       <div className="mx-auto max-w-5xl grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-4">
           <Badge tone="info">Public Booking</Badge>

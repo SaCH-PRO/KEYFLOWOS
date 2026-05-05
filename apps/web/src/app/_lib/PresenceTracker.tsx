@@ -14,19 +14,29 @@ import { API_BASE } from "@/lib/api";
  *
  * Pass `businessId` when known (storefront, booking, intake). Pages
  * that don't yet know which business is being viewed can omit it —
- * the SDK just won't emit until set.
+ * the SDK just won't emit until set, unless `emitWhenUnknown` is true,
+ * in which case a single page_view is emitted with an empty
+ * businessId so the server can resolve the business from the Referer
+ * URL (used by short-lived redirect pages like /pay/link/[token]).
  */
-export function PresenceTracker({ businessId }: { businessId?: string | null }) {
+export function PresenceTracker({
+  businessId,
+  emitWhenUnknown = false,
+}: {
+  businessId?: string | null;
+  emitWhenUnknown?: boolean;
+}) {
   const pathname = usePathname();
   const lastFiredRef = useRef<string | null>(null);
 
   useEffect(() => {
     initPresence({ apiBase: API_BASE });
-    if (!businessId) return;
-    const key = `${businessId}::${pathname ?? ""}`;
+    const id = businessId || (emitWhenUnknown ? "" : null);
+    if (id === null) return;
+    const key = `${id}::${pathname ?? ""}`;
     if (lastFiredRef.current === key) return;
     lastFiredRef.current = key;
-    trackPageView(businessId);
-  }, [businessId, pathname]);
+    trackPageView(id);
+  }, [businessId, pathname, emitWhenUnknown]);
   return null;
 }
