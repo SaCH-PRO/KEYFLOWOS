@@ -55,6 +55,22 @@ export const SYSTEM_COA: CoaSeed[] = [
   { systemKey: 'EXPENSE_OTHER', name: 'Other Expenses', type: 'EXPENSE', code: '6900', parentSystemKey: 'EXPENSE_GENERAL' },
 ];
 
+/**
+ * Map common ExpenseCategory.name patterns (substring, case-insensitive)
+ * to COA systemKeys. Order matters — first match wins. Anything that does
+ * not match falls through to EXPENSE_GENERAL so every category gets linked.
+ */
+const EXPENSE_CATEGORY_NAME_MAP: Array<{ pattern: RegExp; systemKey: string }> = [
+  { pattern: /market|advert|ads|promo|seo|content/i, systemKey: 'EXPENSE_MARKETING' },
+  { pattern: /software|subscription|saas|license|tool/i, systemKey: 'EXPENSE_SOFTWARE' },
+  { pattern: /rent|utility|utilities|electric|water|internet|phone/i, systemKey: 'EXPENSE_RENT' },
+  { pattern: /payroll|salary|salaries|wage|contractor|freelanc/i, systemKey: 'EXPENSE_PAYROLL' },
+  { pattern: /office|supply|supplies|equipment|stationery/i, systemKey: 'EXPENSE_OFFICE' },
+  { pattern: /travel|transport|fuel|gas|mileage|flight|hotel/i, systemKey: 'EXPENSE_TRAVEL' },
+  { pattern: /professional|legal|accountant|consult/i, systemKey: 'EXPENSE_PROFESSIONAL' },
+  { pattern: /bank|fee|charge|processor|interchange/i, systemKey: 'EXPENSE_BANK_FEES' },
+];
+
 @Injectable()
 export class ChartOfAccountsSeederService {
   constructor(private readonly prisma: PrismaService) {}
@@ -65,6 +81,11 @@ export class ChartOfAccountsSeederService {
    * the (businessId, systemKey) unique index so re-runs are no-ops.
    */
   async ensureDefaults(businessId: string): Promise<void> {
+    await this.seedSystemAccounts(businessId);
+    await this.linkExpenseCategories(businessId);
+  }
+
+  private async seedSystemAccounts(businessId: string): Promise<void> {
     const existing = await this.prisma.client.chartOfAccount.findMany({
       where: { businessId, systemKey: { in: SYSTEM_COA.map((s) => s.systemKey) } },
       select: { id: true, systemKey: true },
@@ -109,6 +130,40 @@ export class ChartOfAccountsSeederService {
       await this.prisma.client.chartOfAccount.update({
         where: { id },
         data: { parentId },
+      });
+    }
+  }
+
+  /**
+   * Idempotently link existing `ExpenseCategory` rows that have no
+   * `chartOfAccountId` yet to the appropriate EXPENSE_* system COA bucket.
+   * Falls back to EXPENSE_GENERAL when no name pattern matches so every
+   * category is linked. Safe to call on every read.
+   */
+  async linkExpenseCategories(businessId: string): Promise<void> {
+    const unlinked = await this.prisma.client.expenseCategory.findMany({
+      where: { businessId, chartOfAccountId: null },
+      select: { id: true, name: true },
+    });
+    if (unlinked.length === 0) return;
+
+    const expenseKeys = Array.from(
+      new Set(EXPENSE_CATEGORY_NAME_MAP.map((m) => m.systemKey).concat(['EXPENSE_GENERAL'])),
+    );
+    const coaRows = await this.prisma.client.chartOfAccount.findMany({
+      where: { businessId, systemKey: { in: expenseKeys } },
+      select: { id: true, systemKey: true },
+    });
+    const coaBySystemKey = new Map(coaRows.map((r) => [r.systemKey ?? '', r.id] as const));
+    const fallbackId = coaBySystemKey.get('EXPENSE_GENERAL');
+    if (!fallbackId) return; // System COA not yet seeded — caller should run seedSystemAccounts first.
+
+    for (const cat of unlinked) {
+      const matched = EXPENSE_CATEGORY_NAME_MAP.find((m) => m.pattern.test(cat.name));
+      const targetId = (matched && coaBySystemKey.get(matched.systemKey)) ?? fallbackId;
+      await this.prisma.client.expenseCategory.update({
+        where: { id: cat.id },
+        data: { chartOfAccountId: targetId },
       });
     }
   }

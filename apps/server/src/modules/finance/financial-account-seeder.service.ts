@@ -77,13 +77,29 @@ export class FinancialAccountSeederService {
       haveByName.add(seed.name.toLowerCase());
     }
 
-    // One processor per distinct historical Payment.provider that maps to
-    // a known processor (skip 'cash', 'bank_transfer' — already covered).
-    const processors = await this.prisma.client.payment.findMany({
-      where: { businessId, provider: { in: Object.keys(PROCESSOR_LABELS) } },
-      select: { provider: true },
-      distinct: ['provider'],
-    });
+    // One processor account per *active* payment provider connection.
+    //
+    // The schema has no dedicated `PaymentConnection` model — the only
+    // persisted evidence that a provider is wired up for a given business
+    // is either (a) a row in `Payment` whose `provider` is one we know,
+    // or (b) the existence of `PaymentLink` rows (which today are issued
+    // exclusively for WiPay-backed checkout flows). We union both signals
+    // so newly-connected providers without payment history still get an
+    // account seeded on first read of `/finance/accounts`.
+    const [paymentProviders, hasLinks] = await Promise.all([
+      this.prisma.client.payment.findMany({
+        where: { businessId, provider: { in: Object.keys(PROCESSOR_LABELS) } },
+        select: { provider: true },
+        distinct: ['provider'],
+      }),
+      this.prisma.client.paymentLink.findFirst({
+        where: { businessId, active: true },
+        select: { id: true },
+      }),
+    ]);
+    const activeProviders = new Set(paymentProviders.map((p) => p.provider));
+    if (hasLinks) activeProviders.add('wipay');
+    const processors = Array.from(activeProviders).map((provider) => ({ provider }));
     if (processors.length > 0) {
       const processorCoa = await this.coaSeeder.getBySystemKey(businessId, 'PAYMENT_PROCESSOR');
       if (processorCoa) {
