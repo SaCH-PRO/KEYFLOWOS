@@ -2,6 +2,9 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuar
 import { LeadFormsService } from './lead-forms.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
+import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
+import { sanitizeObject } from '../../core/utils/sanitize';
 
 @Controller()
 export class LeadFormsController {
@@ -71,14 +74,19 @@ export class LeadFormsController {
     return this.leadForms.toggleActive(businessId, id);
   }
 
+  @UseGuards(PublicRateLimitGuard, HoneypotGuard)
+  @PublicRateLimit(5, 60_000)
+  @Honeypot('_hp', 'website_url', 'company_url')
   @Post('public/lead-forms/:formId/submit')
   submitForm(
     @Param('formId') formId: string,
-    @Body() body: { data: Record<string, any>; source?: string },
+    @Body() body: { data: Record<string, any>; source?: string; _hp?: string; _t?: number },
     @Req() req: any,
   ) {
     const ipAddress = req.headers['x-forwarded-for'] || req.ip;
-    return this.leadForms.submitForm(formId, body.data, body.source, ipAddress);
+    const cleanData = sanitizeObject(body.data ?? {}, 5000);
+    const cleanSource = body.source ? String(body.source).slice(0, 200) : undefined;
+    return this.leadForms.submitForm(formId, cleanData, cleanSource, ipAddress);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

@@ -52,8 +52,11 @@ const FIELD_ICONS: Record<string, typeof Type> = {
 export function AssetIntake({ journeyId, productName, primaryColor, secondaryColor, checklist, onComplete, onBack }: Props) {
   const fields = checklist && checklist.length > 0 ? checklist : DEFAULT_CHECKLIST;
   const [values, setValues] = useState<Record<string, string>>({});
+  const [hp, setHp] = useState("");
+  const [renderedAt] = useState(() => Date.now());
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const requiredFields = fields.filter(f => f.required);
   const allRequiredFilled = requiredFields.every(f => (values[f.id] ?? "").trim().length > 0);
@@ -61,11 +64,16 @@ export function AssetIntake({ journeyId, productName, primaryColor, secondaryCol
 
   const handleSubmit = async () => {
     setSubmitting(true);
-    await apiPost({
+    setSubmitError(null);
+    const res = await apiPost({
       path: `/site/storefront/public/qualification/${journeyId}/intake`,
-      body: values,
+      body: { ...values, _hp: hp, _t: renderedAt },
     });
     setSubmitting(false);
+    if (res.error) {
+      setSubmitError(res.error || "We couldn't submit your assets. Please try again.");
+      return;
+    }
     setSubmitted(true);
     setTimeout(() => onComplete(), 1500);
   };
@@ -168,6 +176,23 @@ export function AssetIntake({ journeyId, productName, primaryColor, secondaryCol
           );
         })}
       </div>
+
+      <input
+        type="text"
+        name="website_url"
+        tabIndex={-1}
+        autoComplete="off"
+        value={hp}
+        onChange={(e) => setHp(e.target.value)}
+        aria-hidden="true"
+        style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, width: 0 }}
+      />
+
+      {submitError && (
+        <div className="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-500">
+          {submitError}
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-3 pt-2">
         <button

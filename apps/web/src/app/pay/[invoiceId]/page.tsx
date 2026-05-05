@@ -6,6 +6,7 @@ import Image from "next/image";
 import { Button } from "@keyflow/ui";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
+import { PublicPageState } from "@/components/ui/public-page-state";
 import {
   CheckCircle2,
   Loader2,
@@ -23,7 +24,6 @@ import {
   Banknote,
   Copy,
   Check,
-  RefreshCw,
   Calendar,
   Hash,
   User,
@@ -540,28 +540,13 @@ function PublicPaymentPageInner() {
 
   if (error && !invoice) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center px-4">
-        <div className={`max-w-md w-full ${glassCard} p-8`}>
-          <div className="text-center space-y-4">
-            <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto">
-              <AlertCircle className="w-8 h-8 text-red-400" />
-            </div>
-            <h1 className="text-xl font-semibold text-red-400">Invoice Not Found</h1>
-            <p className="text-sm text-slate-400">This invoice link may be invalid or expired.</p>
-            <Button
-              onClick={() => window.location.reload()}
-              className="mt-4"
-              variant="outline"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Try Again
-            </Button>
-          </div>
-        </div>
-        <footer className="fixed bottom-4 left-0 right-0 text-center text-xs text-slate-600">
-          Powered by <span className="font-semibold" style={{ color: primaryColor }}>KeyFlowOS</span>
-        </footer>
-      </main>
+      <PublicPageState
+        variant="error"
+        title="Invoice Not Found"
+        message="This invoice link may be invalid or expired. If you were sent this by a business, please contact them for a new link."
+        retry={() => window.location.reload()}
+        primaryColor={primaryColor}
+      />
     );
   }
 

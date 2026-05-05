@@ -971,6 +971,8 @@ export class MarketplaceService {
             name: true,
             email: true,
             phone: true,
+            whatsapp: true,
+            slug: true,
             logoUrl: true,
             primaryColor: true,
             secondaryColor: true,

@@ -14,6 +14,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { CatalogService } from '../catalog/catalog.service';
+import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
+import { sanitizeRequired, sanitizeString } from '../../core/utils/sanitize';
 
 @Controller('bookings')
 export class BookingsController {
@@ -134,8 +136,9 @@ export class BookingsController {
     });
   }
 
-  @UseGuards(PublicRateLimitGuard)
+  @UseGuards(PublicRateLimitGuard, HoneypotGuard)
   @PublicRateLimit(10, 60_000)
+  @Honeypot()
   @Post('public/businesses/:businessId')
   async publicCreateBooking(
     @Param('businessId') businessId: string,
@@ -156,19 +159,19 @@ export class BookingsController {
     }
     return this.bookings.publicCreateBooking({
       businessId,
-      serviceId: body.serviceId,
-      staffId: body.staffId || undefined,
+      serviceId: sanitizeRequired(body.serviceId, 'serviceId', 200),
+      staffId: body.staffId ? sanitizeString(body.staffId, 200) : undefined,
       startTime: new Date(body.startTime),
       contact: {
-        firstName: body.firstName,
-        lastName: body.lastName,
-        email: body.email,
-        phone: body.phone,
-        companyName: body.company,
+        firstName: sanitizeRequired(body.firstName, 'firstName', 100),
+        lastName: sanitizeRequired(body.lastName, 'lastName', 100),
+        email: sanitizeRequired(body.email, 'email', 200),
+        phone: sanitizeRequired(body.phone, 'phone', 50),
+        companyName: body.company ? sanitizeString(body.company, 200) : undefined,
       },
-      notes: body.notes ?? undefined,
-      location: body.location ?? undefined,
-      locationPlaceId: body.locationPlaceId ?? undefined,
+      notes: body.notes ? sanitizeString(body.notes, 2000) : undefined,
+      location: body.location ? sanitizeString(body.location, 500) : undefined,
+      locationPlaceId: body.locationPlaceId ? sanitizeString(body.locationPlaceId, 200) : undefined,
       locationLatLng: body.locationLatLng ?? undefined,
     });
   }
