@@ -33,6 +33,7 @@ import { ServiceLinkWidget } from "../commerce/components/service-link-widget";
 import UnifiedCalendar from "./components/unified-calendar";
 import { TodaysPlanCard } from "./components/todays-plan-card";
 import { NextActionsWidget } from "../crm/dashboard/next-actions-widget";
+import { NextBestActionWidget } from "@/components/ai/next-best-action-widget";
 import { AskKeyButton, KeyNoticedStream } from "@/components/key";
 import {
   KeyflowNotesDrawer,
@@ -320,6 +321,8 @@ export default function KeyflowCommandPage() {
             />
 
             <NextActionsWidget businessId={d.businessId} windowDays={7} limit={25} />
+
+            {d.businessId && <NextBestActionWidget businessId={d.businessId} />}
 
             <TodaysPlanCard businessId={d.businessId} />
 

@@ -54,6 +54,7 @@ import {
   Lock,
   Search as SearchIcon2,
   Landmark,
+  Calculator,
 } from "lucide-react";
 
 interface ResolvedFeatureFlag {
@@ -74,6 +75,12 @@ import { RequireAuth } from "@/components/require-auth";
 import { NotesProvider } from "@/components/keyflow/notes-context";
 import { KeyflowNotesDrawer } from "@/components/keyflow/keyflow-notes-drawer";
 import { NotesQueryParamTrigger } from "@/components/keyflow/notes-query-param-trigger";
+import dynamic from "next/dynamic";
+
+const MissionsButton = dynamic(
+  () => import("@/components/ui/missions-button").then((m) => m.MissionsButton),
+  { ssr: false, loading: () => null },
+);
 
 function relativeTime(dateStr: string): string {
   const now = Date.now();
@@ -253,8 +260,10 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Calendar", href: "/app/calendar", icon: Calendar },
     { label: "Bookings", href: "/app/bookings", icon: Calendar },
     { label: "Finance", href: "/app/finance", icon: Landmark },
+    { label: "Accounting", href: "/app/accounting", icon: Calculator },
     { label: "Revenue", href: "/app/commerce", icon: CreditCard },
     { label: "Payments", href: "/app/payments", icon: CreditCard },
+    { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle },
     { label: "Content", href: "/app/marketing", icon: Megaphone },
     { label: "Automations", href: "/app/automations", icon: Zap },
     { label: "Projects", href: "/app/projects", icon: FolderKanban },
@@ -294,6 +303,8 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/social", "workspaces"],
   ["/app/crm", "workspaces"],
   ["/app/commerce", "workspaces"],
+  ["/app/accounting", "workspaces"],
+  ["/app/whatsapp", "workspaces"],
   ["/app/payments", "workspaces"],
   ["/app/bookings", "workspaces"],
   ["/app/calendar", "workspaces"],
@@ -817,6 +828,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                   <NewEntityMenu onClose={() => setAddMenuOpen(false)} />
                 )}
               </div>
+
+              <MissionsButton />
 
               <div className="relative" ref={notifRef}>
                 <button

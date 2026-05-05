@@ -9,6 +9,7 @@ import { Badge, Button, Input } from "@keyflow/ui";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ReferContactDialog } from "@/components/contacts/refer-contact-dialog";
+import { RelationshipHealthStrip } from "@/components/contacts/relationship-health-strip";
 import { UserPlus } from "lucide-react";
 import {
   Contact,
@@ -635,6 +636,13 @@ export default function ContactDetailPage() {
           </Button>
         </div>
       </div>
+
+      <RelationshipHealthStrip
+        outstandingBalance={meta?.outstandingBalance ?? null}
+        totalRevenue={meta?.totalRevenue ?? null}
+        bookingCount={meta?.bookingCount ?? 0}
+        lastInteraction={meta?.lastInteractionAt ?? c.lastContactedAt ?? null}
+      />
 
       <div className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-2">
         <div className="text-sm font-semibold">Manage Contact</div>

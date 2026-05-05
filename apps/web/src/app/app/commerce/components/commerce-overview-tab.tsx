@@ -35,6 +35,7 @@ import { formatCurrencyCompact } from "@/lib/currency";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from "recharts";
 import { openKey } from "@/components/key/key-agent";
 import { RevenueIntelligenceSection } from "./revenue-intelligence-section";
+import { ChurnRiskPanel } from "./churn-risk-panel";
 
 interface CommerceOverviewTabProps {
   businessId: string | null;
@@ -783,6 +784,10 @@ export function CommerceOverviewTab({
           </div>
         </motion.div>
       </div>
+
+      <motion.div variants={stagger.item}>
+        <ChurnRiskPanel businessId={businessId} />
+      </motion.div>
     </motion.div>
   );
 }

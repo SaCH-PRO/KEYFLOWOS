@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
-import { FolderKanban, Send, LayoutGrid, List, FileStack } from "lucide-react";
+import { FolderKanban, Send, LayoutGrid, List, FileStack, Zap } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useSearchParams, useRouter } from "next/navigation";
 import { NotesTrigger } from "@/components/keyflow/notes-trigger";
@@ -14,6 +14,7 @@ import { fetchProjects, Project } from "@/lib/client";
 import { ProjectBoard } from "./components/project-board";
 import { ProjectListView } from "./components/project-list-view";
 import { TemplateManager } from "./components/template-manager";
+import { PlaybookPanel } from "./components/playbook-panel";
 import { ProjectExecutionStrip } from "./components/project-execution-strip";
 import { ProjectDetail } from "./components/project-detail";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
@@ -27,6 +28,7 @@ const TABS = [
   { key: "board", label: "Board", icon: LayoutGrid, tooltip: "Kanban board view grouped by delivery stage." },
   { key: "list", label: "List", icon: List, tooltip: "Table view of all projects with sortable columns." },
   { key: "templates", label: "Templates", icon: FileStack, tooltip: "Reusable project blueprints with pre-defined tasks." },
+  { key: "playbooks", label: "Playbooks", icon: Zap, tooltip: "Trigger-based event playbooks for automation." },
 ];
 
 export default function ProjectsPage() {
@@ -47,7 +49,7 @@ export default function ProjectsPage() {
   const handleProjectsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
       const tab = actionKey.replace("switch_tab:", "");
-      if (["board", "list", "templates"].includes(tab)) setActiveTab(tab);
+      if (["board", "list", "templates", "playbooks"].includes(tab)) setActiveTab(tab);
     } else if (actionKey === "new_project") {
       setActiveTab("board");
     }
@@ -246,6 +248,10 @@ export default function ProjectsPage() {
 
         {activeTab === "templates" && (
           <TemplateManager businessId={businessId} onProjectCreated={loadProjects} />
+        )}
+
+        {activeTab === "playbooks" && (
+          <PlaybookPanel />
         )}
       </div>
 
