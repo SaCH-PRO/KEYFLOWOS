@@ -11076,14 +11076,20 @@ const calendarListResponseSchema = z.object({
 
 export type CalendarListResponse = z.infer<typeof calendarListResponseSchema>;
 
+const calendarTypedConflictSchema = z.object({
+  kind: z.string(),
+  severity: z.enum(["low", "medium", "high"]),
+  message: z.string(),
+  eventIds: z.array(z.string()),
+  left: calendarEventSchema.optional(),
+  right: calendarEventSchema.optional(),
+  reason: z.string().optional(),
+});
+
+export type CalendarTypedConflict = z.infer<typeof calendarTypedConflictSchema>;
+
 const calendarConflictResponseSchema = z.object({
-  conflicts: z.array(
-    z.object({
-      left: calendarEventSchema,
-      right: calendarEventSchema,
-      reason: z.string(),
-    }),
-  ),
+  conflicts: z.array(calendarTypedConflictSchema),
   scanned: z.number(),
 });
 
@@ -11097,9 +11103,49 @@ const calendarInsightsResponseSchema = z.object({
   byModule: z.array(z.object({ key: z.string(), count: z.number(), revenue: z.number() })),
   byType: z.array(z.object({ key: z.string(), count: z.number(), revenue: z.number() })),
   hints: z.array(z.object({ kind: z.string(), message: z.string() })),
+  conflicts: z.array(calendarTypedConflictSchema).optional(),
 });
 
 export type CalendarInsightsResponse = z.infer<typeof calendarInsightsResponseSchema>;
+
+const calendarDailyPlanSchema = z.object({
+  date: z.string(),
+  greeting: z.string(),
+  summary: z.string(),
+  topPriorities: z.array(
+    z.object({
+      title: z.string(),
+      why: z.string(),
+      kind: z.string(),
+      eventId: z.string().optional(),
+      suggestedTime: z.string().optional(),
+    }),
+  ),
+  focusBlocks: z.array(
+    z.object({ startAt: z.string(), endAt: z.string(), label: z.string() }),
+  ),
+  warnings: z.array(z.string()),
+});
+
+export type CalendarDailyPlan = z.infer<typeof calendarDailyPlanSchema>;
+
+const calendarWeeklyCapacitySchema = z.object({
+  weekStart: z.string(),
+  totalScheduledHours: z.number(),
+  byDay: z.array(
+    z.object({
+      date: z.string(),
+      hours: z.number(),
+      eventCount: z.number(),
+      capacityPct: z.number(),
+    }),
+  ),
+  overloadedDays: z.array(z.string()),
+  underutilizedDays: z.array(z.string()),
+  recommendations: z.array(z.string()),
+});
+
+export type CalendarWeeklyCapacity = z.infer<typeof calendarWeeklyCapacitySchema>;
 
 export interface CalendarEventFilters {
   start?: string;
@@ -11187,6 +11233,38 @@ export async function fetchCalendarInsights(
   return apiGet(
     `/calendar/businesses/${encodeURIComponent(bid)}/insights?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     calendarInsightsResponseSchema,
+  );
+}
+
+export async function fetchCalendarDailyPlan(
+  businessId: string,
+  day?: string,
+  options: { refresh?: boolean } = {},
+) {
+  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const params = new URLSearchParams();
+  if (day) params.set("day", day);
+  if (options.refresh) params.set("refresh", "1");
+  const qs = params.toString();
+  return apiGet(
+    `/calendar/businesses/${encodeURIComponent(bid)}/daily-plan${qs ? `?${qs}` : ""}`,
+    calendarDailyPlanSchema,
+  );
+}
+
+export async function fetchCalendarWeeklyCapacity(
+  businessId: string,
+  weekStart?: string,
+  options: { refresh?: boolean } = {},
+) {
+  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const params = new URLSearchParams();
+  if (weekStart) params.set("weekStart", weekStart);
+  if (options.refresh) params.set("refresh", "1");
+  const qs = params.toString();
+  return apiGet(
+    `/calendar/businesses/${encodeURIComponent(bid)}/weekly-capacity${qs ? `?${qs}` : ""}`,
+    calendarWeeklyCapacitySchema,
   );
 }
 

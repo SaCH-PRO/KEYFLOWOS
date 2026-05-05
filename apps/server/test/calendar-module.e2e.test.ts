@@ -7,6 +7,9 @@ import { CalendarController } from '../src/modules/calendar/calendar.controller'
 import { CalendarQueryService } from '../src/modules/calendar/calendar-query.service';
 import { CalendarPermissionService } from '../src/modules/calendar/calendar-permission.service';
 import { CalendarProjectionService } from '../src/modules/calendar/calendar-projection.service';
+import { CalendarConflictService } from '../src/modules/calendar/calendar-conflict.service';
+import { CalendarInsightService } from '../src/modules/calendar/calendar-insight.service';
+import { ModelGatewayService } from '../src/modules/ai/model-gateway.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
@@ -236,6 +239,30 @@ describe('CalendarController (C2)', () => {
         CalendarQueryService,
         CalendarPermissionService,
         CalendarProjectionService,
+        CalendarConflictService,
+        CalendarInsightService,
+        {
+          provide: (await import('../src/modules/calendar/calendar-sync.service')).CalendarSyncService,
+          useValue: {
+            getStatus: vi.fn(),
+            getSettings: vi.fn(),
+            patchSettings: vi.fn(),
+            listAvailableCalendars: vi.fn(),
+            getAuthUrl: vi.fn(),
+            handleOAuthCallback: vi.fn(),
+            disconnect: vi.fn(),
+            triggerSync: vi.fn(),
+          },
+        },
+        {
+          provide: ModelGatewayService,
+          useValue: {
+            complete: vi.fn(async () => ({
+              text: '{}',
+              usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+            })),
+          },
+        },
         { provide: PrismaService, useValue: prismaMock },
       ],
     }).compile();
@@ -395,11 +422,46 @@ describe('CalendarController (C2)', () => {
         })
         .expect(200);
 
-      expect(res.body.conflicts).toHaveLength(1);
-      expect(res.body.conflicts[0].reason).toBe('staff');
-      expect([res.body.conflicts[0].left.id, res.body.conflicts[0].right.id]).toEqual(
+      expect(res.body.conflicts.length).toBeGreaterThanOrEqual(1);
+      const staffConflict = res.body.conflicts.find(
+        (c: any) => c.kind === 'staff_double_booking',
+      );
+      expect(staffConflict).toBeDefined();
+      expect(staffConflict.severity).toBe('high');
+      expect(staffConflict.message).toMatch(/staff/i);
+      expect(staffConflict.eventIds).toEqual(
         expect.arrayContaining(['evt_overlap_a', 'evt_overlap_b']),
       );
+    });
+  });
+
+  describe('GET /daily-plan', () => {
+    it('returns a deterministic plan when the AI gateway returns empty', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/calendar/businesses/biz_1/daily-plan')
+        .query({ day: '2030-06-01' })
+        .expect(200);
+
+      expect(res.body.date).toBeDefined();
+      expect(res.body.greeting).toBeDefined();
+      expect(Array.isArray(res.body.topPriorities)).toBe(true);
+      expect(Array.isArray(res.body.focusBlocks)).toBe(true);
+      expect(Array.isArray(res.body.warnings)).toBe(true);
+    });
+  });
+
+  describe('GET /weekly-capacity', () => {
+    it('returns a 7-day capacity breakdown', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/calendar/businesses/biz_1/weekly-capacity')
+        .query({ weekStart: '2030-06-01' })
+        .expect(200);
+
+      expect(res.body.weekStart).toBeDefined();
+      expect(Array.isArray(res.body.byDay)).toBe(true);
+      expect(res.body.byDay.length).toBe(7);
+      expect(typeof res.body.totalScheduledHours).toBe('number');
+      expect(Array.isArray(res.body.recommendations)).toBe(true);
     });
   });
 
@@ -422,7 +484,8 @@ describe('CalendarController (C2)', () => {
           expect.objectContaining({ key: 'EXTERNAL' }),
         ]),
       );
-      expect(res.body.hints).toEqual([]);
+      expect(Array.isArray(res.body.hints)).toBe(true);
+      expect(Array.isArray(res.body.conflicts)).toBe(true);
     });
   });
 

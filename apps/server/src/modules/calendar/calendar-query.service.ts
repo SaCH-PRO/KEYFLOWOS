@@ -229,6 +229,9 @@ export class CalendarQueryService {
     });
   }
 
+  // The full categorized conflict scan lives in CalendarConflictService
+  // (C7). This method is kept as a lightweight overlap-only fallback used
+  // by tests that don't wire the conflict service.
   async conflicts(
     businessId: string,
     userId: string,
@@ -242,21 +245,13 @@ export class CalendarQueryService {
     });
 
     const events = (await this.prisma.client.calendarEvent.findMany({
-      where: {
-        ...where,
-        // Conflicts only make sense for time-anchored items; agenda-only
-        // events without an endAt can be a "deadline" but won't overlap.
-        endAt: { not: null },
-      },
+      where: { ...where, endAt: { not: null } },
       orderBy: { startAt: 'asc' },
       take: MAX_EVENTS_RETURNED,
     })) as ReturnedEvent[];
 
     type Pair = { left: ReturnedEvent; right: ReturnedEvent; reason: string };
     const pairs: Pair[] = [];
-
-    // Group by a "scope key": same staff, same assignee, or same contact.
-    // Two events in the same scope that overlap in time are a conflict.
     const scopes = new Map<string, ReturnedEvent[]>();
     const push = (key: string, ev: ReturnedEvent) => {
       const arr = scopes.get(key) ?? [];
@@ -268,29 +263,22 @@ export class CalendarQueryService {
       if (ev.assigneeId) push(`assignee:${ev.assigneeId}`, ev);
       if (ev.contactId) push(`contact:${ev.contactId}`, ev);
     }
-
     const seen = new Set<string>();
     for (const [scope, list] of scopes) {
-      // Already sorted by startAt thanks to the parent query.
       for (let i = 0; i < list.length; i += 1) {
         const a = list[i];
         for (let j = i + 1; j < list.length; j += 1) {
           const b = list[j];
           const aEnd = a.endAt!.getTime();
           const bStart = b.startAt.getTime();
-          if (bStart >= aEnd) break; // remaining are after a, can't overlap
+          if (bStart >= aEnd) break;
           const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          pairs.push({
-            left: a,
-            right: b,
-            reason: scope.split(':')[0],
-          });
+          pairs.push({ left: a, right: b, reason: scope.split(':')[0] });
         }
       }
     }
-
     return { conflicts: pairs, scanned: events.length };
   }
 
