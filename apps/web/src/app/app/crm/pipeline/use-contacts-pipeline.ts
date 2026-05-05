@@ -10,6 +10,7 @@ import { useContactsData } from "./hooks/use-contacts-data";
 import { useContactDetail } from "./hooks/use-contact-detail";
 import { useContactActions } from "./hooks/use-contact-actions";
 import { useFlowIntelligence } from "./hooks/use-flow-intelligence";
+import { useOpenComposer } from "@/hooks/use-open-composer";
 
 export function useContactsPipeline() {
   const router = useRouter();
@@ -65,7 +66,9 @@ export function useContactsPipeline() {
     setSelectedContactId(null);
   }, [setSelectedContactId]);
 
+  const openComposer = useOpenComposer();
   const handleDoAction = useCallback((action: NextActionUI) => {
+    const channel = action.bestChannel ?? undefined;
     switch (action.type) {
       case "send_quote":
         router.push(`/app/commerce?tab=quotes&contactId=${action.contactId}`);
@@ -76,11 +79,21 @@ export function useContactsPipeline() {
         toast.info(`Opening invoices for ${action.contactName}`);
         break;
       case "email":
-      case "follow_up":
-        selectContact(action.contactId);
-        setCrmViewTab("contacts");
-        toast.info(`Opening ${action.contactName} — ${action.description}`);
+      case "follow_up": {
+        const contentType = channel === "email" ? "email" : channel ? "social" : "email";
+        openComposer({
+          contentType,
+          channel,
+          contactId: action.contactId,
+          subject: `Message for ${action.contactName}`,
+        });
+        toast.info(
+          channel
+            ? `Opening composer (${channel}) for ${action.contactName}`
+            : `Opening composer for ${action.contactName}`,
+        );
         break;
+      }
       case "call":
         selectContact(action.contactId);
         setCrmViewTab("contacts");
@@ -96,7 +109,7 @@ export function useContactsPipeline() {
         setCrmViewTab("contacts");
         break;
     }
-  }, [selectContact, router, setCrmViewTab]);
+  }, [selectContact, router, setCrmViewTab, openComposer]);
 
   useEffect(() => {
     if (businessId) {

@@ -7,6 +7,8 @@ interface OpenComposerOptions {
   contentType?: "social" | "email" | "multi";
   body?: string;
   subject?: string;
+  channel?: "email" | "whatsapp" | "sms" | "call";
+  contactId?: string;
 }
 
 export function useOpenComposer() {
@@ -17,6 +19,8 @@ export function useOpenComposer() {
     params.set("tab", "social");
     params.set("compose", "true");
     if (opts?.contentType) params.set("contentType", opts.contentType);
+    if (opts?.channel) params.set("channel", opts.channel);
+    if (opts?.contactId) params.set("contactId", opts.contactId);
     if (opts?.body) {
       try { sessionStorage.setItem("kf_composer_body", opts.body); } catch {}
     }

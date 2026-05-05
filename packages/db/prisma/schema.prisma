@@ -113,6 +113,7 @@ model Business {
   products         Product[]
   bookings         Booking[]
   contactEvents    ContactEvent[]
+  contactChannelStats ContactChannelStat[]
   contactNotes     ContactNote[]
   contactTasks     ContactTask[]
     contactImports   ContactImport[]
@@ -427,6 +428,10 @@ model Contact {
   secondaryPhone  String? @map("secondary_phone")
   whatsappNumber  String? @map("whatsapp_number")
   preferredChannel String? @map("preferred_channel")
+  bestChannel           String?   @map("best_channel")
+  bestChannelConfidence Float?    @map("best_channel_confidence")
+  bestTimeWindowJson    Json?     @map("best_time_window_json")
+  bestSignalUpdatedAt   DateTime? @map("best_signal_updated_at")
   addressLine1 String? @map("address_line_1")
   addressLine2 String? @map("address_line_2")
   city         String?
@@ -481,6 +486,7 @@ model Contact {
     sequenceEnrollments CrmSequenceEnrollment[]
   listMembers         ContactListMember[]
   momentum            ContactMomentum[]
+  channelStats        ContactChannelStat[]
   momentumSnapshots   ContactMomentumSnapshot[]
   momentumRecommendations MomentumRecommendation[]
   externalMappings    ContactExternalMapping[]
@@ -697,6 +703,28 @@ model ContactReadState {
   @@index([businessId, userId])
   @@index([contactId])
   @@map("contact_read_states")
+}
+
+model ContactChannelStat {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  contactId    String   @map("contact_id")
+  channel      String
+  sentCount    Int      @default(0) @map("sent_count")
+  replyCount   Int      @default(0) @map("reply_count")
+  openCount    Int      @default(0) @map("open_count")
+  lastReplyAt  DateTime? @map("last_reply_at")
+  lastSentAt   DateTime? @map("last_sent_at")
+  hourBucketsJson Json?  @map("hour_buckets_json")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, channel])
+  @@index([businessId, contactId])
+  @@map("contact_channel_stats")
 }
 
 model ContactNote {

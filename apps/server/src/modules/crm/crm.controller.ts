@@ -20,6 +20,7 @@ import {
   ContactRelationshipHealth,
   RelationshipHealthThresholds,
 } from '@keyflow/shared';
+import { BestChannelService } from './best-channel.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -53,6 +54,7 @@ export class CrmController {
     @Inject(CrmSavedViewsService) private readonly savedViews: CrmSavedViewsService,
     @Inject(CrmRelationshipHealthService) private readonly relationshipHealth: CrmRelationshipHealthService,
     @Inject(CrmCommunicationService) private readonly communication: CrmCommunicationService,
+    @Inject(BestChannelService) private readonly bestChannel: BestChannelService,
   ) {}
 
   @Get('health')
@@ -94,6 +96,8 @@ export class CrmController {
     @Query('priorities') priorities?: string | string[],
     @Query('relationshipHealth') relationshipHealth?: string | string[],
     @Query('pipelineStages') pipelineStages?: string | string[],
+    @Query('bestChannels') bestChannels?: string | string[],
+    @Query('bestTimeNow') bestTimeNow?: string,
     @Query('favorite') favorite?: string,
     @Query('includeArchived') includeArchived?: string,
     @Query('skip') skip?: string,
@@ -106,7 +110,12 @@ export class CrmController {
     const validSortBy = ['name', 'newest', 'oldest', 'revenue', 'score', 'lastInteraction'];
     const validSortOrder = ['asc', 'desc'];
     const toArr = (v?: string | string[]) => (Array.isArray(v) ? v : v ? [v] : undefined);
-    return this.crm.listContacts({
+    const wantBestTimeNow = bestTimeNow === 'true';
+    return (async () => {
+      const bestTimeNowIds = wantBestTimeNow
+        ? await this.bestChannel.findContactsBestTimeNow(businessId).catch(() => [])
+        : undefined;
+      return this.crm.listContacts({
       businessId,
       status,
       search,
@@ -122,6 +131,9 @@ export class CrmController {
       priorities: toArr(priorities),
       relationshipHealth: toArr(relationshipHealth),
       pipelineStages: toArr(pipelineStages),
+      bestChannels: toArr(bestChannels),
+      bestTimeNow: wantBestTimeNow,
+      bestTimeNowIds,
       favorite: favorite === 'true' ? true : favorite === 'false' ? false : undefined,
       includeArchived: includeArchived === 'true',
       skip: skip ? Number(skip) : undefined,
@@ -131,6 +143,18 @@ export class CrmController {
       sortBy: sortBy && validSortBy.includes(sortBy) ? sortBy as any : undefined,
       sortOrder: sortOrder && validSortOrder.includes(sortOrder) ? sortOrder as 'asc' | 'desc' : undefined,
     });
+    })();
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/best-channel')
+  bestChannelExplain(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.bestChannel.explain(businessId, contactId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
