@@ -8,6 +8,8 @@ import { CommerceService } from './commerce.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
 import { InvoiceOverdueScheduler } from './invoice-overdue.scheduler';
+import { QuoteStaleScheduler } from './quote-stale.scheduler';
+import { QuoteStaleListener } from './quote-stale.listener';
 import { CommerceAiService } from './commerce-ai.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { RecurringInvoiceService } from './recurring-invoice.service';
@@ -36,6 +38,8 @@ import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
     CommerceStatsService,
     InvoiceWorkflowService,
     InvoiceOverdueScheduler,
+    QuoteStaleScheduler,
+    QuoteStaleListener,
     CommerceAiService,
     CommerceVisionService,
     RecurringInvoiceService,

@@ -1344,6 +1344,11 @@ model Quote {
   viewedAt   DateTime? @map("viewed_at")
   acceptedAt DateTime? @map("accepted_at")
   rejectedAt DateTime? @map("rejected_at")
+  // R3: timestamp of the most recent stale-quote follow-up reminder.
+  // When set after `sentAt`, the quote is considered "freshly nudged"
+  // and is excluded from the daily stale-quote scan so the same row
+  // doesn't keep re-surfacing in the Action Queue.
+  lastFollowUpAt DateTime? @map("last_follow_up_at")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)

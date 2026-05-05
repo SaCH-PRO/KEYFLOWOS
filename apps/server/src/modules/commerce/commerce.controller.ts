@@ -412,6 +412,47 @@ export class CommerceController {
     return this.commerce.getStaleQuotes(businessId, threshold);
   }
 
+  // R3: one-click "Send reminder" used by the Action Queue stale-quote
+  // card. Stamps lastFollowUpAt so the daily scan won't re-surface the
+  // same quote tomorrow, and resolves any pending stale-quote approval
+  // items for it as 'approved'.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/quotes/:quoteId/follow-up')
+  async sendQuoteFollowUp(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+    @Req() req: any,
+  ) {
+    const actorId = req?.user?.id ?? null;
+    const quote = await this.commerce.markQuoteFollowedUp({ quoteId, businessId, actorId });
+    // Resolve any pending stale-quote Action Queue cards for this quote.
+    const pending = await this.prisma.client.aiApprovalItem.findMany({
+      where: {
+        businessId,
+        status: 'pending',
+        toolName: 'commerce_send_quote_reminder',
+      },
+      select: { id: true, inputPayload: true },
+    });
+    const matches = pending.filter(
+      (p) => (p.inputPayload as Record<string, unknown> | null)?.quoteId === quoteId,
+    );
+    if (matches.length > 0) {
+      await this.prisma.client.aiApprovalItem.updateMany({
+        where: { id: { in: matches.map((m) => m.id) } },
+        data: {
+          status: 'approved',
+          resolution: 'approved',
+          resolvedAt: new Date(),
+          resolvedBy: actorId,
+          resolvedByUserId: actorId,
+        },
+      });
+    }
+    return { success: true, quote, resolvedApprovals: matches.length };
+  }
+
   @Get('quotes/:quoteId')
   getQuote(@Param('quoteId') quoteId: string) {
     return this.commerce.getQuote(quoteId);
