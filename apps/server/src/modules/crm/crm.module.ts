@@ -30,6 +30,8 @@ import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmRevenueService } from './crm-revenue.service';
 import { CrmSequenceService } from './crm-sequence.service';
 import { CrmSequenceSchedulerService } from './crm-sequence-scheduler.service';
+import { CrmSequenceAnalyticsService } from './crm-sequence-analytics.service';
+import { SequenceAttributionListener } from './sequence-attribution.listener';
 import { CrmRelationshipHealthService } from './crm-relationship-health.service';
 import { CrmRelationshipHealthSchedulerService } from './crm-relationship-health-scheduler.service';
 import { CrmStatsService } from './crm-stats.service';
@@ -87,6 +89,8 @@ import { CommunityModule } from '../community/community.module';
     CrmAiService,
     CrmSequenceService,
     CrmSequenceSchedulerService,
+    CrmSequenceAnalyticsService,
+    SequenceAttributionListener,
     CrmRelationshipHealthService,
     CrmRelationshipHealthSchedulerService,
     CrmDealsService,
@@ -128,6 +132,7 @@ import { CommunityModule } from '../community/community.module';
     CrmAiService,
     CrmSequenceService,
     CrmSequenceSchedulerService,
+    CrmSequenceAnalyticsService,
     CrmRelationshipHealthService,
     CrmRelationshipHealthSchedulerService,
     CrmDealsService,

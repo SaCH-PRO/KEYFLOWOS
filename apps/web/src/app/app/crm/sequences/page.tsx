@@ -5,13 +5,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button, Card, ContentContainer, PageHeader, Badge } from "@keyflow/ui";
-import { Plus, Workflow, Users, Mail, MessageCircle, Phone, Clock, GitBranch, Copy, Trash2 } from "lucide-react";
+import { Plus, Workflow, Users, Mail, MessageCircle, Phone, Clock, GitBranch, Copy, Trash2, BarChart3, TrendingUp, Trophy } from "lucide-react";
 import {
   CrmSequence,
+  SequenceKpi,
   createSequence,
   deleteSequence,
   duplicateSequence,
   fetchSequences,
+  fetchSequencesSummary,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -30,10 +32,24 @@ const NODE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   end: Workflow,
 };
 
+function formatCurrencyShort(value: number, currency: string | null) {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency ?? "TTD",
+      maximumFractionDigits: 0,
+      notation: value > 9999 ? "compact" : "standard",
+    }).format(value);
+  } catch {
+    return `$${value.toFixed(0)}`;
+  }
+}
+
 export default function SequencesListPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [sequences, setSequences] = useState<CrmSequence[]>([]);
+  const [kpis, setKpis] = useState<Record<string, SequenceKpi>>({});
   const [loading, setLoading] = useState(true);
   const [, startTransition] = useTransition();
 
@@ -43,9 +59,15 @@ export default function SequencesListPage() {
       const id = (await ensureWorkspace()) ?? getStoredBusinessId();
       if (cancelled || !id) return;
       setBusinessId(id);
-      const { data } = await fetchSequences(id);
+      const [{ data: seqs }, { data: summary }] = await Promise.all([
+        fetchSequences(id),
+        fetchSequencesSummary(id),
+      ]);
       if (cancelled) return;
-      setSequences(data ?? []);
+      setSequences(seqs ?? []);
+      const map: Record<string, SequenceKpi> = {};
+      for (const k of summary ?? []) map[k.sequenceId] = k;
+      setKpis(map);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -54,7 +76,12 @@ export default function SequencesListPage() {
   const reload = () => {
     if (!businessId) return;
     startTransition(() => {
-      void fetchSequences(businessId).then(({ data }) => setSequences(data ?? []));
+      void Promise.all([fetchSequences(businessId), fetchSequencesSummary(businessId)]).then(([{ data: seqs }, { data: summary }]) => {
+        setSequences(seqs ?? []);
+        const map: Record<string, SequenceKpi> = {};
+        for (const k of summary ?? []) map[k.sequenceId] = k;
+        setKpis(map);
+      });
     });
   };
 
@@ -112,9 +139,16 @@ export default function SequencesListPage() {
         title="Sequences"
         subtitle="Visual multi-channel sequences for outreach and follow-ups."
         actions={
-          <Button onClick={handleCreate} disabled={!businessId}>
-            <Plus className="w-4 h-4 mr-1" /> New sequence
-          </Button>
+          <div className="flex items-center gap-2">
+            <Link href="/app/crm/sequences/lifecycle">
+              <Button variant="subtle" size="sm">
+                <BarChart3 className="w-4 h-4 mr-1" /> Lifecycle report
+              </Button>
+            </Link>
+            <Button onClick={handleCreate} disabled={!businessId}>
+              <Plus className="w-4 h-4 mr-1" /> New sequence
+            </Button>
+          </div>
         }
       />
 
@@ -133,6 +167,7 @@ export default function SequencesListPage() {
           {sequences.map((seq) => {
             const nodes = seq.graph?.nodes ?? [];
             const types = Array.from(new Set(nodes.map((n) => n.type)));
+            const kpi = kpis[seq.id];
             return (
               <Card key={seq.id} padding="lg" className="space-y-3 hover:border-[hsl(var(--kf-accent1))]/40 transition-colors">
                 <div className="flex items-start justify-between gap-2">
@@ -163,15 +198,40 @@ export default function SequencesListPage() {
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                   <span className="inline-flex items-center gap-1">
                     <Users className="w-3 h-3" />
-                    {seq.enrollmentCount ?? 0} enrolled
+                    {kpi?.enrolled ?? seq.enrollmentCount ?? 0} enrolled
                   </span>
                   <span>{nodes.length} nodes</span>
                 </div>
+                {kpi && kpi.enrolled > 0 && (
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/30 text-[11px]">
+                    <div className="flex items-center gap-1">
+                      <TrendingUp className="w-3 h-3 text-[hsl(var(--kf-info))]" />
+                      <span className="text-muted-foreground">Reply</span>
+                      <span className="ml-auto tabular-nums font-medium">{Math.round(kpi.replyRate * 100)}%</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Trophy className="w-3 h-3 text-[hsl(var(--kf-success))]" />
+                      <span className="text-muted-foreground">Won</span>
+                      <span className="ml-auto tabular-nums font-medium">
+                        {kpi.attributedDeals > 0
+                          ? formatCurrencyShort(kpi.attributedValue, kpi.currency)
+                          : "—"}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-1 pt-1 border-t border-border/30">
                   <Link href={`/app/crm/sequences/${seq.id}`} className="flex-1">
                     <Button variant="subtle" size="sm" className="w-full">
                       Open builder
                     </Button>
+                  </Link>
+                  <Link
+                    href={`/app/crm/sequences/${seq.id}/analytics`}
+                    className="p-2 rounded-md hover:bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
+                    title="Analytics"
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
                   </Link>
                   <button
                     onClick={() => handleDuplicate(seq.id)}
