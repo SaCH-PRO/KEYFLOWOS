@@ -1038,7 +1038,7 @@ export class SiteService {
       const booking = await this.prisma.client.booking.findFirst({
         where: {
           businessId: business.id,
-          customerEmail: { equals: normalizedEmail, mode: 'insensitive' },
+          contact: { emailNormalized: normalizedEmail },
           serviceId: data.productId,
           status: 'COMPLETED',
         },
