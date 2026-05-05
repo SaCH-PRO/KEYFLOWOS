@@ -5,6 +5,7 @@ export const CONTACT_EVENT_CATEGORIES = [
   'delivery_operations',
   'relationship_leverage',
   'ai_system',
+  'public_engagement',
 ] as const;
 
 export type ContactEventCategory = (typeof CONTACT_EVENT_CATEGORIES)[number];
@@ -104,6 +105,18 @@ export const CONTACT_EVENT_TYPES_BY_CATEGORY = {
     'autopilot.payment_recovery',
     'autopilot.lead_reactivation',
   ],
+  public_engagement: [
+    'storefront.viewed',
+    'service.viewed',
+    'product.viewed',
+    'quote.requested',
+    'booking.started',
+    'cart.created',
+    'checkout.started',
+    'checkout.abandoned',
+    'payment.completed',
+    'storefront.shared',
+  ],
 } as const satisfies Record<ContactEventCategory, readonly string[]>;
 
 export const CONTACT_EVENT_TYPES = [
@@ -113,6 +126,7 @@ export const CONTACT_EVENT_TYPES = [
   ...CONTACT_EVENT_TYPES_BY_CATEGORY.delivery_operations,
   ...CONTACT_EVENT_TYPES_BY_CATEGORY.relationship_leverage,
   ...CONTACT_EVENT_TYPES_BY_CATEGORY.ai_system,
+  ...CONTACT_EVENT_TYPES_BY_CATEGORY.public_engagement,
 ] as const;
 
 export type ContactEventType = (typeof CONTACT_EVENT_TYPES)[number];
@@ -263,6 +277,16 @@ export const CONTACT_EVENT_LABELS: Record<ContactEventType, string> = {
   'autopilot.payment_recovery': 'Payment recovery',
   'autopilot.lead_reactivation': 'Lead reactivation',
   'relationship_health.changed': 'Relationship health changed',
+  'storefront.viewed': 'Storefront viewed',
+  'service.viewed': 'Service viewed',
+  'product.viewed': 'Product viewed',
+  'quote.requested': 'Quote requested',
+  'booking.started': 'Booking started',
+  'cart.created': 'Cart created',
+  'checkout.started': 'Checkout started',
+  'checkout.abandoned': 'Checkout abandoned',
+  'payment.completed': 'Payment completed',
+  'storefront.shared': 'Storefront shared',
 };
 
 export function getContactEventLabel(type: string): string {

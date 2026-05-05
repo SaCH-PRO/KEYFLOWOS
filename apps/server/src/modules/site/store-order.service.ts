@@ -2,6 +2,8 @@ import { Injectable, Inject, BadRequestException, NotFoundException, Logger } fr
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PromoCodeService } from './promo-code.service';
+import { CrmService } from '../crm/crm.service';
+import { PublicEventsService } from '../public-events/public-events.service';
 
 @Injectable()
 export class StoreOrderService {
@@ -11,6 +13,8 @@ export class StoreOrderService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(PromoCodeService) private readonly promoCodeService: PromoCodeService,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
   ) {}
 
   async validateCart(items: { productId: string; quantity: number }[], businessId: string) {
@@ -149,6 +153,9 @@ export class StoreOrderService {
     };
     paymentMethod?: string;
     notes?: string;
+    storefrontSlug?: string | null;
+    visitorId?: string | null;
+    referralCode?: string | null;
   }) {
     const totals = await this.calculateOrderTotals(
       input.cartItems,
@@ -205,6 +212,65 @@ export class StoreOrderService {
     }
 
     this.events.emit('store_order.created', { order, businessId: input.businessId });
+
+    try {
+      const sourceDetail = input.storefrontSlug
+        ? `storefront:${input.storefrontSlug}`
+        : `order:${order.orderNumber}`;
+      const nameParts = (input.customerInfo.name ?? '').trim().split(/\s+/);
+      const contact = await this.crm.findOrCreateContact(input.businessId, {
+        firstName: nameParts[0] ?? null,
+        lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+        email: input.customerInfo.email ?? null,
+        phone: input.customerInfo.phone ?? null,
+        source: 'storefront',
+        sourceDetail,
+        ...(input.referralCode ? { custom: { referralCode: input.referralCode } } : {}),
+      });
+      if (contact?.id) {
+        if (input.visitorId) {
+          await this.publicEvents.backstitchVisitor({
+            businessId: input.businessId,
+            visitorId: input.visitorId,
+            contactId: contact.id,
+            sourceDetail,
+          }).catch(() => undefined);
+        }
+        const baseData = {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          total: order.total,
+          currency: order.currency,
+          itemCount: order.items.length,
+          referralCode: input.referralCode ?? null,
+        };
+        await this.publicEvents.logStorefrontEvent({
+          businessId: input.businessId,
+          contactId: contact.id,
+          type: 'checkout.started',
+          sourceDetail,
+          data: baseData,
+        });
+        await this.publicEvents.logStorefrontEvent({
+          businessId: input.businessId,
+          contactId: contact.id,
+          type: 'store_order.created',
+          sourceDetail,
+          data: baseData,
+        });
+        if (order.paymentStatus === 'PAID') {
+          await this.publicEvents.logStorefrontEvent({
+            businessId: input.businessId,
+            contactId: contact.id,
+            type: 'payment.completed',
+            sourceDetail,
+            data: baseData,
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`[store-order] CRM hook failed: ${(err as Error).message}`);
+    }
 
     return order;
   }
@@ -289,6 +355,36 @@ export class StoreOrderService {
 
     if (paymentStatus === 'PAID') {
       this.events.emit('store_order.paid', { order, businessId: order.businessId });
+      try {
+        if (order.customerEmail) {
+          const nameParts = (order.customerName ?? '').trim().split(/\s+/);
+          const contact = await this.crm.findOrCreateContact(order.businessId, {
+            firstName: nameParts[0] ?? null,
+            lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+            email: order.customerEmail,
+            phone: order.customerPhone,
+            source: 'storefront',
+            sourceDetail: `order:${order.orderNumber}`,
+          });
+          if (contact?.id) {
+            await this.publicEvents.logStorefrontEvent({
+              businessId: order.businessId,
+              contactId: contact.id,
+              type: 'payment.completed',
+              sourceDetail: `order:${order.orderNumber}`,
+              data: {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                total: order.total,
+                currency: order.currency,
+                paymentRef: paymentRef ?? null,
+              },
+            });
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`[store-order] payment CRM hook failed: ${(err as Error).message}`);
+      }
     }
 
     return order;

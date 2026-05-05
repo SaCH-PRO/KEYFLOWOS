@@ -53,6 +53,7 @@ import { SeoModule } from './modules/seo/seo.module';
 import { GrowthIntelligenceModule } from './modules/growth-intelligence/growth-intelligence.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
+import { PublicEventsModule } from './modules/public-events/public-events.module';
 
 @Module({
   imports: [
@@ -107,6 +108,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
     GrowthIntelligenceModule,
     FeatureFlagsModule,
     CalendarModule,
+    PublicEventsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -4615,12 +4615,99 @@ export async function fetchStoreReadiness(businessId: string): Promise<ApiResult
   return apiGetSimple<StoreReadinessResult>(`/commerce/businesses/${encodeURIComponent(businessId)}/store/readiness`);
 }
 
-export async function trackStoreEvent(businessId: string, type: string, itemId?: string): Promise<void> {
+const PUBLIC_EVENT_MAP: Record<string, string> = {
+  page_view: 'storefront.viewed',
+  item_view: 'product.viewed',
+  add_to_cart: 'cart.created',
+  checkout_start: 'checkout.started',
+  checkout_complete: 'payment.completed',
+  service_view: 'service.viewed',
+  share: 'storefront.shared',
+};
+
+const VISITOR_KEY = 'kf_vid';
+
+function readReferralCode(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('ref') || params.get('referral');
+    return code?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readStoredVisitorId(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    return localStorage.getItem(VISITOR_KEY) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistVisitorId(id: string | null | undefined) {
+  if (!id || typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(VISITOR_KEY, id);
+  } catch {
+    // localStorage may be unavailable (private browsing); cookie still works.
+  }
+}
+
+export async function trackStoreEvent(
+  businessId: string,
+  type: string,
+  itemId?: string,
+  options?: { sourceDetail?: string; identity?: { name?: string; email?: string; phone?: string } },
+): Promise<void> {
+  // Legacy storefront analytics bucket — preserved so existing dashboards
+  // (conversion funnel, product health) keep working unchanged.
   fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/analytics/event`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, itemId }),
   }).catch(() => {});
+
+  const canonical = PUBLIC_EVENT_MAP[type];
+  if (!canonical) return;
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const visitorId = readStoredVisitorId();
+  if (visitorId) headers['X-Visitor-Id'] = visitorId;
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/public-events/businesses/${encodeURIComponent(businessId)}/track`,
+      {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          type: canonical,
+          sourceDetail: options?.sourceDetail ?? null,
+          referralCode: readReferralCode() ?? null,
+          data: itemId ? { itemId } : {},
+          identity: options?.identity ?? null,
+        }),
+      },
+    );
+    if (res.ok) {
+      const json = await res.json().catch(() => null);
+      if (json?.visitorId) persistVisitorId(json.visitorId);
+    }
+  } catch {
+    // Tracking is best-effort; never block the storefront UX on it.
+  }
+}
+
+export function getStorefrontVisitorId(): string | undefined {
+  return readStoredVisitorId();
+}
+
+export function getStorefrontReferralCode(): string | undefined {
+  return readReferralCode();
 }
 
 export interface ConversionFunnelStage {

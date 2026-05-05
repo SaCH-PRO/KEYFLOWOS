@@ -120,6 +120,7 @@ model Business {
   products         Product[]
   bookings         Booking[]
   contactEvents    ContactEvent[]
+  publicVisitorEvents PublicVisitorEvent[]
   contactChannelStats ContactChannelStat[]
   contactNotes     ContactNote[]
   contactTasks     ContactTask[]
@@ -5686,3 +5687,27 @@ model ContactForgetRequest {
   @@map("contact_forget_requests")
 }
 
+
+/// Anonymous public-storefront events captured before identification.
+/// On identification, `contactId` is back-stitched and a canonical
+/// ContactEvent is also written via CrmTimelineService for visibility
+/// in the contact timeline.
+model PublicVisitorEvent {
+  id           String    @id @default(cuid())
+  businessId   String    @map("business_id")
+  visitorId    String    @map("visitor_id")
+  contactId    String?   @map("contact_id")
+  type         String
+  sourceDetail String?   @map("source_detail")
+  referralCode String?   @map("referral_code")
+  data         Json      @default("{}")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  identifiedAt DateTime? @map("identified_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, visitorId])
+  @@index([businessId, contactId])
+  @@index([businessId, type, createdAt])
+  @@map("public_visitor_events")
+}
