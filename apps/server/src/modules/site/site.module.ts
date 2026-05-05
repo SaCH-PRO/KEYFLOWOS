@@ -11,6 +11,8 @@ import { StoreOrderService } from './store-order.service';
 import { PromoCodeService } from './promo-code.service';
 import { IntakeService } from './intake.service';
 import { QualificationService } from './qualification.service';
+import { PresenceController } from './presence/presence.controller';
+import { PresenceService } from './presence/presence.service';
 
 @Module({
   imports: [
@@ -21,8 +23,8 @@ import { QualificationService } from './qualification.service';
     CrmModule,
     forwardRef(() => PublicEventsModule),
   ],
-  controllers: [SiteController],
-  providers: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService],
-  exports: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService],
+  controllers: [SiteController, PresenceController],
+  providers: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService, PresenceService],
+  exports: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService, PresenceService],
 })
 export class SiteModule {}

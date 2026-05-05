@@ -243,6 +243,10 @@ model Business {
   seoIssues         SeoIssue[]
   contentBriefs     ContentBrief[]
 
+  // Presence editor (S3): Draft/Preview/Published page composition
+  sitePageDraft     SitePageDraft?
+  sitePagePublished SitePagePublished?
+
   // Mission 2: Supplier connections
   supplierConnections  SupplierConnection[]
 
@@ -5671,6 +5675,46 @@ model ContactExportJob {
 /// and recoverable until `purgeAt`; a scheduled job then hard-deletes
 /// the contact + child rows and replaces identifiers in the audit log
 /// with hashed values. One active request per contact.
+// ---
+// MODULE: PRESENCE EDITOR (S3)
+// Draft → Preview → Published state machine for the public site composition.
+// Payload is a typed JSON document of branding, sections (ordered), seo, slug,
+// custom domain, and mobile preview state. The published payload is what the
+// public renderer reads; the draft is what the operator edits.
+// ---
+model SitePageDraft {
+  id               String    @id @default(cuid())
+  businessId       String    @unique @map("business_id")
+  business         Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  version          Int       @default(1)
+  payload          Json      @default("{}")
+  status           String    @default("DRAFT") // DRAFT | PREVIEW
+  previewToken     String?   @unique @map("preview_token")
+  previewExpiresAt DateTime? @map("preview_expires_at")
+  lastSavedById    String?   @map("last_saved_by_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("site_page_drafts")
+}
+
+model SitePagePublished {
+  id            String    @id @default(cuid())
+  businessId    String    @unique @map("business_id")
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  version       Int       @default(1)
+  payload       Json      @default("{}")
+  publishedAt   DateTime  @default(now()) @map("published_at")
+  publishedById String?   @map("published_by_id")
+  unpublishedAt DateTime? @map("unpublished_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("site_pages_published")
+}
+
 model ContactForgetRequest {
   id          String   @id @default(cuid())
   businessId  String   @map("business_id")

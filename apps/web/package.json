@@ -20,6 +20,7 @@
     "@tiptap/pm": "^3.20.1",
     "@tiptap/react": "^3.20.1",
     "@tiptap/starter-kit": "^3.20.1",
+    "@types/sanitize-html": "^2.16.1",
     "dexie": "^4.3.0",
     "exceljs": "^4.4.0",
     "framer-motion": "^12.23.24",
@@ -33,6 +34,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "recharts": "^3.7.0",
+    "sanitize-html": "^2.17.3",
     "sonner": "^2.0.7",
     "zod": "^3.24.0"
   },

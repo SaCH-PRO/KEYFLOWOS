@@ -270,6 +270,7 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Emails", href: "/app/settings/notifications", icon: Mail },
   ],
   public: [
+    { label: "Site editor", href: "/app/presence", icon: Globe },
     { label: "Community", href: "/app/community", icon: MessageCircle },
     { label: "Learn", href: "/app/learn", icon: BookOpen },
     { label: "Marketplace", href: "/app/marketplace", icon: Globe },
@@ -283,6 +284,7 @@ const routeToSurface: [string, PrimarySectionId][] = [
   ["/app/connect", "studio"],
   ["/app/profile", "studio"],
   ["/app/store", "store"],
+  ["/app/presence", "public"],
   ["/app/community", "public"],
   ["/app/learn", "public"],
   ["/app/marketplace", "public"],
