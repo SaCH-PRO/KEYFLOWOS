@@ -1717,6 +1717,10 @@ export class CrmService {
       where: { id: input.contactId },
       data: { nextActionAt: null, nextActionType: null },
     });
+    this.events.emit('contact.next_action_cleared', {
+      businessId: input.businessId,
+      contactId: input.contactId,
+    });
     await this.timeline.logEvent(
       input.businessId,
       input.contactId,
@@ -1758,6 +1762,11 @@ export class CrmService {
     const updated = await this.prisma.client.contact.update({
       where: { id: input.contactId },
       data: { nextActionAt: target },
+    });
+    this.events.emit('contact.next_action_set', {
+      businessId: input.businessId,
+      contactId: input.contactId,
+      nextActionAt: target.toISOString(),
     });
     await this.timeline.logEvent(
       input.businessId,
