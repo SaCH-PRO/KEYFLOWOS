@@ -18,6 +18,15 @@ const contactMetaSchema = z.object({
   totalRevenue: z.number().optional(),
   invoiceCount: z.number().optional(),
   bookingCount: z.number().optional(),
+  openDealsCount: z.number().optional(),
+  openDealsValue: z.number().optional(),
+  topOpenDeal: z.object({
+    id: z.string(),
+    title: z.string(),
+    value: z.number().nullable(),
+    currency: z.string(),
+    stage: z.object({ id: z.string(), name: z.string(), slug: z.string() }),
+  }).nullable().optional(),
 });
 
 const contactSchema = z.object({
@@ -313,6 +322,8 @@ export async function fetchContacts(
     search?: string;
     hasUnpaidInvoices?: boolean;
     hasUpcomingBookings?: boolean;
+    hasOpenDeals?: boolean;
+    dealStageIds?: string[];
     staleDays?: number;
     newThisWeek?: boolean;
     tags?: string[];
@@ -337,6 +348,8 @@ export async function fetchContacts(
   if (opts?.search) params.set("search", opts.search);
   if (opts?.hasUnpaidInvoices) params.set("hasUnpaidInvoices", "true");
   if (opts?.hasUpcomingBookings) params.set("hasUpcomingBookings", "true");
+  if (opts?.hasOpenDeals) params.set("hasOpenDeals", "true");
+  if (opts?.dealStageIds?.length) opts.dealStageIds.forEach((g) => params.append("dealStageIds", g));
   if (opts?.staleDays) params.set("staleDays", String(opts.staleDays));
   if (opts?.newThisWeek) params.set("newThisWeek", "true");
   if (opts?.tags?.length) opts.tags.forEach((t) => params.append("tags", t));
@@ -811,6 +824,152 @@ export async function fetchFavorites(businessId: string = DEFAULT_BUSINESS_ID) {
     z.array(contactSchema),
     [],
   );
+}
+
+// ============ DEALS ============
+
+export interface DealStage {
+  id: string;
+  businessId: string;
+  name: string;
+  slug: string;
+  position: number;
+  color?: string | null;
+  category: 'OPEN' | 'WON' | 'LOST';
+  isDefault: boolean;
+  archivedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Deal {
+  id: string;
+  businessId: string;
+  contactId: string;
+  title: string;
+  description?: string | null;
+  companyName?: string | null;
+  value?: number | null;
+  currency: string;
+  stageId: string;
+  stage?: DealStage;
+  contact?: { id: string; firstName?: string | null; lastName?: string | null; displayName?: string | null; email?: string | null; companyName?: string | null };
+  status: 'OPEN' | 'WON' | 'LOST';
+  probability?: number | null;
+  ownerUserId?: string | null;
+  source?: string | null;
+  sourceDetail?: string | null;
+  tags: string[];
+  notes?: string | null;
+  expectedCloseAt?: string | null;
+  wonAt?: string | null;
+  lostAt?: string | null;
+  lossReason?: string | null;
+  lastStageChangedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DealListResponse { deals: Deal[]; total: number; skip: number; take: number; }
+
+export interface DealListFilters {
+  stageIds?: string[];
+  ownerId?: string;
+  status?: 'OPEN' | 'WON' | 'LOST' | 'ALL';
+  contactId?: string;
+  minValue?: number;
+  maxValue?: number;
+  expectedCloseFrom?: string;
+  expectedCloseTo?: string;
+  search?: string;
+  tags?: string[];
+  skip?: number;
+  take?: number;
+}
+
+export async function fetchDealStages(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<DealStage[]>(`/crm/businesses/${encodeURIComponent(businessId)}/deal-stages`);
+}
+
+export async function createDealStage(data: { name: string; slug?: string; color?: string; category?: 'OPEN' | 'WON' | 'LOST'; position?: number }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<DealStage>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deal-stages`, body: data });
+}
+
+export async function updateDealStage(stageId: string, data: { name?: string; color?: string; category?: 'OPEN' | 'WON' | 'LOST'; position?: number; archived?: boolean }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPatch<DealStage>(`/crm/businesses/${encodeURIComponent(businessId)}/deal-stages/${encodeURIComponent(stageId)}`, data);
+}
+
+export async function deleteDealStage(stageId: string, opts: { reassignToStageId?: string } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+  const qs = opts.reassignToStageId ? `?reassignToStageId=${encodeURIComponent(opts.reassignToStageId)}` : '';
+  return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/deal-stages/${encodeURIComponent(stageId)}${qs}`);
+}
+
+export async function fetchDeals(filters: DealListFilters = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+  const params = new URLSearchParams();
+  if (filters.stageIds?.length) params.set('stageIds', filters.stageIds.join(','));
+  if (filters.ownerId) params.set('ownerId', filters.ownerId);
+  if (filters.status) params.set('status', filters.status);
+  if (filters.contactId) params.set('contactId', filters.contactId);
+  if (filters.minValue != null) params.set('minValue', String(filters.minValue));
+  if (filters.maxValue != null) params.set('maxValue', String(filters.maxValue));
+  if (filters.expectedCloseFrom) params.set('expectedCloseFrom', filters.expectedCloseFrom);
+  if (filters.expectedCloseTo) params.set('expectedCloseTo', filters.expectedCloseTo);
+  if (filters.search) params.set('search', filters.search);
+  if (filters.tags?.length) params.set('tags', filters.tags.join(','));
+  if (filters.skip != null) params.set('skip', String(filters.skip));
+  if (filters.take != null) params.set('take', String(filters.take));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return apiGetSimple<DealListResponse>(`/crm/businesses/${encodeURIComponent(businessId)}/deals${qs}`);
+}
+
+export async function fetchDeal(dealId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<Deal>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}`);
+}
+
+export async function createDeal(data: {
+  title: string; contactId: string; description?: string; companyName?: string;
+  value?: number; currency?: string; stageId?: string; ownerUserId?: string | null;
+  source?: string; sourceDetail?: string; tags?: string[]; notes?: string;
+  expectedCloseAt?: string; probability?: number;
+}, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals`, body: data });
+}
+
+export async function updateDeal(dealId: string, data: Partial<{
+  title: string; description: string | null; companyName: string | null;
+  value: number | null; currency: string; ownerUserId: string | null;
+  source: string | null; sourceDetail: string | null; tags: string[];
+  notes: string | null; expectedCloseAt: string | null; probability: number | null;
+}>, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPatch<Deal>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}`, data);
+}
+
+export async function deleteDeal(dealId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}`);
+}
+
+export async function moveDealStage(dealId: string, stageId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}/move-stage`, body: { stageId } });
+}
+
+export async function bulkMoveDealStage(dealIds: string[], stageId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<{ moved: number; failed: number; results: Array<{ id: string; ok: boolean; error?: string }> }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/bulk/move-stage`,
+    body: { dealIds, stageId },
+  });
+}
+
+export async function winDeal(dealId: string, data: { wonAt?: string; actualValue?: number } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}/win`, body: data });
+}
+
+export async function loseDeal(dealId: string, data: { lossReason?: string; lostAt?: string } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}/lose`, body: data });
+}
+
+export async function fetchContactDeals(contactId: string, opts: { status?: 'OPEN' | 'WON' | 'LOST' | 'ALL' } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+  const qs = opts.status ? `?status=${opts.status}` : '';
+  return apiGetSimple<Deal[]>(`/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/deals${qs}`);
 }
 
 export async function approveAutopilotAction(actionId: string, businessId: string = DEFAULT_BUSINESS_ID) {

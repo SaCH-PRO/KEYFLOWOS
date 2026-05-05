@@ -15,6 +15,8 @@ export type ContactFilterPrimitives = {
   search?: string;
   hasUnpaidInvoices?: boolean;
   hasUpcomingBookings?: boolean;
+  hasOpenDeals?: boolean;
+  dealStageIds?: string[];
   staleDays?: number;
   newThisWeek?: boolean;
   tags?: string[];
@@ -89,6 +91,13 @@ export function buildContactWhere(
     where.bookings = {
       some: { startTime: { gt: new Date() }, status: { notIn: ['CANCELLED'] }, deletedAt: null },
     };
+  }
+  if (filters.hasOpenDeals || (filters.dealStageIds && filters.dealStageIds.length > 0)) {
+    const dealsSome: Prisma.DealWhereInput = { deletedAt: null, status: 'OPEN' };
+    if (filters.dealStageIds && filters.dealStageIds.length > 0) {
+      dealsSome.stageId = { in: filters.dealStageIds };
+    }
+    where.deals = { some: dealsSome };
   }
   if (filters.staleDays && filters.staleDays > 0) {
     const cutoff = new Date();

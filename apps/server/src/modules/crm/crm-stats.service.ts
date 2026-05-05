@@ -4,6 +4,14 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 
+export type TopOpenDeal = {
+  id: string;
+  title: string;
+  value: number | null;
+  currency: string;
+  stage: { id: string; name: string; slug: string };
+};
+
 export type ContactMeta = {
   outstandingBalance: number;
   unpaidInvoices: number;
@@ -18,6 +26,9 @@ export type ContactMeta = {
   totalRevenue: number;
   invoiceCount: number;
   bookingCount: number;
+  openDealsCount?: number;
+  openDealsValue?: number;
+  topOpenDeal?: TopOpenDeal | null;
 };
 
 export type ContactWithStats = Contact & {
@@ -244,7 +255,7 @@ export class CrmStatsService {
 
   async attachContactStats(businessId: string, contacts: Contact[]): Promise<ContactWithStats[]> {
     const ids = contacts.map((c) => c.id);
-    const [invoices, tasks, events, notes, bookings] = await Promise.all([
+    const [invoices, tasks, events, notes, bookings, openDeals] = await Promise.all([
       this.prisma.client.invoice.findMany({
         where: { businessId, contactId: { in: ids }, deletedAt: null },
         select: {
@@ -275,6 +286,18 @@ export class CrmStatsService {
         where: { businessId, contactId: { in: ids }, deletedAt: null },
         select: { contactId: true, status: true, startTime: true },
       }),
+      this.prisma.client.deal.findMany({
+        where: { businessId, contactId: { in: ids }, status: 'OPEN', deletedAt: null },
+        orderBy: [{ value: 'desc' }],
+        select: {
+          id: true,
+          contactId: true,
+          title: true,
+          value: true,
+          currency: true,
+          stage: { select: { id: true, name: true, slug: true } },
+        },
+      }),
     ]);
 
     const statsMap = new Map<string, ContactMeta>();
@@ -293,7 +316,26 @@ export class CrmStatsService {
         totalRevenue: 0,
         invoiceCount: 0,
         bookingCount: 0,
+        openDealsCount: 0,
+        openDealsValue: 0,
+        topOpenDeal: null,
       });
+    }
+
+    for (const deal of openDeals) {
+      const stats = statsMap.get(deal.contactId);
+      if (!stats) continue;
+      stats.openDealsCount = (stats.openDealsCount ?? 0) + 1;
+      stats.openDealsValue = (stats.openDealsValue ?? 0) + Number(deal.value ?? 0);
+      if (!stats.topOpenDeal) {
+        stats.topOpenDeal = {
+          id: deal.id,
+          title: deal.title,
+          value: deal.value,
+          currency: deal.currency,
+          stage: deal.stage,
+        };
+      }
     }
 
     const now = new Date();

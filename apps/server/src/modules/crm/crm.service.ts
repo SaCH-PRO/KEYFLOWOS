@@ -30,6 +30,8 @@ export type ContactListOptions = {
   search?: string;
   hasUnpaidInvoices?: boolean;
   hasUpcomingBookings?: boolean;
+  hasOpenDeals?: boolean;
+  dealStageIds?: string[];
   staleDays?: number;
   newThisWeek?: boolean;
   tags?: string[];
@@ -153,6 +155,8 @@ export class CrmService {
       search: input.search,
       hasUnpaidInvoices: input.hasUnpaidInvoices,
       hasUpcomingBookings: input.hasUpcomingBookings,
+      hasOpenDeals: input.hasOpenDeals,
+      dealStageIds: input.dealStageIds,
       staleDays: input.staleDays,
       newThisWeek: input.newThisWeek,
       tags: input.tags,
