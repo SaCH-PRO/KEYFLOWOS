@@ -12301,3 +12301,149 @@ export async function fetchFinanceSettings(businessId: string) {
 export async function updateFinanceSettings(businessId: string, body: Partial<FinanceSettings>) {
   return apiPatch<FinanceSettings>(`${finBase(businessId)}/settings`, body);
 }
+
+// ---------- FIN6: Bank import & reconciliation ----------
+
+export interface BankTransactionRow {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  reference: string | null;
+  status: 'UNMATCHED' | 'MATCHED' | 'IGNORED';
+  matchedTransactionId: string | null;
+}
+export interface LedgerCandidateRow {
+  transactionId: string;
+  date: string;
+  amount: number;
+  description: string | null;
+  reference: string | null;
+}
+export interface BankSplitView {
+  bankTransactions: BankTransactionRow[];
+  ledgerCandidates: LedgerCandidateRow[];
+}
+export interface ReconciliationRow {
+  id: string;
+  businessId: string;
+  accountId: string;
+  periodStart: string;
+  periodEnd: string;
+  statementBalance: string | number;
+  systemBalance: string | number;
+  difference: string | number;
+  status: 'OPEN' | 'NEEDS_REVIEW' | 'RECONCILED';
+  notes: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+export interface BankImportResultPayload {
+  accountId: string;
+  parsed: number;
+  inserted: number;
+  duplicates: number;
+  invalid: number;
+  errors: string[];
+  autoMatched?: { scanned: number; matched: number; ambiguous: number };
+}
+
+export async function importBankCsv(
+  businessId: string,
+  accountId: string,
+  file: File,
+): Promise<BankImportResultPayload> {
+  const url = `${API_BASE}${finBase(businessId)}/accounts/${encodeURIComponent(accountId)}/bank-transactions/import`;
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(url, { method: 'POST', headers: getAuthHeaders(), body: fd });
+  const payload: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    let msg = res.statusText || 'Import failed';
+    if (payload && typeof payload === 'object' && 'message' in payload) {
+      const m = (payload as { message?: unknown }).message;
+      if (typeof m === 'string') msg = m;
+    }
+    throw new Error(msg);
+  }
+  return payload as BankImportResultPayload;
+}
+
+export async function fetchBankSplitView(businessId: string, accountId: string, params: { since?: string; until?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (params.since) qs.set('since', params.since);
+  if (params.until) qs.set('until', params.until);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return apiGetSimple<BankSplitView>(`${finBase(businessId)}/accounts/${encodeURIComponent(accountId)}/bank-transactions${suffix}`);
+}
+
+export async function runBankAutoMatch(businessId: string, accountId: string) {
+  return apiPost<{ scanned: number; matched: number; ambiguous: number }>({
+    path: `${finBase(businessId)}/accounts/${encodeURIComponent(accountId)}/bank-transactions/auto-match`,
+    body: {},
+  });
+}
+
+export async function manualMatchBankRow(businessId: string, bankTransactionId: string, transactionId: string) {
+  return apiPost<BankTransactionRow>({
+    path: `${finBase(businessId)}/bank-transactions/${encodeURIComponent(bankTransactionId)}/match`,
+    body: { transactionId },
+  });
+}
+
+export async function unmatchBankRow(businessId: string, bankTransactionId: string) {
+  return apiPost<BankTransactionRow>({
+    path: `${finBase(businessId)}/bank-transactions/${encodeURIComponent(bankTransactionId)}/unmatch`,
+    body: {},
+  });
+}
+
+export async function ignoreBankRow(businessId: string, bankTransactionId: string) {
+  return apiPost<BankTransactionRow>({
+    path: `${finBase(businessId)}/bank-transactions/${encodeURIComponent(bankTransactionId)}/ignore`,
+    body: {},
+  });
+}
+
+export async function listReconciliations(businessId: string, accountId?: string | null) {
+  const qs = accountId ? `?accountId=${encodeURIComponent(accountId)}` : '';
+  return apiGetSimple<{ items: ReconciliationRow[] }>(`${finBase(businessId)}/reconciliations${qs}`);
+}
+
+export async function createReconciliation(
+  businessId: string,
+  body: { accountId: string; periodStart: string; periodEnd: string; statementBalance: number; notes?: string | null },
+) {
+  return apiPost<ReconciliationRow>({ path: `${finBase(businessId)}/reconciliations`, body });
+}
+
+export async function completeReconciliation(businessId: string, id: string) {
+  return apiPost<ReconciliationRow>({
+    path: `${finBase(businessId)}/reconciliations/${encodeURIComponent(id)}/complete`,
+    body: {},
+  });
+}
+
+/**
+ * Authenticated CSV download. Anchor-based downloads can't attach the
+ * bearer token from `getAuthHeaders()`, so we fetch the CSV with proper
+ * auth, materialise it as a Blob, and trigger a browser download via
+ * a transient object URL.
+ */
+export async function downloadReconciliationReportCsv(businessId: string, id: string): Promise<void> {
+  const url = `${API_BASE}${finBase(businessId)}/reconciliations/${encodeURIComponent(id)}/report.csv`;
+  const res = await fetch(url, { method: 'GET', headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Download failed (${res.status})`);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = `reconciliation-${id}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  }
+}

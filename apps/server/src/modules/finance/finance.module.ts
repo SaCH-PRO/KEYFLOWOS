@@ -13,6 +13,9 @@ import { FinanceAccountsService } from './finance-accounts.service';
 import { FinanceCoaService } from './finance-coa.service';
 import { FinanceTaxRateService } from './finance-tax-rate.service';
 import { FinanceSettingsService } from './finance-settings.service';
+import { BankImportService } from './bank-import.service';
+import { BankMatchingService } from './bank-matching.service';
+import { ReconciliationService } from './reconciliation.service';
 import { FinanceController } from './finance.controller';
 
 /**
@@ -37,6 +40,9 @@ import { FinanceController } from './finance.controller';
     FinanceCoaService,
     FinanceTaxRateService,
     FinanceSettingsService,
+    BankImportService,
+    BankMatchingService,
+    ReconciliationService,
   ],
   exports: [
     PostingService,
@@ -51,6 +57,9 @@ import { FinanceController } from './finance.controller';
     FinanceCoaService,
     FinanceTaxRateService,
     FinanceSettingsService,
+    BankImportService,
+    BankMatchingService,
+    ReconciliationService,
   ],
 })
 export class FinanceModule {}
