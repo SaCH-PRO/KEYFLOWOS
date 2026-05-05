@@ -7,12 +7,14 @@ import type { HealthMetrics } from "@/components/contacts/contact-health-score";
 import type { JourneyMilestone } from "@/components/contacts/relationship-timeline";
 import type { ConversationContextData } from "@/components/contacts/conversation-context";
 import type { AiInsight } from "@/components/contacts/ai-copilot";
-import type { Contact, ContactDetail as ContactDetailAPI, CrossJourneyResponse } from "@/lib/client";
+import type { Contact, ContactDetail as ContactDetailAPI, ContactInsightSnapshot, CrossJourneyResponse } from "@/lib/client";
 import {
   fetchContactDetail,
   fetchContactHealthMetrics,
   fetchContactJourney,
   fetchConversationContext,
+  fetchContactInsightSnapshot,
+  recomputeContactInsightSnapshot,
   generateAiInsight,
   fetchContactCrossJourney,
 } from "@/lib/client";
@@ -30,9 +32,13 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   const [conversationContext, setConversationContext] = useState<ConversationContextData | null>(null);
   const [aiInsight, setAiInsight] = useState<AiInsight | null>(null);
   const [aiInsightLoading, setAiInsightLoading] = useState(false);
+  const [insightSnapshot, setInsightSnapshot] = useState<ContactInsightSnapshot | null>(null);
+  const [insightLoading, setInsightLoading] = useState(false);
 
   const detailAbortRef = useRef<AbortController | null>(null);
   const aiAbortRef = useRef<AbortController | null>(null);
+  const insightAbortRef = useRef<AbortController | null>(null);
+  const insightPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadDetail = useCallback(
     async (contactId: string) => {
@@ -52,6 +58,11 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
       setJourneyMilestones([]);
       setConversationContext(null);
       setAiInsight(null);
+      setInsightSnapshot(null);
+      if (insightPollRef.current) {
+        clearTimeout(insightPollRef.current);
+        insightPollRef.current = null;
+      }
       try {
         const results = await Promise.allSettled([
           fetchContactDetail(contactId, businessId, { signal }),
@@ -92,14 +103,50 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     [businessId],
   );
 
+  const loadInsightSnapshot = useCallback(
+    async (contactId: string, options: { force?: boolean } = {}) => {
+      if (!businessId) return;
+      if (insightAbortRef.current) insightAbortRef.current.abort();
+      const controller = new AbortController();
+      insightAbortRef.current = controller;
+      setInsightLoading(true);
+      try {
+        const { data } = options.force
+          ? await recomputeContactInsightSnapshot(contactId, businessId, { signal: controller.signal })
+          : await fetchContactInsightSnapshot(contactId, businessId, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        if (data) {
+          setInsightSnapshot(data);
+          if (data.stale && !options.force) {
+            if (insightPollRef.current) clearTimeout(insightPollRef.current);
+            insightPollRef.current = setTimeout(() => {
+              void loadInsightSnapshot(contactId);
+            }, 4000);
+          }
+        }
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      } finally {
+        if (!controller.signal.aborted) setInsightLoading(false);
+      }
+    },
+    [businessId],
+  );
+
+  const handleRecomputeInsight = useCallback(async () => {
+    if (!selectedContactId) return;
+    await loadInsightSnapshot(selectedContactId, { force: true });
+  }, [selectedContactId, loadInsightSnapshot]);
+
   const selectContact = useCallback(
     (contactId: string, trackRecent?: (id: string) => void) => {
       setSelectedContactId(contactId);
       trackRecent?.(contactId);
       void loadDetail(contactId);
+      void loadInsightSnapshot(contactId);
       if (window.innerWidth < 1024) setShowMobileDetail(true);
     },
-    [loadDetail],
+    [loadDetail, loadInsightSnapshot],
   );
 
   const handleGenerateAiInsight = useCallback(async () => {
@@ -143,6 +190,8 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     return () => {
       if (detailAbortRef.current) detailAbortRef.current.abort();
       if (aiAbortRef.current) aiAbortRef.current.abort();
+      if (insightAbortRef.current) insightAbortRef.current.abort();
+      if (insightPollRef.current) clearTimeout(insightPollRef.current);
     };
   }, []);
 
@@ -172,6 +221,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     showMobileDetail, setShowMobileDetail,
     healthMetrics, journeyMilestones, crossJourney, conversationContext,
     aiInsight, aiInsightLoading,
+    insightSnapshot, insightLoading, handleRecomputeInsight,
     selectedContact, detailEvents, detailNotes, detailTasks, detailInvoices, detailBookings, contactName,
     loadDetail, selectContact,
     handleGenerateAiInsight, handleRefreshConversationContext,

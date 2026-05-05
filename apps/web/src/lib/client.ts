@@ -3841,6 +3841,73 @@ export async function generateAiInsight(contactId: string, businessId?: string, 
   });
 }
 
+export type ContactInsightSnapshot = {
+  payload: {
+    version: number;
+    relationshipSummary: string;
+    bestChannel: "email" | "whatsapp" | "sms" | "call" | null;
+    bestChannelConfidence: number | null;
+    bestTimeWindow: { label: string; tz: string } | null;
+    dominantTopics: string[];
+    lifetimeValue: number;
+    currency: string;
+    openDeals: { count: number; value: number };
+    churnRisk: number;
+    churnRiskReason: string;
+    suggestedAction: {
+      kind:
+        | "schedule_call"
+        | "send_whatsapp"
+        | "send_email"
+        | "enroll_in_sequence"
+        | "create_task"
+        | "create_invoice"
+        | "book_appointment"
+        | "review_dormant";
+      label: string;
+      description: string;
+      channel?: "email" | "whatsapp" | "sms" | "call";
+      prefill?: {
+        message?: string;
+        subject?: string;
+        taskTitle?: string;
+        dueDate?: string;
+        priority?: "HIGH" | "NORMAL" | "LOW";
+      };
+    };
+    lastInteractionAt: string | null;
+    tags: string[];
+  };
+  computedAt: string;
+  stale: boolean;
+  modelUsed: string | null;
+};
+
+export async function fetchContactInsightSnapshot(
+  contactId: string,
+  businessId?: string,
+  opts?: { signal?: AbortSignal },
+): Promise<ApiResult<ContactInsightSnapshot>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<ContactInsightSnapshot>(
+    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/insight-card`,
+    opts?.signal ? { signal: opts.signal } : undefined,
+  );
+}
+
+export async function recomputeContactInsightSnapshot(
+  contactId: string,
+  businessId?: string,
+  opts?: { signal?: AbortSignal },
+): Promise<ApiResult<ContactInsightSnapshot>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<ContactInsightSnapshot>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/insight-card/recompute`,
+    body: {},
+    init: opts?.signal ? { signal: opts.signal } : undefined,
+  });
+}
+
 export type ActivityItem = {
   id: string;
   module: string;

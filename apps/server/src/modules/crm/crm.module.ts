@@ -35,6 +35,8 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { BestChannelService } from './best-channel.service';
 import { BestChannelListener } from './best-channel.listener';
 import { BestChannelSchedulerService } from './best-channel-scheduler.service';
+import { ContactInsightService } from './contact-insight.service';
+import { ContactInsightListener } from './contact-insight.listener';
 import { CrmRateLimitGuard } from './guards/rate-limit.guard';
 import { FeatureFlagGuard } from './guards/feature-flag.guard';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
@@ -81,6 +83,8 @@ import { CommunityModule } from '../community/community.module';
     BestChannelService,
     BestChannelListener,
     BestChannelSchedulerService,
+    ContactInsightService,
+    ContactInsightListener,
     CrmRateLimitGuard,
     FeatureFlagGuard,
     PlanLimitGuard,
@@ -112,6 +116,7 @@ import { CommunityModule } from '../community/community.module';
     CrmRelationshipHealthSchedulerService,
     CrmDealsService,
     BestChannelService,
+    ContactInsightService,
     ContactAuditService,
     ContactPrivacyService,
   ],

@@ -16,6 +16,7 @@ import { AiLeadScorePanel } from "./ai-lead-score";
 import { AiPrepBriefPanel } from "./ai-prep-brief";
 import { AiTagSuggestionsPanel } from "./ai-tag-suggestions";
 import { NextBestActionCard } from "./next-best-action-card";
+import { ContactInsightCard } from "./contact-insight-card";
 
 export type ContactDetailData = {
   id: string;
@@ -121,6 +122,9 @@ interface ContactDetailProps {
   aiInsight?: { summary: string; nextBestAction: string; reasoning?: string; confidence: number; suggestedMessage?: string; tags?: string[] } | null;
   aiInsightLoading?: boolean;
   onGenerateAiInsight?: () => Promise<void>;
+  insightSnapshot?: import("@/lib/client").ContactInsightSnapshot | null;
+  insightLoading?: boolean;
+  onRecomputeInsight?: () => Promise<void> | void;
   onRefreshConversationContext?: () => Promise<void>;
   relatedContacts?: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string | null; jobTitle?: string | null }>;
   onSelectRelatedContact?: (contactId: string) => void;
@@ -157,6 +161,9 @@ export function ContactDetail({
   aiInsight,
   aiInsightLoading,
   onGenerateAiInsight,
+  insightSnapshot,
+  insightLoading,
+  onRecomputeInsight,
   onRefreshConversationContext,
   relatedContacts,
   onSelectRelatedContact,
@@ -325,6 +332,23 @@ export function ContactDetail({
           contactName={`${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "client"}
           onAddTask={onAddTask}
         />
+
+        {(insightSnapshot || insightLoading) && (
+          <ContactInsightCard
+            snapshot={insightSnapshot ?? null}
+            loading={insightLoading}
+            contact={{
+              id: contact.id,
+              firstName: contact.firstName,
+              lastName: contact.lastName,
+              email: contact.email,
+              phone: contact.phone,
+              whatsappNumber: contact.whatsappNumber,
+            }}
+            onRefresh={onRecomputeInsight}
+            onAddTask={onAddTask}
+          />
+        )}
 
         {(aiInsight || onGenerateAiInsight) && (
           <NextBestActionCard
