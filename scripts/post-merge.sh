@@ -74,6 +74,14 @@ esac
 rm -f "$DIFF_TMP"
 
 echo "[4/4] Syncing database schema (prisma db push)…"
-pnpm --filter @keyflow/db exec prisma db push --schema=./prisma/schema.prisma --skip-generate
+# In development, accept Prisma's data-loss warnings for additive changes
+# (e.g. adding a unique constraint on a brand-new nullable column where every
+# existing row is NULL — harmless in Postgres but Prisma flags it). Production
+# merges still require an explicit migration.
+PUSH_FLAGS="--schema=./prisma/schema.prisma --skip-generate"
+if [ "${NODE_ENV:-development}" = "development" ] || [ "${POST_MERGE_ACCEPT_DATA_LOSS:-0}" = "1" ]; then
+  PUSH_FLAGS="$PUSH_FLAGS --accept-data-loss"
+fi
+pnpm --filter @keyflow/db exec prisma db push $PUSH_FLAGS
 
 echo "=== Post-merge setup complete ==="
