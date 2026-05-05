@@ -5,6 +5,7 @@ import { BookingCompletedPayload, BookingConfirmedPayload, BookingCreatedPayload
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
+import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -34,6 +35,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(CommerceService) private readonly commerce: CommerceService,
+    @Inject(RevenueAttributionService) private readonly revenueAttribution: RevenueAttributionService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
@@ -715,8 +717,28 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    const invoice =
-      service.price > 0 ? await this.commerce.createInvoiceForService(input.businessId, contact.id, service) : null;
+    // S2 invoice gating. Three modes per service:
+    //   - depositRequired=true → create a DEPOSIT invoice up-front
+    //     (booking.depositInvoiceId), full invoice waits for completion.
+    //   - invoiceTiming === 'BOOKING' (and no deposit) → create FULL invoice now.
+    //   - invoiceTiming === 'COMPLETION' (default) → no invoice now;
+    //     bookings.completed flow generates it on completion.
+    let invoice: { id: string; total: number; currency: string } | null = null;
+    let depositInvoice: { id: string; total: number; currency: string } | null = null;
+    if (service.price > 0) {
+      const depositAmount = this.commerce.computeServiceDeposit(service);
+      const invoiceTiming = service.invoiceTiming ?? 'COMPLETION';
+      if (depositAmount > 0) {
+        depositInvoice = await this.commerce.createInvoiceForService(
+          input.businessId,
+          contact.id,
+          service,
+          { kind: 'DEPOSIT', amountOverride: depositAmount },
+        );
+      } else if (invoiceTiming === 'BOOKING') {
+        invoice = await this.commerce.createInvoiceForService(input.businessId, contact.id, service);
+      }
+    }
 
     const bookingData: Prisma.BookingUncheckedCreateInput = {
       businessId: input.businessId,
@@ -727,6 +749,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     };
     if (input.staffId) bookingData.staffId = input.staffId;
     if (invoice?.id) bookingData.invoiceId = invoice.id;
+    if (depositInvoice?.id) bookingData.depositInvoiceId = depositInvoice.id;
     if (input.notes && input.notes.trim()) bookingData.notes = input.notes.trim();
     if (input.location && input.location.trim()) bookingData.location = input.location.trim();
     if (input.locationPlaceId && input.locationPlaceId.trim())
@@ -768,12 +791,38 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           startTime: booking.startTime,
           endTime: booking.endTime,
           invoiceId: invoice?.id,
+          depositInvoiceId: depositInvoice?.id,
+          depositAmount: depositInvoice?.total ?? null,
           referralCode: input.referralCode ?? null,
         },
       });
     }
 
-    return { success: true, bookingId: booking.id, invoiceId: invoice?.id };
+    // Revenue attribution row for the booking itself (recognized at the
+    // service price even if invoice/payment lands later — gives growth
+    // dashboards an immediate view of pipeline value). Hard requirement
+    // for storefront-originated revenue: failures propagate to the caller.
+    await this.revenueAttribution.record({
+      businessId: input.businessId,
+      source: 'storefront',
+      sourceDetail,
+      revenueType: 'BOOKING',
+      revenueId: booking.id,
+      amount: service.price ?? 0,
+      currency: 'TTD',
+      contactId: contact.id,
+      referralCode: input.referralCode ?? null,
+      visitorId: input.visitorId ?? null,
+      occurredAt: booking.createdAt,
+    });
+
+    return {
+      success: true,
+      bookingId: booking.id,
+      invoiceId: invoice?.id,
+      depositInvoiceId: depositInvoice?.id,
+      depositAmount: depositInvoice?.total ?? 0,
+    };
   }
 
   private async autoGenerateInvoiceForCompletedBooking(booking: any, businessId: string) {

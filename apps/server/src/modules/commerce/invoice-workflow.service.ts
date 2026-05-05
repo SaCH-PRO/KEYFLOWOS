@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 /**
@@ -202,9 +203,22 @@ export class InvoiceWorkflowService {
   async transition(
     invoiceId: string,
     to: InvoiceStatus,
-    extra: { sentAt?: Date; dueDate?: Date | null; paidAt?: Date } = {},
+    extra: {
+      sentAt?: Date;
+      dueDate?: Date | null;
+      paidAt?: Date;
+      tx?: Prisma.TransactionClient;
+      /**
+       * When provided, events are pushed to this buffer instead of being
+       * emitted synchronously. Callers using a Prisma $transaction MUST
+       * pass a buffer and emit it post-commit so listeners never observe
+       * uncommitted state on rollback.
+       */
+      eventBuffer?: Array<{ name: string; payload: unknown }>;
+    } = {},
   ) {
-    const existing = await this.prisma.client.invoice.findUnique({
+    const db = (extra.tx ?? this.prisma.client) as Prisma.TransactionClient;
+    const existing = await db.invoice.findUnique({
       where: { id: invoiceId },
       select: { id: true, status: true, businessId: true },
     });
@@ -216,28 +230,32 @@ export class InvoiceWorkflowService {
     if (extra.dueDate !== undefined) data.dueDate = extra.dueDate;
     if (to === 'PAID') data.paidAt = extra.paidAt ?? new Date();
 
-    const updated = await this.prisma.client.invoice.update({
+    const updated = await db.invoice.update({
       where: { id: invoiceId },
       data,
       include: { items: true, contact: true, booking: true },
     });
 
     const lower = to.toLowerCase();
+    const queue = (name: string, payload: unknown) => {
+      if (extra.eventBuffer) extra.eventBuffer.push({ name, payload });
+      else this.events.emit(name, payload);
+    };
     if (to === 'PAID') {
-      this.events.emit('invoice.paid', {
+      queue('invoice.paid', {
         invoice: updated,
         businessId: updated.businessId,
         eventName: 'invoice.paid',
       });
     } else if (to === 'SENT' || to === 'OVERDUE' || to === 'VOID') {
-      this.events.emit(`invoice.${lower}`, {
+      queue(`invoice.${lower}`, {
         invoice: updated,
         businessId: updated.businessId,
         status: to,
         eventName: `invoice.${lower}`,
       });
     } else if (to === 'FAILED') {
-      this.events.emit('invoice.payment_failed', {
+      queue('invoice.payment_failed', {
         invoice: updated,
         businessId: updated.businessId,
         eventName: 'invoice.payment_failed',

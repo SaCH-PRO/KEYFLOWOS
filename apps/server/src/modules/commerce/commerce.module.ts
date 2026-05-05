@@ -21,6 +21,8 @@ import { LandedCostEngine } from './landed-cost-engine.service';
 import { MarginAnalysisService } from './margin-analysis.service';
 import { SourceRiskService } from './source-risk.service';
 import { InventoryRiskService } from './inventory-risk.service';
+import { RevenueAttributionService } from './revenue-attribution.service';
+import { StorefrontInvoiceAttributionListener } from './storefront-invoice-attribution.listener';
 import { CommerceIntelligenceService } from './commerce-intelligence.service';
 import { MarginSnapshotSchedulerService } from './margin-snapshot-scheduler.service';
 import { StoreReadinessService } from './store-readiness.service';
@@ -70,6 +72,8 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     MarginAnalysisService,
     SourceRiskService,
     InventoryRiskService,
+    RevenueAttributionService,
+    StorefrontInvoiceAttributionListener,
     CommerceIntelligenceService,
     MarginSnapshotSchedulerService,
     StoreReadinessService,
@@ -89,6 +93,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     MarginAnalysisService,
     SourceRiskService,
     InventoryRiskService,
+    RevenueAttributionService,
   ],
 })
 export class CommerceModule {}

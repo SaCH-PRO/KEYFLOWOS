@@ -96,8 +96,18 @@ export class CommerceService {
     return result;
   }
 
-  async createInvoiceForService(businessId: string, contactId: string, service: Service) {
-    const total = service.price;
+  async createInvoiceForService(
+    businessId: string,
+    contactId: string,
+    service: Service,
+    options?: { kind?: 'FULL' | 'DEPOSIT'; amountOverride?: number; descriptionSuffix?: string },
+  ) {
+    const kind = options?.kind ?? 'FULL';
+    const total = options?.amountOverride ?? service.price;
+    const description =
+      kind === 'DEPOSIT'
+        ? `Deposit — ${service.name}${options?.descriptionSuffix ?? ''}`
+        : `${service.name}${options?.descriptionSuffix ?? ''}`;
     return this.prisma.client.invoice.create({
       data: {
         businessId,
@@ -105,14 +115,16 @@ export class CommerceService {
         invoiceNumber: `INV-${Date.now()}`,
         status: 'DRAFT',
         issueDate: new Date(),
+        subtotal: total,
         total,
-        currency: (service as any).currency ?? 'TTD',
+        currency: 'TTD',
+        notes: kind === 'DEPOSIT' ? `Deposit for service "${service.name}"` : null,
         items: {
           create: [
             {
-              description: service.name,
+              description,
               quantity: 1,
-              unitPrice: service.price,
+              unitPrice: total,
               total,
             },
           ],
@@ -120,6 +132,24 @@ export class CommerceService {
       },
       include: { items: true, contact: true },
     });
+  }
+
+  /**
+   * Compute the deposit amount for a service using its deposit config.
+   * Returns 0 when deposit is not required or value is invalid.
+   */
+  computeServiceDeposit(service: Pick<Service, 'price'> & { depositRequired?: boolean | null; depositType?: string | null; depositValue?: number | null }): number {
+    if (!service.depositRequired) return 0;
+    const value = service.depositValue ?? 0;
+    if (value <= 0) return 0;
+    if (service.depositType === 'PERCENT') {
+      const pct = Math.min(Math.max(value, 0), 100);
+      return Math.round(((service.price * pct) / 100) * 100) / 100;
+    }
+    if (service.depositType === 'FIXED') {
+      return Math.min(value, service.price);
+    }
+    return 0;
   }
 
   private validateTaxAndDiscount(taxRate?: number, discountValue?: number, discountType?: string) {
