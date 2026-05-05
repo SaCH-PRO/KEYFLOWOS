@@ -52,7 +52,7 @@ export class CustomerReferralService {
       this.prisma.client.booking.count({
         where: {
           businessId: business.id,
-          customerEmail: { equals: normalizedEmail, mode: 'insensitive' },
+          contact: { emailNormalized: normalizedEmail },
           status: { in: ['CONFIRMED', 'COMPLETED'] },
         },
       }),
