@@ -30,6 +30,9 @@ import { QuoteNotificationsListener } from './quote-notifications.listener';
 import { InvoiceReceiptListener } from './invoice-receipt.listener';
 import { RevenueActionService } from './revenue-action.service';
 import { RevenueActionController } from './revenue-action.controller';
+import { RevenueReportingService } from './revenue-reporting.service';
+import { RevenueReportingController } from './revenue-reporting.controller';
+import { RevenueReportingRollupScheduler } from './revenue-reporting-rollup.scheduler';
 import { CrmModule } from '../crm/crm.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
@@ -53,7 +56,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
         }).NotificationsModule,
     ),
   ],
-  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RevenueActionController],
+  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RevenueActionController, RevenueReportingController],
   providers: [
     CommerceService,
     CommerceStatsService,
@@ -80,6 +83,8 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     QuoteNotificationsListener,
     InvoiceReceiptListener,
     RevenueActionService,
+    RevenueReportingService,
+    RevenueReportingRollupScheduler,
     PlanLimitGuard,
   ],
   exports: [
@@ -94,6 +99,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     SourceRiskService,
     InventoryRiskService,
     RevenueAttributionService,
+    RevenueReportingService,
   ],
 })
 export class CommerceModule {}

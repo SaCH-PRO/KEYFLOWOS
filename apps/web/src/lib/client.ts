@@ -11660,3 +11660,121 @@ export async function snoozeRevenueAction(
     body: { hours },
   });
 }
+
+// ---
+// REVENUE REPORTS (R4)
+// ---
+export type RevenueReportPreset =
+  | 'by-source'
+  | 'by-contact'
+  | 'by-product'
+  | 'quote-conversion'
+  | 'days-to-pay'
+  | 'aging-buckets'
+  | 'collected-vs-expected'
+  | 'recurring-expected';
+
+export interface RevenueBySourceRow {
+  source: string;
+  channel: 'campaign' | 'referral' | 'staff' | 'channel' | 'unknown';
+  revenue: number;
+  invoiceCount: number;
+}
+export interface RevenueBySourceReport {
+  rows: RevenueBySourceRow[];
+  totalRevenue: number;
+  currency: string;
+}
+
+export interface RevenueByContactRow {
+  contactId: string | null;
+  name: string;
+  revenue: number;
+  invoiceCount: number;
+  avgInvoice: number;
+  lastPaymentAt: string | null;
+}
+export interface RevenueByContactReport {
+  rows: RevenueByContactRow[];
+  totalRevenue: number;
+  currency: string;
+}
+
+export interface RevenueByProductRow {
+  productId: string | null;
+  name: string;
+  revenue: number;
+  unitsSold: number;
+  invoiceCount: number;
+  category: 'product' | 'service' | 'unmapped';
+}
+export interface RevenueByProductReport {
+  rows: RevenueByProductRow[];
+  totalRevenue: number;
+  currency: string;
+}
+
+export interface QuoteConversionReport {
+  totals: {
+    quotesCreated: number;
+    quotesSent: number;
+    quotesAccepted: number;
+    quotesInvoiced: number;
+    quotesPaid: number;
+  };
+  rates: { sentToAccepted: number; acceptedToInvoiced: number; invoicedToPaid: number; overall: number };
+  funnel: Array<{ stage: string; count: number; pct: number }>;
+  currency: string;
+}
+
+export interface DaysToPayReport {
+  overallAvgDays: number;
+  paidCount: number;
+  perContact: Array<{ contactId: string; name: string; avgDays: number; count: number }>;
+  perSegment: Array<{ segment: string; avgDays: number; count: number }>;
+}
+
+export interface AgingBucketsReport {
+  buckets: Array<{ label: string; min: number; max: number | null; total: number; count: number }>;
+  totalOutstanding: number;
+  totalCount: number;
+  currency: string;
+}
+
+export interface CollectedVsExpectedReport {
+  current: { collected: number; expected: number; pctCollected: number; period: { start: string; end: string } };
+  previous: { collected: number; expected: number; pctCollected: number; period: { start: string; end: string } };
+  changePct: number;
+  currency: string;
+}
+
+export interface RecurringExpectedReport {
+  windows: Array<{ label: '30d' | '60d' | '90d'; expected: number; runs: number }>;
+  rows: Array<{ id: string; name: string; contactName: string; total: number; frequency: string; nextRunDate: string; runsInWindow: number }>;
+  currency: string;
+}
+
+export type RevenueReportData =
+  | RevenueBySourceReport
+  | RevenueByContactReport
+  | RevenueByProductReport
+  | QuoteConversionReport
+  | DaysToPayReport
+  | AgingBucketsReport
+  | CollectedVsExpectedReport
+  | RecurringExpectedReport;
+
+export async function fetchRevenueReport<T extends RevenueReportData = RevenueReportData>(
+  businessId: string,
+  preset: RevenueReportPreset,
+  startDate?: string,
+  endDate?: string,
+) {
+  const qs = new URLSearchParams();
+  if (startDate) qs.set('startDate', startDate);
+  if (endDate) qs.set('endDate', endDate);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return apiGetSimple<T>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-reports/${encodeURIComponent(preset)}${suffix}`,
+  );
+}
