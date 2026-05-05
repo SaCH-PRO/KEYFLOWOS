@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { PresenceService } from './presence.service';
 import { PresenceOverviewService } from './presence-overview.service';
+import { StorefrontIntelligenceService } from './storefront-intelligence.service';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../../core/guards/public-rate-limit.guard';
@@ -10,6 +11,7 @@ export class PresenceController {
   constructor(
     @Inject(PresenceService) private readonly presence: PresenceService,
     @Inject(PresenceOverviewService) private readonly overview: PresenceOverviewService,
+    @Inject(StorefrontIntelligenceService) private readonly intelligence: StorefrontIntelligenceService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -105,6 +107,35 @@ export class PresenceController {
     return this.overview.listStorefrontBookings(businessId, {
       limit: limit ? parseInt(limit, 10) : undefined,
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/insights')
+  getInsights(
+    @Param('businessId') businessId: string,
+    @Query('days') days?: string,
+  ) {
+    const d = days ? Math.min(Math.max(parseInt(days, 10) || 30, 1), 365) : 30;
+    return this.intelligence.getOrGenerate(businessId, d);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/insights/regenerate')
+  regenerateInsights(
+    @Param('businessId') businessId: string,
+    @Body() body?: { days?: number },
+  ) {
+    const d = body?.days ? Math.min(Math.max(body.days, 1), 365) : 30;
+    return this.intelligence.regenerate(businessId, d);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/insights/:insightId/delegate')
+  delegateInsight(
+    @Param('businessId') businessId: string,
+    @Param('insightId') insightId: string,
+  ) {
+    return this.intelligence.delegateInsight(businessId, insightId);
   }
 
   @UseGuards(PublicRateLimitGuard)
