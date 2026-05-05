@@ -7664,6 +7664,21 @@ export async function fetchSequenceVariantReport(
   );
 }
 
+export type AllVariantStepReport = VariantStepReport & {
+  sequenceId: string;
+  sequenceName: string;
+  sequenceStatus: string;
+  channel: string;
+};
+
+export async function fetchAllSequenceVariantReports(
+  businessId: string,
+): Promise<ApiResult<AllVariantStepReport[]>> {
+  return apiGetSimple<AllVariantStepReport[]>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/variants/report`,
+  );
+}
+
 export async function promoteSequenceVariant(
   businessId: string,
   sequenceId: string,

@@ -482,6 +482,34 @@ export class CrmSequenceService {
     if (!sequence) {
       throw new HttpException('Sequence not found', HttpStatus.NOT_FOUND);
     }
+    return this.buildSequenceReports(sequence);
+  }
+
+  async getAllVariantReports(
+    businessId: string,
+  ): Promise<Array<VariantStepReport & { sequenceId: string; sequenceName: string; sequenceStatus: string; channel: string }>> {
+    const sequences = await this.db.crmSequence.findMany({
+      where: { businessId, status: { not: 'archived' } },
+      include: { enrollments: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const out: Array<VariantStepReport & { sequenceId: string; sequenceName: string; sequenceStatus: string; channel: string }> = [];
+    for (const sequence of sequences) {
+      const reports = this.buildSequenceReports(sequence);
+      for (const r of reports) {
+        out.push({
+          ...r,
+          sequenceId: sequence.id,
+          sequenceName: sequence.name,
+          sequenceStatus: sequence.status,
+          channel: r.nodeType,
+        });
+      }
+    }
+    return out;
+  }
+
+  private buildSequenceReports(sequence: any): VariantStepReport[] {
     const graph = ensureGraph({ graph: sequence.graph, steps: sequence.steps });
     const sendNodes = graph.nodes.filter((n: SequenceNode) => isSendNode(n));
     const reports: VariantStepReport[] = [];
