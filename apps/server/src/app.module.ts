@@ -30,6 +30,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
+import { FinanceModule } from './modules/finance/finance.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { EmailMarketingModule } from './modules/email-marketing/email-marketing.module';
 import { LeadFormsModule } from './modules/lead-forms/lead-forms.module';
@@ -86,6 +87,7 @@ import { PublicEventsModule } from './modules/public-events/public-events.module
     SubscriptionsModule,
     ProjectsModule,
     ExpensesModule,
+    FinanceModule,
     ReportsModule,
     EmailMarketingModule,
     LeadFormsModule,
