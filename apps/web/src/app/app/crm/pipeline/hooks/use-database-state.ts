@@ -4,13 +4,13 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { LocalContact } from "@/lib/contacts-db";
 import { cacheContacts, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
 import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
-import { bulkUpdateContacts, bulkDeleteContacts, bulkReassignContacts, addContactsToList, fetchContacts, fetchTeamMembers, type TeamMemberSummary } from "@/lib/client";
+import { bulkUpdateContacts, bulkDeleteContacts, bulkReassignContacts, addContactsToList, fetchContacts, fetchTeamMembers, fetchSequences, enrollContactsInSequence, type TeamMemberSummary, type CrmSequence } from "@/lib/client";
 import { getCachedUser } from "@/lib/workspace";
 import { toast } from "sonner";
 
 export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt" | "lastActive" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl";
 export type SortDir = "asc" | "desc";
-export type BulkAction = "status" | "tags" | "addToList" | "relationshipType" | "priority" | "reassign" | null;
+export type BulkAction = "status" | "tags" | "addToList" | "relationshipType" | "priority" | "reassign" | "enrollSequence" | null;
 
 export interface ListSummary {
   id: string;
@@ -683,6 +683,38 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     }
   }, [businessId, onRefresh]);
 
+  const handleBulkEnrollInSequence = useCallback(async (sequenceId: string) => {
+    setBulkActing(true);
+    try {
+      const ids = Array.from(selectedIdsRef.current);
+      const res = await enrollContactsInSequence(businessId, sequenceId, ids);
+      if (res.error) throw new Error(res.error);
+      const enrolled = res.data?.enrolled ?? 0;
+      const skipped = res.data?.skipped ?? 0;
+      toast.success(
+        `Enrolled ${enrolled} contact${enrolled === 1 ? "" : "s"}${skipped > 0 ? ` (${skipped} already enrolled)` : ""}`,
+      );
+      setSelectedIds(new Set());
+      setAllPagesSelected(false);
+      setActiveBulkAction(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to enroll contacts";
+      toast.error(message);
+    } finally {
+      setBulkActing(false);
+    }
+  }, [businessId]);
+
+  const [activeSequences, setActiveSequences] = useState<CrmSequence[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSequences(businessId).then(({ data }) => {
+      if (cancelled || !data) return;
+      setActiveSequences(data.filter((s) => s.status === "active"));
+    });
+    return () => { cancelled = true; };
+  }, [businessId]);
+
   const handleBulkDelete = useCallback(() => {
     const ids = Array.from(selectedIdsRef.current);
     setConfirmState({
@@ -946,6 +978,8 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     handleBulkPriorityChange,
     handleBulkToggleFavorite,
     handleBulkArchive,
+    handleBulkEnrollInSequence,
+    activeSequences,
     handleBulkDelete,
     handleBulkReassign,
     teamMembers,
