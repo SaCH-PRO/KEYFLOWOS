@@ -4,6 +4,7 @@ import { StoreOrderService } from './store-order.service';
 import { PromoCodeService } from './promo-code.service';
 import { IntakeService } from './intake.service';
 import { QualificationService } from './qualification.service';
+import { StorefrontConversionService } from './storefront-conversion.service';
 import { PaymentsService } from '../payments/payments.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -20,7 +21,36 @@ export class SiteController {
     @Inject(IntakeService) private readonly intakeService: IntakeService,
     @Inject(QualificationService) private readonly qualificationService: QualificationService,
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
+    @Inject(StorefrontConversionService) private readonly conversionService: StorefrontConversionService,
   ) {}
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/conversion-funnel/daily')
+  async getConversionFunnelDaily(
+    @Param('businessId') businessId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('kind') kind?: 'overall' | 'product' | 'service',
+    @Query('refId') refId?: string,
+  ) {
+    return this.conversionService.getFunnel(businessId, {
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      kind,
+      refId,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/conversion-funnel/aggregate')
+  async aggregateConversionFunnel(
+    @Param('businessId') businessId: string,
+    @Body() body: { day?: string },
+  ) {
+    const day = body?.day ? new Date(body.day) : new Date();
+    const upserts = await this.conversionService.aggregateDay(businessId, day);
+    return { ok: true, day: day.toISOString().slice(0, 10), upserts };
+  }
 
   @Get('health')
   health() {

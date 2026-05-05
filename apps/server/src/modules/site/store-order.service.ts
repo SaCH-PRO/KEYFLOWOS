@@ -1,9 +1,13 @@
 import { Injectable, Inject, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PromoCodeService } from './promo-code.service';
 import { CrmService } from '../crm/crm.service';
 import { PublicEventsService } from '../public-events/public-events.service';
+import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
+import { InventoryRiskService } from '../commerce/inventory-risk.service';
+import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
 
 @Injectable()
 export class StoreOrderService {
@@ -15,6 +19,9 @@ export class StoreOrderService {
     @Inject(PromoCodeService) private readonly promoCodeService: PromoCodeService,
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
+    @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
+    @Inject(InventoryRiskService) private readonly inventoryRisk: InventoryRiskService,
+    @Inject(RevenueAttributionService) private readonly revenueAttribution: RevenueAttributionService,
   ) {}
 
   async validateCart(items: { productId: string; quantity: number }[], businessId: string) {
@@ -191,6 +198,9 @@ export class StoreOrderService {
           taxRate: totals.taxRate,
           promoCode: totals.promo?.code ?? null,
           shipping: totals.shipping,
+          referralCode: input.referralCode ?? null,
+          visitorId: input.visitorId ?? null,
+          storefrontSlug: input.storefrontSlug ?? null,
         },
         items: {
           create: totals.items.map((item) => ({
@@ -343,51 +353,307 @@ export class StoreOrderService {
   }
 
   async updatePaymentStatus(orderId: string, paymentStatus: string, paymentRef?: string) {
+    if (paymentStatus === 'PAID') {
+      // Route through completeCheckout so Invoice + Payment + stock decrement
+      // + RevenueAttribution all land in one transaction.
+      return this.completeCheckout({
+        orderId,
+        paymentRef,
+        provider: 'unknown',
+        method: 'unknown',
+      });
+    }
+
     const order = await this.prisma.client.marketplaceOrder.update({
       where: { id: orderId },
       data: {
         paymentStatus,
         ...(paymentRef && { paymentRef }),
-        ...(paymentStatus === 'PAID' && { status: 'CONFIRMED' }),
       },
       include: { items: true },
     });
+    return order;
+  }
 
-    if (paymentStatus === 'PAID') {
-      this.events.emit('store_order.paid', { order, businessId: order.businessId });
+  /**
+   * Atomically finalize a successful storefront checkout.
+   *
+   * Creates, in a single transaction:
+   *   1. Invoice + InvoiceItems (status PAID, going through workflow service)
+   *   2. Payment (status SUCCESSFUL) linked to invoice + business
+   *   3. InventoryStock decrement + StockMovement audit row per item
+   *   4. RevenueAttribution row (source='storefront', revenueType='ORDER')
+   *   5. MarketplaceOrder updated to status CONFIRMED, paymentStatus PAID
+   *
+   * Failure of any step rolls back the whole thing — we never want a paid
+   * order with no invoice or stock that didn't decrement. After the
+   * transaction commits we do best-effort side-effects (event emission,
+   * inventory-risk evaluation, CRM timeline write); failures there are
+   * logged but never fail the checkout.
+   */
+  async completeCheckout(input: {
+    orderId: string;
+    paymentRef?: string;
+    provider?: string;
+    method?: string;
+    paidAmount?: number;
+  }) {
+    const order = await this.prisma.client.marketplaceOrder.findUnique({
+      where: { id: input.orderId },
+      include: { items: true, business: { select: { defaultTaxRate: true } } },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (order.paymentStatus === 'PAID') {
+      // Idempotent: if we already completed this order, return as-is.
+      this.logger.debug(`[store-order] completeCheckout no-op for already-PAID order ${order.id}`);
+      return this.prisma.client.marketplaceOrder.findUnique({
+        where: { id: order.id },
+        include: { items: true },
+      });
+    }
+
+    // Resolve customer contact OUTSIDE the tx so CRM dedup logic
+    // (which has its own internal logic) doesn't expand the tx footprint.
+    let contactId: string | null = null;
+    let referralCode: string | null = null;
+    try {
+      const meta = (order.metadata as Record<string, unknown> | null) ?? {};
+      referralCode = typeof meta.referralCode === 'string' ? meta.referralCode : null;
+      const nameParts = (order.customerName ?? '').trim().split(/\s+/);
+      const contact = await this.crm.findOrCreateContact(order.businessId, {
+        firstName: nameParts[0] ?? null,
+        lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+        email: order.customerEmail,
+        phone: order.customerPhone,
+        source: 'storefront',
+        sourceDetail: `order:${order.orderNumber}`,
+        ...(referralCode ? { custom: { referralCode } } : {}),
+      });
+      contactId = contact?.id ?? null;
+    } catch (err) {
+      this.logger.warn(`[store-order] CRM resolve failed for order ${order.id}: ${(err as Error).message}`);
+    }
+    if (!contactId) {
+      // Invoice requires a contact. Surface this clearly rather than
+      // silently dropping the row.
+      throw new BadRequestException(
+        'Cannot finalize checkout: unable to resolve a contact for this order. Provide a customer email or phone.',
+      );
+    }
+
+    // Pick a default warehouse for stock decrement (first active per business).
+    const defaultWarehouse = await this.prisma.client.warehouse.findFirst({
+      where: { businessId: order.businessId, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const amount = input.paidAmount ?? order.total;
+    const provider = input.provider ?? order.paymentMethod?.toLowerCase() ?? 'manual';
+    const method = (input.method ?? order.paymentMethod ?? 'manual').toLowerCase();
+    const paymentRef = input.paymentRef ?? order.paymentRef ?? `${provider}_${order.id}_${Date.now()}`;
+    const invoiceNumber = `INV-${order.orderNumber}`;
+
+    // Pre-load product inventory mode so we can enforce stock invariants
+    // for tracked products inside the tx. Untracked / virtual products
+    // skip stock decrement explicitly (per-product config), not silently.
+    const productIds = order.items.map((i) => i.productId);
+    const products = await this.prisma.client.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, inventoryMode: true, name: true },
+    });
+    const productMode = new Map(products.map((p) => [p.id, p.inventoryMode ?? 'tracked']));
+
+    // Buffer for invoice events emitted by InvoiceWorkflowService.transition
+    // calls inside the transaction. We flush AFTER the tx commits so
+    // listeners (e.g. InvoiceReceiptListener) never act on uncommitted
+    // state if a later tx step rolls back.
+    const pendingEvents: Array<{ name: string; payload: unknown }> = [];
+
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      // 1. Invoice — created DRAFT then immediately walked DRAFT→SENT→PAID
+      // through the canonical InvoiceWorkflowService inside this same
+      // transaction so the row is never observable in DRAFT outside the
+      // commit boundary. Events are buffered for post-commit emission.
+      const now = new Date();
+      const invoice = await tx.invoice.create({
+        data: {
+          businessId: order.businessId,
+          contactId: contactId!,
+          invoiceNumber,
+          status: 'DRAFT',
+          subtotal: order.subtotal,
+          taxAmount: order.taxAmount,
+          discountAmount: order.discountAmount ?? 0,
+          total: order.total,
+          currency: order.currency,
+          issueDate: now,
+          notes: `Storefront order ${order.orderNumber}`,
+          items: {
+            create: order.items.map((item) => ({
+              description: item.name,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              total: item.total,
+            })),
+          },
+        },
+      });
+      const txClient = tx as unknown as Prisma.TransactionClient;
+      await this.invoiceWorkflow.transition(invoice.id, 'SENT', { sentAt: now, tx: txClient, eventBuffer: pendingEvents });
+      await this.invoiceWorkflow.transition(invoice.id, 'PAID', { paidAt: now, tx: txClient, eventBuffer: pendingEvents });
+
+      // 2. Payment row
+      await tx.payment.create({
+        data: {
+          provider,
+          providerPaymentId: paymentRef,
+          amount,
+          currency: order.currency,
+          status: 'SUCCESSFUL',
+          method,
+          invoiceId: invoice.id,
+          businessId: order.businessId,
+        },
+      });
+
+      // 3. Stock decrement + movement rows. Tracked products MUST have a
+      //    warehouse + stock row with sufficient quantity; otherwise we
+      //    fail the entire checkout (rolling back invoice + payment) so
+      //    we never sell stock we can't fulfill. Untracked / virtual
+      //    products are explicitly skipped per their inventoryMode.
+      const decrementedProductIds: string[] = [];
+      const trackedItems = order.items.filter((i) => {
+        const mode = productMode.get(i.productId) ?? 'tracked';
+        return mode === 'tracked';
+      });
+      if (trackedItems.length > 0 && !defaultWarehouse) {
+        throw new BadRequestException(
+          'Cannot finalize checkout: no active warehouse configured for tracked products.',
+        );
+      }
+      for (const item of order.items) {
+        const mode = productMode.get(item.productId) ?? 'tracked';
+        if (mode !== 'tracked') {
+          this.logger.debug(`[store-order] skipping stock decrement for ${mode} product ${item.productId}`);
+          continue;
+        }
+        const stock = await tx.inventoryStock.findUnique({
+          where: {
+            productId_warehouseId: {
+              productId: item.productId,
+              warehouseId: defaultWarehouse!.id,
+            },
+          },
+        });
+        if (!stock) {
+          throw new BadRequestException(
+            `Cannot finalize checkout: tracked product ${item.productId} has no stock row in the default warehouse.`,
+          );
+        }
+        if (stock.quantity < item.quantity) {
+          throw new BadRequestException(
+            `Cannot finalize checkout: insufficient stock for product ${item.productId} (have ${stock.quantity}, need ${item.quantity}).`,
+          );
+        }
+        await tx.inventoryStock.update({
+          where: { id: stock.id },
+          data: { quantity: stock.quantity - item.quantity },
+        });
+        await tx.stockMovement.create({
+          data: {
+            businessId: order.businessId,
+            warehouseId: defaultWarehouse!.id,
+            productId: item.productId,
+            quantityChange: -item.quantity,
+            type: 'sale',
+            referenceId: order.orderNumber,
+          },
+        });
+        decrementedProductIds.push(item.productId);
+      }
+
+      // 4. Revenue attribution — hard requirement; failures roll back.
+      await this.revenueAttribution.record(
+        {
+          businessId: order.businessId,
+          source: 'storefront',
+          sourceDetail: `order:${order.orderNumber}`,
+          revenueType: 'ORDER',
+          revenueId: order.id,
+          amount: order.total,
+          currency: order.currency,
+          contactId,
+          referralCode,
+        },
+        tx as unknown as Prisma.TransactionClient,
+      );
+
+      // 5. Order — paid + confirmed
+      const updatedOrder = await tx.marketplaceOrder.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: 'PAID',
+          status: 'CONFIRMED',
+          paymentRef,
+        },
+        include: { items: true },
+      });
+
+      return { updatedOrder, invoice, decrementedProductIds };
+    });
+
+    // Tx committed — now safe to flush buffered invoice events and
+    // dispatch the storefront-funnel timeline + CRM hooks.
+    for (const evt of pendingEvents) {
+      this.events.emit(evt.name, evt.payload);
+    }
+
+    try {
+      const baseData = {
+        orderId: result.updatedOrder.id,
+        orderNumber: result.updatedOrder.orderNumber,
+        invoiceId: result.invoice.id,
+        total: result.updatedOrder.total,
+        currency: result.updatedOrder.currency,
+        paymentRef,
+      };
+      await this.publicEvents.logStorefrontEvent({
+        businessId: order.businessId,
+        contactId: contactId!,
+        type: 'payment.completed',
+        sourceDetail: `order:${order.orderNumber}`,
+        data: baseData,
+      });
+    } catch (err) {
+      this.logger.warn(`[store-order] post-checkout timeline write failed: ${(err as Error).message}`);
+    }
+
+    this.events.emit('store_order.paid', { order: result.updatedOrder, businessId: order.businessId, invoiceId: result.invoice.id });
+
+    // Re-evaluate inventory risk for affected products & emit signals so
+    // inventory-risk listeners (action queue, alerts) can react.
+    for (const productId of result.decrementedProductIds) {
       try {
-        if (order.customerEmail) {
-          const nameParts = (order.customerName ?? '').trim().split(/\s+/);
-          const contact = await this.crm.findOrCreateContact(order.businessId, {
-            firstName: nameParts[0] ?? null,
-            lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
-            email: order.customerEmail,
-            phone: order.customerPhone,
-            source: 'storefront',
-            sourceDetail: `order:${order.orderNumber}`,
-          });
-          if (contact?.id) {
-            await this.publicEvents.logStorefrontEvent({
+        const risk = await this.inventoryRisk.evaluateProduct(productId, order.businessId);
+        if (!risk) continue;
+        for (const signal of risk.signals) {
+          if (signal.type === 'out_of_stock' || signal.type === 'low_stock') {
+            this.events.emit(`inventory.${signal.type}`, {
               businessId: order.businessId,
-              contactId: contact.id,
-              type: 'payment.completed',
-              sourceDetail: `order:${order.orderNumber}`,
-              data: {
-                orderId: order.id,
-                orderNumber: order.orderNumber,
-                total: order.total,
-                currency: order.currency,
-                paymentRef: paymentRef ?? null,
-              },
+              productId,
+              productName: risk.productName,
+              signal,
+              triggeredBy: { type: 'order', id: order.id, orderNumber: order.orderNumber },
             });
           }
         }
       } catch (err) {
-        this.logger.warn(`[store-order] payment CRM hook failed: ${(err as Error).message}`);
+        this.logger.warn(`[store-order] inventory-risk eval failed for ${productId}: ${(err as Error).message}`);
       }
     }
 
-    return order;
+    return result.updatedOrder;
   }
 
   async listOrders(

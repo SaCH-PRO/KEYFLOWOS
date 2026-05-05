@@ -204,6 +204,10 @@ model Business {
   // Qualification Journeys
   qualificationJourneys QualificationJourney[]
 
+  // Storefront → Revenue (S2)
+  revenueAttributions       RevenueAttribution[]
+  storefrontConversionDays  StorefrontConversionDaily[]
+
   // Community Relationships & Transactions
   sentQuoteRequests       CommunityQuoteRequest[] @relation("SentQuoteRequests")
   receivedQuoteRequests   CommunityQuoteRequest[] @relation("ReceivedQuoteRequests")
@@ -1420,6 +1424,7 @@ model Invoice {
   payments     Payment[]
   paymentLinks PaymentLink[]
   booking      Booking?
+  depositForBooking Booking? @relation("BookingDepositInvoice")
   quote    Quote?    @relation(fields: [quoteId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
   quoteId  String?   @unique @map("quote_id")
 
@@ -1554,6 +1559,14 @@ model Service {
   bookings Booking[]
   staff    StaffMember[] // Staff who can perform this service
 
+  // Storefront → Revenue gating (S2). Determines whether a booking
+  // immediately produces an invoice (BOOKING) or only on completion
+  // (COMPLETION), and whether a deposit invoice is required up-front.
+  invoiceTiming    String?  @map("invoice_timing") // BOOKING | COMPLETION
+  depositRequired  Boolean  @default(false) @map("deposit_required")
+  depositType      String?  @map("deposit_type") // PERCENT | FIXED
+  depositValue     Float?   @map("deposit_value")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at") // Soft delete
@@ -1593,6 +1606,11 @@ model Booking {
 
   invoiceId String?  @unique @map("invoice_id")
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
+
+  depositInvoiceId String?  @unique @map("deposit_invoice_id")
+  depositInvoice   Invoice? @relation("BookingDepositInvoice", fields: [depositInvoiceId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  paymentStatus   String   @default("UNPAID") @map("payment_status") // UNPAID | DEPOSIT_PAID | PAID
 
   notes           String?
   location         String?
@@ -5805,6 +5823,75 @@ model ContactForgetRequest {
   @@map("contact_forget_requests")
 }
 
+
+/// Per-revenue-event attribution row written every time a storefront-originated
+/// (or other) revenue event is recorded. Powers GrowthStack/ProfitLens
+/// "where did this revenue come from?" queries without re-deriving it from
+/// scratch each time.
+///
+/// `revenueType` is one of: ORDER | INVOICE | BOOKING.
+/// `revenueId` references the corresponding row id (MarketplaceOrder.id,
+/// Invoice.id, Booking.id) — not enforced as an FK because the kind varies.
+model RevenueAttribution {
+  id                 String   @id @default(cuid())
+  businessId         String   @map("business_id")
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  source             String   // storefront | quote | recurring | manual | community | ...
+  sourceDetail       String?  @map("source_detail") // storefront slug, etc.
+  revenueType        String   @map("revenue_type") // ORDER | INVOICE | BOOKING
+  revenueId          String   @map("revenue_id")
+
+  contactId          String?  @map("contact_id")
+  referralContactId  String?  @map("referral_contact_id")
+  referralCode       String?  @map("referral_code")
+  visitorId          String?  @map("visitor_id")
+
+  amount             Float
+  currency           String   @default("TTD")
+
+  occurredAt         DateTime @default(now()) @map("occurred_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@unique([businessId, revenueType, revenueId])
+  @@index([businessId, occurredAt])
+  @@index([businessId, source, occurredAt])
+  @@index([businessId, referralContactId])
+  @@index([businessId, contactId])
+  @@map("revenue_attributions")
+}
+
+/// Daily aggregate of storefront conversion funnel events.
+/// One row per (businessId, day, kind, refId?) where:
+///   kind = 'product' | 'service' | 'overall'
+///   refId = product.id | service.id | null (for overall)
+/// Populated by StorefrontConversionService.aggregateDay() — idempotent upsert
+/// keyed on (businessId, day, kind, refId).
+model StorefrontConversionDaily {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  day         DateTime @db.Date
+  kind        String   // product | service | overall
+  refId       String   @default("") @map("ref_id")
+
+  views       Int      @default(0)
+  cartAdds    Int      @default(0) @map("cart_adds")
+  checkouts   Int      @default(0)
+  orders      Int      @default(0)
+  bookings    Int      @default(0)
+  revenue     Float    @default(0)
+  currency    String   @default("TTD")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, day, kind, refId])
+  @@index([businessId, day])
+  @@index([businessId, kind, day])
+  @@map("storefront_conversion_daily")
+}
 
 /// Anonymous public-storefront events captured before identification.
 /// On identification, `contactId` is back-stitched and a canonical
