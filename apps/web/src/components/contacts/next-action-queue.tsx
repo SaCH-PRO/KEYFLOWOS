@@ -31,6 +31,8 @@ export interface NextAction {
   priority: "urgent" | "high" | "medium" | "low";
   dueDate?: string;
   value?: number;
+  bestChannel?: "email" | "whatsapp" | "sms" | "call" | null;
+  bestTimeWindowLabel?: string | null;
 }
 
 interface NextActionQueueProps {
@@ -190,6 +192,20 @@ const ActionCard = React.memo(function ActionCard({
             )}
           </AnimatePresence>
 
+          {(action.bestChannel || action.bestTimeWindowLabel) && (
+            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+              {action.bestChannel && (
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/20">
+                  Best: {action.bestChannel.charAt(0).toUpperCase() + action.bestChannel.slice(1)}
+                </span>
+              )}
+              {action.bestTimeWindowLabel && (
+                <span className="text-[10px] text-muted-foreground/70">
+                  {action.bestTimeWindowLabel}
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-3 mt-1.5">
             {dueInfo && (
               <span className={`text-[10px] font-medium ${

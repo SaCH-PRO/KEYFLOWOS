@@ -87,6 +87,15 @@ function getCellValue(contact: LocalContact, key: string): string {
     case "companyName": return contact.companyName ?? "";
     case "jobTitle": return contact.jobTitle ?? "";
     case "ageGroup": return getContactAgeGroupLabel(contact.ageGroup) ?? "";
+    case "bestChannel": {
+      if (!contact.bestChannel) return "—";
+      const label = contact.bestChannel.charAt(0).toUpperCase() + contact.bestChannel.slice(1);
+      const conf = typeof contact.bestChannelConfidence === "number"
+        ? ` (${Math.round(contact.bestChannelConfidence * 100)}%)`
+        : "";
+      const win = contact.bestTimeWindowJson?.label ? ` · ${contact.bestTimeWindowJson.label}` : "";
+      return `${label}${conf}${win}`;
+    }
     case "city": return contact.city ?? "";
     case "country": return contact.country ?? "";
     case "source": return contact.source ?? "";
@@ -368,6 +377,41 @@ function DatabaseTableInner({
                             <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-md border ${STATUS_COLORS[val] || "bg-muted text-muted-foreground border-border/30"}`}>
                               {val}
                             </span>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                        </td>
+                      );
+                    }
+
+                    if (col.key === "bestChannel") {
+                      const ch = contact.bestChannel;
+                      const conf = typeof contact.bestChannelConfidence === "number" ? contact.bestChannelConfidence : null;
+                      const win = contact.bestTimeWindowJson;
+                      const updated = contact.bestSignalUpdatedAt;
+                      const tooltip = ch
+                        ? [
+                            `How we computed this:`,
+                            `• Best channel: ${ch}${conf !== null ? ` (${Math.round(conf * 100)}% confidence)` : ""}`,
+                            win ? `• Best time: ${win.label} (${win.tz}, ${win.sampleCount} responses)` : null,
+                            updated ? `• Updated: ${new Date(updated).toLocaleString()}` : null,
+                            `• Score = (response_rate × 0.7 + open_rate × 0.3) × recency_decay × ln(1 + volume) + 0.05 × recency`,
+                          ].filter(Boolean).join("\n")
+                        : "Not enough signal yet — needs more communication history";
+                      return (
+                        <td key={col.key} className={`px-3 py-2.5 text-[13px] ${col.width}`} title={tooltip}>
+                          {ch ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-md bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30 capitalize">
+                                {ch}
+                              </span>
+                              {win?.label && (
+                                <span className="text-[11px] text-muted-foreground/70 truncate">{win.label}</span>
+                              )}
+                              {conf !== null && (
+                                <span className="text-[10px] text-muted-foreground/50 shrink-0">{Math.round(conf * 100)}%</span>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-muted-foreground/40">—</span>
                           )}

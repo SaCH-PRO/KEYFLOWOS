@@ -607,6 +607,39 @@ export function ContactsDatabase({
             )}
           </button>
           <button
+            onClick={() => db.setBestTimeNowFilter(!db.bestTimeNowFilter)}
+            className={`px-2 py-1 text-[11px] rounded-md transition-all whitespace-nowrap shrink-0 ${
+              db.bestTimeNowFilter
+                ? "bg-[hsl(var(--kf-accent2))]/15 border border-[hsl(var(--kf-accent2))]/40 text-[hsl(var(--kf-accent2))]"
+                : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+            }`}
+            aria-pressed={db.bestTimeNowFilter}
+            title="Contacts whose best time-of-day window is happening now"
+          >
+            ⏱ Best time now
+          </button>
+          {(["email", "whatsapp", "sms", "call"] as const).map((ch) => {
+            const active = db.bestChannelFilter.has(ch);
+            return (
+              <button
+                key={`bch-${ch}`}
+                onClick={() => {
+                  const next = new Set(db.bestChannelFilter);
+                  if (active) next.delete(ch); else next.add(ch);
+                  db.setBestChannelFilter(next);
+                }}
+                className={`px-2 py-1 text-[11px] rounded-md transition-all whitespace-nowrap shrink-0 ${
+                  active
+                    ? "bg-[hsl(var(--kf-accent1))]/15 border border-[hsl(var(--kf-accent1))]/40 text-[hsl(var(--kf-accent1))]"
+                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+                }`}
+                aria-pressed={active}
+              >
+                {ch.charAt(0).toUpperCase() + ch.slice(1)}
+              </button>
+            );
+          })}
+          <button
             onClick={() => db.setIncludeArchived(!db.includeArchived)}
             className={`px-2 py-1 text-[11px] rounded-md transition-all whitespace-nowrap shrink-0 ${
               db.includeArchived

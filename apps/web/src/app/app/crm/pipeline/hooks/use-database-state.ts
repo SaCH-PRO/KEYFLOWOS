@@ -19,7 +19,7 @@ export interface ListSummary {
   contactCount: number;
 }
 
-export type ColumnKey = SortField | "tags" | "jobTitle" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl" | "customFields" | "ageGroup";
+export type ColumnKey = SortField | "tags" | "jobTitle" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl" | "customFields" | "ageGroup" | "bestChannel";
 
 export interface ColumnDef {
   key: ColumnKey;
@@ -37,6 +37,7 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: "companyName", label: "Company", width: "w-[160px]", mobileHidden: true },
   { key: "jobTitle", label: "Job Title", width: "w-[140px]", mobileHidden: true },
   { key: "ageGroup", label: "Age Group", width: "w-[120px]", mobileHidden: true },
+  { key: "bestChannel", label: "Best Channel", width: "w-[150px]", mobileHidden: true },
   { key: "city", label: "City", width: "w-[110px]", mobileHidden: true },
   { key: "country", label: "Country", width: "w-[110px]", mobileHidden: true },
   { key: "source", label: "Source", width: "w-[100px]", mobileHidden: true },
@@ -52,7 +53,7 @@ export const ALL_COLUMNS: ColumnDef[] = [
 
 const DEFAULT_VISIBLE_KEYS: ColumnKey[] = [
   "firstName", "lastName", "email", "phone", "status",
-  "companyName", "jobTitle", "ageGroup", "city", "country", "source",
+  "companyName", "jobTitle", "ageGroup", "bestChannel", "city", "country", "source",
   "tags", "createdAt", "lastActive",
 ];
 
@@ -220,6 +221,8 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const [priorityFilter, setPriorityFilter] = useState<Set<string>>(new Set());
   const [relationshipHealthFilter, setRelationshipHealthFilter] = useState<Set<string>>(new Set());
   const [favoriteFilter, setFavoriteFilter] = useState<boolean>(false);
+  const [bestChannelFilter, setBestChannelFilter] = useState<Set<string>>(new Set());
+  const [bestTimeNowFilter, setBestTimeNowFilter] = useState<boolean>(false);
   const [includeArchived, setIncludeArchived] = useState<boolean>(false);
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -302,6 +305,8 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
         relationshipTypes: relationshipTypeFilter.size > 0 ? Array.from(relationshipTypeFilter) : undefined,
         priorities: priorityFilter.size > 0 ? Array.from(priorityFilter) : undefined,
         relationshipHealth: relationshipHealthFilter.size > 0 ? Array.from(relationshipHealthFilter) : undefined,
+        bestChannels: bestChannelFilter.size > 0 ? Array.from(bestChannelFilter) : undefined,
+        bestTimeNow: bestTimeNowFilter ? true : undefined,
         favorite: favoriteFilter ? true : undefined,
         includeArchived,
         sortBy: apiSortBy,
@@ -323,7 +328,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     } finally {
       if (!controller.signal.aborted) setServerLoading(false);
     }
-  }, [businessId, search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi]);
+  }, [businessId, search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, bestChannelFilter, bestTimeNowFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi]);
 
   useEffect(() => {
     if (isMobilePrev.current !== isMobile) {
@@ -343,7 +348,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     setNextCursor(null);
     void loadServerContacts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, businessId]);
+  }, [search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, bestChannelFilter, bestTimeNowFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, businessId]);
 
   useEffect(() => {
     getLastSyncTime().then(setLastSync);
@@ -823,6 +828,10 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     setRelationshipHealthFilter,
     favoriteFilter,
     setFavoriteFilter,
+    bestChannelFilter,
+    setBestChannelFilter,
+    bestTimeNowFilter,
+    setBestTimeNowFilter,
     includeArchived,
     setIncludeArchived,
     showExport,

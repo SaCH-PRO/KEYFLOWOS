@@ -50,6 +50,9 @@ export type ContactListOptions = {
   pipelineStages?: string[];
   favorite?: boolean;
   includeArchived?: boolean;
+  bestChannels?: string[];
+  bestTimeNow?: boolean;
+  bestTimeNowIds?: string[];
   skip?: number;
   take?: number;
   cursor?: string;
@@ -176,6 +179,16 @@ export class CrmService {
       favorite: input.favorite,
       includeArchived: input.includeArchived,
     });
+    if (input.bestChannels && input.bestChannels.length > 0) {
+      where.bestChannel = { in: input.bestChannels };
+    }
+    if (input.bestTimeNow && Array.isArray(input.bestTimeNowIds)) {
+      if (input.bestTimeNowIds.length === 0) {
+        where.id = { in: ['__none__'] };
+      } else {
+        where.id = { in: input.bestTimeNowIds };
+      }
+    }
 
     const take = Math.min(input.take ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 

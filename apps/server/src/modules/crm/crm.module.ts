@@ -25,6 +25,9 @@ import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCommunicationService } from './crm-communication.service';
 import { CrmService } from './crm.service';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { BestChannelService } from './best-channel.service';
+import { BestChannelListener } from './best-channel.listener';
+import { BestChannelSchedulerService } from './best-channel-scheduler.service';
 import { CrmRateLimitGuard } from './guards/rate-limit.guard';
 import { FeatureFlagGuard } from './guards/feature-flag.guard';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
@@ -35,7 +38,7 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
 @Module({
   imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule],
   controllers: [CrmController, CrmAiController, CrmGoogleController, CrmSequenceController, CrmDealsController],
-  providers: [CrmService, CrmTimelineService, CrmCommunicationService, CrmListsService, CrmSavedViewsService, CrmStatsService, CrmDuplicateDetectionService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRelationshipHealthService, CrmRelationshipHealthSchedulerService, CrmDealsService, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard],
-  exports: [CrmService, CrmTimelineService, CrmCommunicationService, CrmListsService, CrmSavedViewsService, CrmStatsService, CrmDuplicateDetectionService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRelationshipHealthService, CrmRelationshipHealthSchedulerService, CrmDealsService],
+  providers: [CrmService, CrmTimelineService, CrmCommunicationService, CrmListsService, CrmSavedViewsService, CrmStatsService, CrmDuplicateDetectionService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRelationshipHealthService, CrmRelationshipHealthSchedulerService, CrmDealsService, BestChannelService, BestChannelListener, BestChannelSchedulerService, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard],
+  exports: [CrmService, CrmTimelineService, CrmCommunicationService, CrmListsService, CrmSavedViewsService, CrmStatsService, CrmDuplicateDetectionService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRelationshipHealthService, CrmRelationshipHealthSchedulerService, CrmDealsService, BestChannelService],
 })
 export class CrmModule {}

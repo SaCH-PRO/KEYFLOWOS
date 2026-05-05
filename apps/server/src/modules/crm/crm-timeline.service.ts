@@ -105,6 +105,7 @@ export class CrmTimelineService {
       source: meta?.source ?? 'system',
       actorType: meta?.actorType,
       actorId: meta?.actorId,
+      data: data ?? {},
     });
     return created;
   }

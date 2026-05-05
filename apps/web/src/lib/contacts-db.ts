@@ -14,6 +14,17 @@ export interface LocalContact {
   city?: string | null;
   country?: string | null;
   preferredChannel?: string | null;
+  bestChannel?: string | null;
+  bestChannelConfidence?: number | null;
+  bestTimeWindowJson?: {
+    dayOfWeek: number;
+    hourStart: number;
+    hourEnd: number;
+    tz: string;
+    label: string;
+    sampleCount: number;
+  } | null;
+  bestSignalUpdatedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   addressLine1?: string | null;

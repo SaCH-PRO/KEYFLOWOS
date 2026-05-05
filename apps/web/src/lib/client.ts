@@ -46,6 +46,31 @@ const contactSchema = z.object({
   secondaryPhone: z.string().nullable().optional(),
   whatsappNumber: z.string().nullable().optional(),
   preferredChannel: z.string().nullable().optional(),
+  bestChannel: z.string().nullable().optional(),
+  bestChannelConfidence: z.number().nullable().optional(),
+  bestTimeWindow: z
+    .object({
+      dayOfWeek: z.number(),
+      hourStart: z.number(),
+      hourEnd: z.number(),
+      tz: z.string(),
+      label: z.string(),
+      sampleCount: z.number(),
+    })
+    .nullable()
+    .optional(),
+  bestTimeWindowJson: z
+    .object({
+      dayOfWeek: z.number(),
+      hourStart: z.number(),
+      hourEnd: z.number(),
+      tz: z.string(),
+      label: z.string(),
+      sampleCount: z.number(),
+    })
+    .nullable()
+    .optional(),
+  bestSignalUpdatedAt: z.string().nullable().optional(),
   addressLine1: z.string().nullable().optional(),
   addressLine2: z.string().nullable().optional(),
   city: z.string().nullable().optional(),
@@ -332,6 +357,8 @@ export async function fetchContacts(
     priorities?: string[];
     relationshipHealth?: string[];
     pipelineStages?: string[];
+    bestChannels?: string[];
+    bestTimeNow?: boolean;
     favorite?: boolean;
     includeArchived?: boolean;
     skip?: number;
@@ -358,6 +385,8 @@ export async function fetchContacts(
   if (opts?.priorities?.length) opts.priorities.forEach((g) => params.append("priorities", g));
   if (opts?.relationshipHealth?.length) opts.relationshipHealth.forEach((g) => params.append("relationshipHealth", g));
   if (opts?.pipelineStages?.length) opts.pipelineStages.forEach((g) => params.append("pipelineStages", g));
+  if (opts?.bestChannels?.length) opts.bestChannels.forEach((g) => params.append("bestChannels", g));
+  if (opts?.bestTimeNow) params.set("bestTimeNow", "true");
   if (opts?.favorite !== undefined) params.set("favorite", String(opts.favorite));
   if (opts?.includeArchived) params.set("includeArchived", "true");
   if (opts?.skip !== undefined) params.set("skip", String(opts.skip));
@@ -711,6 +740,48 @@ export async function fetchContactTasks(params: {
     path,
     z.array(taskSchema),
     [],
+  );
+}
+
+export const bestChannelExplainSchema = z.object({
+  bestChannel: z.string().nullable(),
+  bestChannelConfidence: z.number().nullable(),
+  bestTimeWindow: z
+    .object({
+      dayOfWeek: z.number(),
+      hourStart: z.number(),
+      hourEnd: z.number(),
+      tz: z.string(),
+      label: z.string(),
+      sampleCount: z.number(),
+    })
+    .nullable(),
+  updatedAt: z.string().nullable(),
+  channelStats: z.array(
+    z.object({
+      channel: z.string(),
+      sampleCount: z.number(),
+      responseRate: z.number(),
+      openRate: z.number(),
+      score: z.number(),
+      lastEventAt: z.string().nullable(),
+    }),
+  ),
+  reasoning: z.string(),
+});
+
+export type BestChannelExplain = z.infer<typeof bestChannelExplainSchema>;
+
+export async function fetchBestChannelExplain(
+  contactId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+  opts?: { signal?: AbortSignal },
+) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/best-channel`,
+    bestChannelExplainSchema,
+    null,
+    { signal: opts?.signal },
   );
 }
 

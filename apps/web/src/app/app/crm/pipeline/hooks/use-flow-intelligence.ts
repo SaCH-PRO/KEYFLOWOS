@@ -53,11 +53,16 @@ export function useFlowIntelligence(businessId: string | null) {
       if (controller.signal.aborted) return;
       if (flowRes.status === "fulfilled" && flowRes.value.data) setFlowIntelligence(flowRes.value.data);
       if (actionsRes.status === "fulfilled" && actionsRes.value.data) {
-        setNextActions(actionsRes.value.data.map((a) => ({
-          id: a.id, type: a.type, contactId: a.contactId, contactName: a.contactName,
-          description: a.description, aiDraft: a.aiDraft, estimatedTime: a.estimatedTime,
-          priority: a.priority, dueDate: a.dueDate, value: a.value,
-        })));
+        setNextActions(actionsRes.value.data.map((a) => {
+          const extra = a as unknown as { bestChannel?: NextActionUI["bestChannel"]; bestTimeWindowLabel?: string | null };
+          return {
+            id: a.id, type: a.type, contactId: a.contactId, contactName: a.contactName,
+            description: a.description, aiDraft: a.aiDraft, estimatedTime: a.estimatedTime,
+            priority: a.priority, dueDate: a.dueDate, value: a.value,
+            bestChannel: extra.bestChannel ?? null,
+            bestTimeWindowLabel: extra.bestTimeWindowLabel ?? null,
+          };
+        }));
       }
       if (autopilotRes.status === "fulfilled" && autopilotRes.value.data) setAutopilotActions(autopilotRes.value.data);
       if (revenueRes.status === "fulfilled" && revenueRes.value.data) setRevenueData(revenueRes.value.data);
