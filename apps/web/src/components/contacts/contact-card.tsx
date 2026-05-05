@@ -31,7 +31,16 @@ export type ContactCardData = {
     invoiceCount?: number | null;
     bookingCount?: number | null;
     lastInteractionAt?: string | null;
+    aiDominantSentiment?: string | null;
+    aiLastIntent?: string | null;
   } | null;
+};
+
+const SENTIMENT_DOT: Record<string, string> = {
+  positive: "bg-emerald-400",
+  neutral: "bg-muted-foreground/40",
+  negative: "bg-red-400",
+  mixed: "bg-amber-400",
 };
 
 const STATUS_DOT_COLORS: Record<string, string> = {
@@ -193,6 +202,23 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             {hasOverdueTask && (
               <span className="text-[10px] text-[hsl(var(--kf-accent1))]/80 flex items-center gap-0.5 flex-shrink-0" title="Overdue task">
                 <AlertCircle className="w-2.5 h-2.5" />
+              </span>
+            )}
+            {contact.meta?.aiDominantSentiment && (
+              <span
+                className="text-[10px] text-muted-foreground/70 flex items-center gap-1 flex-shrink-0"
+                title={`Conversation sentiment: ${contact.meta.aiDominantSentiment}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${SENTIMENT_DOT[contact.meta.aiDominantSentiment] ?? SENTIMENT_DOT.neutral}`} />
+                {contact.meta.aiDominantSentiment}
+              </span>
+            )}
+            {contact.meta?.aiLastIntent && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))] flex-shrink-0"
+                title={`Last intent: ${contact.meta.aiLastIntent}`}
+              >
+                {contact.meta.aiLastIntent}
               </span>
             )}
           </div>

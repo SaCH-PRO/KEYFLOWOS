@@ -4,6 +4,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Observable } from 'rxjs';
 import { CrmActionsService } from './crm-actions.service';
 import { CrmCommunicationService, type ConversationChannel, type ConversationDirection } from './crm-communication.service';
+import { ConversationAiService } from './conversation-ai.service';
 import { CrmFlowService } from './crm-flow.service';
 import { CrmImportService } from './crm-import.service';
 import { CrmJourneyService } from './crm-journey.service';
@@ -55,6 +56,7 @@ export class CrmController {
     @Inject(CrmRelationshipHealthService) private readonly relationshipHealth: CrmRelationshipHealthService,
     @Inject(CrmCommunicationService) private readonly communication: CrmCommunicationService,
     @Inject(BestChannelService) private readonly bestChannel: BestChannelService,
+    @Inject(ConversationAiService) private readonly conversationAi: ConversationAiService,
   ) {}
 
   @Get('health')
@@ -1306,6 +1308,68 @@ export class CrmController {
       body: body.body,
       actorId: req?.user?.id,
     });
+  }
+
+  // ---------- Conversation AI ----------
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/conversations/summary')
+  async getConversationSummary(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Query('refresh') refresh?: string,
+  ) {
+    const force = refresh === '1' || refresh === 'true';
+    const r = await this.conversationAi.summarizeThread(businessId, contactId, { force });
+    return { summary: r.insight, cached: r.cached };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(15, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/conversations/summary/regenerate')
+  async regenerateConversationSummary(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    const r = await this.conversationAi.summarizeThread(businessId, contactId, { force: true });
+    return { summary: r.insight, cached: r.cached };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(20, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/conversations/suggest-replies')
+  async suggestReplies(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: { count?: number; preferredChannel?: string; tone?: string },
+  ) {
+    const replies = await this.conversationAi.suggestReplies(businessId, contactId, {
+      count: typeof body?.count === 'number' ? body.count : undefined,
+      preferredChannel: typeof body?.preferredChannel === 'string' ? body.preferredChannel : undefined,
+      tone: typeof body?.tone === 'string' ? body.tone : undefined,
+    });
+    return { replies };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/conversations/insights')
+  async getConversationInsights(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Query('messageRefs') messageRefs?: string,
+  ) {
+    const refs = (messageRefs ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 100);
+    const [rollup, perMessage] = await Promise.all([
+      this.conversationAi.getContactRollup(businessId, contactId),
+      refs.length > 0 ? this.conversationAi.getMessageInsights(businessId, contactId, refs) : Promise.resolve({}),
+    ]);
+    return { rollup, perMessage };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

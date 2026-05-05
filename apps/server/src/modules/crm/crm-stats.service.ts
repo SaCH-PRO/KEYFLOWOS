@@ -29,6 +29,8 @@ export type ContactMeta = {
   openDealsCount?: number;
   openDealsValue?: number;
   topOpenDeal?: TopOpenDeal | null;
+  aiDominantSentiment?: string | null;
+  aiLastIntent?: string | null;
 };
 
 export type ContactWithStats = Contact & {
@@ -389,6 +391,24 @@ export class CrmStatsService {
       if (booking.startTime > stats.lastInteractionAt) stats.lastInteractionAt = booking.startTime;
     });
 
+    // Latest AI rollup per contact (best-effort; failure is silent).
+    const aiRollupMap = new Map<string, { sentiment: string | null; intent: string | null }>();
+    try {
+      const latestInsights = await this.prisma.client.conversationAIInsight.findMany({
+        where: { businessId, contactId: { in: ids }, kind: 'message_analysis' },
+        orderBy: { createdAt: 'desc' },
+        take: ids.length * 5,
+        select: { contactId: true, payload: true, createdAt: true },
+      });
+      for (const ins of latestInsights) {
+        if (aiRollupMap.has(ins.contactId)) continue;
+        const p = (ins.payload ?? {}) as { sentiment?: string | null; intent?: string | null };
+        aiRollupMap.set(ins.contactId, { sentiment: p.sentiment ?? null, intent: p.intent ?? null });
+      }
+    } catch {
+      // ignore
+    }
+
     const updates: { id: string; leadScore: number; lastInteractionAt: Date }[] = [];
     const withStats = contacts.map((contact) => {
       const stats = statsMap.get(contact.id);
@@ -401,6 +421,11 @@ export class CrmStatsService {
         stats.overdueTasks * 5 +
         (contact.status === 'CLIENT' ? 5 : 0);
       stats.leadScore = leadScore;
+      const ai = aiRollupMap.get(contact.id);
+      if (ai) {
+        stats.aiDominantSentiment = ai.sentiment;
+        stats.aiLastIntent = ai.intent;
+      }
       if (
         contact.leadScore !== leadScore ||
         !contact.lastInteractionAt ||

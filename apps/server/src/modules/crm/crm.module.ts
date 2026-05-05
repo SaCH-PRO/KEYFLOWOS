@@ -26,6 +26,7 @@ import { CrmStatsService } from './crm-stats.service';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCommunicationService } from './crm-communication.service';
+import { ConversationAiService } from './conversation-ai.service';
 import { CrmService } from './crm.service';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { BestChannelService } from './best-channel.service';
@@ -52,6 +53,7 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
     CrmService,
     CrmTimelineService,
     CrmCommunicationService,
+    ConversationAiService,
     CrmListsService,
     CrmSavedViewsService,
     CrmStatsService,
@@ -82,6 +84,7 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
     CrmService,
     CrmTimelineService,
     CrmCommunicationService,
+    ConversationAiService,
     CrmListsService,
     CrmSavedViewsService,
     CrmStatsService,

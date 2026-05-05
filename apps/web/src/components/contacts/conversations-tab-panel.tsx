@@ -21,8 +21,16 @@ import {
   markContactConversationsRead,
   sendContactReply,
   subscribeContactConversationStream,
+  fetchConversationSummary,
+  regenerateConversationSummary,
+  fetchSuggestedReplies,
+  fetchConversationInsights,
   type ConversationEntry,
+  type ThreadSummary,
+  type ConversationInsights,
+  type SuggestedReply,
 } from "@/lib/client";
+import { Sparkles, Wand2 } from "lucide-react";
 
 type Channel = "whatsapp" | "email" | "sms" | "call" | "meeting" | "note";
 type Direction = "in" | "out" | "internal";
@@ -42,6 +50,13 @@ interface ConversationsTabPanelProps {
   contact: ContactLite;
   businessId?: string | null;
 }
+
+const SENTIMENT_STYLES: Record<string, string> = {
+  positive: "bg-emerald-500/15 text-emerald-300",
+  neutral: "bg-white/[0.05] text-muted-foreground",
+  negative: "bg-red-500/15 text-red-300",
+  mixed: "bg-amber-500/15 text-amber-300",
+};
 
 const CHANNEL_META: Record<Channel, { label: string; icon: typeof MessageCircle; color: string; bg: string }> = {
   whatsapp: { label: "WhatsApp", icon: MessageCircle, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)" },
@@ -103,6 +118,14 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
+  // AI: thread summary + per-message insights + suggested replies
+  const [summary, setSummary] = useState<ThreadSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [insights, setInsights] = useState<ConversationInsights["perMessage"]>({});
+  const [suggestions, setSuggestions] = useState<SuggestedReply[]>([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+
   const businessIdRef = useRef(businessId ?? undefined);
   useEffect(() => {
     businessIdRef.current = businessId ?? undefined;
@@ -161,6 +184,54 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
     };
   }, [contact.id]);
 
+  // Load thread summary (cached or fresh).
+  const loadSummary = useCallback(async (refresh = false) => {
+    setSummaryLoading(true);
+    const res = await fetchConversationSummary(contact.id, { businessId: businessIdRef.current, refresh });
+    setSummaryLoading(false);
+    if (res.data?.summary) setSummary(res.data.summary);
+  }, [contact.id]);
+
+  useEffect(() => {
+    void loadSummary(false);
+  }, [loadSummary]);
+
+  // Load per-message insights whenever entries change.
+  useEffect(() => {
+    if (entries.length === 0) return;
+    const refs = entries.map((e) => e.id);
+    let cancelled = false;
+    void fetchConversationInsights(contact.id, { businessId: businessIdRef.current, messageRefs: refs }).then((res) => {
+      if (cancelled) return;
+      if (res.data) setInsights(res.data.perMessage);
+    });
+    return () => { cancelled = true; };
+  }, [contact.id, entries]);
+
+  const handleSuggestReplies = async () => {
+    setSuggestLoading(true);
+    setSuggestError(null);
+    const res = await fetchSuggestedReplies(
+      contact.id,
+      { count: 3, preferredChannel: composerChannel },
+      businessIdRef.current,
+    );
+    setSuggestLoading(false);
+    if (res.error || !res.data) {
+      setSuggestError(res.error ?? "Could not generate suggestions");
+      return;
+    }
+    setSuggestions(res.data.replies ?? []);
+  };
+
+  const useSuggestion = (s: SuggestedReply) => {
+    setComposer(s.body);
+    if (s.channel === "whatsapp" || s.channel === "email" || s.channel === "sms" || s.channel === "call" || s.channel === "note" || s.channel === "meeting") {
+      setComposerChannel(s.channel);
+    }
+    setSuggestions([]);
+  };
+
   const handleSend = async () => {
     const body = composer.trim();
     if (!body || sending) return;
@@ -185,6 +256,61 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
 
   return (
     <div className="px-3 space-y-3">
+      {/* AI thread summary */}
+      {(summary || summaryLoading) && (
+        <div className="rounded-xl border border-[hsl(var(--kf-accent2))]/25 bg-[hsl(var(--kf-accent2))]/[0.04] p-3 space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3 text-[hsl(var(--kf-accent2))]" />
+            <span className="text-[10px] uppercase tracking-wider text-[hsl(var(--kf-accent2))] font-semibold">
+              Conversation summary
+            </span>
+            {summary?.sentiment && (
+              <span
+                className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${SENTIMENT_STYLES[summary.sentiment] ?? SENTIMENT_STYLES.neutral}`}
+              >
+                {summary.sentiment}
+              </span>
+            )}
+            {summary?.lastIntent && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-white/[0.05] text-muted-foreground">
+                intent: {summary.lastIntent}
+              </span>
+            )}
+            <button
+              onClick={() => void loadSummary(true)}
+              disabled={summaryLoading}
+              className="ml-auto text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+              title="Regenerate summary"
+            >
+              <RefreshCw className={`w-3 h-3 ${summaryLoading ? "animate-spin" : ""}`} /> Refresh
+            </button>
+          </div>
+          {summary?.summary && (
+            <p className="text-xs text-foreground/90">{summary.summary}</p>
+          )}
+          {summary && (summary.openQuestions.length > 0 || summary.actionItems.length > 0) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              {summary.openQuestions.length > 0 && (
+                <div className="text-[10px] text-muted-foreground">
+                  <div className="uppercase tracking-wider text-muted-foreground/60 mb-0.5">Open questions</div>
+                  <ul className="space-y-0.5 list-disc pl-3">
+                    {summary.openQuestions.slice(0, 3).map((q, i) => <li key={i}>{q}</li>)}
+                  </ul>
+                </div>
+              )}
+              {summary.actionItems.length > 0 && (
+                <div className="text-[10px] text-muted-foreground">
+                  <div className="uppercase tracking-wider text-muted-foreground/60 mb-0.5">Suggested next steps</div>
+                  <ul className="space-y-0.5 list-disc pl-3">
+                    {summary.actionItems.slice(0, 3).map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Filters row */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
@@ -285,6 +411,7 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
               const meta = CHANNEL_META[e.channel];
               const isOut = e.direction === "out";
               const isInternal = e.direction === "internal";
+              const ai = insights[e.id];
               return (
                 <div key={e.id} className={`flex ${isOut ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[80%] rounded-lg p-2.5 border ${
@@ -294,7 +421,7 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
                         ? "bg-[hsl(var(--kf-accent1))]/[0.06] border-[hsl(var(--kf-accent1))]/20"
                         : "bg-white/[0.03] border-border/40"
                   }`}>
-                    <div className="flex items-center gap-1.5 mb-1">
+                    <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                       <span
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-md font-medium"
                         style={{ backgroundColor: meta.bg, color: meta.color }}
@@ -307,6 +434,21 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
                       </span>
                       {e.status && (
                         <span className="text-[9px] text-muted-foreground/50">· {e.status}</span>
+                      )}
+                      {ai?.sentiment && (
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${SENTIMENT_STYLES[ai.sentiment] ?? SENTIMENT_STYLES.neutral}`} title={`Sentiment: ${ai.sentiment}`}>
+                          {ai.sentiment}
+                        </span>
+                      )}
+                      {ai?.intent && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))]" title={`Intent: ${ai.intent}`}>
+                          {ai.intent}
+                        </span>
+                      )}
+                      {ai?.urgency === "high" && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-red-500/15 text-red-300 font-medium" title="High urgency">
+                          urgent
+                        </span>
                       )}
                       <span className="text-[9px] text-muted-foreground/50 ml-auto">{formatTime(e.timestamp)}</span>
                     </div>
@@ -332,6 +474,50 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
 
       {/* Composer */}
       <div className="border-t border-border/40 pt-3 space-y-2">
+        {/* Suggested replies */}
+        {(suggestions.length > 0 || suggestError) && (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3 text-[hsl(var(--kf-accent2))]" />
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">AI suggestions — review before sending</span>
+              <button
+                onClick={() => setSuggestions([])}
+                className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                Dismiss
+              </button>
+            </div>
+            {suggestError && (
+              <div className="text-[10px] text-red-300">{suggestError}</div>
+            )}
+            <div className="space-y-1.5">
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => useSuggestion(s)}
+                  className="w-full text-left rounded-lg border border-[hsl(var(--kf-accent2))]/20 bg-[hsl(var(--kf-accent2))]/[0.04] p-2 hover:bg-[hsl(var(--kf-accent2))]/[0.08] transition-colors"
+                >
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-white/[0.05] text-muted-foreground uppercase tracking-wider">
+                      {s.channel}
+                    </span>
+                    {s.tone && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-white/[0.05] text-muted-foreground">
+                        {s.tone}
+                      </span>
+                    )}
+                    <span className="ml-auto text-[9px] text-[hsl(var(--kf-accent2))]">Use →</span>
+                  </div>
+                  <div className="text-xs text-foreground whitespace-pre-wrap break-words">{s.body}</div>
+                  {s.rationale && (
+                    <div className="text-[10px] text-muted-foreground/70 mt-1 italic">{s.rationale}</div>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">Send via</span>
           {(["whatsapp", "email", "sms", "call", "note"] as Channel[]).map((ch) => {
@@ -370,14 +556,25 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
             rows={2}
             className="flex-1 px-2.5 py-2 text-xs rounded-lg bg-white/[0.03] border border-border/40 text-foreground placeholder:text-muted-foreground/40 resize-none focus:outline-none focus:border-[hsl(var(--kf-accent1))]/40"
           />
-          <button
-            onClick={() => void handleSend()}
-            disabled={!composer.trim() || sending}
-            className="self-end inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-[hsl(var(--kf-accent1))] text-white hover:bg-[hsl(var(--kf-accent1))]/90 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-            Send
-          </button>
+          <div className="flex flex-col gap-1.5 self-end">
+            <button
+              onClick={() => void handleSuggestReplies()}
+              disabled={suggestLoading}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg bg-white/[0.04] border border-[hsl(var(--kf-accent2))]/30 text-[hsl(var(--kf-accent2))] hover:bg-[hsl(var(--kf-accent2))]/[0.08] disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Generate AI-suggested replies (review before sending)"
+            >
+              {suggestLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+              Suggest reply
+            </button>
+            <button
+              onClick={() => void handleSend()}
+              disabled={!composer.trim() || sending}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-[hsl(var(--kf-accent1))] text-white hover:bg-[hsl(var(--kf-accent1))]/90 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+              Send
+            </button>
+          </div>
         </div>
         {sendStatus && (
           <div className={`flex items-center gap-1.5 text-[10px] ${sendStatus.kind === "success" ? "text-emerald-400" : "text-red-300"}`}>
