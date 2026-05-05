@@ -332,6 +332,13 @@ model Business {
   // Booking Reminder (minutes before appointment to send reminder email)
   bookingReminderMins Int @default(60) @map("booking_reminder_mins")
 
+  // Privacy / GDPR settings (M7)
+  forgetGraceDays      Int     @default(7) @map("forget_grace_days")
+  defaultForgetReason  String? @map("default_forget_reason")
+  contactAuditEntries  ContactAuditEntry[]
+  contactExportJobs    ContactExportJob[]
+  contactForgetRequests ContactForgetRequest[]
+
   // Business Hours (JSON: { "mon": { "open": "09:00", "close": "17:00", "closed": false }, ... })
   businessHours Json? @map("business_hours")
 
@@ -482,6 +489,9 @@ model Contact {
     importRecords ContactImportContact[]
     media         ContactMedia[]
     playbooks     ContactPlaybook[]
+    auditEntries  ContactAuditEntry[]
+    exportJobs    ContactExportJob[]
+    forgetRequest ContactForgetRequest?
     recurringInvoices RecurringInvoice[]
     sequenceEnrollments CrmSequenceEnrollment[]
   listMembers         ContactListMember[]
@@ -5168,5 +5178,116 @@ model AuthAuditLog {
   @@index([userId, createdAt])
   @@index([ip, createdAt])
   @@map("auth_audit_logs")
+}
+
+// ---
+// MODULE M7: PER-CONTACT AUDIT LOG + GDPR EXPORT/FORGET
+// ---
+
+/// Tamper-evident per-contact audit log. One row per mutation against a
+/// Contact (or its child rows: communications, deals, notes, attachments).
+/// On hard purge during the GDPR "forget" flow, identifiers in this table
+/// are replaced with one-way hashes so the compliance trail survives but
+/// no PII does. Append-only by convention.
+model ContactAuditEntry {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  contactId   String?  @map("contact_id")
+  /// Stable hashed contact identifier — survives purge; format
+  /// "sha256:<hex>". Always populated.
+  contactHash String   @map("contact_hash")
+  /// Canonical action: created | updated | deleted | restored | merged |
+  /// reassigned | shared | imported | exported | forget_requested |
+  /// forget_cancelled | forget_purged | note_added | note_updated |
+  /// note_deleted | task_added | task_updated | task_deleted |
+  /// communication_logged | child_updated.
+  action      String
+  /// Which child entity this entry concerns: contact | note | task |
+  /// event | invoice | quote | booking | media | sequence.
+  entityType  String   @default("contact") @map("entity_type")
+  entityId    String?  @map("entity_id")
+  /// Free-form actor info: { type: USER|SYSTEM|API, id?, label? }.
+  actor       Json?
+  before      Json?
+  after       Json?
+  /// Computed list of changed field names for fast filtering.
+  changedFields String[] @default([]) @map("changed_fields")
+  reason      String?
+  ip          String?
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, contactId, createdAt])
+  @@index([businessId, contactHash, createdAt])
+  @@index([businessId, action, createdAt])
+  @@map("contact_audit_entries")
+}
+
+/// One-time signed download bundle for a "Export contact data" request.
+/// Stores the bundle in object storage and gates downloads via a
+/// random token + expiry. Each successful download writes a
+/// `exported` audit entry on the contact.
+model ContactExportJob {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  contactId    String   @map("contact_id")
+  requestedById String? @map("requested_by_id")
+  /// Random URL-safe token used by the public download endpoint.
+  token        String   @unique
+  /// Object-storage key for the JSON bundle.
+  jsonKey      String   @map("json_key")
+  /// Object-storage key for the ZIP bundle (contains the JSON + any
+  /// referenced attachment metadata files).
+  zipKey       String   @map("zip_key")
+  byteSize     Int?     @map("byte_size")
+  expiresAt    DateTime @map("expires_at")
+  /// Maximum number of times the token may be redeemed for a signed
+  /// URL. Defaults to 1 (one-time download) per GDPR compliance.
+  maxDownloads Int      @default(1) @map("max_downloads")
+  downloadCount Int     @default(0) @map("download_count")
+  lastDownloadedAt DateTime? @map("last_downloaded_at")
+  consumedAt   DateTime? @map("consumed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, contactId])
+  @@index([expiresAt])
+  @@map("contact_export_jobs")
+}
+
+/// "Forget contact" request. The contact is soft-deleted immediately
+/// and recoverable until `purgeAt`; a scheduled job then hard-deletes
+/// the contact + child rows and replaces identifiers in the audit log
+/// with hashed values. One active request per contact.
+model ContactForgetRequest {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  /// Nullable + ON DELETE SET NULL: the request must survive the
+  /// hard-purge of the contact so compliance reviewers can see the
+  /// historical forget action even after PII is gone. `contactHash`
+  /// preserves an opaque pointer to the original contact.
+  contactId   String?  @unique @map("contact_id")
+  contactHash String?  @map("contact_hash")
+  requestedById String? @map("requested_by_id")
+  reason      String?
+  /// requested | purged | cancelled
+  status      String   @default("requested")
+  requestedAt DateTime @default(now()) @map("requested_at")
+  purgeAt     DateTime @map("purge_at")
+  purgedAt    DateTime? @map("purged_at")
+  cancelledAt DateTime? @map("cancelled_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, status])
+  @@index([status, purgeAt])
+  @@index([contactHash])
+  @@map("contact_forget_requests")
 }
 

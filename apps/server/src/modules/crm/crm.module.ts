@@ -5,6 +5,9 @@ import { CrmGoogleController } from './crm-google.controller';
 import { CrmSequenceController } from './crm-sequence.controller';
 import { CrmDealsController } from './crm-deals.controller';
 import { CrmDealsService } from './crm-deals.service';
+import { ContactPrivacyController } from './privacy/contact-privacy.controller';
+import { ContactAuditService } from './privacy/contact-audit.service';
+import { ContactPrivacyService } from './privacy/contact-privacy.service';
 import { CrmActionsService } from './crm-actions.service';
 import { CrmAiService } from './crm-ai.service';
 import { CrmFlowService } from './crm-flow.service';
@@ -37,8 +40,68 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
 
 @Module({
   imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule],
-  controllers: [CrmController, CrmAiController, CrmGoogleController, CrmSequenceController, CrmDealsController],
-  providers: [CrmService, CrmTimelineService, CrmCommunicationService, CrmListsService, CrmSavedViewsService, CrmStatsService, CrmDuplicateDetectionService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRelationshipHealthService, CrmRelationshipHealthSchedulerService, CrmDealsService, BestChannelService, BestChannelListener, BestChannelSchedulerService, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard],
-  exports: [CrmService, CrmTimelineService, CrmCommunicationService, CrmListsService, CrmSavedViewsService, CrmStatsService, CrmDuplicateDetectionService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRelationshipHealthService, CrmRelationshipHealthSchedulerService, CrmDealsService, BestChannelService],
+  controllers: [
+    CrmController,
+    CrmAiController,
+    CrmGoogleController,
+    CrmSequenceController,
+    CrmDealsController,
+    ContactPrivacyController,
+  ],
+  providers: [
+    CrmService,
+    CrmTimelineService,
+    CrmCommunicationService,
+    CrmListsService,
+    CrmSavedViewsService,
+    CrmStatsService,
+    CrmDuplicateDetectionService,
+    CrmImportService,
+    CrmPlaybookService,
+    CrmGoogleService,
+    CrmFlowService,
+    CrmActionsService,
+    CrmRevenueService,
+    CrmJourneyService,
+    CrmAiService,
+    CrmSequenceService,
+    CrmSequenceSchedulerService,
+    CrmRelationshipHealthService,
+    CrmRelationshipHealthSchedulerService,
+    CrmDealsService,
+    BestChannelService,
+    BestChannelListener,
+    BestChannelSchedulerService,
+    CrmRateLimitGuard,
+    FeatureFlagGuard,
+    PlanLimitGuard,
+    ContactAuditService,
+    ContactPrivacyService,
+  ],
+  exports: [
+    CrmService,
+    CrmTimelineService,
+    CrmCommunicationService,
+    CrmListsService,
+    CrmSavedViewsService,
+    CrmStatsService,
+    CrmDuplicateDetectionService,
+    CrmImportService,
+    CrmPlaybookService,
+    CrmGoogleService,
+    CrmFlowService,
+    CrmActionsService,
+    CrmRevenueService,
+    CrmJourneyService,
+    CrmAiService,
+    CrmSequenceService,
+    CrmSequenceSchedulerService,
+    CrmRelationshipHealthService,
+    CrmRelationshipHealthSchedulerService,
+    CrmDealsService,
+    BestChannelService,
+    ContactAuditService,
+    ContactPrivacyService,
+  ],
 })
 export class CrmModule {}
