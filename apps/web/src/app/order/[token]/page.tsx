@@ -6,7 +6,8 @@ import Image from "next/image";
 import { Package, Truck, CheckCircle2, Clock, XCircle, ExternalLink, Phone, Mail, MessageCircle } from "lucide-react";
 import { PublicPageState } from "@/components/ui/public-page-state";
 import { buildWhatsAppLink } from "@/lib/whatsapp";
-import { initPresence, trackPageView, pickBusinessId } from "@/app/_lib/presence-sdk";
+import { pickBusinessId } from "@/app/_lib/presence-sdk";
+import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -64,12 +65,6 @@ export default function OrderStatusPage() {
   const params = useParams();
   const token = params.token as string;
   const [order, setOrder] = useState<OrderData | null>(null);
-
-  useEffect(() => {
-    initPresence({ apiBase: API_BASE });
-    const bizId = pickBusinessId(order);
-    if (bizId) trackPageView(bizId);
-  }, [order]);
   const [errorBusiness, setErrorBusiness] = useState<OrderData["business"] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,6 +130,7 @@ export default function OrderStatusPage() {
 
   return (
     <div className="min-h-screen" style={{ background: "#111113" }}>
+      <PresenceTracker businessId={pickBusinessId(order) ?? null} />
       <div className="max-w-xl mx-auto px-4 py-8 space-y-6">
         <div
           className="rounded-2xl overflow-hidden"

@@ -1,19 +1,14 @@
 'use client';
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
 import { Invoice, DEFAULT_BUSINESS_ID } from "@/lib/client";
 import { motion } from "framer-motion";
-import { initPresence, trackPageView } from "@/app/_lib/presence-sdk";
+import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
 export default function PublicPayPage() {
   const [invoiceId, setInvoiceId] = useState("");
-
-  useEffect(() => {
-    initPresence({ apiBase: API_BASE });
-    if (DEFAULT_BUSINESS_ID) trackPageView(DEFAULT_BUSINESS_ID);
-  }, []);
   const [status, setStatus] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [paidInvoiceId, setPaidInvoiceId] = useState<string | null>(null);
@@ -39,6 +34,7 @@ export default function PublicPayPage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-10">
+      <PresenceTracker businessId={DEFAULT_BUSINESS_ID || null} />
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex flex-col gap-2">
           <Badge tone="info">Public Payment</Badge>

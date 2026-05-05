@@ -18,8 +18,8 @@ import {
   rejectPublicQuote,
   type Quote,
 } from "@/lib/client";
-import { initPresence, trackPageView, pickBusinessId } from "@/app/_lib/presence-sdk";
-import { API_BASE } from "@/lib/api";
+import { pickBusinessId } from "@/app/_lib/presence-sdk";
+import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
 type RespondState = "idle" | "submitting" | "done" | "error";
 
@@ -88,12 +88,6 @@ export default function PublicQuotePage() {
   const token = params?.token ?? "";
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    initPresence({ apiBase: API_BASE });
-    const bizId = pickBusinessId(quote);
-    if (bizId) trackPageView(bizId);
-  }, [quote]);
   const [error, setError] = useState<string | null>(null);
   const [respondState, setRespondState] = useState<RespondState>("idle");
   const [respondError, setRespondError] = useState<string | null>(null);
@@ -187,6 +181,7 @@ export default function PublicQuotePage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-10">
+      <PresenceTracker businessId={pickBusinessId(quote) ?? null} />
       <div className="mx-auto max-w-3xl space-y-6">
         <div className="flex flex-col gap-2">
           <Badge tone="info">Quote</Badge>

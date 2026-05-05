@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { apiGet, API_BASE } from "@/lib/api";
+import { apiGet } from "@/lib/api";
 import { Loader2, LinkIcon } from "lucide-react";
 import { PublicPageState } from "@/components/ui/public-page-state";
-import { initPresence, trackPageView } from "@/app/_lib/presence-sdk";
+import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
 export default function PaymentLinkPage() {
   const params = useParams();
@@ -13,10 +13,11 @@ export default function PaymentLinkPage() {
   const token = params.token as string;
 
   const [error, setError] = useState<string | null>(null);
+  const [businessId, setBusinessId] = useState<string | null>(null);
 
   const resolve = async () => {
     setError(null);
-    const res = await apiGet<{ invoiceId: string; active: boolean; expiresAt: string | null }>(
+    const res = await apiGet<{ invoiceId: string; businessId?: string; active: boolean; expiresAt: string | null }>(
       `/commerce/payment-links/${encodeURIComponent(token)}`
     );
 
@@ -35,32 +36,39 @@ export default function PaymentLinkPage() {
       return;
     }
 
+    if (res.data.businessId) setBusinessId(res.data.businessId);
     router.replace(`/pay/${res.data.invoiceId}`);
   };
 
   useEffect(() => {
-    initPresence({ apiBase: API_BASE });
-    // We don't yet know the businessId on this redirect page — pass
-    // empty so the server resolves it from the /pay/link/<token>
-    // Referer URL. Fires before the redirect so the visit isn't lost.
-    trackPageView("");
     resolve();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // `emitWhenUnknown` makes the tracker fire one page_view with an empty
+  // businessId so the server resolves it from the /pay/link/<token>
+  // Referer URL. Once the resolve API returns a real businessId, the
+  // tracker's per-(businessId,pathname) dedupe key changes and fires
+  // exactly one more attributed page_view — no duplicates per id.
+  const tracker = <PresenceTracker businessId={businessId} emitWhenUnknown />;
+
   if (error) {
     return (
-      <PublicPageState
-        variant="error"
-        title="Payment Link Error"
-        message={`${error} Please contact the business for a new payment link.`}
-        retry={resolve}
-      />
+      <>
+        {tracker}
+        <PublicPageState
+          variant="error"
+          title="Payment Link Error"
+          message={`${error} Please contact the business for a new payment link.`}
+          retry={resolve}
+        />
+      </>
     );
   }
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center">
+      {tracker}
       <div className="text-center space-y-4">
         <div className="relative">
           <Loader2 className="w-10 h-10 animate-spin mx-auto text-orange-400" />

@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Badge, Button, Card, Input } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
-import { initPresence, trackPageView } from "@/app/_lib/presence-sdk";
+import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
 type SocialPostResponse = {
   id?: string;
@@ -13,11 +13,6 @@ type SocialPostResponse = {
 
 export default function PublicSocialPage() {
   const [businessId, setBusinessId] = useState("");
-
-  useEffect(() => {
-    initPresence({ apiBase: API_BASE });
-    if (businessId) trackPageView(businessId);
-  }, [businessId]);
   const [postId, setPostId] = useState("");
   const [content, setContent] = useState("");
   const [mediaUrls, setMediaUrls] = useState("");
@@ -37,6 +32,7 @@ export default function PublicSocialPage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-950 to-black text-white px-4 py-8">
+      <PresenceTracker businessId={businessId || null} />
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex flex-col gap-2">
           <Badge tone="info">Public Social</Badge>

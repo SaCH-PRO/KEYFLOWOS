@@ -1878,6 +1878,7 @@ export class CommerceService {
         active: true,
         expiresAt: true,
         invoiceId: true,
+        businessId: true,
         invoice: {
           select: {
             id: true,
