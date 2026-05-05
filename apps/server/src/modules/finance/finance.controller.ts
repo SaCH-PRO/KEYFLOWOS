@@ -29,7 +29,7 @@ import { ReconciliationService } from './reconciliation.service';
 @UseGuards(AuthGuard, BusinessGuard)
 export class FinanceController {
   constructor(
-    private readonly receivables: ReceivablesService,
+    @Inject(ReceivablesService) private readonly receivables: ReceivablesService,
     @Inject(FinanceOverviewService) private readonly overview: FinanceOverviewService,
     @Inject(FinanceAccountsService) private readonly accounts: FinanceAccountsService,
     @Inject(FinanceCoaService) private readonly coa: FinanceCoaService,
