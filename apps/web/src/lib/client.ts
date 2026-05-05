@@ -11145,3 +11145,121 @@ export async function cancelCalendarEvent(businessId: string, eventId: string) {
     `/calendar/businesses/${encodeURIComponent(bid)}/events/${encodeURIComponent(eventId)}`,
   );
 }
+// ---------------------------------------------------------------------------
+// Presence editor (S3): Draft → Preview → Publish state machine for the
+// public site composition (sections, branding, SEO, slug).
+// ---------------------------------------------------------------------------
+
+export type PresenceSectionType =
+  | 'hero' | 'about' | 'services' | 'products' | 'trust' | 'gallery'
+  | 'faq' | 'contact' | 'location' | 'custom_html';
+
+export interface PresenceSection {
+  id: string;
+  type: PresenceSectionType;
+  visible: boolean;
+  data: Record<string, unknown>;
+}
+
+export interface PresenceBranding {
+  logoUrl?: string;
+  faviconUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  fontPairing?: string;
+}
+
+export interface PresenceSeo {
+  metaTitle?: string;
+  metaDescription?: string;
+  socialImageUrl?: string;
+  canonicalUrl?: string;
+  robotsIndex?: boolean;
+}
+
+export interface PresencePayload {
+  branding: PresenceBranding;
+  sections: PresenceSection[];
+  seo: PresenceSeo;
+  slug?: string;
+  customDomain?: string;
+}
+
+export interface PresenceDraftResponse {
+  draft: {
+    id: string;
+    version: number;
+    status: string;
+    payload: PresencePayload;
+    previewToken: string | null;
+    previewExpiresAt: string | null;
+    updatedAt: string;
+  };
+  published: {
+    id: string;
+    version: number;
+    publishedAt: string;
+    unpublishedAt: string | null;
+    payload: PresencePayload;
+  } | null;
+}
+
+export interface PresenceDiffResponse {
+  hasPublished: boolean;
+  diffs: { path: string; before: unknown; after: unknown }[];
+  draftVersion: number;
+  publishedVersion: number;
+}
+
+export async function fetchPresenceDraft(businessId: string) {
+  return apiGetSimple<PresenceDraftResponse>(`/site/presence/businesses/${encodeURIComponent(businessId)}/draft`);
+}
+
+export async function savePresenceDraft(businessId: string, payload: PresencePayload) {
+  const res = await fetch(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/draft`, {
+    method: 'PUT',
+    headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) return { data: null, error: (data?.message as string) || 'Failed to save' };
+  return { data, error: null };
+}
+
+export async function fetchPresenceDiff(businessId: string) {
+  return apiGetSimple<PresenceDiffResponse>(`/site/presence/businesses/${encodeURIComponent(businessId)}/diff`);
+}
+
+export async function createPresencePreview(businessId: string) {
+  return apiPostSimple<{ previewToken: string; previewExpiresAt: string }>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/preview`,
+    {},
+  );
+}
+
+export async function publishPresence(businessId: string) {
+  return apiPostSimple<{ id: string; version: number; publishedAt: string }>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/publish`,
+    {},
+  );
+}
+
+export async function unpublishPresence(businessId: string) {
+  const res = await fetch(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/publish`, {
+    method: 'DELETE',
+    headers: { ...await getAuthHeaders() },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) return { data: null, error: (data?.message as string) || 'Failed to unpublish' };
+  return { data, error: null };
+}
+
+export async function fetchPresenceCompleteness(businessId: string) {
+  return apiGetSimple<{
+    score: number;
+    sections: { id: string; type: string; visible: boolean; complete: boolean }[];
+    seoComplete: boolean;
+    brandingComplete: boolean;
+  }>(`/site/presence/businesses/${encodeURIComponent(businessId)}/completeness`);
+}
+
