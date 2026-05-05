@@ -11908,6 +11908,141 @@ export async function snoozeRevenueAction(
 }
 
 // ---
+// REVENUE INTELLIGENCE (R5: forecast / slow payers / pricing signals / AI briefing)
+// ---
+export interface RevenueForecastBucket {
+  date: string;
+  expected: number;
+  best: number;
+  worst: number;
+  fromInvoices: number;
+  fromQuotes: number;
+  fromRecurring: number;
+}
+export interface RevenueForecastResponse {
+  businessId: string;
+  currency: string;
+  generatedAt: string;
+  horizonDays: number;
+  totalExpected: number;
+  totalBest: number;
+  totalWorst: number;
+  confidence: 'high' | 'medium' | 'low';
+  buckets: RevenueForecastBucket[];
+  inputs: {
+    openInvoices: number;
+    openInvoiceTotal: number;
+    acceptedQuotes: number;
+    acceptedQuoteTotal: number;
+    activeRecurring: number;
+    monthlyRecurringEstimate: number;
+    avgPaymentDays: number;
+    paymentDayStdev: number;
+  };
+}
+export async function fetchCommerceRevenueForecast(businessId: string) {
+  return apiGetSimple<RevenueForecastResponse>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-intelligence/forecast`,
+  );
+}
+
+export interface SlowPayerEntry {
+  contactId: string;
+  contactName: string;
+  email: string | null;
+  avgDaysToPay: number;
+  paidInvoiceCount: number;
+  outstandingTotal: number;
+  threshold: number;
+  severity: 'mild' | 'moderate' | 'severe';
+}
+export interface SlowPayerReport {
+  businessId: string;
+  generatedAt: string;
+  businessMedianDays: number;
+  threshold: number;
+  totalContactsScanned: number;
+  slowPayers: SlowPayerEntry[];
+}
+export async function fetchSlowPayers(businessId: string) {
+  return apiGetSimple<SlowPayerReport>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-intelligence/slow-payers`,
+  );
+}
+
+export interface PricingSignal {
+  productId: string;
+  productName: string;
+  signal: 'underpriced' | 'high_margin_promote' | 'underperforming_high_margin';
+  grossMarginPct: number;
+  unitsSold90d: number;
+  revenue90d: number;
+  reason: string;
+  suggestion: string;
+}
+export interface PricingSignalsReport {
+  businessId: string;
+  generatedAt: string;
+  thresholds: { highMarginPct: number; lowVolumeUnits: number; highVolumeUnits: number };
+  signals: PricingSignal[];
+}
+export async function fetchPricingSignals(businessId: string) {
+  return apiGetSimple<PricingSignalsReport>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-intelligence/pricing-signals`,
+  );
+}
+
+export interface RevenueBriefingChase {
+  id: string;
+  title: string;
+  detail: string;
+  amountAtRisk?: number | null;
+  contactId?: string | null;
+  relatedType?: string | null;
+  relatedId?: string | null;
+}
+export interface RevenueBriefing {
+  headline: string;
+  whatChanged: string[];
+  whatsAtRisk: string[];
+  whatToChase: RevenueBriefingChase[];
+  whatToPlan: string[];
+  source: 'ai' | 'fallback';
+}
+export interface RevenueBriefingSnapshot {
+  businessId: string;
+  generatedAt: string;
+  expiresAt: string;
+  briefing: RevenueBriefing;
+  forecast: RevenueForecastResponse;
+  slowPayers: SlowPayerReport;
+  pricingSignals: PricingSignalsReport;
+  inputs: {
+    overdueCount: number;
+    overdueTotal: number;
+    pendingQuoteCount: number;
+    pendingQuoteTotal: number;
+  };
+}
+export async function fetchRevenueBriefing(businessId: string) {
+  return apiGetSimple<RevenueBriefingSnapshot>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-intelligence/briefing`,
+  );
+}
+export async function regenerateRevenueBriefing(businessId: string) {
+  return apiPost<RevenueBriefingSnapshot>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-intelligence/briefing/regenerate`,
+    body: {},
+  });
+}
+export async function delegateRevenueBriefingChase(businessId: string, chase: RevenueBriefingChase) {
+  return apiPost<{ created: boolean; actionId?: string }>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-intelligence/briefing/delegate-chase`,
+    body: { chase },
+  });
+}
+
+// ---
 // REVENUE REPORTS (R4)
 // ---
 export type RevenueReportPreset =

@@ -33,6 +33,12 @@ import { RevenueActionController } from './revenue-action.controller';
 import { RevenueReportingService } from './revenue-reporting.service';
 import { RevenueReportingController } from './revenue-reporting.controller';
 import { RevenueReportingRollupScheduler } from './revenue-reporting-rollup.scheduler';
+import { RevenueForecastService } from './revenue-forecast.service';
+import { SlowPayerDetector } from './slow-payer-detector.service';
+import { PricingSignalsService } from './pricing-signals.service';
+import { RevenueBriefingService } from './revenue-briefing.service';
+import { WeeklyRevenueReviewScheduler } from './weekly-revenue-review.scheduler';
+import { RevenueIntelligenceController } from './revenue-intelligence.controller';
 import { CrmModule } from '../crm/crm.module';
 import { PublicEventsModule } from '../public-events/public-events.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
@@ -58,7 +64,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
         }).NotificationsModule,
     ),
   ],
-  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RevenueActionController, RevenueReportingController],
+  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController],
   providers: [
     CommerceService,
     CommerceStatsService,
@@ -87,6 +93,11 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     RevenueActionService,
     RevenueReportingService,
     RevenueReportingRollupScheduler,
+    RevenueForecastService,
+    SlowPayerDetector,
+    PricingSignalsService,
+    RevenueBriefingService,
+    WeeklyRevenueReviewScheduler,
     PlanLimitGuard,
   ],
   exports: [
@@ -103,6 +114,10 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     RevenueAttributionService,
     RevenueReportingService,
     RevenueActionService,
+    RevenueForecastService,
+    SlowPayerDetector,
+    PricingSignalsService,
+    RevenueBriefingService,
   ],
 })
 export class CommerceModule {}
