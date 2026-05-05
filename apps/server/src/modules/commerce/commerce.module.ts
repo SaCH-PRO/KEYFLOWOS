@@ -39,6 +39,9 @@ import { PricingSignalsService } from './pricing-signals.service';
 import { RevenueBriefingService } from './revenue-briefing.service';
 import { WeeklyRevenueReviewScheduler } from './weekly-revenue-review.scheduler';
 import { RevenueIntelligenceController } from './revenue-intelligence.controller';
+import { TimeCostService } from './time-cost.service';
+import { LeverageController } from './leverage.controller';
+import { MarginOnPaymentListener } from './margin-on-payment.listener';
 import { CrmModule } from '../crm/crm.module';
 import { PublicEventsModule } from '../public-events/public-events.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
@@ -64,7 +67,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
         }).NotificationsModule,
     ),
   ],
-  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController],
+  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController],
   providers: [
     CommerceService,
     CommerceStatsService,
@@ -98,6 +101,8 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     PricingSignalsService,
     RevenueBriefingService,
     WeeklyRevenueReviewScheduler,
+    TimeCostService,
+    MarginOnPaymentListener,
     PlanLimitGuard,
   ],
   exports: [
@@ -118,6 +123,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     SlowPayerDetector,
     PricingSignalsService,
     RevenueBriefingService,
+    TimeCostService,
   ],
 })
 export class CommerceModule {}

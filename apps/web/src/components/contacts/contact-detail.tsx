@@ -349,6 +349,7 @@ export function ContactDetail({
             onRefresh={onRecomputeInsight}
             onAddTask={onAddTask}
             revenueSummary={revenueSummary ?? null}
+            businessId={businessId}
           />
         )}
 

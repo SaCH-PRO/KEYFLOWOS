@@ -738,6 +738,7 @@ export default function BookingsPage() {
             onUpdateLocation={handleUpdateLocation}
             onCreateInvoice={handleCreateInvoice}
             calendarConnected={calendarConnected}
+            businessId={businessId}
           />
         )}
       </AnimatePresence>
