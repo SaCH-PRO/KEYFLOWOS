@@ -1,4 +1,4 @@
-import { Booking, Contact, Invoice, InvoiceItem, Product, Quote, QuoteItem, SocialPost } from '@keyflow/db';
+import { Booking, Contact, Invoice, InvoiceItem, Product, Quote, QuoteItem, Service, SocialPost } from '@keyflow/db';
 import type { ConnectorType } from '../connectors/connector.interface';
 
 export class ContactCreatedPayload {
@@ -114,6 +114,41 @@ export class ProductUpdatedPayload {
 
 export class ProductDeactivatedPayload {
   product!: Product;
+  businessId!: string;
+}
+
+// ---- Canonical Catalog events (S1: shared catalog) ----
+// Owned by CatalogService. Legacy `product.*` events above are still
+// emitted alongside these for backwards compatibility with existing
+// listeners; new listeners should subscribe to `catalog.*` instead.
+
+export class CatalogProductCreatedPayload {
+  product!: Product;
+  businessId!: string;
+}
+
+export class CatalogProductUpdatedPayload {
+  product!: Product;
+  businessId!: string;
+}
+
+export class CatalogProductDeletedPayload {
+  product!: Product;
+  businessId!: string;
+}
+
+export class CatalogServiceCreatedPayload {
+  service!: Service;
+  businessId!: string;
+}
+
+export class CatalogServiceUpdatedPayload {
+  service!: Service;
+  businessId!: string;
+}
+
+export class CatalogServiceDeletedPayload {
+  service!: Service | { id: string };
   businessId!: string;
 }
 
@@ -517,6 +552,12 @@ export interface KeyFlowEventMap {
   'product.created': ProductCreatedPayload;
   'product.updated': ProductUpdatedPayload;
   'product.deactivated': ProductDeactivatedPayload;
+  'catalog.product.created': CatalogProductCreatedPayload;
+  'catalog.product.updated': CatalogProductUpdatedPayload;
+  'catalog.product.deleted': CatalogProductDeletedPayload;
+  'catalog.service.created': CatalogServiceCreatedPayload;
+  'catalog.service.updated': CatalogServiceUpdatedPayload;
+  'catalog.service.deleted': CatalogServiceDeletedPayload;
   'quote.created': QuoteCreatedPayload;
   'quote.sent': QuoteSentPayload;
   'quote.converted': QuoteConvertedPayload;

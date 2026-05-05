@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NetworkActivityService } from './network-activity.service';
+import { CatalogService } from '../catalog/catalog.service';
 
 const businessSelect = {
   id: true, name: true, logoUrl: true, headline: true, industry: true, slug: true,
@@ -13,6 +14,7 @@ export class ResourceMarketplaceService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NetworkActivityService) private readonly activity: NetworkActivityService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
   async publish(businessId: string, input: {
@@ -33,25 +35,23 @@ export class ResourceMarketplaceService {
     }
     const isFree = input.isFree ?? input.price === 0;
 
-    const product = await this.prisma.client.product.create({
-      data: {
-        businessId,
-        name: input.name,
-        description: input.description ?? null,
-        price: isFree ? 0 : input.price,
-        currency: input.currency ?? 'TTD',
-        category: 'PRODUCT',
-        imageUrl: input.imageUrl ?? null,
-        isActive: true,
-        resourceType: input.resourceType,
-        downloadUrl: input.downloadUrl,
-        previewUrl: input.previewUrl ?? null,
-        licenseTerms: input.licenseTerms ?? null,
-        isFree,
-        fileSize: input.fileSize ?? null,
-        fulfillmentModel: 'manual',
-        inventoryMode: 'virtual',
-      },
+    const product = await this.catalog.createProduct({
+      businessId,
+      name: input.name,
+      description: input.description ?? null,
+      price: isFree ? 0 : input.price,
+      currency: input.currency ?? 'TTD',
+      category: 'PRODUCT',
+      imageUrl: input.imageUrl ?? null,
+      isActive: true,
+      resourceType: input.resourceType,
+      downloadUrl: input.downloadUrl,
+      previewUrl: input.previewUrl ?? null,
+      licenseTerms: input.licenseTerms ?? null,
+      isFree,
+      fileSize: input.fileSize ?? null,
+      fulfillmentModel: 'manual',
+      inventoryMode: 'virtual',
     });
 
     await this.activity.log({

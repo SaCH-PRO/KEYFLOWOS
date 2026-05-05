@@ -1,12 +1,13 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { ProductCreatedPayload, ProductUpdatedPayload, ProductDeactivatedPayload, QuoteCreatedPayload, QuoteSentPayload, QuoteConvertedPayload } from '../../core/event-bus/events.types';
+import { QuoteCreatedPayload, QuoteSentPayload, QuoteConvertedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { Service } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus } from './invoice-workflow.service';
+import { CatalogService } from '../catalog/catalog.service';
 
 @Injectable()
 export class CommerceService {
@@ -17,36 +18,29 @@ export class CommerceService {
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(CommerceStatsService) private readonly statsCache: CommerceStatsService,
     @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
+  /**
+   * @deprecated Use CatalogService.listProducts directly. This pass-through
+   * remains so the existing /commerce/businesses/:id/products endpoint keeps
+   * working; it will be removed once Commerce callers migrate (see S2).
+   */
   async listProducts(businessId: string, page = 1, pageSize = 50) {
-    page = Math.max(page, 1);
-    pageSize = Math.min(Math.max(pageSize, 1), 100);
-    const where = { businessId, deletedAt: null };
-    const [data, total] = await Promise.all([
-      this.prisma.client.product.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      this.prisma.client.product.count({ where }),
-    ]);
-    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+    return this.catalog.listProducts(businessId, page, pageSize);
   }
 
+  /** @deprecated Use CatalogService.listPublicProducts. */
   async listPublicProducts(businessId: string) {
-    return this.prisma.client.product.findMany({
-      where: { businessId, deletedAt: null, isActive: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.catalog.listPublicProducts(businessId);
   }
 
-  async createProduct(input: { 
-    businessId: string; 
-    name: string; 
-    price: number; 
-    currency?: string; 
+  /** @deprecated Use CatalogService.createProduct. */
+  async createProduct(input: {
+    businessId: string;
+    name: string;
+    price: number;
+    currency?: string;
     description?: string | null;
     category?: string;
     duration?: number | null;
@@ -54,31 +48,18 @@ export class CommerceService {
     sku?: string | null;
     isActive?: boolean;
   }) {
-    const result = await this.prisma.client.product.create({
-      data: {
-        businessId: input.businessId,
-        name: input.name,
-        price: input.price,
-        currency: input.currency ?? 'TTD',
-        description: input.description ?? null,
-        category: input.category ?? 'SERVICE',
-        duration: input.duration ?? null,
-        imageUrl: input.imageUrl ?? null,
-        sku: input.sku ?? null,
-        isActive: input.isActive ?? true,
-      },
-    });
+    const result = await this.catalog.createProduct(input);
     this.statsCache.invalidateCache(input.businessId);
-    this.events.emit('product.created', { product: result, businessId: input.businessId } as ProductCreatedPayload);
     return result;
   }
 
-  async updateProduct(input: { 
-    businessId: string; 
-    productId: string; 
-    name?: string; 
-    price?: number; 
-    currency?: string; 
+  /** @deprecated Use CatalogService.updateProduct. */
+  async updateProduct(input: {
+    businessId: string;
+    productId: string;
+    name?: string;
+    price?: number;
+    currency?: string;
     description?: string | null;
     category?: string;
     duration?: number | null;
@@ -86,51 +67,23 @@ export class CommerceService {
     sku?: string | null;
     isActive?: boolean;
   }) {
-    const result = await this.prisma.client.product.update({
-      where: { id: input.productId, businessId: input.businessId },
-      data: {
-        ...(input.name !== undefined && { name: input.name }),
-        ...(input.price !== undefined && { price: input.price }),
-        ...(input.currency !== undefined && { currency: input.currency }),
-        ...(input.description !== undefined && { description: input.description }),
-        ...(input.category !== undefined && { category: input.category }),
-        ...(input.duration !== undefined && { duration: input.duration }),
-        ...(input.imageUrl !== undefined && { imageUrl: input.imageUrl }),
-        ...(input.sku !== undefined && { sku: input.sku }),
-        ...(input.isActive !== undefined && { isActive: input.isActive }),
-      },
-    });
+    const result = await this.catalog.updateProduct(input);
     this.statsCache.invalidateCache(input.businessId);
-    this.events.emit('product.updated', { product: result, businessId: input.businessId } as ProductUpdatedPayload);
     return result;
   }
 
+  /** @deprecated Use CatalogService.deleteProduct. */
   async deleteProduct(businessId: string, productId: string) {
-    const result = await this.prisma.client.product.update({
-      where: { id: productId, businessId },
-      data: { deletedAt: new Date() },
-    });
+    const result = await this.catalog.deleteProduct(businessId, productId);
     this.statsCache.invalidateCache(businessId);
-    this.events.emit('product.deactivated', { product: result, businessId } as ProductDeactivatedPayload);
     return result;
   }
 
+  /** @deprecated Use CatalogService.bulkUpdateProducts. */
   async bulkUpdateProducts(businessId: string, ids: string[], action: 'activate' | 'deactivate' | 'delete') {
-    const where = { id: { in: ids }, businessId, deletedAt: null };
-    let result: { count: number };
-    switch (action) {
-      case 'activate':
-        result = await this.prisma.client.product.updateMany({ where, data: { isActive: true } });
-        break;
-      case 'deactivate':
-        result = await this.prisma.client.product.updateMany({ where, data: { isActive: false } });
-        break;
-      case 'delete':
-        result = await this.prisma.client.product.updateMany({ where, data: { deletedAt: new Date() } });
-        break;
-    }
+    const result = await this.catalog.bulkUpdateProducts(businessId, ids, action);
     this.statsCache.invalidateCache(businessId);
-    return { updated: result.count, action };
+    return result;
   }
 
   async createInvoiceForService(businessId: string, contactId: string, service: Service) {

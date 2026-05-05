@@ -13,6 +13,7 @@ import { appUrl } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
+import { CatalogService } from '../catalog/catalog.service';
 
 @Controller('bookings')
 export class BookingsController {
@@ -22,6 +23,7 @@ export class BookingsController {
     @Inject(BookingOptimizerService) private readonly optimizer: BookingOptimizerService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -171,33 +173,35 @@ export class BookingsController {
     });
   }
 
+  /**
+   * @deprecated Bookings owns scheduling, not the service catalog. Use
+   * `/catalog/businesses/:businessId/services` (CatalogService). This
+   * pass-through stays so existing clients keep working.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/services')
   listServices(@Param('businessId') businessId: string) {
-    return this.prisma.client.service.findMany({
-      where: { businessId, deletedAt: null },
-      orderBy: { name: 'asc' },
-    });
+    return this.catalog.listServices(businessId);
   }
 
+  /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.createService. */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/services')
   createService(
     @Param('businessId') businessId: string,
     @Body() body: { name: string; duration: number; price: number; description?: string; sourceProductId?: string },
   ) {
-    return this.prisma.client.service.create({
-      data: {
-        businessId,
-        name: body.name,
-        duration: body.duration,
-        price: body.price,
-        description: body.description ?? null,
-        sourceProductId: body.sourceProductId ?? null,
-      },
+    return this.catalog.createService({
+      businessId,
+      name: body.name,
+      duration: body.duration,
+      price: body.price,
+      description: body.description ?? null,
+      sourceProductId: body.sourceProductId ?? null,
     });
   }
 
+  /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.updateService. */
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/services/:serviceId')
   async updateService(
@@ -205,63 +209,34 @@ export class BookingsController {
     @Param('serviceId') serviceId: string,
     @Body() body: { name?: string; duration?: number; price?: number; description?: string; bufferMins?: number; leadTimeMins?: number },
   ) {
-    const existing = await this.prisma.client.service.findFirst({ where: { id: serviceId, businessId } });
-    if (!existing) throw new NotFoundException('Service not found');
-    return this.prisma.client.service.update({
-      where: { id: serviceId },
-      data: {
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.duration !== undefined && { duration: body.duration }),
-        ...(body.price !== undefined && { price: body.price }),
-        ...(body.description !== undefined && { description: body.description }),
-        ...(body.bufferMins !== undefined && { bufferMins: body.bufferMins }),
-        ...(body.leadTimeMins !== undefined && { leadTimeMins: body.leadTimeMins }),
-      },
-    });
+    return this.catalog.updateService({ businessId, serviceId, ...body });
   }
 
+  /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.deleteService. */
   @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/services/:serviceId')
   async deleteService(@Param('businessId') businessId: string, @Param('serviceId') serviceId: string) {
-    const existing = await this.prisma.client.service.findFirst({ where: { id: serviceId, businessId } });
-    if (!existing) throw new NotFoundException('Service not found');
-    await this.prisma.client.service.update({
-      where: { id: serviceId },
-      data: { deletedAt: new Date() },
-    });
+    await this.catalog.deleteService(businessId, serviceId);
     return { success: true };
   }
 
+  /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.batchServices. */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/services/batch')
   async batchServices(
     @Param('businessId') businessId: string,
     @Body() body: { add?: { name: string; duration: number; price: number; description?: string }[]; remove?: string[] },
   ) {
-    const results: { added: number; removed: number; errors: string[] } = { added: 0, removed: 0, errors: [] };
-
-    if (body.remove?.length) {
-      await this.prisma.client.service.updateMany({
-        where: { id: { in: body.remove }, businessId },
-        data: { deletedAt: new Date() },
-      });
-      results.removed = body.remove.length;
-    }
-
-    if (body.add?.length) {
-      for (const item of body.add) {
-        try {
-          await this.prisma.client.service.create({
-            data: { businessId, name: item.name, duration: item.duration, price: item.price, description: item.description ?? null },
-          });
-          results.added++;
-        } catch (e) {
-          results.errors.push(`Failed to add ${item.name}`);
-        }
-      }
-    }
-
-    return results;
+    return this.catalog.batchServices(businessId, {
+      add: body.add?.map(s => ({
+        businessId,
+        name: s.name,
+        duration: s.duration,
+        price: s.price,
+        description: s.description ?? null,
+      })),
+      remove: body.remove,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

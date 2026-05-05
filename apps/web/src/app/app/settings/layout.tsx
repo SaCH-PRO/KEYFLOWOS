@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Shield, ContactRound } from "lucide-react";
+import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Shield, ContactRound, Layers } from "lucide-react";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 
 const navItems = [
   { href: "/app/settings/billing", label: "Billing", icon: Crown, description: "Subscription & usage" },
   { href: "/app/settings/business", label: "Payment Gateways", icon: CreditCard, description: "Customer payment methods" },
+  { href: "/app/settings/catalog", label: "Catalog", icon: Layers, description: "Products & services" },
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
   { href: "/app/connect", label: "Connect", icon: Link2, description: "Integrations hub" },
   { href: "/app/settings/contact-sources", label: "Contact Sources", icon: ContactRound, description: "Google, Outlook & signatures" },

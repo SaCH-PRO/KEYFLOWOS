@@ -25,10 +25,11 @@ import { StoreReadinessService } from './store-readiness.service';
 import { CrmModule } from '../crm/crm.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
+import { CatalogModule } from '../catalog/catalog.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 
 @Module({
-  imports: [CrmModule, SubscriptionsModule, AiModule],
+  imports: [CrmModule, SubscriptionsModule, AiModule, CatalogModule],
   controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController],
   providers: [
     CommerceService,
