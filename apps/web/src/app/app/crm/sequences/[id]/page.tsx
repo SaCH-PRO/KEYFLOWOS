@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -137,7 +137,9 @@ function validateGraph(graph: SequenceGraph): string[] {
 export default function SequenceBuilderPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const sequenceId = params?.id;
+  const deepLinkNodeId = searchParams?.get("node") ?? null;
 
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [sequence, setSequence] = useState<CrmSequenceDetail | null>(null);
@@ -176,11 +178,14 @@ export default function SequenceBuilderPage() {
       setDescription(data.description ?? "");
       setStatus(data.status);
       setGraph(data.graph ?? { version: 1, startNodeId: null, nodes: [], edges: [] });
+      if (deepLinkNodeId && (data.graph?.nodes ?? []).some((n) => n.id === deepLinkNodeId)) {
+        setSelectedNodeId(deepLinkNodeId);
+      }
       setLoading(false);
       void reloadReport(id, sequenceId);
     })();
     return () => { cancelled = true; };
-  }, [sequenceId, router, reloadReport]);
+  }, [sequenceId, router, reloadReport, deepLinkNodeId]);
 
   const errors = useMemo(() => (graph ? validateGraph(graph) : []), [graph]);
   const selectedNode = useMemo(

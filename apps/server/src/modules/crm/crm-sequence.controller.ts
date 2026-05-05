@@ -116,6 +116,14 @@ export class CrmSequenceController {
 
   @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
   @RequireFeature('sequences')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/sequences/variants/report')
+  getAllVariantReports(@Param('businessId') businessId: string) {
+    return this.sequences.getAllVariantReports(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('sequences')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/sequences/:id/variants/report')
   getVariantReport(

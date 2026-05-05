@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button, Card, ContentContainer, PageHeader, Badge } from "@keyflow/ui";
-import { Plus, Workflow, Users, Mail, MessageCircle, Phone, Clock, GitBranch, Copy, Trash2, BarChart3, TrendingUp, Trophy } from "lucide-react";
+import { Plus, Workflow, Users, Mail, MessageCircle, Phone, Clock, GitBranch, Copy, Trash2, BarChart3, TrendingUp, Trophy, ExternalLink } from "lucide-react";
 import {
+  AllVariantStepReport,
   CrmSequence,
   SequenceKpi,
   createSequence,
   deleteSequence,
   duplicateSequence,
+  fetchAllSequenceVariantReports,
   fetchSequences,
   fetchSequencesSummary,
 } from "@/lib/client";
@@ -45,6 +47,8 @@ function formatCurrencyShort(value: number, currency: string | null) {
   }
 }
 
+type TabKey = "sequences" | "variants";
+
 export default function SequencesListPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -52,6 +56,7 @@ export default function SequencesListPage() {
   const [kpis, setKpis] = useState<Record<string, SequenceKpi>>({});
   const [loading, setLoading] = useState(true);
   const [, startTransition] = useTransition();
+  const [tab, setTab] = useState<TabKey>("sequences");
 
   useEffect(() => {
     let cancelled = false;
@@ -133,6 +138,20 @@ export default function SequencesListPage() {
     reload();
   };
 
+  const tabBtn = (key: TabKey, label: string) => (
+    <button
+      type="button"
+      onClick={() => setTab(key)}
+      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+        tab === key
+          ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]"
+          : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <ContentContainer>
       <PageHeader
@@ -152,107 +171,344 @@ export default function SequencesListPage() {
         }
       />
 
-      {loading ? (
-        <div className="text-sm text-muted-foreground py-12 text-center">Loading sequences…</div>
-      ) : sequences.length === 0 ? (
-        <Card padding="lg" className="text-center space-y-3">
-          <Workflow className="w-10 h-10 mx-auto text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">No sequences yet.</p>
-          <Button onClick={handleCreate} disabled={!businessId} variant="subtle">
-            <Plus className="w-4 h-4 mr-1" /> Create your first sequence
-          </Button>
-        </Card>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {sequences.map((seq) => {
-            const nodes = seq.graph?.nodes ?? [];
-            const types = Array.from(new Set(nodes.map((n) => n.type)));
-            const kpi = kpis[seq.id];
-            return (
-              <Card key={seq.id} padding="lg" className="space-y-3 hover:border-[hsl(var(--kf-accent1))]/40 transition-colors">
-                <div className="flex items-start justify-between gap-2">
-                  <Link href={`/app/crm/sequences/${seq.id}`} className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm truncate">{seq.name}</p>
-                    {seq.description && (
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{seq.description}</p>
-                    )}
-                  </Link>
-                  <Badge className={STATUS_STYLES[seq.status] ?? STATUS_STYLES.draft}>
-                    {seq.status}
-                  </Badge>
-                </div>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {types.map((t) => {
-                    const Icon = NODE_ICONS[t] ?? Workflow;
-                    return (
-                      <span
-                        key={t}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-muted/40 text-[10px] text-muted-foreground"
-                      >
-                        <Icon className="w-3 h-3" />
-                        {t}
-                      </span>
-                    );
-                  })}
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    <Users className="w-3 h-3" />
-                    {kpi?.enrolled ?? seq.enrollmentCount ?? 0} enrolled
-                  </span>
-                  <span>{nodes.length} nodes</span>
-                </div>
-                {kpi && kpi.enrolled > 0 && (
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/30 text-[11px]">
-                    <div className="flex items-center gap-1">
-                      <TrendingUp className="w-3 h-3 text-[hsl(var(--kf-info))]" />
-                      <span className="text-muted-foreground">Reply</span>
-                      <span className="ml-auto tabular-nums font-medium">{Math.round(kpi.replyRate * 100)}%</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Trophy className="w-3 h-3 text-[hsl(var(--kf-success))]" />
-                      <span className="text-muted-foreground">Won</span>
-                      <span className="ml-auto tabular-nums font-medium">
-                        {kpi.attributedDeals > 0
-                          ? formatCurrencyShort(kpi.attributedValue, kpi.currency)
-                          : "—"}
-                      </span>
-                    </div>
+      <div className="flex items-center gap-1 border-b border-border/40 mb-4">
+        {tabBtn("sequences", "Sequences")}
+        {tabBtn("variants", "Variant performance")}
+      </div>
+
+      {tab === "sequences" ? (
+        loading ? (
+          <div className="text-sm text-muted-foreground py-12 text-center">Loading sequences…</div>
+        ) : sequences.length === 0 ? (
+          <Card padding="lg" className="text-center space-y-3">
+            <Workflow className="w-10 h-10 mx-auto text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">No sequences yet.</p>
+            <Button onClick={handleCreate} disabled={!businessId} variant="subtle">
+              <Plus className="w-4 h-4 mr-1" /> Create your first sequence
+            </Button>
+          </Card>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {sequences.map((seq) => {
+              const nodes = seq.graph?.nodes ?? [];
+              const types = Array.from(new Set(nodes.map((n) => n.type)));
+              const kpi = kpis[seq.id];
+              return (
+                <Card key={seq.id} padding="lg" className="space-y-3 hover:border-[hsl(var(--kf-accent1))]/40 transition-colors">
+                  <div className="flex items-start justify-between gap-2">
+                    <Link href={`/app/crm/sequences/${seq.id}`} className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate">{seq.name}</p>
+                      {seq.description && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{seq.description}</p>
+                      )}
+                    </Link>
+                    <Badge className={STATUS_STYLES[seq.status] ?? STATUS_STYLES.draft}>
+                      {seq.status}
+                    </Badge>
                   </div>
-                )}
-                <div className="flex items-center gap-1 pt-1 border-t border-border/30">
-                  <Link href={`/app/crm/sequences/${seq.id}`} className="flex-1">
-                    <Button variant="subtle" size="sm" className="w-full">
-                      Open builder
-                    </Button>
-                  </Link>
-                  <Link
-                    href={`/app/crm/sequences/${seq.id}/analytics`}
-                    className="p-2 rounded-md hover:bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
-                    title="Analytics"
-                  >
-                    <BarChart3 className="w-3.5 h-3.5" />
-                  </Link>
-                  <button
-                    onClick={() => handleDuplicate(seq.id)}
-                    className="p-2 rounded-md hover:bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
-                    title="Duplicate"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(seq.id, seq.name)}
-                    className="p-2 rounded-md hover:bg-[hsl(var(--kf-error))]/15 text-muted-foreground hover:text-[hsl(var(--kf-error))] transition-colors"
-                    title="Archive"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {types.map((t) => {
+                      const Icon = NODE_ICONS[t] ?? Workflow;
+                      return (
+                        <span
+                          key={t}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-muted/40 text-[10px] text-muted-foreground"
+                        >
+                          <Icon className="w-3 h-3" />
+                          {t}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <Users className="w-3 h-3" />
+                      {kpi?.enrolled ?? seq.enrollmentCount ?? 0} enrolled
+                    </span>
+                    <span>{nodes.length} nodes</span>
+                  </div>
+                  {kpi && kpi.enrolled > 0 && (
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/30 text-[11px]">
+                      <div className="flex items-center gap-1">
+                        <TrendingUp className="w-3 h-3 text-[hsl(var(--kf-info))]" />
+                        <span className="text-muted-foreground">Reply</span>
+                        <span className="ml-auto tabular-nums font-medium">{Math.round(kpi.replyRate * 100)}%</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Trophy className="w-3 h-3 text-[hsl(var(--kf-success))]" />
+                        <span className="text-muted-foreground">Won</span>
+                        <span className="ml-auto tabular-nums font-medium">
+                          {kpi.attributedDeals > 0
+                            ? formatCurrencyShort(kpi.attributedValue, kpi.currency)
+                            : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1 pt-1 border-t border-border/30">
+                    <Link href={`/app/crm/sequences/${seq.id}`} className="flex-1">
+                      <Button variant="subtle" size="sm" className="w-full">
+                        Open builder
+                      </Button>
+                    </Link>
+                    <Link
+                      href={`/app/crm/sequences/${seq.id}/analytics`}
+                      className="p-2 rounded-md hover:bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
+                      title="Analytics"
+                    >
+                      <BarChart3 className="w-3.5 h-3.5" />
+                    </Link>
+                    <button
+                      onClick={() => handleDuplicate(seq.id)}
+                      className="p-2 rounded-md hover:bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
+                      title="Duplicate"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(seq.id, seq.name)}
+                      className="p-2 rounded-md hover:bg-[hsl(var(--kf-error))]/15 text-muted-foreground hover:text-[hsl(var(--kf-error))] transition-colors"
+                      title="Archive"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )
+      ) : (
+        <VariantPerformancePanel businessId={businessId} sequences={sequences} />
       )}
     </ContentContainer>
+  );
+}
+
+function VariantPerformancePanel({
+  businessId,
+  sequences,
+}: {
+  businessId: string | null;
+  sequences: CrmSequence[];
+}) {
+  const [reports, setReports] = useState<AllVariantStepReport[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sequenceFilter, setSequenceFilter] = useState<string>("all");
+  const [channelFilter, setChannelFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    void fetchAllSequenceVariantReports(businessId).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) toast.error(error);
+      setReports(data ?? []);
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [businessId]);
+
+  const channels = useMemo(() => {
+    const set = new Set<string>();
+    (reports ?? []).forEach((r) => set.add(r.channel));
+    return Array.from(set).sort();
+  }, [reports]);
+
+  const filtered = useMemo(() => {
+    return (reports ?? []).filter((r) => {
+      if (sequenceFilter !== "all" && r.sequenceId !== sequenceFilter) return false;
+      if (channelFilter !== "all" && r.channel !== channelFilter) return false;
+      if (statusFilter !== "all" && r.sequenceStatus !== statusFilter) return false;
+      return true;
+    });
+  }, [reports, sequenceFilter, channelFilter, statusFilter]);
+
+  const totalSends = useMemo(
+    () => filtered.reduce((sum, r) => sum + r.variants.reduce((s, v) => s + v.sent, 0), 0),
+    [filtered],
+  );
+
+  if (!businessId || loading) {
+    return <div className="text-sm text-muted-foreground py-12 text-center">Loading variant performance…</div>;
+  }
+
+  if ((reports?.length ?? 0) === 0) {
+    return (
+      <Card padding="lg" className="text-center space-y-3">
+        <BarChart3 className="w-10 h-10 mx-auto text-muted-foreground/40" />
+        <p className="text-sm text-muted-foreground">No send nodes found yet. Add email, WhatsApp, or SMS steps to your sequences to see variant performance here.</p>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card padding="md" className="flex flex-wrap items-end gap-3">
+        <FilterSelect
+          label="Sequence"
+          value={sequenceFilter}
+          onChange={setSequenceFilter}
+          options={[
+            { value: "all", label: "All sequences" },
+            ...sequences.map((s) => ({ value: s.id, label: s.name })),
+          ]}
+        />
+        <FilterSelect
+          label="Channel"
+          value={channelFilter}
+          onChange={setChannelFilter}
+          options={[
+            { value: "all", label: "All channels" },
+            ...channels.map((c) => ({ value: c, label: c })),
+          ]}
+        />
+        <FilterSelect
+          label="Status"
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: "all", label: "All statuses" },
+            { value: "draft", label: "Draft" },
+            { value: "active", label: "Active" },
+            { value: "paused", label: "Paused" },
+          ]}
+        />
+        <div className="ml-auto text-xs text-muted-foreground tabular-nums">
+          {filtered.length} send {filtered.length === 1 ? "node" : "nodes"} · {totalSends.toLocaleString()} sends
+        </div>
+      </Card>
+
+      {filtered.length === 0 ? (
+        <Card padding="lg" className="text-center text-sm text-muted-foreground">
+          No send nodes match the current filters.
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((r) => (
+            <VariantNodeRow key={`${r.sequenceId}:${r.nodeId}`} report={r} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-background border border-border/50 rounded-md px-2 py-1.5 text-xs text-foreground min-w-[140px]"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function pct(n: number) {
+  return `${Math.round(n * 1000) / 10}%`;
+}
+
+function VariantNodeRow({ report }: { report: AllVariantStepReport }) {
+  const ChannelIcon = NODE_ICONS[report.channel] ?? Workflow;
+  const totalSent = report.variants.reduce((s, v) => s + v.sent, 0);
+  return (
+    <Card padding="md" className="space-y-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Link
+              href={`/app/crm/sequences/${report.sequenceId}`}
+              className="font-medium text-foreground hover:text-[hsl(var(--kf-accent1))] truncate"
+            >
+              {report.sequenceName}
+            </Link>
+            <Badge className={STATUS_STYLES[report.sequenceStatus] ?? STATUS_STYLES.draft}>
+              {report.sequenceStatus}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-muted/40 text-[10px] text-muted-foreground">
+              <ChannelIcon className="w-3 h-3" /> {report.channel}
+            </span>
+            <span className="text-sm font-semibold">{report.nodeLabel}</span>
+            <span className="text-[11px] text-muted-foreground tabular-nums">{totalSent.toLocaleString()} sends</span>
+          </div>
+        </div>
+        <Link
+          href={`/app/crm/sequences/${report.sequenceId}?node=${encodeURIComponent(report.nodeId)}`}
+          className="inline-flex items-center gap-1 text-xs text-[hsl(var(--kf-accent1))] hover:underline"
+        >
+          Jump to node <ExternalLink className="w-3 h-3" />
+        </Link>
+      </div>
+
+      {report.variants.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No variants configured on this node.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/40">
+                <th className="text-left font-medium py-1.5 pr-2">Variant</th>
+                <th className="text-right font-medium py-1.5 px-2 tabular-nums">Sent</th>
+                <th className="text-right font-medium py-1.5 px-2 tabular-nums">Open</th>
+                <th className="text-right font-medium py-1.5 px-2 tabular-nums">Click</th>
+                <th className="text-right font-medium py-1.5 px-2 tabular-nums">Reply</th>
+                <th className="text-right font-medium py-1.5 pl-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.variants.map((v) => (
+                <tr key={v.variantId} className="border-b border-border/20 last:border-b-0">
+                  <td className="py-1.5 pr-2">
+                    <span className="font-medium">{v.label}</span>
+                  </td>
+                  <td className="text-right py-1.5 px-2 tabular-nums">{v.sent.toLocaleString()}</td>
+                  <td className="text-right py-1.5 px-2 tabular-nums">{v.sent ? pct(v.openRate) : "—"}</td>
+                  <td className="text-right py-1.5 px-2 tabular-nums">{v.sent ? pct(v.clickRate) : "—"}</td>
+                  <td className="text-right py-1.5 px-2 tabular-nums">{v.sent ? pct(v.replyRate) : "—"}</td>
+                  <td className="text-right py-1.5 pl-2">
+                    {v.isWinner ? (
+                      <span className="inline-flex items-center gap-1 text-[hsl(var(--kf-success))]">
+                        <Trophy className="w-3 h-3" /> Winner
+                      </span>
+                    ) : v.isPromoted ? (
+                      <span className="inline-flex items-center gap-1 text-[hsl(var(--kf-accent1))]">
+                        <Trophy className="w-3 h-3" /> Promoted
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {report.winnerVariantId && (
+            <div className="text-[11px] text-muted-foreground mt-2">
+              Winner confidence: {pct(report.winnerConfidence)}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
