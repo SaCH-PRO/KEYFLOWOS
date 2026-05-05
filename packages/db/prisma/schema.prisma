@@ -106,6 +106,8 @@ model Business {
   // Module Relationships
   members          Membership[]
   contacts         Contact[]
+  deals            Deal[]
+  dealStages       DealStage[]
   invoices         Invoice[]
   quotes           Quote[]
   products         Product[]
@@ -482,6 +484,7 @@ model Contact {
   momentumSnapshots   ContactMomentumSnapshot[]
   momentumRecommendations MomentumRecommendation[]
   externalMappings    ContactExternalMapping[]
+  deals               Deal[]
   customerJourney     CustomerJourney?
   journeyTouchpoints  JourneyTouchpoint[]
   whatsappContacts    WhatsAppContact[]
@@ -509,6 +512,75 @@ model Contact {
   @@unique([businessId, emailNormalized])
   @@unique([businessId, phoneNormalized])
   @@map("contacts")
+}
+
+model DealStage {
+  id          String  @id @default(cuid())
+  businessId  String  @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  position    Int     @default(0)
+  color       String?
+  category    String  @default("OPEN") // OPEN | WON | LOST
+  isDefault   Boolean @default(false) @map("is_default")
+  archivedAt  DateTime? @map("archived_at")
+
+  deals       Deal[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, slug])
+  @@index([businessId, position])
+  @@map("deal_stages")
+}
+
+model Deal {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contactId       String   @map("contact_id")
+  contact         Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  title           String
+  description     String?
+  companyName     String?  @map("company_name")
+  value           Float?
+  currency        String   @default("TTD")
+
+  stageId         String   @map("stage_id")
+  stage           DealStage @relation(fields: [stageId], references: [id])
+
+  status          String   @default("OPEN") // OPEN | WON | LOST
+  probability     Int?     // 0-100
+  ownerUserId     String?  @map("owner_user_id")
+  source          String?
+  sourceDetail    String?  @map("source_detail")
+  tags            String[] @default([])
+  notes           String?
+
+  expectedCloseAt DateTime? @map("expected_close_at")
+  wonAt           DateTime? @map("won_at")
+  lostAt          DateTime? @map("lost_at")
+  lossReason      String?   @map("loss_reason")
+  lastStageChangedAt DateTime? @map("last_stage_changed_at")
+
+  // Optional links
+  quoteId         String?  @map("quote_id")
+  invoiceId       String?  @map("invoice_id")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@index([businessId, status])
+  @@index([businessId, stageId])
+  @@index([businessId, ownerUserId])
+  @@index([businessId, expectedCloseAt])
+  @@index([contactId])
+  @@index([businessId, deletedAt])
+  @@map("deals")
 }
 
 model ContactExternalMapping {

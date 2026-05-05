@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense, useState } from "react";
-import { MessageSquare, ListTodo, History, AlertCircle, Loader2, MessageCircle } from "lucide-react";
+import { MessageSquare, ListTodo, History, AlertCircle, Loader2, MessageCircle, Briefcase } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
 import type { CrossJourneyResponse } from "@/lib/client";
@@ -11,6 +11,7 @@ const TasksTabPanel = React.lazy(() => import("./tasks-tab-panel").then(m => ({ 
 const TimelineTabPanel = React.lazy(() => import("./timeline-tab-panel").then(m => ({ default: m.TimelineTabPanel })));
 const ConversationsTabPanel = React.lazy(() => import("./conversations-tab-panel").then(m => ({ default: m.ConversationsTabPanel })));
 type ConversationsContactLite = import("./conversations-tab-panel").ContactLite;
+const DealsTabPanel = React.lazy(() => import("./deals-tab-panel").then(m => ({ default: m.DealsTabPanel })));
 
 class TabErrorBoundary extends React.Component<
   { children: React.ReactNode; resetKey: string },
@@ -131,6 +132,7 @@ export function ContactDetailTabs({
           { key: "conversations", label: "Conversations", icon: MessageCircle, count: conversationsCount },
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
+          { key: "deals", label: "Deals", icon: Briefcase, count: undefined as number | undefined },
         ].map(({ key, label, icon: Icon, count }) => (
           <button
             key={key}
@@ -201,6 +203,13 @@ export function ContactDetailTabs({
             <div className={`space-y-3 pt-3 pb-6 ${normalized === "tasks" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="tasks">
                 <TasksTabPanel contact={contact} tasks={tasks} onAddTask={onAddTask} onAddNote={onAddNote} onCompleteTask={onCompleteTask} onDeleteTask={onDeleteTask} onUpdateTask={onUpdateTask} />
+              </TabErrorBoundary>
+            </div>
+          )}
+          {activatedTabs.has("deals") && (
+            <div className={`space-y-3 pt-3 pb-6 ${normalized === "deals" ? "" : "hidden"}`}>
+              <TabErrorBoundary resetKey="deals">
+                <DealsTabPanel contact={contact} businessId={businessId} />
               </TabErrorBoundary>
             </div>
           )}
