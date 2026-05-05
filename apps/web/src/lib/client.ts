@@ -12159,3 +12159,145 @@ export async function fetchRevenueReport<T extends RevenueReportData = RevenueRe
     `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-reports/${encodeURIComponent(preset)}${suffix}`,
   );
 }
+
+// ============================================================================
+// FIN5 — Finance cockpit (Overview, Accounts CRUD, Chart of Accounts CRUD,
+// Tax Rates, Settings). Surface lives at /app/finance.
+// ============================================================================
+
+export interface FinanceOverviewActionItem {
+  id: string;
+  title: string;
+  detail: string | null;
+  amountAtRisk: number | null;
+  status: string;
+  type: string;
+  createdAt: string;
+}
+
+export interface FinanceOverview {
+  cashBalance: number;
+  cashAccountCount: number;
+  revenueThisMonth: number;
+  expensesThisMonth: number;
+  netProfitThisMonth: number;
+  outstandingInvoices: number;
+  outstandingInvoiceCount: number;
+  overdueInvoices: number;
+  overdueInvoiceCount: number;
+  billsDue: number;
+  billsDueCount: number;
+  taxReserved: number;
+  cashRunwayMonths: number | null;
+  pendingActionCount: number;
+  actions: FinanceOverviewActionItem[];
+  currency: string;
+}
+
+export interface FinancialAccountRow {
+  id: string;
+  businessId: string;
+  chartOfAccountId: string;
+  name: string;
+  type: string;
+  subtype: string | null;
+  currency: string;
+  openingBalance: string | number;
+  currentBalance: string | number;
+  institution: string | null;
+  accountLast4: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChartOfAccountRow {
+  id: string;
+  businessId: string;
+  code: string | null;
+  name: string;
+  type: string;
+  subtype: string | null;
+  systemKey: string | null;
+  parentId: string | null;
+  isSystem: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaxRateRow {
+  id: string;
+  businessId: string;
+  name: string;
+  rate: string | number;
+  type: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinanceSettings {
+  accountingBasis: 'CASH' | 'ACCRUAL';
+  fiscalYearStartMonth: number;
+  defaultTaxRate: number;
+  defaultCashAccountId: string | null;
+  defaultArAccountId: string | null;
+  defaultApAccountId: string | null;
+  defaultTaxAccountId: string | null;
+  currency: string;
+}
+
+const finBase = (businessId: string) => `/finance/businesses/${encodeURIComponent(businessId)}`;
+
+export async function fetchFinanceOverview(businessId: string) {
+  return apiGetSimple<FinanceOverview>(`${finBase(businessId)}/overview`);
+}
+
+export async function fetchFinanceAccounts(businessId: string) {
+  return apiGetSimple<{ items: FinancialAccountRow[] }>(`${finBase(businessId)}/accounts`);
+}
+export async function createFinanceAccount(businessId: string, body: Partial<FinancialAccountRow> & { name: string; type: string }) {
+  return apiPost<FinancialAccountRow>({ path: `${finBase(businessId)}/accounts`, body });
+}
+export async function updateFinanceAccount(businessId: string, id: string, body: Partial<FinancialAccountRow>) {
+  return apiPatch<FinancialAccountRow>(`${finBase(businessId)}/accounts/${encodeURIComponent(id)}`, body);
+}
+export async function archiveFinanceAccount(businessId: string, id: string) {
+  return apiDelete<FinancialAccountRow>(`${finBase(businessId)}/accounts/${encodeURIComponent(id)}`);
+}
+
+export async function fetchFinanceCoa(businessId: string) {
+  return apiGetSimple<{ items: ChartOfAccountRow[] }>(`${finBase(businessId)}/chart-of-accounts`);
+}
+export async function createFinanceCoa(businessId: string, body: Partial<ChartOfAccountRow> & { name: string; type: string }) {
+  return apiPost<ChartOfAccountRow>({ path: `${finBase(businessId)}/chart-of-accounts`, body });
+}
+export async function updateFinanceCoa(businessId: string, id: string, body: Partial<ChartOfAccountRow>) {
+  return apiPatch<ChartOfAccountRow>(`${finBase(businessId)}/chart-of-accounts/${encodeURIComponent(id)}`, body);
+}
+export async function archiveFinanceCoa(businessId: string, id: string) {
+  return apiDelete<ChartOfAccountRow>(`${finBase(businessId)}/chart-of-accounts/${encodeURIComponent(id)}`);
+}
+
+export async function fetchTaxRates(businessId: string) {
+  return apiGetSimple<{ items: TaxRateRow[] }>(`${finBase(businessId)}/tax-rates`);
+}
+export async function createTaxRate(businessId: string, body: { name: string; rate: number; type?: string | null; isDefault?: boolean; isActive?: boolean }) {
+  return apiPost<TaxRateRow>({ path: `${finBase(businessId)}/tax-rates`, body });
+}
+export async function updateTaxRate(businessId: string, id: string, body: Partial<{ name: string; rate: number; type: string | null; isDefault: boolean; isActive: boolean }>) {
+  return apiPatch<TaxRateRow>(`${finBase(businessId)}/tax-rates/${encodeURIComponent(id)}`, body);
+}
+export async function deleteTaxRate(businessId: string, id: string) {
+  return apiDelete<TaxRateRow>(`${finBase(businessId)}/tax-rates/${encodeURIComponent(id)}`);
+}
+
+export async function fetchFinanceSettings(businessId: string) {
+  return apiGetSimple<FinanceSettings>(`${finBase(businessId)}/settings`);
+}
+export async function updateFinanceSettings(businessId: string, body: Partial<FinanceSettings>) {
+  return apiPatch<FinanceSettings>(`${finBase(businessId)}/settings`, body);
+}

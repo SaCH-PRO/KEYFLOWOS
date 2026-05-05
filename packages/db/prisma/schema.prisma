@@ -199,6 +199,20 @@ model Business {
   bankTransactions      BankTransaction[]
   reconciliations       Reconciliation[]
   taxLiabilities        TaxLiability[]
+  taxRates              TaxRate[]
+
+  // Finance OS (FIN5) — settings stored on the business row.
+  // (accountingBasis declared above as part of FIN2; FIN5 settings UI flips it.)
+  /// Fiscal-year start month (1=Jan ... 12=Dec). Default 1.
+  fiscalYearStartMonth  Int?     @default(1) @map("fiscal_year_start_month")
+  /// Default FinancialAccount.id used when posting Cash movements.
+  defaultCashAccountId  String?  @map("default_cash_account_id")
+  /// Default FinancialAccount.id for Accounts Receivable target.
+  defaultArAccountId    String?  @map("default_ar_account_id")
+  /// Default FinancialAccount.id for Accounts Payable target.
+  defaultApAccountId    String?  @map("default_ap_account_id")
+  /// Default FinancialAccount.id for Tax Payable holding account.
+  defaultTaxAccountId   String?  @map("default_tax_account_id")
 
   // Business Builder
   businessPlans        BusinessPlan[]
@@ -6375,4 +6389,27 @@ model TaxLiability {
   @@index([businessId, status])
   @@index([businessId, type, periodEnd])
   @@map("tax_liabilities")
+}
+
+/// Per-business tax rate (FIN5). Used as a picker source on invoices/quotes
+/// and as the default applied when none is selected. One rate per
+/// (businessId, name); multiple rates may exist (e.g. VAT 12.5%, Zero 0%).
+model TaxRate {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  rate        Decimal  @db.Decimal(8, 4)
+  /// Free-form e.g. "VAT", "Sales Tax". Optional.
+  type        String?
+  isDefault   Boolean  @default(false) @map("is_default")
+  isActive    Boolean  @default(true)  @map("is_active")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, name])
+  @@index([businessId, isActive])
+  @@map("tax_rates")
 }

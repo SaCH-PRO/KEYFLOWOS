@@ -7,6 +7,7 @@ import { AnimatePresence } from "framer-motion";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { FinanceBanner } from "../finance/components/finance-banner";
 import { WorkspaceMetricStrip } from "@/components/ui/workspace-metric-strip";
 import {
   Receipt,
@@ -263,6 +264,7 @@ export default function ExpensesPage() {
       tabLayoutId="expenses-tab"
       banners={
         <>
+          <FinanceBanner from="expenses" />
           <ResumePrompt module="expenses" onResume={handleResumeExpenseTask} />
           <div className="flex items-center gap-2">
             <NotesTrigger pageKey="expenses" variant="header" />
