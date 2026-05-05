@@ -1,4 +1,3 @@
-Loaded Prisma config from prisma.config.ts.
 
 -- AlterTable
 ALTER TABLE "expense_categories" ADD COLUMN     "chart_of_account_id" TEXT;
