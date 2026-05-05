@@ -50,6 +50,10 @@ export type CommerceProduct = {
   duration?: number | null;
   imageUrl?: string | null;
   isActive: boolean;
+  availableQuantity?: number | null;
+  stockStatus?: "available" | "low" | "out_of_stock" | "backorder" | "untracked";
+  purchasable?: boolean;
+  outOfStockBehavior?: string;
 };
 
 export type CatalogItem = {
@@ -63,6 +67,9 @@ export type CatalogItem = {
   itemType: "service" | "product" | "package";
   requiresBooking: boolean;
   sourceServiceId?: string;
+  availableQuantity?: number | null;
+  stockStatus?: "available" | "low" | "out_of_stock" | "backorder" | "untracked";
+  purchasable?: boolean;
 };
 
 export type CartItem = CatalogItem & { quantity: number };

@@ -1308,6 +1308,7 @@ model Product {
   // Mission 2: Fulfillment & inventory extensions
   fulfillmentModel  String?  @map("fulfillment_model")   // local_stock, dropship, preorder, manual, hybrid
   inventoryMode     String?  @map("inventory_mode")      // tracked, untracked, virtual
+  outOfStockBehavior String? @default("hide") @map("out_of_stock_behavior") // hide, show_oos, allow_backorder
   compareAtPrice    Float?   @map("compare_at_price")
 
   // Resource Marketplace (Community Phase 5)

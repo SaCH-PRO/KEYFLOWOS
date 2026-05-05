@@ -22,6 +22,7 @@ import {
   Send,
   Repeat,
   LayoutDashboard,
+  Boxes,
 } from "lucide-react";
 
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -58,8 +59,9 @@ import PaymentsTab from "./payments/payments-tab";
 import { CommerceOverviewTab } from "./components/commerce-overview-tab";
 import { RevenueActionsTab } from "./components/revenue-actions-tab";
 import { ServiceLinkWidget } from "./components/service-link-widget";
+import { CommerceInventoryWrapper } from "./components/commerce-inventory-wrapper";
 
-type RevenueTabKey = "overview" | "quotes" | "invoices" | "payments" | "recurring" | "actions";
+type RevenueTabKey = "overview" | "quotes" | "invoices" | "payments" | "recurring" | "actions" | "inventory";
 
 const REVENUE_TABS: { key: RevenueTabKey; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, tooltip: "Cashflow snapshot and key metrics" },
@@ -67,6 +69,7 @@ const REVENUE_TABS: { key: RevenueTabKey; label: string; icon: React.ElementType
   { key: "invoices", label: "Invoices", icon: Receipt, tooltip: "Drafts, sent, overdue, paid" },
   { key: "payments", label: "Payments", icon: DollarSign, tooltip: "Collected and pending payments" },
   { key: "recurring", label: "Recurring", icon: Repeat, tooltip: "Subscriptions and scheduled invoices" },
+  { key: "inventory", label: "Inventory", icon: Boxes, tooltip: "Warehouses, stock, and purchase orders" },
   { key: "actions", label: "Actions", icon: Zap, tooltip: "Cashflow actions that need attention" },
 ];
 
@@ -783,6 +786,12 @@ export default function CommercePage() {
             triggerNew={billing.triggerNewSchedule}
             currency={businessCurrency}
           />
+        </TabFrame>
+      )}
+
+      {activeTab === "inventory" && (
+        <TabFrame loading={shell.loading} error={shell.error}>
+          <CommerceInventoryWrapper businessId={businessId} />
         </TabFrame>
       )}
 

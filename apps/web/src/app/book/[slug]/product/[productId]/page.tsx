@@ -173,6 +173,9 @@ export default function ProductDetailPage() {
           imageUrl: p.imageUrl,
           itemType: p.category === "PACKAGE" ? "package" : p.category === "SERVICE" ? "service" : "product",
           requiresBooking: false,
+          availableQuantity: p.availableQuantity,
+          stockStatus: p.stockStatus,
+          purchasable: p.purchasable,
         });
       }
 
@@ -340,10 +343,49 @@ export default function ProductDetailPage() {
               <p className="text-sm text-gray-500 leading-relaxed whitespace-pre-line">{item.description}</p>
             )}
 
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              In Stock
-            </div>
+            {(() => {
+              const status = item.stockStatus;
+              const purchasable = item.purchasable !== false;
+              const qty = item.availableQuantity;
+              if (item.itemType === "service" || status === "untracked" || status === undefined) {
+                return (
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    In Stock
+                  </div>
+                );
+              }
+              if (status === "out_of_stock" || !purchasable) {
+                return (
+                  <div className="flex items-center gap-2 text-xs text-red-500 font-medium">
+                    <div className="w-2 h-2 rounded-full bg-red-500" />
+                    Out of Stock
+                  </div>
+                );
+              }
+              if (status === "backorder") {
+                return (
+                  <div className="flex items-center gap-2 text-xs text-amber-500 font-medium">
+                    <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    Available on Backorder
+                  </div>
+                );
+              }
+              if (status === "low") {
+                return (
+                  <div className="flex items-center gap-2 text-xs text-amber-500 font-medium">
+                    <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    Only {qty ?? 0} left
+                  </div>
+                );
+              }
+              return (
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  In Stock{typeof qty === "number" ? ` · ${qty} available` : ""}
+                </div>
+              );
+            })()}
 
             <div className="flex flex-wrap gap-3 py-1">
               <div className="flex items-center gap-1.5 text-xs text-gray-400">
@@ -390,6 +432,14 @@ export default function ProductDetailPage() {
                   <CheckCircle2 className="w-5 h-5" />
                   In Cart — Remove
                 </button>
+              ) : item.purchasable === false ? (
+                <button
+                  disabled
+                  className="flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-semibold min-h-[44px] cursor-not-allowed bg-gray-100 text-gray-400 border border-gray-200"
+                >
+                  <ShoppingBag className="w-5 h-5" />
+                  Sold Out
+                </button>
               ) : (
                 <button
                   onClick={() => addToCart(item, quantity)}
@@ -397,7 +447,8 @@ export default function ProductDetailPage() {
                   style={{ backgroundColor: `${primaryColor}25`, color: primaryColor, border: `1px solid ${primaryColor}35` }}
                 >
                   <ShoppingBag className="w-5 h-5" />
-                  Add to Cart{quantity > 1 ? ` (${quantity})` : ""}
+                  {item.stockStatus === "backorder" ? "Pre-order" : "Add to Cart"}
+                  {quantity > 1 ? ` (${quantity})` : ""}
                 </button>
               )}
 
@@ -488,6 +539,14 @@ export default function ProductDetailPage() {
             <CheckCircle2 className="w-5 h-5" />
             In Cart — Tap to Remove
           </button>
+        ) : item.purchasable === false ? (
+          <button
+            disabled
+            className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-semibold min-h-[44px] cursor-not-allowed bg-gray-200 text-gray-500"
+          >
+            <ShoppingBag className="w-5 h-5" />
+            Sold Out
+          </button>
         ) : (
           <button
             onClick={() => addToCart(item, quantity)}
@@ -495,7 +554,7 @@ export default function ProductDetailPage() {
             style={{ backgroundColor: primaryColor, color: "white" }}
           >
             <ShoppingBag className="w-5 h-5" />
-            Add to Cart — {formatPrice(item.price * quantity, item.currency)}
+            {item.stockStatus === "backorder" ? "Pre-order" : "Add to Cart"} — {formatPrice(item.price * quantity, item.currency)}
           </button>
         )}
       </div>

@@ -476,9 +476,12 @@ export class StoreOrderService {
     const productIds = order.items.map((i) => i.productId);
     const products = await this.prisma.client.product.findMany({
       where: { id: { in: productIds } },
-      select: { id: true, inventoryMode: true, name: true },
+      select: { id: true, inventoryMode: true, outOfStockBehavior: true, name: true },
     });
     const productMode = new Map(products.map((p) => [p.id, p.inventoryMode ?? 'tracked']));
+    const productOOSBehavior = new Map(
+      products.map((p) => [p.id, p.outOfStockBehavior ?? 'hide']),
+    );
 
     // Buffer for invoice events emitted by InvoiceWorkflowService.transition
     // calls inside the transaction. We flush AFTER the tx commits so
@@ -568,9 +571,15 @@ export class StoreOrderService {
           );
         }
         if (stock.quantity < item.quantity) {
-          throw new BadRequestException(
-            `Cannot finalize checkout: insufficient stock for product ${item.productId} (have ${stock.quantity}, need ${item.quantity}).`,
-          );
+          // Merchant explicitly opted into backorder for this product —
+          // allow the sale through and let stock dip negative so the
+          // owed-units delta is still tracked + visible in inventory.
+          const allowBackorder = productOOSBehavior.get(item.productId) === 'allow_backorder';
+          if (!allowBackorder) {
+            throw new BadRequestException(
+              `Cannot finalize checkout: insufficient stock for product ${item.productId} (have ${stock.quantity}, need ${item.quantity}).`,
+            );
+          }
         }
         await tx.inventoryStock.update({
           where: { id: stock.id },

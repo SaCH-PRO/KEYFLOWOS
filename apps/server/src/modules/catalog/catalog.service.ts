@@ -28,6 +28,7 @@ export interface CatalogProductInput {
   executionMeta?: any;
   fulfillmentModel?: string | null;
   inventoryMode?: string | null;
+  outOfStockBehavior?: string | null;
   compareAtPrice?: number | null;
   // Digital resource (community/resource-marketplace) fields
   resourceType?: string | null;
@@ -54,6 +55,7 @@ export interface CatalogProductPatch {
   executionMeta?: any;
   fulfillmentModel?: string | null;
   inventoryMode?: string | null;
+  outOfStockBehavior?: string | null;
   compareAtPrice?: number | null;
 }
 
@@ -115,17 +117,134 @@ export class CatalogService {
     return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
+  /**
+   * Public storefront listing. Augments each product row with live
+   * inventory state derived from `InventoryStock` (sum across warehouses,
+   * minus reservations) and computes:
+   *   - availableQuantity: number | null (null when untracked/virtual)
+   *   - stockStatus: 'available' | 'low' | 'out_of_stock' | 'backorder' | 'untracked'
+   *   - purchasable: boolean — single source of truth for storefront UI
+   * Tracked products at zero stock with outOfStockBehavior='hide' are
+   * filtered out of the public list entirely.
+   */
   async listPublicProducts(businessId: string) {
-    return this.prisma.client.product.findMany({
+    const products = await this.prisma.client.product.findMany({
       where: { businessId, deletedAt: null, isActive: true },
       orderBy: { createdAt: 'desc' },
     });
+    const stockByProduct = await this.aggregateStock(products.map((p) => p.id));
+    const result: any[] = [];
+    for (const p of products) {
+      const projected = this.projectAvailability(p, stockByProduct.get(p.id));
+      if (projected.hidden) continue;
+      result.push({ ...p, ...projected.public });
+    }
+    return result;
   }
 
   async getProduct(businessId: string, productId: string) {
-    return this.prisma.client.product.findFirst({
+    const product = await this.prisma.client.product.findFirst({
       where: { id: productId, businessId, deletedAt: null },
     });
+    if (!product) return null;
+    const stockByProduct = await this.aggregateStock([product.id]);
+    const projected = this.projectAvailability(product, stockByProduct.get(product.id));
+    return { ...product, ...projected.public };
+  }
+
+  private async aggregateStock(productIds: string[]) {
+    const map = new Map<string, { quantity: number; reserved: number }>();
+    if (productIds.length === 0) return map;
+    const rows = await this.prisma.client.inventoryStock.groupBy({
+      by: ['productId'],
+      where: { productId: { in: productIds } },
+      _sum: { quantity: true, reserved: true },
+    });
+    for (const r of rows) {
+      map.set(r.productId, {
+        quantity: r._sum.quantity ?? 0,
+        reserved: r._sum.reserved ?? 0,
+      });
+    }
+    return map;
+  }
+
+  private projectAvailability(
+    product: { inventoryMode: string | null; outOfStockBehavior: string | null },
+    stock: { quantity: number; reserved: number } | undefined,
+  ): {
+    hidden: boolean;
+    public: {
+      availableQuantity: number | null;
+      stockStatus: 'available' | 'low' | 'out_of_stock' | 'backorder' | 'untracked';
+      purchasable: boolean;
+      outOfStockBehavior: string;
+    };
+  } {
+    const mode = product.inventoryMode ?? 'tracked';
+    const behavior = product.outOfStockBehavior ?? 'hide';
+
+    // Untracked / virtual: no inventory gating, always purchasable.
+    if (mode !== 'tracked') {
+      return {
+        hidden: false,
+        public: {
+          availableQuantity: null,
+          stockStatus: 'untracked',
+          purchasable: true,
+          outOfStockBehavior: behavior,
+        },
+      };
+    }
+
+    const qty = stock?.quantity ?? 0;
+    const reserved = stock?.reserved ?? 0;
+    const available = Math.max(0, qty - reserved);
+
+    if (available <= 0) {
+      if (behavior === 'allow_backorder') {
+        return {
+          hidden: false,
+          public: {
+            availableQuantity: 0,
+            stockStatus: 'backorder',
+            purchasable: true,
+            outOfStockBehavior: behavior,
+          },
+        };
+      }
+      if (behavior === 'show_oos') {
+        return {
+          hidden: false,
+          public: {
+            availableQuantity: 0,
+            stockStatus: 'out_of_stock',
+            purchasable: false,
+            outOfStockBehavior: behavior,
+          },
+        };
+      }
+      // default: hide
+      return {
+        hidden: true,
+        public: {
+          availableQuantity: 0,
+          stockStatus: 'out_of_stock',
+          purchasable: false,
+          outOfStockBehavior: behavior,
+        },
+      };
+    }
+
+    return {
+      hidden: false,
+      public: {
+        availableQuantity: available,
+        stockStatus: available <= 3 ? 'low' : 'available',
+        purchasable: true,
+        outOfStockBehavior: behavior,
+      },
+    };
   }
 
   async createProduct(input: CatalogProductInput) {
@@ -149,6 +268,7 @@ export class CatalogService {
         ...(input.executionMeta !== undefined && { executionMeta: input.executionMeta }),
         ...(input.fulfillmentModel !== undefined && { fulfillmentModel: input.fulfillmentModel }),
         ...(input.inventoryMode !== undefined && { inventoryMode: input.inventoryMode }),
+        ...(input.outOfStockBehavior !== undefined && { outOfStockBehavior: input.outOfStockBehavior }),
         ...(input.compareAtPrice !== undefined && { compareAtPrice: input.compareAtPrice }),
         ...(input.resourceType !== undefined && { resourceType: input.resourceType }),
         ...(input.downloadUrl !== undefined && { downloadUrl: input.downloadUrl }),
@@ -169,7 +289,7 @@ export class CatalogService {
     const fields: (keyof CatalogProductPatch)[] = [
       'name', 'price', 'currency', 'description', 'category', 'duration',
       'imageUrl', 'sku', 'isActive', 'executionModel', 'executionMeta',
-      'fulfillmentModel', 'inventoryMode', 'compareAtPrice',
+      'fulfillmentModel', 'inventoryMode', 'outOfStockBehavior', 'compareAtPrice',
     ];
     for (const k of fields) {
       if (input[k] !== undefined) data[k as string] = input[k];
