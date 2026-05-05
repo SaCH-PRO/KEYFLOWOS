@@ -7,6 +7,7 @@ import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { PublicEventsService } from '../public-events/public-events.service';
 
 interface DayHours {
   open: string;
@@ -35,6 +36,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     @Inject(CommerceService) private readonly commerce: CommerceService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
+    @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
   ) {}
 
   onModuleInit() {
@@ -580,6 +582,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     location?: string | null;
     locationPlaceId?: string | null;
     locationLatLng?: { lat: number; lng: number } | null;
+    storefrontSlug?: string | null;
+    visitorId?: string | null;
+    referralCode?: string | null;
   }) {
     const business = await this.prisma.client.business.findFirstOrThrow({
       where: { id: input.businessId, deletedAt: null },
@@ -676,14 +681,39 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    const sourceDetail = input.storefrontSlug
+      ? `storefront:${input.storefrontSlug}`
+      : 'public-booking';
     const contact = await this.crm.findOrCreateContact(input.businessId, {
       ...input.contact,
-      source: 'booking',
-      sourceDetail: 'public-booking',
+      source: 'storefront',
+      sourceDetail,
+      ...(input.referralCode ? { custom: { referralCode: input.referralCode } } : {}),
     });
     if (!contact) {
       throw new Error('Failed to create or find contact');
     }
+    if (input.visitorId) {
+      await this.publicEvents
+        .backstitchVisitor({
+          businessId: input.businessId,
+          visitorId: input.visitorId,
+          contactId: contact.id,
+          sourceDetail,
+        })
+        .catch(() => undefined);
+    }
+    await this.publicEvents.logStorefrontEvent({
+      businessId: input.businessId,
+      contactId: contact.id,
+      type: 'booking.started',
+      sourceDetail,
+      data: {
+        serviceId: service.id,
+        startTime: start.toISOString(),
+        referralCode: input.referralCode ?? null,
+      },
+    });
 
     const invoice =
       service.price > 0 ? await this.commerce.createInvoiceForService(input.businessId, contact.id, service) : null;
@@ -727,19 +757,19 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     this.logger.debug(`Emitting booking.created for booking=${booking.id} business=${booking.businessId}`);
     this.events.emit('booking.created', payload);
     if (booking.contactId) {
-      await this.crm.logContactEvent({
+      await this.publicEvents.logStorefrontEvent({
         businessId: booking.businessId,
         contactId: booking.contactId,
         type: 'booking.created',
+        sourceDetail,
         data: {
           bookingId: booking.id,
           serviceId: booking.serviceId,
           startTime: booking.startTime,
           endTime: booking.endTime,
           invoiceId: invoice?.id,
+          referralCode: input.referralCode ?? null,
         },
-        actorType: 'SYSTEM',
-        source: 'bookings',
       });
     }
 

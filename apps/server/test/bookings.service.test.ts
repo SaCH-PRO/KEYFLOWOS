@@ -88,6 +88,7 @@ function makeService(prisma: PrismaService, opts: { findOrCreateContact?: any; c
     commerce as any,
     { checkAndEnforceLimit: vi.fn() } as any,
     { sendTransactionalEmail: vi.fn() } as any,
+    { track: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn() } as any,
   );
 }
 
@@ -109,6 +110,7 @@ describe('BookingsService', () => {
       { createInvoiceForService: vi.fn() } as any,
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
+      { track: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn() } as any,
     );
 
     const booking = await service.createBooking({
@@ -140,6 +142,7 @@ describe('BookingsService', () => {
       { createInvoiceForService: vi.fn() } as any,
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
+      { track: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn() } as any,
     );
 
     await service.createBooking({
@@ -178,6 +181,7 @@ describe('BookingsService', () => {
       { createInvoiceForService } as any,
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
+      { track: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn() } as any,
     );
 
     const result = await service.publicCreateBooking({

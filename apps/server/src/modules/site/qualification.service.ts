@@ -1,5 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CrmService } from '../crm/crm.service';
+import { PublicEventsService } from '../public-events/public-events.service';
 
 export interface QualificationAnswer {
   questionId: string;
@@ -21,6 +23,8 @@ export interface QualificationRecommendation {
 export class QualificationService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
   ) {}
 
   async getQualificationConfig(businessId: string) {
@@ -216,11 +220,16 @@ export class QualificationService {
     };
   }
 
-  async selectPackage(journeyId: string, productId: string, executionModel?: string, customer?: { name?: string; email?: string }) {
+  async selectPackage(
+    journeyId: string,
+    productId: string,
+    executionModel?: string,
+    customer?: { name?: string; email?: string; visitorId?: string; referralCode?: string },
+  ) {
     const journey = await this.prisma.client.qualificationJourney.findUnique({ where: { id: journeyId } });
     if (!journey) throw new NotFoundException('Journey not found');
 
-    return this.prisma.client.qualificationJourney.update({
+    const updated = await this.prisma.client.qualificationJourney.update({
       where: { id: journeyId },
       data: {
         selectedProductId: productId,
@@ -230,6 +239,47 @@ export class QualificationService {
         status: 'package_selected',
       },
     });
+
+    const customerEmail = customer?.email ?? journey.customerEmail ?? null;
+    const customerName = customer?.name ?? journey.customerName ?? null;
+    if (customerEmail || customerName) {
+      try {
+        const nameParts = (customerName ?? '').trim().split(/\s+/).filter(Boolean);
+        const sourceDetail = `qualification:${journey.id}`;
+        const contact = await this.crm.findOrCreateContact(journey.businessId, {
+          firstName: nameParts[0] ?? null,
+          lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+          email: customerEmail,
+          source: 'storefront',
+          sourceDetail,
+          ...(customer?.referralCode ? { custom: { referralCode: customer.referralCode } } : {}),
+        });
+        if (contact?.id) {
+          if (customer?.visitorId) {
+            await this.publicEvents.backstitchVisitor({
+              businessId: journey.businessId,
+              visitorId: customer.visitorId,
+              contactId: contact.id,
+              sourceDetail,
+            }).catch(() => undefined);
+          }
+          await this.publicEvents.logStorefrontEvent({
+            businessId: journey.businessId,
+            contactId: contact.id,
+            type: 'quote.requested',
+            sourceDetail,
+            data: {
+              journeyId: journey.id,
+              productId,
+              executionModel: executionModel ?? null,
+            },
+          });
+        }
+      } catch {
+      }
+    }
+
+    return updated;
   }
 
   async submitAssetIntake(journeyId: string, intakeData: Record<string, any>) {

@@ -173,6 +173,9 @@ export class BookingsController {
       location: body.location ? sanitizeString(body.location, 500) : undefined,
       locationPlaceId: body.locationPlaceId ? sanitizeString(body.locationPlaceId, 200) : undefined,
       locationLatLng: body.locationLatLng ?? undefined,
+      storefrontSlug: body.storefrontSlug ? sanitizeString(body.storefrontSlug, 200) : undefined,
+      visitorId: body.visitorId ? sanitizeString(body.visitorId, 100) : undefined,
+      referralCode: body.referralCode ? sanitizeString(body.referralCode, 100) : undefined,
     });
   }
 

@@ -86,4 +86,19 @@ export class PublicCreateBookingDto {
   @ValidateNested()
   @Type(() => PublicBookingLatLngDto)
   locationLatLng?: PublicBookingLatLngDto | null;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  storefrontSlug?: string | null;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  visitorId?: string | null;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  referralCode?: string | null;
 }

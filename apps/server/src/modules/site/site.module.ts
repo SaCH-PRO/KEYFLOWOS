@@ -1,8 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CrmModule } from '../crm/crm.module';
+import { PublicEventsModule } from '../public-events/public-events.module';
 import { SiteController } from './site.controller';
 import { SiteService } from './site.service';
 import { StoreOrderService } from './store-order.service';
@@ -11,7 +13,14 @@ import { IntakeService } from './intake.service';
 import { QualificationService } from './qualification.service';
 
 @Module({
-  imports: [PrismaModule, AiModule, PaymentsModule, NotificationsModule],
+  imports: [
+    PrismaModule,
+    AiModule,
+    PaymentsModule,
+    NotificationsModule,
+    CrmModule,
+    forwardRef(() => PublicEventsModule),
+  ],
   controllers: [SiteController],
   providers: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService],
   exports: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService],

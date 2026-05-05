@@ -6,6 +6,7 @@ import { BookingsAiService } from './bookings-ai.service';
 import { CalendarService } from './calendar.service';
 import { BookingOptimizerService } from './booking-optimizer.service';
 import { CrmModule } from '../crm/crm.module';
+import { PublicEventsModule } from '../public-events/public-events.module';
 import { CommerceModule } from '../commerce/commerce.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
@@ -13,7 +14,7 @@ import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [CrmModule, CommerceModule, SubscriptionsModule, AiModule, NotificationsModule],
+  imports: [CrmModule, PublicEventsModule, CommerceModule, SubscriptionsModule, AiModule, NotificationsModule],
   controllers: [BookingsController, BookingsAiController],
   providers: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService, PlanLimitGuard],
   exports: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService],

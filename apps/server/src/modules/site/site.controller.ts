@@ -111,6 +111,8 @@ export class SiteController {
       paymentMethod?: string;
       returnUrl?: string;
       notes?: string;
+      visitorId?: string;
+      referralCode?: string;
     },
   ) {
     const storefront = await this.siteService.getPublicStorefront(slug);
@@ -132,6 +134,9 @@ export class SiteController {
       shippingInfo: body.shipping,
       paymentMethod: body.paymentMethod,
       notes: sanitize(body.notes ?? null) ?? undefined,
+      storefrontSlug: slug,
+      visitorId: body.visitorId ? sanitize(body.visitorId, 100) ?? undefined : undefined,
+      referralCode: body.referralCode ? sanitize(body.referralCode, 100) ?? undefined : undefined,
     });
 
     let payment: any = null;
@@ -367,6 +372,8 @@ export class SiteController {
       description: string;
       budget?: string;
       urgency?: string;
+      visitorId?: string;
+      referralCode?: string;
       _hp?: string;
       _t?: number;
     },
@@ -380,6 +387,8 @@ export class SiteController {
       description: sanitize(body.description ?? '', 5000) ?? '',
       budget: body.budget ? (sanitize(body.budget, 100) ?? undefined) : undefined,
       urgency: body.urgency && allowedUrgency.has(body.urgency) ? body.urgency : 'normal',
+      visitorId: body.visitorId ? sanitize(body.visitorId, 100) ?? undefined : undefined,
+      referralCode: body.referralCode ? sanitize(body.referralCode, 100) ?? undefined : undefined,
     });
   }
 
@@ -460,7 +469,7 @@ export class SiteController {
   @Post('storefront/public/qualification/:journeyId/select')
   qualificationSelect(
     @Param('journeyId') journeyId: string,
-    @Body() body: { productId: string; executionModel?: string; customer?: { name?: string; email?: string } },
+    @Body() body: { productId: string; executionModel?: string; customer?: { name?: string; email?: string; visitorId?: string; referralCode?: string } },
   ) {
     const cleanProductId = sanitize(body.productId ?? '', 100) ?? '';
     const cleanExec = body.executionModel ? sanitize(body.executionModel, 100) ?? undefined : undefined;
@@ -468,6 +477,8 @@ export class SiteController {
       ? {
           name: body.customer.name ? sanitize(body.customer.name, 200) ?? undefined : undefined,
           email: body.customer.email ? sanitize(body.customer.email, 320) ?? undefined : undefined,
+          visitorId: body.customer.visitorId ? sanitize(body.customer.visitorId, 100) ?? undefined : undefined,
+          referralCode: body.customer.referralCode ? sanitize(body.customer.referralCode, 100) ?? undefined : undefined,
         }
       : undefined;
     return this.qualificationService.selectPackage(journeyId, cleanProductId, cleanExec, cleanCustomer);

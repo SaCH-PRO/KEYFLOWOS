@@ -1,12 +1,16 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CrmService } from '../crm/crm.service';
+import { PublicEventsService } from '../public-events/public-events.service';
 
 @Injectable()
 export class IntakeService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
   ) {}
 
   async submitIntake(slug: string, input: {
@@ -17,6 +21,8 @@ export class IntakeService {
     description: string;
     budget?: string;
     urgency?: string;
+    visitorId?: string | null;
+    referralCode?: string | null;
   }) {
     if (!input.name?.trim()) throw new BadRequestException('Name is required');
     if (!input.email?.trim()) throw new BadRequestException('Email is required');
@@ -68,6 +74,44 @@ export class IntakeService {
         },
       });
     } catch {
+    }
+
+    try {
+      const nameParts = input.name.trim().split(/\s+/);
+      const contact = await this.crm.findOrCreateContact(business.id, {
+        firstName: nameParts[0] ?? null,
+        lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+        email: input.email,
+        phone: input.phone ?? null,
+        source: 'storefront',
+        sourceDetail: `intake:${slug}`,
+        ...(input.referralCode ? { custom: { referralCode: input.referralCode } } : {}),
+      });
+
+      if (contact?.id) {
+        if (input.visitorId) {
+          await this.publicEvents.backstitchVisitor({
+            businessId: business.id,
+            visitorId: input.visitorId,
+            contactId: contact.id,
+            sourceDetail: `intake:${slug}`,
+          }).catch(() => undefined);
+        }
+        await this.publicEvents.logStorefrontEvent({
+          businessId: business.id,
+          contactId: contact.id,
+          type: 'lead_form.submitted',
+          sourceDetail: `intake:${slug}`,
+          data: {
+            submissionId: submission.id,
+            category: input.category,
+            urgency: input.urgency || 'normal',
+            referralCode: input.referralCode ?? null,
+          },
+        });
+      }
+    } catch {
+      // Public-flow CRM hook is best-effort; intake submission must still succeed.
     }
 
     return { id: submission.id, message: 'Request submitted successfully' };
