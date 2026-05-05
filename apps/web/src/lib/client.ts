@@ -10875,3 +10875,273 @@ export async function updateDataQualitySettings(businessId: string, body: { stal
     body,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Calendar module API (C2) — unified CalendarEvent surface
+// ---------------------------------------------------------------------------
+
+export const calendarEventModuleSchema = z.enum([
+  'BOOKINGS',
+  'MARKETING',
+  'CRM',
+  'REVENUE',
+  'PROJECTS',
+  'ORDERS',
+  'EXTERNAL',
+  'ACTIVITY',
+]);
+
+export const calendarEventTypeSchema = z.enum([
+  'BOOKING',
+  'CONTENT_POST',
+  'EMAIL_CAMPAIGN',
+  'CONTACT_TASK',
+  'FOLLOW_UP',
+  'INVOICE_DUE',
+  'INVOICE_OVERDUE',
+  'QUOTE_EXPIRY',
+  'PROJECT_TASK',
+  'SHIPMENT',
+  'REORDER',
+  'RECURRING_INVOICE',
+  'EXTERNAL_GOOGLE_EVENT',
+  'ACTIVITY_LOG',
+]);
+
+export const calendarEventStatusSchema = z.enum([
+  'SCHEDULED',
+  'TENTATIVE',
+  'CONFIRMED',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'CANCELLED',
+  'OVERDUE',
+  'FAILED',
+]);
+
+export const calendarEventVisibilitySchema = z.enum([
+  'PRIVATE',
+  'TEAM',
+  'PUBLIC',
+]);
+
+export const calendarEventPrioritySchema = z.enum([
+  'LOW',
+  'NORMAL',
+  'HIGH',
+  'URGENT',
+]);
+
+export const calendarEventSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  type: calendarEventTypeSchema,
+  module: calendarEventModuleSchema,
+  startAt: z.string(),
+  endAt: z.string().nullable().optional(),
+  allDay: z.boolean(),
+  timezone: z.string().nullable().optional(),
+  status: calendarEventStatusSchema,
+  priority: calendarEventPrioritySchema,
+  color: z.string().nullable().optional(),
+  visibility: calendarEventVisibilitySchema,
+  sourceType: z.string(),
+  sourceId: z.string(),
+  sourceUrl: z.string().nullable().optional(),
+  contactId: z.string().nullable().optional(),
+  staffId: z.string().nullable().optional(),
+  assigneeId: z.string().nullable().optional(),
+  amount: z.number().nullable().optional(),
+  currency: z.string().nullable().optional(),
+  meta: z.unknown().nullable().optional(),
+  syncStatus: z.string(),
+  googleEventId: z.string().nullable().optional(),
+  googleCalendarId: z.string().nullable().optional(),
+  lastSyncedAt: z.string().nullable().optional(),
+  syncError: z.string().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type CalendarEvent = z.infer<typeof calendarEventSchema>;
+export type CalendarEventModule = z.infer<typeof calendarEventModuleSchema>;
+export type CalendarEventType = z.infer<typeof calendarEventTypeSchema>;
+export type CalendarEventStatus = z.infer<typeof calendarEventStatusSchema>;
+
+const calendarListResponseSchema = z.object({
+  events: z.array(calendarEventSchema),
+  total: z.number(),
+  truncated: z.boolean(),
+  cap: z.number(),
+  limit: z.number(),
+  nextCursor: z.string().nullable(),
+});
+
+export type CalendarListResponse = z.infer<typeof calendarListResponseSchema>;
+
+const calendarConflictResponseSchema = z.object({
+  conflicts: z.array(
+    z.object({
+      left: calendarEventSchema,
+      right: calendarEventSchema,
+      reason: z.string(),
+    }),
+  ),
+  scanned: z.number(),
+});
+
+export type CalendarConflictResponse = z.infer<typeof calendarConflictResponseSchema>;
+
+const calendarInsightsResponseSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  totalEvents: z.number(),
+  totalRevenue: z.number(),
+  byModule: z.array(z.object({ key: z.string(), count: z.number(), revenue: z.number() })),
+  byType: z.array(z.object({ key: z.string(), count: z.number(), revenue: z.number() })),
+  hints: z.array(z.object({ kind: z.string(), message: z.string() })),
+});
+
+export type CalendarInsightsResponse = z.infer<typeof calendarInsightsResponseSchema>;
+
+export interface CalendarEventFilters {
+  start?: string;
+  end?: string;
+  modules?: CalendarEventModule[];
+  types?: CalendarEventType[];
+  statuses?: CalendarEventStatus[];
+  contactId?: string;
+  staffId?: string;
+  assigneeId?: string;
+  sourceType?: string;
+  sourceId?: string;
+  hasRevenue?: boolean;
+  synced?: boolean;
+  view?: 'agenda' | 'day' | 'week' | 'month';
+  includeTimeline?: boolean;
+  includeExternal?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+function buildCalendarQuery(filters: CalendarEventFilters): string {
+  const params = new URLSearchParams();
+  const set = (key: string, value: string | undefined) => {
+    if (value !== undefined && value !== '') params.set(key, value);
+  };
+  set('start', filters.start);
+  set('end', filters.end);
+  if (filters.modules?.length) params.set('modules', filters.modules.join(','));
+  if (filters.types?.length) params.set('types', filters.types.join(','));
+  if (filters.statuses?.length) params.set('statuses', filters.statuses.join(','));
+  set('contactId', filters.contactId);
+  set('staffId', filters.staffId);
+  set('assigneeId', filters.assigneeId);
+  set('sourceType', filters.sourceType);
+  set('sourceId', filters.sourceId);
+  if (filters.hasRevenue !== undefined) params.set('hasRevenue', String(filters.hasRevenue));
+  if (filters.synced !== undefined) params.set('synced', String(filters.synced));
+  set('view', filters.view);
+  if (filters.includeTimeline !== undefined) params.set('includeTimeline', String(filters.includeTimeline));
+  if (filters.includeExternal !== undefined) params.set('includeExternal', String(filters.includeExternal));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  set('cursor', filters.cursor);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+export async function fetchCalendarEvents(
+  businessId: string,
+  filters: CalendarEventFilters = {},
+) {
+  const bid = businessId || DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/calendar/businesses/${encodeURIComponent(bid)}/events${buildCalendarQuery(filters)}`,
+    calendarListResponseSchema,
+  );
+}
+
+export async function fetchCalendarAgenda(businessId: string, day: string) {
+  const bid = businessId || DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/calendar/businesses/${encodeURIComponent(bid)}/agenda?day=${encodeURIComponent(day)}`,
+    calendarListResponseSchema,
+  );
+}
+
+export async function fetchCalendarConflicts(
+  businessId: string,
+  from: string,
+  to: string,
+) {
+  const bid = businessId || DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/calendar/businesses/${encodeURIComponent(bid)}/conflicts?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    calendarConflictResponseSchema,
+  );
+}
+
+export async function fetchCalendarInsights(
+  businessId: string,
+  from: string,
+  to: string,
+) {
+  const bid = businessId || DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/calendar/businesses/${encodeURIComponent(bid)}/insights?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    calendarInsightsResponseSchema,
+  );
+}
+
+export async function createCalendarEvent(
+  businessId: string,
+  body: {
+    title: string;
+    description?: string | null;
+    type: CalendarEventType;
+    module?: CalendarEventModule;
+    startAt: string;
+    endAt?: string | null;
+    allDay?: boolean;
+    timezone?: string | null;
+    priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+    visibility?: 'PRIVATE' | 'TEAM' | 'PUBLIC';
+    color?: string | null;
+    contactId?: string | null;
+    assigneeId?: string | null;
+    meta?: Record<string, unknown> | null;
+  },
+) {
+  const bid = businessId || DEFAULT_BUSINESS_ID;
+  return apiPost<CalendarEvent>({
+    path: `/calendar/businesses/${encodeURIComponent(bid)}/events`,
+    body,
+  });
+}
+
+export async function patchCalendarEvent(
+  businessId: string,
+  eventId: string,
+  patch: {
+    startAt?: string;
+    endAt?: string | null;
+    status?: CalendarEventStatus;
+    title?: string;
+    description?: string | null;
+  },
+) {
+  const bid = businessId || DEFAULT_BUSINESS_ID;
+  return apiPatch<CalendarEvent>(
+    `/calendar/businesses/${encodeURIComponent(bid)}/events/${encodeURIComponent(eventId)}`,
+    patch,
+  );
+}
+
+export async function cancelCalendarEvent(businessId: string, eventId: string) {
+  const bid = businessId || DEFAULT_BUSINESS_ID;
+  return apiDelete<{ id: string; cancelled: boolean }>(
+    `/calendar/businesses/${encodeURIComponent(bid)}/events/${encodeURIComponent(eventId)}`,
+  );
+}

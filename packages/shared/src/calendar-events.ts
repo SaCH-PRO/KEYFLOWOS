@@ -105,6 +105,7 @@ export const CALENDAR_SOURCE_TYPES = [
   "recurring_invoice",
   "google_event",
   "activity",
+  "manual",
 ] as const;
 
 export type CalendarSourceType = (typeof CALENDAR_SOURCE_TYPES)[number];
