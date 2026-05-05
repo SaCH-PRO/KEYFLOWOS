@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense, useState } from "react";
-import { MessageSquare, ListTodo, History, AlertCircle, Loader2, MessageCircle, Briefcase, Shield } from "lucide-react";
+import { MessageSquare, ListTodo, History, AlertCircle, Loader2, MessageCircle, Briefcase, Shield, Network } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
 import type { CrossJourneyResponse } from "@/lib/client";
@@ -13,6 +13,7 @@ const ConversationsTabPanel = React.lazy(() => import("./conversations-tab-panel
 type ConversationsContactLite = import("./conversations-tab-panel").ContactLite;
 const DealsTabPanel = React.lazy(() => import("./deals-tab-panel").then(m => ({ default: m.DealsTabPanel })));
 const AuditTabPanel = React.lazy(() => import("./audit-tab-panel").then(m => ({ default: m.AuditTabPanel })));
+const NetworkTabPanel = React.lazy(() => import("./network-tab-panel").then(m => ({ default: m.NetworkTabPanel })));
 
 class TabErrorBoundary extends React.Component<
   { children: React.ReactNode; resetKey: string },
@@ -134,7 +135,8 @@ export function ContactDetailTabs({
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
           { key: "deals", label: "Deals", icon: Briefcase, count: undefined as number | undefined },
-          { key: "audit", label: "Audit", icon: Shield, count: undefined },
+          { key: "audit", label: "Audit", icon: Shield, count: undefined as number | undefined },
+          { key: "network", label: "Network", icon: Network, count: undefined as number | undefined },
         ].map(({ key, label, icon: Icon, count }) => (
           <button
             key={key}
@@ -219,6 +221,22 @@ export function ContactDetailTabs({
             <div className={`pt-3 pb-6 ${normalized === "audit" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="audit">
                 <AuditTabPanel businessId={businessId} contactId={contact.id} />
+              </TabErrorBoundary>
+            </div>
+          )}
+          {activatedTabs.has("network") && (
+            <div className={`space-y-3 pt-3 pb-6 ${normalized === "network" ? "" : "hidden"}`}>
+              <TabErrorBoundary resetKey="network">
+                <NetworkTabPanel
+                  contactId={contact.id}
+                  contactName={`${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || undefined}
+                  businessId={businessId}
+                  onNavigateToContact={(id) => {
+                    if (typeof window !== "undefined") {
+                      window.location.href = `/app/crm/contacts/${id}`;
+                    }
+                  }}
+                />
               </TabErrorBoundary>
             </div>
           )}

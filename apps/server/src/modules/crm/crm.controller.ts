@@ -8,6 +8,8 @@ import { ConversationAiService } from './conversation-ai.service';
 import { CrmFlowService } from './crm-flow.service';
 import { CrmImportService } from './crm-import.service';
 import { CrmJourneyService } from './crm-journey.service';
+import { CrmNetworkService } from './crm-network.service';
+import type { ContactRelationshipEdgeType } from '@keyflow/shared';
 import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmRevenueService } from './crm-revenue.service';
 import { CrmRelationshipHealthService } from './crm-relationship-health.service';
@@ -57,7 +59,121 @@ export class CrmController {
     @Inject(CrmCommunicationService) private readonly communication: CrmCommunicationService,
     @Inject(BestChannelService) private readonly bestChannel: BestChannelService,
     @Inject(ConversationAiService) private readonly conversationAi: ConversationAiService,
+    @Inject(CrmNetworkService) private readonly network: CrmNetworkService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  // Relationship graph (M5)
+  // ---------------------------------------------------------------------------
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/relationships')
+  listContactRelationships(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.network.listForContact(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/network')
+  getContactNetwork(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Query('depth') depth?: string,
+  ) {
+    const d = depth ? Math.max(1, Math.min(2, Number(depth) || 2)) : 2;
+    return this.network.getNeighbourhood(businessId, contactId, d);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/network')
+  getNetworkGraph(
+    @Param('businessId') businessId: string,
+    @Query('type') type?: string,
+    @Query('relationshipHealth') relationshipHealth?: string,
+    @Query('minDealValue') minDealValue?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.network.listGraphForBusiness(businessId, {
+      type: type as ContactRelationshipEdgeType | undefined,
+      relationshipHealth: relationshipHealth || undefined,
+      minDealValue: minDealValue ? Number(minDealValue) : undefined,
+      search: search || undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/relationships')
+  createContactRelationship(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: { toContactId: string; type: string; since?: string | null; note?: string | null },
+  ) {
+    if (!body?.toContactId || !body?.type) {
+      throw new BadRequestException('toContactId and type are required');
+    }
+    return this.network.createRelationship({
+      businessId,
+      fromContactId: contactId,
+      toContactId: body.toContactId,
+      type: body.type,
+      since: body.since ?? null,
+      note: body.note ?? null,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Delete('businesses/:businessId/relationships/:relationshipId')
+  deleteContactRelationship(
+    @Param('businessId') businessId: string,
+    @Param('relationshipId') relationshipId: string,
+  ) {
+    return this.network.deleteRelationship(businessId, relationshipId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/refer')
+  referContact(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: {
+      contactId?: string;
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      phone?: string;
+      note?: string | null;
+    },
+  ) {
+    if (!body?.contactId && !body?.firstName && !body?.lastName && !body?.email && !body?.phone) {
+      throw new BadRequestException('Provide an existing contactId or referral details (name/email/phone)');
+    }
+    return this.network.referContact({
+      businessId,
+      referrerContactId: contactId,
+      target: {
+        contactId: body.contactId,
+        firstName: body.firstName,
+        lastName: body.lastName,
+        email: body.email,
+        phone: body.phone,
+      },
+      note: body.note ?? null,
+    });
+  }
 
   @Get('health')
   async healthCheck() {

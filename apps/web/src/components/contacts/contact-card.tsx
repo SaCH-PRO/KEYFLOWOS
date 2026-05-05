@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import React from "react";
 import { motion } from "framer-motion";
-import { Phone, Tag, Trash2, MessageCircle, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock, AlertCircle, DollarSign } from "lucide-react";
+import { Phone, Tag, Trash2, MessageCircle, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock, AlertCircle, DollarSign, UserPlus } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import { relativeTime, getScoreStyle, STATUS_COLORS } from "@/lib/crm-utils";
 
@@ -60,7 +60,7 @@ const STAGE_BADGE_STYLES: Record<string, { bg: string; text: string; label: stri
   VIP: { bg: "bg-violet-500/10", text: "text-violet-400", label: "VIP" },
 };
 
-export type QuickActionType = "create-invoice" | "book-appointment" | "send-quote";
+export type QuickActionType = "create-invoice" | "book-appointment" | "send-quote" | "refer";
 
 interface ContactCardProps {
   contact: ContactCardData;
@@ -274,6 +274,10 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
                   <button role="menuitem" onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-white/[0.05] transition-colors">
                     <FileSignature className="w-3.5 h-3.5 text-violet-400" />
                     Send Quote
+                  </button>
+                  <button role="menuitem" onClick={(e) => handleQuickAction(e, "refer")} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-white/[0.05] transition-colors">
+                    <UserPlus className="w-3.5 h-3.5 text-amber-400" />
+                    Refer / Link
                   </button>
                   <hr className="my-1 border-border/30" />
                   <button role="menuitem" onClick={handleDelete} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
