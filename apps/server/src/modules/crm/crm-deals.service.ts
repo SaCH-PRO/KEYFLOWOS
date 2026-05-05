@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
+import { WonLostReasonService } from './won-lost-reason.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
 
 const DEFAULT_STAGES: Array<{
@@ -46,6 +47,7 @@ export class CrmDealsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
+    @Inject(WonLostReasonService) private readonly reasons: WonLostReasonService,
   ) {}
 
   async ensureDefaultStages(businessId: string) {
@@ -293,6 +295,15 @@ export class CrmDealsService {
       newStatus,
     }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
 
+    this.events.emit('crm.deal.stage_changed', {
+      businessId: input.businessId,
+      dealId: deal.id,
+      contactId: deal.contactId,
+      fromStageId: fromStage?.id,
+      toStageId: target.id,
+      newStatus,
+    });
+
     if (newStatus === 'WON' && deal.status !== 'WON') {
       await this.timeline.logEvent(input.businessId, deal.contactId, CONTACT_EVENT.DEAL_WON, {
         dealId: deal.id, title: deal.title, value: deal.value, currency: deal.currency,
@@ -327,13 +338,18 @@ export class CrmDealsService {
     return { moved: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
   }
 
-  async winDeal(input: { businessId: string; dealId: string; wonAt?: string; actualValue?: number; actorId?: string }) {
+  async winDeal(input: { businessId: string; dealId: string; wonAt?: string; actualValue?: number; reasonId?: string | null; reasonNotes?: string | null; actorId?: string }) {
     const deal = await this.getDeal({ businessId: input.businessId, dealId: input.dealId });
     const stage = await this.prisma.client.dealStage.findFirst({
       where: { businessId: input.businessId, category: 'WON', archivedAt: null },
       orderBy: [{ position: 'asc' }],
     });
     if (!stage) throw new BadRequestException('No "Won" stage configured');
+    const reason = await this.reasons.resolveForUse({ businessId: input.businessId, reasonId: input.reasonId ?? null, kind: 'WON' });
+    const trimmedNotes = input.reasonNotes ? input.reasonNotes.trim().slice(0, 1000) : null;
+    if (!reason && !trimmedNotes) {
+      throw new BadRequestException('A reason or notes is required when marking a deal as won');
+    }
     const updated = await this.prisma.client.deal.update({
       where: { id: deal.id },
       data: {
@@ -342,27 +358,42 @@ export class CrmDealsService {
         wonAt: this.parseDate(input.wonAt) ?? new Date(),
         lostAt: null,
         lossReason: null,
+        wonLostReasonId: reason?.id ?? null,
+        wonLostReasonNotes: trimmedNotes,
+        bottleneckFlag: false,
+        bottleneckAt: null,
         value: input.actualValue !== undefined ? input.actualValue : undefined,
         lastStageChangedAt: new Date(),
       },
-      include: { stage: true },
+      include: { stage: true, wonLostReason: true },
     });
     await this.timeline.logEvent(input.businessId, deal.contactId, CONTACT_EVENT.DEAL_STAGE_CHANGED, {
       dealId: deal.id, title: deal.title, toStage: { id: stage.id, name: stage.name, slug: stage.slug }, newStatus: 'WON',
     }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
     await this.timeline.logEvent(input.businessId, deal.contactId, CONTACT_EVENT.DEAL_WON, {
       dealId: deal.id, title: deal.title, value: updated.value, currency: updated.currency,
+      reason: reason ? { id: reason.id, label: reason.label, slug: reason.slug } : null,
+      reasonNotes: trimmedNotes,
     }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
+    this.events.emit('crm.deal.stage_changed', {
+      businessId: input.businessId, dealId: deal.id, contactId: deal.contactId, toStageId: stage.id, newStatus: 'WON',
+    });
     return updated;
   }
 
-  async loseDeal(input: { businessId: string; dealId: string; lossReason?: string; lostAt?: string; actorId?: string }) {
+  async loseDeal(input: { businessId: string; dealId: string; lossReason?: string; lostAt?: string; reasonId?: string | null; reasonNotes?: string | null; actorId?: string }) {
     const deal = await this.getDeal({ businessId: input.businessId, dealId: input.dealId });
     const stage = await this.prisma.client.dealStage.findFirst({
       where: { businessId: input.businessId, category: 'LOST', archivedAt: null },
       orderBy: [{ position: 'asc' }],
     });
     if (!stage) throw new BadRequestException('No "Lost" stage configured');
+    const reason = await this.reasons.resolveForUse({ businessId: input.businessId, reasonId: input.reasonId ?? null, kind: 'LOST' });
+    const trimmedNotes = input.reasonNotes ? input.reasonNotes.trim().slice(0, 1000) : null;
+    const legacyReason = input.lossReason?.trim() || null;
+    if (!reason && !trimmedNotes && !legacyReason) {
+      throw new BadRequestException('A reason or notes is required when marking a deal as lost');
+    }
     const updated = await this.prisma.client.deal.update({
       where: { id: deal.id },
       data: {
@@ -370,17 +401,26 @@ export class CrmDealsService {
         status: 'LOST',
         lostAt: this.parseDate(input.lostAt) ?? new Date(),
         wonAt: null,
-        lossReason: input.lossReason ?? null,
+        lossReason: legacyReason ?? reason?.label ?? null,
+        wonLostReasonId: reason?.id ?? null,
+        wonLostReasonNotes: trimmedNotes,
+        bottleneckFlag: false,
+        bottleneckAt: null,
         lastStageChangedAt: new Date(),
       },
-      include: { stage: true },
+      include: { stage: true, wonLostReason: true },
     });
     await this.timeline.logEvent(input.businessId, deal.contactId, CONTACT_EVENT.DEAL_STAGE_CHANGED, {
       dealId: deal.id, title: deal.title, toStage: { id: stage.id, name: stage.name, slug: stage.slug }, newStatus: 'LOST',
     }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
     await this.timeline.logEvent(input.businessId, deal.contactId, CONTACT_EVENT.DEAL_LOST, {
       dealId: deal.id, title: deal.title, value: updated.value, currency: updated.currency, lossReason: updated.lossReason,
+      reason: reason ? { id: reason.id, label: reason.label, slug: reason.slug } : null,
+      reasonNotes: trimmedNotes,
     }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
+    this.events.emit('crm.deal.stage_changed', {
+      businessId: input.businessId, dealId: deal.id, contactId: deal.contactId, toStageId: stage.id, newStatus: 'LOST',
+    });
     return updated;
   }
 
@@ -439,6 +479,7 @@ export class CrmDealsService {
         take,
         include: {
           stage: true,
+          wonLostReason: { select: { id: true, label: true, slug: true, kind: true } },
           contact: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true, companyName: true } },
         },
       }),

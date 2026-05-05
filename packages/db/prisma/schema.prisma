@@ -109,6 +109,7 @@ model Business {
   contacts         Contact[]
   deals            Deal[]
   dealStages       DealStage[]
+  wonLostReasons   WonLostReason[]
   invoices         Invoice[]
   quotes           Quote[]
   products         Product[]
@@ -616,6 +617,16 @@ model Deal {
   lossReason      String?   @map("loss_reason")
   lastStageChangedAt DateTime? @map("last_stage_changed_at")
 
+  // Deal intelligence (M3)
+  healthScore        Int?      @map("health_score")
+  healthScoreAt      DateTime? @map("health_score_at")
+  healthBreakdown    Json?     @map("health_breakdown")
+  bottleneckFlag     Boolean   @default(false) @map("bottleneck_flag")
+  bottleneckAt       DateTime? @map("bottleneck_at")
+  wonLostReasonId    String?   @map("won_lost_reason_id")
+  wonLostReason      WonLostReason? @relation(fields: [wonLostReasonId], references: [id])
+  wonLostReasonNotes String?   @map("won_lost_reason_notes")
+
   // Optional links
   quoteId         String?  @map("quote_id")
   invoiceId       String?  @map("invoice_id")
@@ -630,6 +641,7 @@ model Deal {
   @@index([businessId, expectedCloseAt])
   @@index([contactId])
   @@index([businessId, deletedAt])
+  @@index([businessId, bottleneckFlag])
   @@map("deals")
 }
 
@@ -700,6 +712,28 @@ model ContactDataIssue {
   @@index([businessId, kind, status])
   @@index([businessId, severity, status])
   @@map("contact_data_issues")
+}
+
+model WonLostReason {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  kind        String   // WON | LOST
+  label       String
+  slug        String
+  position    Int      @default(0)
+  isDefault   Boolean  @default(false) @map("is_default")
+  archivedAt  DateTime? @map("archived_at")
+
+  deals       Deal[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, kind, slug])
+  @@index([businessId, kind, position])
+  @@map("won_lost_reasons")
 }
 
 model ContactExternalMapping {

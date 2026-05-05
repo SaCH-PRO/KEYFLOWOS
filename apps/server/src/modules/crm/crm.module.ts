@@ -5,6 +5,13 @@ import { CrmGoogleController } from './crm-google.controller';
 import { CrmSequenceController } from './crm-sequence.controller';
 import { CrmDealsController } from './crm-deals.controller';
 import { CrmDealsService } from './crm-deals.service';
+import { DealForecastService } from './deal-forecast.service';
+import { DealVelocityService } from './deal-velocity.service';
+import { DealHealthService } from './deal-health.service';
+import { DealIntelligenceSchedulerService } from './deal-intelligence-scheduler.service';
+import { WonLostReasonService } from './won-lost-reason.service';
+import { AutopilotModule } from '../autopilot/autopilot.module';
+import { forwardRef } from '@nestjs/common';
 import { ContactPrivacyController } from './privacy/contact-privacy.controller';
 import { ContactAuditService } from './privacy/contact-audit.service';
 import { ContactPrivacyService } from './privacy/contact-privacy.service';
@@ -46,7 +53,7 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
 import { CommunityModule } from '../community/community.module';
 
 @Module({
-  imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule, CommunityModule],
+  imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule, CommunityModule, forwardRef(() => AutopilotModule)],
   controllers: [
     CrmController,
     CrmAiController,
@@ -80,6 +87,11 @@ import { CommunityModule } from '../community/community.module';
     CrmRelationshipHealthService,
     CrmRelationshipHealthSchedulerService,
     CrmDealsService,
+    DealForecastService,
+    DealVelocityService,
+    DealHealthService,
+    DealIntelligenceSchedulerService,
+    WonLostReasonService,
     BestChannelService,
     BestChannelListener,
     BestChannelSchedulerService,

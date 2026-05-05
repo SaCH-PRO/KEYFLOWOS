@@ -132,6 +132,12 @@ export class WinDealDto {
 
   @IsNumber() @IsOptional() @Min(0)
   actualValue?: number;
+
+  @IsString() @IsOptional()
+  reasonId?: string | null;
+
+  @IsString() @IsOptional() @MaxLength(1000) @Transform(({ value }) => sanitize(value))
+  reasonNotes?: string | null;
 }
 
 export class LoseDealDto {
@@ -140,4 +146,35 @@ export class LoseDealDto {
 
   @IsDateString() @IsOptional()
   lostAt?: string;
+
+  @IsString() @IsOptional()
+  reasonId?: string | null;
+
+  @IsString() @IsOptional() @MaxLength(1000) @Transform(({ value }) => sanitize(value))
+  reasonNotes?: string | null;
+}
+
+export class CreateWonLostReasonDto {
+  @IsIn(['WON', 'LOST'])
+  kind!: 'WON' | 'LOST';
+
+  @IsString() @MaxLength(120) @Transform(({ value }) => sanitize(value))
+  label!: string;
+
+  @IsString() @IsOptional() @MaxLength(120)
+  slug?: string;
+
+  @IsInt() @IsOptional()
+  position?: number;
+}
+
+export class UpdateWonLostReasonDto {
+  @IsString() @IsOptional() @MaxLength(120) @Transform(({ value }) => sanitize(value))
+  label?: string;
+
+  @IsInt() @IsOptional()
+  position?: number;
+
+  @IsBoolean() @IsOptional()
+  archived?: boolean;
 }

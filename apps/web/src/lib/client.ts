@@ -939,11 +939,70 @@ export interface Deal {
   lostAt?: string | null;
   lossReason?: string | null;
   lastStageChangedAt?: string | null;
+  healthScore?: number | null;
+  healthScoreAt?: string | null;
+  healthBreakdown?: {
+    base: number; ageInStage: number; recency: number; sentiment: number;
+    relationship: number; valueFit: number; total: number;
+    daysInStage: number; daysSinceTouch: number | null;
+    stageAvgDays: number; stageAvgValue: number;
+  } | null;
+  bottleneckFlag?: boolean | null;
+  bottleneckAt?: string | null;
+  wonLostReasonId?: string | null;
+  wonLostReasonNotes?: string | null;
+  wonLostReason?: { id: string; label: string; slug: string; kind: 'WON' | 'LOST' } | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface DealListResponse { deals: Deal[]; total: number; skip: number; take: number; }
+
+export interface WonLostReason {
+  id: string;
+  businessId: string;
+  kind: 'WON' | 'LOST';
+  label: string;
+  slug: string;
+  position: number;
+  isDefault: boolean;
+  archivedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DealForecast {
+  windowDays: number;
+  windowEnd: string;
+  currency: string;
+  totalOpenValue: number;
+  totalWeightedValue: number;
+  totalWonValue: number;
+  totalLostValue: number;
+  expectedCloseValue: number;
+  expectedCloseWeightedValue: number;
+  byStage: Array<{
+    stageId: string; stageName: string; stageSlug: string; position: number;
+    openDeals: number; totalValue: number; winRate: number; weightedValue: number;
+    source: 'historical' | 'default';
+  }>;
+  generatedAt: string;
+}
+
+export interface DealVelocityReport {
+  stages: Array<{
+    stageId: string; stageName: string; stageSlug: string; category: string; position: number;
+    sampleSize: number; avgDaysInStage: number; medianDaysInStage: number; p90DaysInStage: number;
+    outlierThresholdDays: number; openDeals: number;
+  }>;
+  outliers: Array<{
+    dealId: string; title: string; stageId: string; stageName: string;
+    daysInStage: number; avgDaysInStage: number; multiple: number;
+    value: number | null; currency: string;
+    contact: { id: string; displayName: string | null } | null;
+  }>;
+  generatedAt: string;
+}
 
 export interface DealListFilters {
   stageIds?: string[];
@@ -1032,12 +1091,49 @@ export async function bulkMoveDealStage(dealIds: string[], stageId: string, busi
   });
 }
 
-export async function winDeal(dealId: string, data: { wonAt?: string; actualValue?: number } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function winDeal(
+  dealId: string,
+  data: { wonAt?: string; actualValue?: number; reasonId?: string | null; reasonNotes?: string | null } = {},
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
   return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}/win`, body: data });
 }
 
-export async function loseDeal(dealId: string, data: { lossReason?: string; lostAt?: string } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function loseDeal(
+  dealId: string,
+  data: { lossReason?: string; lostAt?: string; reasonId?: string | null; reasonNotes?: string | null } = {},
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
   return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}/lose`, body: data });
+}
+
+export async function fetchDealForecast(opts: { windowDays?: number; currency?: string } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+  const params = new URLSearchParams();
+  if (opts.windowDays != null) params.set('windowDays', String(opts.windowDays));
+  if (opts.currency) params.set('currency', opts.currency);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return apiGetSimple<DealForecast>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/intelligence/forecast${qs}`);
+}
+
+export async function fetchDealVelocity(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<DealVelocityReport>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/intelligence/velocity`);
+}
+
+export async function fetchWonLostReasons(opts: { kind?: 'WON' | 'LOST' } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+  const qs = opts.kind ? `?kind=${opts.kind}` : '';
+  return apiGetSimple<WonLostReason[]>(`/crm/businesses/${encodeURIComponent(businessId)}/won-lost-reasons${qs}`);
+}
+
+export async function createWonLostReason(data: { kind: 'WON' | 'LOST'; label: string; slug?: string; position?: number }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<WonLostReason>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/won-lost-reasons`, body: data });
+}
+
+export async function updateWonLostReason(reasonId: string, data: { label?: string; position?: number; archived?: boolean }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPatch<WonLostReason>(`/crm/businesses/${encodeURIComponent(businessId)}/won-lost-reasons/${encodeURIComponent(reasonId)}`, data);
+}
+
+export async function deleteWonLostReason(reasonId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/won-lost-reasons/${encodeURIComponent(reasonId)}`);
 }
 
 export async function fetchContactDeals(contactId: string, opts: { status?: 'OPEN' | 'WON' | 'LOST' | 'ALL' } = {}, businessId: string = DEFAULT_BUSINESS_ID) {

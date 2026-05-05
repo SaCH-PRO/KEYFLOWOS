@@ -8,16 +8,97 @@ import {
   BulkMoveStageDto,
   CreateDealDto,
   CreateDealStageDto,
+  CreateWonLostReasonDto,
   LoseDealDto,
   UpdateDealDto,
   UpdateDealStageDto,
+  UpdateWonLostReasonDto,
   WinDealDto,
 } from './dto/deal.dto';
+import { DealForecastService } from './deal-forecast.service';
+import { DealVelocityService } from './deal-velocity.service';
+import { WonLostReasonService } from './won-lost-reason.service';
 
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
 export class CrmDealsController {
-  constructor(@Inject(CrmDealsService) private readonly deals: CrmDealsService) {}
+  constructor(
+    @Inject(CrmDealsService) private readonly deals: CrmDealsService,
+    @Inject(DealForecastService) private readonly forecast: DealForecastService,
+    @Inject(DealVelocityService) private readonly velocity: DealVelocityService,
+    @Inject(WonLostReasonService) private readonly reasons: WonLostReasonService,
+  ) {}
+
+  // ---- intelligence ----
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/deals/intelligence/forecast')
+  getForecast(
+    @Param('businessId') businessId: string,
+    @Query('windowDays') windowDays?: string,
+    @Query('currency') currency?: string,
+  ) {
+    return this.forecast.getForecast({
+      businessId,
+      windowDays: windowDays ? Number(windowDays) : undefined,
+      currency: currency || undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/deals/intelligence/velocity')
+  getVelocity(@Param('businessId') businessId: string) {
+    return this.velocity.getReport(businessId);
+  }
+
+  // ---- won/lost reasons ----
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/won-lost-reasons')
+  listReasons(
+    @Param('businessId') businessId: string,
+    @Query('kind') kind?: string,
+  ) {
+    const validKind = kind === 'WON' || kind === 'LOST' ? kind : undefined;
+    return this.reasons.list({ businessId, kind: validKind });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Post('businesses/:businessId/won-lost-reasons')
+  createReason(@Param('businessId') businessId: string, @Body() body: CreateWonLostReasonDto) {
+    return this.reasons.create({ businessId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Patch('businesses/:businessId/won-lost-reasons/:reasonId')
+  updateReason(
+    @Param('businessId') businessId: string,
+    @Param('reasonId') reasonId: string,
+    @Body() body: UpdateWonLostReasonDto,
+  ) {
+    return this.reasons.update({ businessId, reasonId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Delete('businesses/:businessId/won-lost-reasons/:reasonId')
+  deleteReason(
+    @Param('businessId') businessId: string,
+    @Param('reasonId') reasonId: string,
+  ) {
+    return this.reasons.remove({ businessId, reasonId });
+  }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
@@ -177,7 +258,7 @@ export class CrmDealsController {
     @Body() body: WinDealDto,
     @Req() req: any,
   ) {
-    return this.deals.winDeal({ businessId, dealId, ...body, actorId: req?.user?.id });
+    return this.deals.winDeal({ businessId, dealId, ...body, actorId: req?.user?.id ?? undefined });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
