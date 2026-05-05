@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { CommerceController } from './commerce.controller';
 import { AccountingController } from './accounting.controller';
 import { CommerceAiController } from './commerce-ai.controller';
@@ -24,14 +24,30 @@ import { InventoryRiskService } from './inventory-risk.service';
 import { CommerceIntelligenceService } from './commerce-intelligence.service';
 import { MarginSnapshotSchedulerService } from './margin-snapshot-scheduler.service';
 import { StoreReadinessService } from './store-readiness.service';
+import { QuoteNotificationsListener } from './quote-notifications.listener';
 import { CrmModule } from '../crm/crm.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
+import type { NotificationsModule as NotificationsModuleType } from '../notifications/notifications.module';
 
 @Module({
-  imports: [CrmModule, SubscriptionsModule, AiModule, CatalogModule],
+  imports: [
+    CrmModule,
+    SubscriptionsModule,
+    AiModule,
+    CatalogModule,
+    // notifications -> commerce -> notifications is a circular cycle, so we
+    // mirror the lazy require pattern used in NotificationsModule itself to
+    // avoid a TDZ "Cannot access ... before initialization" error.
+    forwardRef(
+      () =>
+        (require('../notifications/notifications.module') as {
+          NotificationsModule: typeof NotificationsModuleType;
+        }).NotificationsModule,
+    ),
+  ],
   controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController],
   providers: [
     CommerceService,
@@ -54,6 +70,7 @@ import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
     CommerceIntelligenceService,
     MarginSnapshotSchedulerService,
     StoreReadinessService,
+    QuoteNotificationsListener,
     PlanLimitGuard,
   ],
   exports: [

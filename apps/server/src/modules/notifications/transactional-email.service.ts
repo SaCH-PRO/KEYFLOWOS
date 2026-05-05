@@ -21,6 +21,11 @@ import {
   reviewRequestTemplate,
   preorderDelayNoticeTemplate,
   reorderPromptTemplate,
+  quoteViewedOwnerTemplate,
+  quoteAcceptedOwnerTemplate,
+  quoteRejectedOwnerTemplate,
+  quoteAcceptedCustomerTemplate,
+  quoteRejectedCustomerTemplate,
 } from './email-templates';
 
 export type NotificationType =
@@ -40,7 +45,12 @@ export type NotificationType =
   | 'document_generated'
   | 'review_request'
   | 'preorder_delay_notice'
-  | 'reorder_prompt';
+  | 'reorder_prompt'
+  | 'quote_viewed_owner'
+  | 'quote_accepted_owner'
+  | 'quote_rejected_owner'
+  | 'quote_accepted_customer'
+  | 'quote_rejected_customer';
 
 export interface NotificationPreferences {
   booking_confirmed?: boolean;
@@ -60,6 +70,11 @@ export interface NotificationPreferences {
   review_request?: boolean;
   preorder_delay_notice?: boolean;
   reorder_prompt?: boolean;
+  quote_viewed_owner?: boolean;
+  quote_accepted_owner?: boolean;
+  quote_rejected_owner?: boolean;
+  quote_accepted_customer?: boolean;
+  quote_rejected_customer?: boolean;
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -80,6 +95,11 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   review_request: true,
   preorder_delay_notice: true,
   reorder_prompt: true,
+  quote_viewed_owner: true,
+  quote_accepted_owner: true,
+  quote_rejected_owner: true,
+  quote_accepted_customer: true,
+  quote_rejected_customer: true,
 };
 
 const QUEUE_DRAIN_INTERVAL_MS = 5 * 60 * 1000;
@@ -197,6 +217,23 @@ export class TransactionalEmailService implements OnModuleInit {
     if (!this.isEnabled(ctx.preferences, params.type)) {
       this.logger.debug(`Notification type ${params.type} disabled for business ${params.businessId}`);
       return { status: 'FAILED' };
+    }
+
+    if (params.dedupeKey) {
+      const existing = await this.prisma.client.customerNotificationLog.findFirst({
+        where: {
+          businessId: params.businessId,
+          messageId: params.dedupeKey,
+          status: { in: ['SENT', 'QUEUED', 'DRAINED'] },
+        },
+        select: { id: true, status: true, messageId: true },
+      });
+      if (existing) {
+        this.logger.debug(
+          `Skipping duplicate ${params.type} for ${params.recipientEmail} (dedupeKey=${params.dedupeKey})`,
+        );
+        return { status: existing.status as 'SENT' | 'QUEUED', messageId: existing.messageId ?? undefined };
+      }
     }
 
     const gmailStatus = await this.gmail.getGmailStatus(params.businessId);
@@ -395,6 +432,61 @@ export class TransactionalEmailService implements OnModuleInit {
             orderNumber: data.orderNumber,
             productNames: data.productNames,
             daysSincePurchase: data.daysSincePurchase,
+          });
+          break;
+        case 'quote_viewed_owner':
+          rendered = quoteViewedOwnerTemplate({
+            ...baseCtx,
+            quoteNumber: data.quoteNumber,
+            contactDisplayName: data.contactDisplayName,
+            total: data.total,
+            currency: data.currency,
+            viewedAt: data.viewedAt,
+            quoteUrl: data.quoteUrl,
+          });
+          break;
+        case 'quote_accepted_owner':
+          rendered = quoteAcceptedOwnerTemplate({
+            ...baseCtx,
+            quoteNumber: data.quoteNumber,
+            contactDisplayName: data.contactDisplayName,
+            total: data.total,
+            currency: data.currency,
+            acceptedAt: data.acceptedAt,
+            quoteUrl: data.quoteUrl,
+          });
+          break;
+        case 'quote_rejected_owner':
+          rendered = quoteRejectedOwnerTemplate({
+            ...baseCtx,
+            quoteNumber: data.quoteNumber,
+            contactDisplayName: data.contactDisplayName,
+            total: data.total,
+            currency: data.currency,
+            rejectedAt: data.rejectedAt,
+            reason: data.reason,
+            quoteUrl: data.quoteUrl,
+          });
+          break;
+        case 'quote_accepted_customer':
+          rendered = quoteAcceptedCustomerTemplate({
+            ...baseCtx,
+            quoteNumber: data.quoteNumber,
+            total: data.total,
+            currency: data.currency,
+            acceptedAt: data.acceptedAt,
+            quoteUrl: data.quoteUrl,
+          });
+          break;
+        case 'quote_rejected_customer':
+          rendered = quoteRejectedCustomerTemplate({
+            ...baseCtx,
+            quoteNumber: data.quoteNumber,
+            total: data.total,
+            currency: data.currency,
+            rejectedAt: data.rejectedAt,
+            reason: data.reason,
+            quoteUrl: data.quoteUrl,
           });
           break;
         default:

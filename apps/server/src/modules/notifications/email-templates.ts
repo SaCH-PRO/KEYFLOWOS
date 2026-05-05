@@ -680,6 +680,131 @@ ${ctx.productNames.map((n) => `<li style="margin:4px 0;">${n}</li>`).join('')}
   return { subject, html: baseLayout(ctx, subject, body) };
 }
 
+export function quoteViewedOwnerTemplate(ctx: TemplateContext & {
+  quoteNumber: string;
+  contactDisplayName: string;
+  total: number;
+  currency: string;
+  viewedAt: Date | string;
+  quoteUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Quote ${ctx.quoteNumber} was viewed by ${ctx.contactDisplayName}`;
+  const body = [
+    heading('Quote Viewed &#128065;'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Good news — <strong>${escapeHtml(ctx.contactDisplayName)}</strong> just opened the quote you sent.`),
+    detailTable([
+      detailRow('Quote #', escapeHtml(ctx.quoteNumber)),
+      detailRow('Customer', escapeHtml(ctx.contactDisplayName)),
+      detailRow('Amount', formatCurrency(ctx.total, ctx.currency)),
+      detailRow('Viewed at', `${formatDate(ctx.viewedAt)} ${formatTime(ctx.viewedAt)}`),
+    ].join('')),
+    ctx.quoteUrl ? ctaButton('Open Quote', ctx.quoteUrl) : '',
+    paragraph(`Now is a great time to follow up while it's fresh in their mind.`),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function quoteAcceptedOwnerTemplate(ctx: TemplateContext & {
+  quoteNumber: string;
+  contactDisplayName: string;
+  total: number;
+  currency: string;
+  acceptedAt: Date | string;
+  quoteUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Quote ${ctx.quoteNumber} accepted by ${ctx.contactDisplayName}`;
+  const body = [
+    heading('Quote Accepted &#127881;'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`<strong>${escapeHtml(ctx.contactDisplayName)}</strong> just accepted your quote. Time to deliver!`),
+    detailTable([
+      detailRow('Quote #', escapeHtml(ctx.quoteNumber)),
+      detailRow('Customer', escapeHtml(ctx.contactDisplayName)),
+      detailRow('Amount', formatCurrency(ctx.total, ctx.currency)),
+      detailRow('Accepted at', `${formatDate(ctx.acceptedAt)} ${formatTime(ctx.acceptedAt)}`),
+    ].join('')),
+    ctx.quoteUrl ? ctaButton('Open Quote', ctx.quoteUrl) : '',
+    paragraph(`You can now convert this quote into an invoice and kick off the work.`),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function quoteRejectedOwnerTemplate(ctx: TemplateContext & {
+  quoteNumber: string;
+  contactDisplayName: string;
+  total: number;
+  currency: string;
+  rejectedAt: Date | string;
+  reason?: string | null;
+  quoteUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Quote ${ctx.quoteNumber} declined by ${ctx.contactDisplayName}`;
+  const body = [
+    heading('Quote Declined'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`<strong>${escapeHtml(ctx.contactDisplayName)}</strong> declined the quote you sent.`),
+    detailTable([
+      detailRow('Quote #', escapeHtml(ctx.quoteNumber)),
+      detailRow('Customer', escapeHtml(ctx.contactDisplayName)),
+      detailRow('Amount', formatCurrency(ctx.total, ctx.currency)),
+      detailRow('Declined at', `${formatDate(ctx.rejectedAt)} ${formatTime(ctx.rejectedAt)}`),
+      ctx.reason ? detailRow('Reason', escapeHtml(ctx.reason)) : '',
+    ].join('')),
+    ctx.quoteUrl ? ctaButton('Open Quote', ctx.quoteUrl) : '',
+    paragraph(`Consider following up to understand why and explore another option.`),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function quoteAcceptedCustomerTemplate(ctx: TemplateContext & {
+  quoteNumber: string;
+  total: number;
+  currency: string;
+  acceptedAt: Date | string;
+  quoteUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Thanks for accepting Quote ${ctx.quoteNumber}`;
+  const body = [
+    heading('Quote Accepted &#10003;'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Thanks for accepting Quote <strong>${escapeHtml(ctx.quoteNumber)}</strong> from ${escapeHtml(ctx.businessName)}. We'll be in touch shortly with next steps.`),
+    detailTable([
+      detailRow('Quote #', escapeHtml(ctx.quoteNumber)),
+      detailRow('Total', `<strong>${formatCurrency(ctx.total, ctx.currency)}</strong>`),
+      detailRow('Accepted on', `${formatDate(ctx.acceptedAt)} ${formatTime(ctx.acceptedAt)}`),
+    ].join('')),
+    ctx.quoteUrl ? ctaButton('View Quote', ctx.quoteUrl) : '',
+    paragraph(`If you have any questions, just reply to this email.`),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function quoteRejectedCustomerTemplate(ctx: TemplateContext & {
+  quoteNumber: string;
+  total: number;
+  currency: string;
+  rejectedAt: Date | string;
+  reason?: string | null;
+  quoteUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `We received your response to Quote ${ctx.quoteNumber}`;
+  const body = [
+    heading('Quote Response Received'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`We've recorded that you declined Quote <strong>${escapeHtml(ctx.quoteNumber)}</strong> from ${escapeHtml(ctx.businessName)}.`),
+    detailTable([
+      detailRow('Quote #', escapeHtml(ctx.quoteNumber)),
+      detailRow('Total', formatCurrency(ctx.total, ctx.currency)),
+      detailRow('Declined on', `${formatDate(ctx.rejectedAt)} ${formatTime(ctx.rejectedAt)}`),
+      ctx.reason ? detailRow('Reason', escapeHtml(ctx.reason)) : '',
+    ].join('')),
+    ctx.quoteUrl ? ctaButton('View Quote', ctx.quoteUrl) : '',
+    paragraph(`If this was a mistake or you'd like to revisit, please reply to this email and we'll be happy to help.`),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
 export interface VerificationEmailContext {
   recipientName?: string;
   recipientEmail: string;
