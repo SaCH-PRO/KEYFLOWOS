@@ -8,6 +8,7 @@ import { PublicEventsService } from '../public-events/public-events.service';
 import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { InventoryRiskService } from '../commerce/inventory-risk.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
+import { RevenuePostingService } from '../finance/revenue-posting.service';
 
 @Injectable()
 export class StoreOrderService {
@@ -22,6 +23,7 @@ export class StoreOrderService {
     @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
     @Inject(InventoryRiskService) private readonly inventoryRisk: InventoryRiskService,
     @Inject(RevenueAttributionService) private readonly revenueAttribution: RevenueAttributionService,
+    @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
   ) {}
 
   async validateCart(items: { productId: string; quantity: number }[], businessId: string) {
@@ -522,8 +524,10 @@ export class StoreOrderService {
       await this.invoiceWorkflow.transition(invoice.id, 'SENT', { sentAt: now, tx: txClient, eventBuffer: pendingEvents });
       await this.invoiceWorkflow.transition(invoice.id, 'PAID', { paidAt: now, tx: txClient, eventBuffer: pendingEvents });
 
-      // 2. Payment row
-      await tx.payment.create({
+      // 2. Payment row + ledger posting (FIN2). Posting runs inside the
+      //    same transaction so revenue / AR / deposit entries commit
+      //    atomically with the payment row.
+      const payment = await tx.payment.create({
         data: {
           provider,
           providerPaymentId: paymentRef,
@@ -535,6 +539,7 @@ export class StoreOrderService {
           businessId: order.businessId,
         },
       });
+      await this.revenuePosting.onPaymentRecorded(payment.id, { tx: txClient });
 
       // 3. Stock decrement + movement rows. Tracked products MUST have a
       //    warehouse + stock row with sufficient quantity; otherwise we

@@ -2,6 +2,7 @@ import { ConflictException, Inject, Injectable, Logger, NotFoundException } from
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { RevenuePostingService } from '../finance/revenue-posting.service';
 
 /**
  * Canonical invoice statuses. Mirrors the string-typed `Invoice.status`
@@ -122,6 +123,7 @@ export class InvoiceWorkflowService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
   ) {}
 
   /**
@@ -217,24 +219,43 @@ export class InvoiceWorkflowService {
       eventBuffer?: Array<{ name: string; payload: unknown }>;
     } = {},
   ) {
-    const db = (extra.tx ?? this.prisma.client) as Prisma.TransactionClient;
-    const existing = await db.invoice.findUnique({
-      where: { id: invoiceId },
-      select: { id: true, status: true, businessId: true },
-    });
-    if (!existing) throw new NotFoundException('Invoice not found');
-    this.assertLegalTransition(existing.status as InvoiceStatus, to);
+    // Wrap in $transaction when caller did not provide one so the FIN2
+    // posting either commits with the status update or rolls both back.
+    const run = async (db: Prisma.TransactionClient) => {
+      const existing = await db.invoice.findUnique({
+        where: { id: invoiceId },
+        select: { id: true, status: true, businessId: true },
+      });
+      if (!existing) throw new NotFoundException('Invoice not found');
+      this.assertLegalTransition(existing.status as InvoiceStatus, to);
 
-    const data: Record<string, unknown> = { status: to };
-    if (extra.sentAt) data.sentAt = extra.sentAt;
-    if (extra.dueDate !== undefined) data.dueDate = extra.dueDate;
-    if (to === 'PAID') data.paidAt = extra.paidAt ?? new Date();
+      const data: Record<string, unknown> = { status: to };
+      if (extra.sentAt) data.sentAt = extra.sentAt;
+      if (extra.dueDate !== undefined) data.dueDate = extra.dueDate;
+      if (to === 'PAID') data.paidAt = extra.paidAt ?? new Date();
 
-    const updated = await db.invoice.update({
-      where: { id: invoiceId },
-      data,
-      include: { items: true, contact: true, booking: true },
-    });
+      const updated = await db.invoice.update({
+        where: { id: invoiceId },
+        data,
+        include: { items: true, contact: true, booking: true },
+      });
+
+      // FIN2 — accrual recognition: post AR/Revenue when an invoice goes
+      // SENT (or PENDING, which is the awaiting-confirmation flavour of
+      // SENT for offline payments), and reverse the recognition when
+      // voided. Cash-basis businesses no-op inside the posting service.
+      if (to === 'SENT' || to === 'PENDING') {
+        await this.revenuePosting.onInvoiceFinalized(invoiceId, { tx: db });
+      } else if (to === 'VOID') {
+        await this.revenuePosting.onInvoiceVoided(invoiceId, { tx: db });
+      }
+
+      return updated;
+    };
+
+    const updated = extra.tx
+      ? await run(extra.tx)
+      : await this.prisma.client.$transaction((tx) => run(tx as unknown as Prisma.TransactionClient));
 
     const lower = to.toLowerCase();
     const queue = (name: string, payload: unknown) => {

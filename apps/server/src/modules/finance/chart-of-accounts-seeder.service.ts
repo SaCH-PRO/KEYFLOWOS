@@ -36,6 +36,9 @@ export const SYSTEM_COA: CoaSeed[] = [
 
   // INCOME
   { systemKey: 'REVENUE', name: 'Revenue', type: 'INCOME', code: '4000' },
+  { systemKey: 'REVENUE_SERVICE', name: 'Service Revenue', type: 'INCOME', code: '4010', parentSystemKey: 'REVENUE' },
+  { systemKey: 'REVENUE_PRODUCT', name: 'Product Revenue', type: 'INCOME', code: '4020', parentSystemKey: 'REVENUE' },
+  { systemKey: 'REVENUE_PACKAGE', name: 'Package Revenue', type: 'INCOME', code: '4030', parentSystemKey: 'REVENUE' },
   { systemKey: 'OTHER_INCOME', name: 'Other Income', type: 'INCOME', code: '4900' },
   { systemKey: 'DISCOUNTS_GIVEN', name: 'Discounts Given', type: 'INCOME', code: '4100' },
 

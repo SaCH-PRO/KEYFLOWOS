@@ -789,7 +789,7 @@ export default function CommercePage() {
         </TabFrame>
       )}
 
-      {activeTab === "inventory" && (
+      {activeTab === "inventory" && businessId && (
         <TabFrame loading={shell.loading} error={shell.error}>
           <CommerceInventoryWrapper businessId={businessId} />
         </TabFrame>

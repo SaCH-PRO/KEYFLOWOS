@@ -1,6 +1,7 @@
-import { Inject, Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { InvoiceWorkflowService } from './invoice-workflow.service';
 
 @Injectable()
 export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
@@ -11,6 +12,8 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(forwardRef(() => InvoiceWorkflowService))
+    private readonly invoiceWorkflow: InvoiceWorkflowService,
   ) {}
 
   onModuleInit() {
@@ -282,7 +285,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
         }
         const total = subtotal + taxAmount - discountAmount;
 
-        const invoice = await this.prisma.client.invoice.create({
+        const draft = await this.prisma.client.invoice.create({
           data: {
             businessId: recurring.businessId,
             contactId: recurring.contactId,
@@ -310,6 +313,14 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
             },
           },
           include: { items: true, contact: true },
+        });
+
+        // FIN2 — finalize the generated invoice through the workflow so it
+        // posts to the ledger (accrual: Dr AR/Cr Revenue) under the same
+        // tx that the status update commits with. Cash-basis businesses
+        // no-op inside the posting service.
+        const invoice = await this.invoiceWorkflow.transition(draft.id, 'SENT', {
+          sentAt: new Date(),
         });
 
         const nextRunDate = this.calculateNextRunDate(recurring.nextRunDate, recurring.frequency);
