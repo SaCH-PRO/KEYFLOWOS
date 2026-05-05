@@ -301,6 +301,9 @@ model Business {
   calendarId           String?   @map("calendar_id")
   calendarSyncDirection String   @default("two_way") @map("calendar_sync_direction")
   calendarSyncEnabled   Boolean  @default(true) @map("calendar_sync_enabled")
+  /// Per-event-type sync toggles + visibility:
+  /// { booking, contact_task, invoice_due, quote_expiry, content_post, pullExternal, defaultVisibility, lastResyncAt, lastResyncError, consecutiveErrors }
+  calendarSyncSettings  Json?    @map("calendar_sync_settings")
   calendarSyncConflicts CalendarSyncConflict[]
   calendarEvents        CalendarEvent[]
 
