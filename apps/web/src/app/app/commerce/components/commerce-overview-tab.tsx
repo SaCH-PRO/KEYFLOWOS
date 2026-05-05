@@ -6,7 +6,6 @@ import {
   DollarSign,
   Clock,
   AlertTriangle,
-  TrendingUp,
   FileText,
   CreditCard,
   RefreshCw,
@@ -16,17 +15,24 @@ import {
   Package,
   ArrowUpRight,
   Zap,
+  Repeat,
+  Percent,
+  TrendingUp,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   fetchCommerceStats,
   fetchRecurringInvoices,
+  fetchRevenueOverview,
   type CommerceStats,
   type Invoice,
   type Quote,
   type RecurringInvoice,
+  type RevenueOverview,
 } from "@/lib/client";
 import { formatCurrencyCompact } from "@/lib/currency";
+import { Area, AreaChart, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from "recharts";
+import { openKey } from "@/components/key/key-agent";
 
 interface CommerceOverviewTabProps {
   businessId: string | null;
@@ -56,8 +62,8 @@ const stagger = {
 function OverviewSkeleton() {
   return (
     <div className="space-y-4" role="status" aria-label="Loading overview">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="rounded-xl border border-border/50 bg-card p-3">
             <Skeleton className="h-3 w-14 mb-2" />
             <Skeleton className="h-6 w-20 mb-1" />
@@ -113,6 +119,7 @@ export function CommerceOverviewTab({
 }: CommerceOverviewTabProps) {
   const [stats, setStats] = useState<CommerceStats | null>(null);
   const [recurring, setRecurring] = useState<RecurringInvoice[]>([]);
+  const [revenueOverview, setRevenueOverview] = useState<RevenueOverview | null>(null);
 
   useEffect(() => {
     if (!businessId) return;
@@ -122,6 +129,9 @@ export function CommerceOverviewTab({
     });
     fetchRecurringInvoices(businessId).then((res) => {
       if (!cancelled && res.data) setRecurring(res.data);
+    });
+    fetchRevenueOverview(businessId).then((res) => {
+      if (!cancelled && res.data) setRevenueOverview(res.data);
     });
     return () => { cancelled = true; };
   }, [businessId, invoices.length, quotes.length]);
@@ -315,36 +325,84 @@ export function CommerceOverviewTab({
 
   if (loading && !stats) return <OverviewSkeleton />;
 
-  const kpiCards = [
-    {
-      icon: DollarSign,
-      label: "Collected",
-      value: formatCurrencyCompact(kpi.collected, currency),
-      color: "#10b981",
-      accent: "--kf-accent1",
-    },
-    {
-      icon: Clock,
-      label: "Outstanding",
-      value: formatCurrencyCompact(kpi.outstanding, currency),
-      color: "#f59e0b",
-      accent: "--kf-accent2",
-    },
-    {
-      icon: AlertTriangle,
-      label: "Overdue",
-      value: kpi.overdueCount > 0 ? formatCurrencyCompact(kpi.overdue, currency) : "—",
-      color: kpi.overdueCount > 0 ? "#ef4444" : "#6b7280",
-      accent: "--kf-accent1",
-    },
-    {
-      icon: TrendingUp,
-      label: "Quote Conversion",
-      value: `${kpi.conversionRate}%`,
-      color: "hsl(142 76% 36%)",
-      accent: "--kf-accent2",
-    },
-  ];
+  const rk = revenueOverview?.kpis;
+  const kpiCards = rk
+    ? [
+        {
+          icon: DollarSign,
+          label: "Collected this month",
+          value: formatCurrencyCompact(rk.collectedThisMonth, currency),
+          color: "#10b981",
+        },
+        {
+          icon: Clock,
+          label: "Outstanding",
+          value: formatCurrencyCompact(rk.outstanding, currency),
+          color: "#f59e0b",
+        },
+        {
+          icon: AlertTriangle,
+          label: "Overdue",
+          value: rk.overdueCount > 0 ? formatCurrencyCompact(rk.overdue, currency) : "—",
+          color: rk.overdueCount > 0 ? "#ef4444" : "#6b7280",
+        },
+        {
+          icon: FileText,
+          label: "Quote pipeline",
+          value: formatCurrencyCompact(rk.quotePipeline, currency),
+          color: "#a855f7",
+        },
+        {
+          icon: Repeat,
+          label: "Recurring expected",
+          value: formatCurrencyCompact(rk.recurringExpected, currency),
+          color: "#6366f1",
+        },
+        {
+          icon: Percent,
+          label: "Cash collection rate",
+          value: `${Math.round(rk.cashCollectionRate * 100)}%`,
+          color: "hsl(142 76% 36%)",
+        },
+      ]
+    : [
+        {
+          icon: DollarSign,
+          label: "Collected this month",
+          value: formatCurrencyCompact(kpi.collected, currency),
+          color: "#10b981",
+        },
+        {
+          icon: Clock,
+          label: "Outstanding",
+          value: formatCurrencyCompact(kpi.outstanding, currency),
+          color: "#f59e0b",
+        },
+        {
+          icon: AlertTriangle,
+          label: "Overdue",
+          value: kpi.overdueCount > 0 ? formatCurrencyCompact(kpi.overdue, currency) : "—",
+          color: kpi.overdueCount > 0 ? "#ef4444" : "#6b7280",
+        },
+        {
+          icon: FileText,
+          label: "Quote pipeline",
+          value: "—",
+          color: "#a855f7",
+        },
+        {
+          icon: Repeat,
+          label: "Recurring expected",
+          value: "—",
+          color: "#6366f1",
+        },
+        {
+          icon: Percent,
+          label: "Cash collection rate",
+          value: "—",
+          color: "hsl(142 76% 36%)",
+        },
+      ];
 
   return (
     <motion.div
@@ -353,7 +411,7 @@ export function CommerceOverviewTab({
       animate="visible"
       className="space-y-4"
     >
-      <motion.div variants={stagger.item} className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      <motion.div variants={stagger.item} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {kpiCards.map((card) => (
           <div
             key={card.label}
@@ -371,6 +429,130 @@ export function CommerceOverviewTab({
           </div>
         ))}
       </motion.div>
+
+      {revenueOverview && (
+        <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="lg:col-span-2 rounded-xl border border-border/50 bg-card p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
+                  Revenue Pulse
+                </h3>
+                <p className="text-[10px] text-muted-foreground/50">Last 12 weeks · billed vs. collected</p>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] text-muted-foreground/60">Cash collection</div>
+                <div className="text-sm font-bold text-emerald-400">
+                  {Math.round(revenueOverview.kpis.cashCollectionRate * 100)}%
+                </div>
+              </div>
+            </div>
+            <div className="h-32 -mx-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={revenueOverview.pulse} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="pulseCollected" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.45} />
+                      <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="pulseBilled" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="weekStart" hide />
+                  <YAxis hide />
+                  <RTooltip
+                    contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }}
+                    formatter={(value, name) => [formatCurrencyCompact(Number(value ?? 0), currency), name === "collected" ? "Collected" : name === "billed" ? "Billed" : "Outstanding"] as [string, string]}
+                    labelFormatter={(l) => `Week of ${l}`}
+                  />
+                  <Area type="monotone" dataKey="billed" stroke="#6366f1" strokeWidth={1.5} fill="url(#pulseBilled)" />
+                  <Area type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={1.5} fill="url(#pulseCollected)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mt-2 text-[10px]">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-indigo-500/70" />
+                <span className="text-muted-foreground/60">Billed</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500/70" />
+                <span className="text-muted-foreground/60">Collected</span>
+              </div>
+              <div className="text-right text-muted-foreground/60">
+                Quote pipeline {formatCurrencyCompact(revenueOverview.kpis.quotePipeline, currency)}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border/50 bg-card p-4 flex flex-col">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
+                Top Revenue Actions
+              </h3>
+              <button
+                onClick={() => onNavigate("actions")}
+                className="text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:underline flex items-center gap-0.5"
+              >
+                View all <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+            {revenueOverview.top.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground/60 my-auto py-4 text-center">
+                Nothing pressing right now.
+              </p>
+            ) : (
+              <ul className="space-y-1.5 flex-1">
+                {revenueOverview.top.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white/[0.03] transition-colors"
+                  >
+                    <span
+                      className="w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{ background: a.priority === 1 ? "#ef4444" : a.priority === 2 ? "#f59e0b" : "#6b7280" }}
+                    />
+                    <span className="text-[11px] text-foreground/80 truncate flex-1">{a.title}</span>
+                    {a.amountAtRisk != null && a.amountAtRisk > 0 && (
+                      <span className="text-[10px] font-semibold text-foreground/60 shrink-0">
+                        {formatCurrencyCompact(a.amountAtRisk, currency)}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button
+              onClick={() =>
+                openKey({
+                  mode: "chat",
+                  module: "revenue",
+                  prompt: "Walk me through what's happening with my revenue this month and what I should focus on first.",
+                  context: {
+                    surface: "commerce-overview",
+                    kpis: revenueOverview.kpis,
+                    pulse: revenueOverview.pulse,
+                    topActions: revenueOverview.top.map((a) => ({
+                      id: a.id, type: a.type, title: a.title, priority: a.priority, amountAtRisk: a.amountAtRisk,
+                    })),
+                  },
+                })
+              }
+              className="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-semibold"
+              style={{
+                background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.15))",
+                border: "1px solid hsl(var(--kf-accent1) / 0.25)",
+                color: "hsl(var(--kf-accent1))",
+              }}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Ask AI about revenue
+            </button>
+          </div>
+        </motion.div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
         <motion.div variants={stagger.item} className="lg:col-span-3 space-y-3">

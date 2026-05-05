@@ -26,6 +26,8 @@ import { MarginSnapshotSchedulerService } from './margin-snapshot-scheduler.serv
 import { StoreReadinessService } from './store-readiness.service';
 import { QuoteNotificationsListener } from './quote-notifications.listener';
 import { InvoiceReceiptListener } from './invoice-receipt.listener';
+import { RevenueActionService } from './revenue-action.service';
+import { RevenueActionController } from './revenue-action.controller';
 import { CrmModule } from '../crm/crm.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
@@ -49,7 +51,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
         }).NotificationsModule,
     ),
   ],
-  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController],
+  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RevenueActionController],
   providers: [
     CommerceService,
     CommerceStatsService,
@@ -73,6 +75,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     StoreReadinessService,
     QuoteNotificationsListener,
     InvoiceReceiptListener,
+    RevenueActionService,
     PlanLimitGuard,
   ],
   exports: [

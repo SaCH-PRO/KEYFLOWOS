@@ -360,6 +360,27 @@ export class ActionBlockedPayload {
   riskTier!: number;
 }
 
+// ---- R3: Revenue Action Queue canonical events ----
+export class RevenueActionCreatedPayload {
+  businessId!: string;
+  actionId!: string;
+  type!: string;
+  priority!: number;
+  relatedType?: string | null;
+  relatedId?: string | null;
+  amountAtRisk?: number | null;
+}
+
+export class RevenueActionCompletedPayload {
+  businessId!: string;
+  actionId!: string;
+  type!: string;
+  resolution!: 'completed' | 'dismissed' | 'snoozed';
+  relatedType?: string | null;
+  relatedId?: string | null;
+  resolvedBy?: string | null;
+}
+
 export interface ConnectorEventEnvelope {
   connectorType: ConnectorType;
   externalId: string | null;
@@ -625,6 +646,9 @@ export interface KeyFlowEventMap {
   'graph.cache_invalidated': GraphCacheInvalidatedPayload;
   'action.executed': ActionExecutedPayload;
   'action.blocked': ActionBlockedPayload;
+
+  'revenue_action.created': RevenueActionCreatedPayload;
+  'revenue_action.completed': RevenueActionCompletedPayload;
 
   'connector.synced': ConnectorSyncedPayload;
   'connector.error': ConnectorErrorPayload;
