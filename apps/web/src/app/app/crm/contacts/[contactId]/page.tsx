@@ -2,12 +2,14 @@
 
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { Badge, Button, Input } from "@keyflow/ui";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ReferContactDialog } from "@/components/contacts/refer-contact-dialog";
+import { UserPlus } from "lucide-react";
 import {
   Contact,
   ContactPlaybook,
@@ -63,6 +65,7 @@ function useIsMobile() {
 export default function ContactDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const isMobile = useIsMobile();
   const { setCurrentMeta, getOriginContext } = useNavigationContext();
   const contactId = params?.contactId as string;
@@ -85,6 +88,13 @@ export default function ContactDetailPage() {
   const [notesQuery, setNotesQuery] = useState("");
   const [playbookEdit, setPlaybookEdit] = useState(false);
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
+  const [referOpen, setReferOpen] = useState(false);
+
+  useEffect(() => {
+    if (searchParams?.get("action") === "refer") {
+      setReferOpen(true);
+    }
+  }, [searchParams]);
 
   const normalizeContact = useCallback(
     (contact?: Contact | null): ContactWithTags | null => (contact ? { ...contact, tags: contact.tags ?? [] } : null),
@@ -659,8 +669,20 @@ export default function ContactDetailPage() {
           <Button variant="destructive" onClick={deleteAction} disabled={isPending}>
             Delete
           </Button>
+          <Button variant="outline" onClick={() => setReferOpen(true)}>
+            <UserPlus className="w-3.5 h-3.5 mr-1" /> Refer
+          </Button>
         </div>
       </div>
+      <ReferContactDialog
+        open={referOpen}
+        contactId={contactId}
+        contactName={`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.email || undefined}
+        onClose={() => setReferOpen(false)}
+        onCreated={(targetId) => {
+          router.push(`/app/crm/contacts/${targetId}`);
+        }}
+      />
 
       <div className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-3">
         <div className="flex items-center justify-between gap-2">

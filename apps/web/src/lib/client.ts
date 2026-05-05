@@ -9840,3 +9840,140 @@ export function subscribeContactConversationStream(
     try { es?.close(); } catch {}
   };
 }
+
+// =============================================================================
+// Relationship graph (M5)
+// =============================================================================
+const networkContactSchema = z.object({
+  id: z.string(),
+  firstName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  companyName: z.string().nullable().optional(),
+  jobTitle: z.string().nullable().optional(),
+  status: z.string().nullable().optional(),
+  relationshipType: z.string().nullable().optional(),
+  relationshipHealth: z.string().nullable().optional(),
+  priority: z.string().nullable().optional(),
+});
+export type NetworkContact = z.infer<typeof networkContactSchema>;
+
+const relationshipEdgeSchema = z.object({
+  id: z.string(),
+  fromContactId: z.string(),
+  toContactId: z.string(),
+  type: z.string(),
+  since: z.string().nullable().optional(),
+  note: z.string().nullable().optional(),
+});
+export type RelationshipEdge = z.infer<typeof relationshipEdgeSchema>;
+
+const contactRelationshipsSchema = z.object({
+  outgoing: z.array(
+    relationshipEdgeSchema.extend({
+      toContact: networkContactSchema.extend({ businessId: z.string().optional() }).passthrough(),
+    }),
+  ),
+  incoming: z.array(
+    relationshipEdgeSchema.extend({
+      fromContact: networkContactSchema.extend({ businessId: z.string().optional() }).passthrough(),
+    }),
+  ),
+});
+export type ContactRelationships = z.infer<typeof contactRelationshipsSchema>;
+
+const networkGraphSchema = z.object({
+  rootId: z.string().optional(),
+  nodes: z.array(networkContactSchema),
+  edges: z.array(relationshipEdgeSchema),
+});
+export type NetworkGraph = z.infer<typeof networkGraphSchema>;
+
+export async function fetchContactRelationships(
+  contactId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/relationships`,
+    contactRelationshipsSchema,
+    { outgoing: [], incoming: [] },
+  );
+}
+
+export async function fetchContactNetwork(
+  contactId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+  depth: number = 2,
+) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/network?depth=${depth}`,
+    networkGraphSchema,
+    { rootId: contactId, nodes: [], edges: [] },
+  );
+}
+
+export async function fetchNetworkGraph(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  filter?: { type?: string; relationshipHealth?: string; minDealValue?: number; search?: string },
+) {
+  const params = new URLSearchParams();
+  if (filter?.type) params.set("type", filter.type);
+  if (filter?.relationshipHealth) params.set("relationshipHealth", filter.relationshipHealth);
+  if (typeof filter?.minDealValue === "number") params.set("minDealValue", String(filter.minDealValue));
+  if (filter?.search) params.set("search", filter.search);
+  const qs = params.toString();
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/network${qs ? "?" + qs : ""}`,
+    networkGraphSchema,
+    { nodes: [], edges: [] },
+  );
+}
+
+export async function createContactRelationship(input: {
+  contactId: string;
+  toContactId: string;
+  type: string;
+  since?: string | null;
+  note?: string | null;
+  businessId?: string;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<RelationshipEdge>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}/relationships`,
+    body: {
+      toContactId: input.toContactId,
+      type: input.type,
+      since: input.since ?? null,
+      note: input.note ?? null,
+    },
+  });
+}
+
+export async function deleteContactRelationship(
+  relationshipId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiDelete<{ ok: true }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/relationships/${encodeURIComponent(relationshipId)}`,
+  );
+}
+
+export async function referContact(input: {
+  contactId: string;
+  target: { contactId?: string; firstName?: string; lastName?: string; email?: string; phone?: string };
+  note?: string | null;
+  businessId?: string;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ relationship: RelationshipEdge; targetContactId: string }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}/refer`,
+    body: {
+      contactId: input.target.contactId,
+      firstName: input.target.firstName,
+      lastName: input.target.lastName,
+      email: input.target.email,
+      phone: input.target.phone,
+      note: input.note ?? null,
+    },
+  });
+}

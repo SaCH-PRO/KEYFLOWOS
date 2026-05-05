@@ -458,6 +458,9 @@ export function useContactActions({
         moduleEvents.emit("commerce:create_quote_for_contact", "crm", { contactId });
         router.push(`/app/commerce?tab=billing&segment=quotes&contactId=${contactId}`);
         break;
+      case "refer":
+        router.push(`/app/crm/contacts/${contactId}?action=refer`);
+        break;
     }
   }, [router]);
 

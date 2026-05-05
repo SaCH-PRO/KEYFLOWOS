@@ -506,6 +506,8 @@ model Contact {
   journeyTouchpoints  JourneyTouchpoint[]
   whatsappContacts    WhatsAppContact[]
   conversationInsights ConversationAIInsight[]
+  relationshipsFrom   ContactRelationship[] @relation("ContactRelationshipFrom")
+  relationshipsTo     ContactRelationship[] @relation("ContactRelationshipTo")
 
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
@@ -599,6 +601,29 @@ model Deal {
   @@index([contactId])
   @@index([businessId, deletedAt])
   @@map("deals")
+}
+
+model ContactRelationship {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  fromContactId String   @map("from_contact_id")
+  toContactId   String   @map("to_contact_id")
+  type          String
+  since         DateTime?
+  note          String?
+
+  fromContact Contact @relation("ContactRelationshipFrom", fields: [fromContactId], references: [id], onDelete: Cascade)
+  toContact   Contact @relation("ContactRelationshipTo", fields: [toContactId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@unique([fromContactId, toContactId, type])
+  @@index([businessId])
+  @@index([businessId, type])
+  @@index([fromContactId])
+  @@index([toContactId])
+  @@map("contact_relationships")
 }
 
 model ContactExternalMapping {

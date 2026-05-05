@@ -16,6 +16,7 @@ import { CrmImportService } from './crm-import.service';
 import { CrmJourneyService } from './crm-journey.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmSavedViewsService } from './crm-saved-views.service';
+import { CrmNetworkService } from './crm-network.service';
 import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmRevenueService } from './crm-revenue.service';
 import { CrmSequenceService } from './crm-sequence.service';
@@ -38,9 +39,10 @@ import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import { AiModule } from '../ai/ai.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { ConnectorModule } from '../../core/connectors/connector.module';
+import { CommunityModule } from '../community/community.module';
 
 @Module({
-  imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule],
+  imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule, CommunityModule],
   controllers: [
     CrmController,
     CrmAiController,
@@ -65,6 +67,7 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
     CrmActionsService,
     CrmRevenueService,
     CrmJourneyService,
+    CrmNetworkService,
     CrmAiService,
     CrmSequenceService,
     CrmSequenceSchedulerService,
@@ -96,6 +99,7 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
     CrmActionsService,
     CrmRevenueService,
     CrmJourneyService,
+    CrmNetworkService,
     CrmAiService,
     CrmSequenceService,
     CrmSequenceSchedulerService,
