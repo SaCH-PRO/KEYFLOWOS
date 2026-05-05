@@ -8,9 +8,11 @@ import type {
   InvoiceStatusPayload,
   PaymentFailedPayload,
   QuoteAcceptedPayload,
+  QuoteSentPayload,
   QuoteStalePayload,
   RevenueActionCreatedPayload,
   RevenueActionCompletedPayload,
+  StoreOrderRoutingFailedPayload,
 } from '../../core/event-bus/events.types';
 
 const TICK_MS = 5 * 60 * 1000;
@@ -83,6 +85,21 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
   @OnEvent('quote.stale', { async: true })
   async onQuoteStale(payload: QuoteStalePayload) {
     await this.generateForStaleQuote(payload.businessId, payload.quote.id);
+  }
+
+  @OnEvent('quote.sent', { async: true })
+  async onQuoteSent(payload: QuoteSentPayload) {
+    await this.generateQuoteSentFollowUp(payload.businessId, payload.quote.id);
+  }
+
+  @OnEvent('store_order.routing_failed', { async: true })
+  async onStoreOrderRoutingFailed(payload: StoreOrderRoutingFailedPayload) {
+    await this.generateForRoutingFailure(
+      payload.businessId,
+      payload.orderId,
+      payload.contactId ?? null,
+      payload.error,
+    );
   }
 
   @OnEvent('quote.accepted', { async: true })
@@ -272,6 +289,54 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       relatedId: quote.id,
       amountAtRisk: Number(quote.total ?? 0),
       recommendation,
+    });
+  }
+
+  /**
+   * Quote-sent follow-up: schedule a STALE_QUOTE-style action with a 3-day
+   * dueAt so the owner sees a reminder unless the quote progresses. Idempotent
+   * via the (businessId, type, relatedType, relatedId) unique key.
+   */
+  async generateQuoteSentFollowUp(businessId: string, quoteId: string): Promise<boolean> {
+    const quote = await this.prisma.client.quote.findFirst({
+      where: { id: quoteId, businessId, deletedAt: null },
+      include: { contact: true },
+    });
+    if (!quote || quote.status !== 'SENT' || quote.acceptedAt || quote.rejectedAt) return false;
+    const contactName = formatContactName(quote.contact);
+    const ref = quote.quoteNumber ?? quote.id.slice(0, 8);
+    return this.upsertAction({
+      businessId,
+      type: 'STALE_QUOTE',
+      title: `Follow up on quote #${ref}`,
+      detail: `${contactName} was sent quote #${ref}. Reach out in 3 days if there is no movement.`,
+      priority: 2,
+      contactId: quote.contactId,
+      relatedType: 'quote',
+      relatedId: quote.id,
+      amountAtRisk: Number(quote.total ?? 0),
+      dueAt: new Date(Date.now() + 3 * 86_400_000),
+      recommendation: null,
+    });
+  }
+
+  async generateForRoutingFailure(
+    businessId: string,
+    orderId: string,
+    contactId: string | null,
+    error: string,
+  ): Promise<boolean> {
+    return this.upsertAction({
+      businessId,
+      type: 'OVERDUE_INVOICE',
+      title: `Fulfillment routing failed for order ${orderId.slice(0, 8)}`,
+      detail: `The system could not route this order automatically. Reason: ${error.slice(0, 200)}`,
+      priority: 1,
+      contactId,
+      relatedType: 'store_order',
+      relatedId: orderId,
+      amountAtRisk: null,
+      recommendation: null,
     });
   }
 

@@ -3,6 +3,7 @@ import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { TransactionalEmailService } from './transactional-email.service';
 import { SystemEmailService } from './system-email.service';
+import { NotificationsRevenueListener } from './notifications-revenue.listener';
 // CommerceModule is intentionally NOT statically imported here. The dependency
 // chain notifications -> commerce -> crm -> connector -> notifications is a
 // circular cycle, and a static `import { CommerceModule }` triggers eager
@@ -22,7 +23,7 @@ import type { CommerceModule as CommerceModuleType } from '../commerce/commerce.
     ),
   ],
   controllers: [NotificationsController],
-  providers: [NotificationsService, TransactionalEmailService, SystemEmailService],
+  providers: [NotificationsService, TransactionalEmailService, SystemEmailService, NotificationsRevenueListener],
   exports: [NotificationsService, TransactionalEmailService, SystemEmailService],
 })
 export class NotificationsModule {}

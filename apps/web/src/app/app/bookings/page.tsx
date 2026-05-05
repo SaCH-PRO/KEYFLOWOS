@@ -393,15 +393,34 @@ export default function BookingsPage() {
     }
   }
 
-  const handleCreateInvoice = useCallback((booking: Booking) => {
-    moduleEvents.emit("booking:create_invoice", "bookings", {
-      contactId: booking.contact?.id,
-      serviceId: booking.serviceId,
-      serviceName: booking.service?.name,
-      servicePrice: booking.service?.price,
-    });
-    router.push("/app/commerce?tab=invoices&action=new-invoice");
-  }, [router]);
+  const handleCreateInvoice = useCallback(async (booking: Booking) => {
+    if (!businessId) return;
+    try {
+      const { createInvoiceFromBooking } = await import("@/lib/client");
+      const res = await createInvoiceFromBooking(booking.id, businessId);
+      if (res.data?.invoiceId) {
+        moduleEvents.emit("booking:create_invoice", "bookings", {
+          contactId: booking.contact?.id,
+          serviceId: booking.serviceId,
+          serviceName: booking.service?.name,
+          servicePrice: booking.service?.price,
+          invoiceId: res.data.invoiceId,
+        });
+        await loadData();
+        setBanner({
+          text: res.data.alreadyExisted
+            ? `Opening existing invoice ${res.data.invoiceNumber}.`
+            : `Invoice ${res.data.invoiceNumber} created from booking.`,
+          type: "success",
+        });
+        router.push(`/app/commerce?tab=invoices&invoiceId=${encodeURIComponent(res.data.invoiceId)}`);
+        return;
+      }
+      setBanner({ text: res.error ?? "Failed to create invoice from booking.", type: "error" });
+    } catch (err) {
+      setBanner({ text: (err as Error)?.message ?? "Failed to create invoice from booking.", type: "error" });
+    }
+  }, [router, businessId, loadData]);
 
   async function handleCreateStaff() {
     if (!businessId || !staffForm.name.trim()) return;

@@ -12,6 +12,7 @@ import {
   ContactUpdatedPayload,
   InvoicePaidPayload,
   InvoiceStatusPayload,
+  PaymentReceivedPayload,
   SequenceStepDuePayload,
   SequenceStepFailedPayload,
   ExpenseCreatedPayload,
@@ -404,12 +405,49 @@ export class FlowListener implements OnModuleInit {
   @OnEvent('invoice.paid')
   async handleInvoicePaidCustomerNotif(payload: InvoicePaidPayload) {
     const inv = payload.invoice;
-    await this.sendCustomerNotification(payload.businessId, 'payment_receipt', inv.contact, {
-      invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
-      total: inv.total,
-      currency: inv.currency,
-      paidAt: inv.paidAt ?? new Date(),
-    });
+    await this.sendCustomerNotification(
+      payload.businessId,
+      'payment_receipt',
+      inv.contact,
+      {
+        invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
+        total: inv.total,
+        currency: inv.currency,
+        paidAt: inv.paidAt ?? new Date(),
+      },
+      `receipt_invoice_${inv.id}`,
+    );
+  }
+
+  /**
+   * Connector-driven payment.received: covers partial-payment and
+   * out-of-band reconciliation cases where invoice.paid may not have
+   * fired. Uses the SAME dedupeKey as the invoice.paid handler
+   * (`receipt_invoice_<invoiceId>`) so a customer never gets two
+   * receipts when both events occur for the same invoice.
+   */
+  @OnEvent('payment.received')
+  async handlePaymentReceivedCustomerReceipt(payload: PaymentReceivedPayload) {
+    if (!payload.invoiceId) return;
+    const inv = await this.prisma.client.invoice
+      .findFirst({
+        where: { id: payload.invoiceId, businessId: payload.businessId, deletedAt: null },
+        include: { contact: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      })
+      .catch(() => null);
+    if (!inv?.contact?.email) return;
+    await this.sendCustomerNotification(
+      payload.businessId,
+      'payment_receipt',
+      inv.contact,
+      {
+        invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
+        total: payload.amount ?? inv.total,
+        currency: payload.currency ?? inv.currency,
+        paidAt: new Date(),
+      },
+      `receipt_invoice_${inv.id}`,
+    );
   }
 
   async handleBookingReminders() {

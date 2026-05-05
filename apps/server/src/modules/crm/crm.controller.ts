@@ -1395,6 +1395,17 @@ export class CrmController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/revenue-summary')
+  getContactRevenueSummary(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.revenue.getContactRevenueSummary(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/health-metrics')
   getContactHealthMetrics(
     @Param('businessId') businessId: string,

@@ -48,6 +48,7 @@ import { BestChannelListener } from './best-channel.listener';
 import { BestChannelSchedulerService } from './best-channel-scheduler.service';
 import { ContactInsightService } from './contact-insight.service';
 import { ContactInsightListener } from './contact-insight.listener';
+import { RevenueEventListener } from './revenue-event.listener';
 import { CrmRateLimitGuard } from './guards/rate-limit.guard';
 import { FeatureFlagGuard } from './guards/feature-flag.guard';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
@@ -105,6 +106,7 @@ import { CommunityModule } from '../community/community.module';
     BestChannelSchedulerService,
     ContactInsightService,
     ContactInsightListener,
+    RevenueEventListener,
     CrmRateLimitGuard,
     FeatureFlagGuard,
     PlanLimitGuard,

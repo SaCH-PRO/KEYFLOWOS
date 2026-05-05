@@ -1,7 +1,14 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
-import { BookingCompletedPayload, BookingConfirmedPayload, BookingCreatedPayload, BookingRescheduledPayload } from '../../core/event-bus/events.types';
+import {
+  BookingCompletedPayload,
+  BookingConfirmedPayload,
+  BookingCreatedPayload,
+  BookingInvoiceCreatedPayload,
+  BookingNoShowPayload,
+  BookingRescheduledPayload,
+} from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -153,6 +160,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
         service: { select: { id: true, name: true, duration: true, price: true, bufferMins: true, leadTimeMins: true } },
         staff: { select: { id: true, name: true } },
+        invoice: { select: { id: true, invoiceNumber: true, status: true, total: true, currency: true } },
       },
     });
   }
@@ -165,10 +173,12 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       const { NotFoundException } = await import('@nestjs/common');
       throw new NotFoundException('Booking not found');
     }
-    const allowed = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED'];
+    const allowed = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW'];
     if (!allowed.includes(status)) {
       const { BadRequestException } = await import('@nestjs/common');
-      throw new BadRequestException('Invalid status. Must be one of: PENDING, CONFIRMED, CANCELLED, COMPLETED');
+      throw new BadRequestException(
+        'Invalid status. Must be one of: PENDING, CONFIRMED, CANCELLED, COMPLETED, NO_SHOW',
+      );
     }
     const updated = await this.prisma.client.booking.update({
       where: { id: bookingId },
@@ -230,7 +240,89 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
+    if (status === 'NO_SHOW' && booking.contactId) {
+      const payload: BookingNoShowPayload = {
+        booking: updated,
+        contact: updated.contact ?? undefined,
+        businessId,
+        markedAt: new Date(),
+      };
+      // Single source of truth: the event-bus subscriber (BookingNoShowListener
+      // + RevenueEventListener) owns timeline + notification side-effects for
+      // no-shows. Do not write to the timeline directly here.
+      this.events.emit('booking.no_show', payload);
+    }
+
     return updated;
+  }
+
+  /**
+   * Public version of the auto-invoice helper that powers the booking-detail
+   * "Create invoice" button. Idempotent: if the booking already has an invoice,
+   * returns it unchanged; otherwise creates one from the booking's service and
+   * links it via `Booking.invoiceId`.
+   */
+  async createInvoiceFromBooking(businessId: string, bookingId: string) {
+    const booking = await this.prisma.client.booking.findFirst({
+      where: { id: bookingId, businessId, deletedAt: null },
+      include: {
+        service: true,
+        contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    });
+    if (!booking) {
+      throw new BadRequestException('Booking not found');
+    }
+    if (booking.invoiceId) {
+      const existing = await this.prisma.client.invoice.findUnique({
+        where: { id: booking.invoiceId },
+        select: { id: true, invoiceNumber: true },
+      });
+      if (existing) {
+        return {
+          invoiceId: existing.id,
+          invoiceNumber: existing.invoiceNumber,
+          alreadyExisted: true,
+        };
+      }
+    }
+    if (!booking.contactId || !booking.serviceId || !booking.service) {
+      throw new BadRequestException('Booking is missing a contact or service');
+    }
+    if ((booking.service.price ?? 0) <= 0) {
+      throw new BadRequestException('Service has no price configured');
+    }
+
+    const invoice = await this.commerce.createInvoiceForService(
+      businessId,
+      booking.contactId,
+      booking.service,
+    );
+    if (!invoice) {
+      throw new BadRequestException('Failed to create invoice');
+    }
+    await this.prisma.client.booking.update({
+      where: { id: booking.id },
+      data: { invoiceId: invoice.id },
+    });
+
+    const invoiceWithNumber = invoice as typeof invoice & { invoiceNumber: string };
+    const payload: BookingInvoiceCreatedPayload = {
+      booking: { ...booking, invoiceId: invoice.id },
+      invoice,
+      businessId,
+    };
+    // Single source of truth: RevenueEventListener subscribes to
+    // `booking.invoice_created` and writes the canonical
+    // `invoice.from_booking` row on the contact timeline. Do NOT also
+    // call this.crm.logContactEvent here — that would bypass the bus
+    // and risk duplicate timeline rows.
+    this.events.emit('booking.invoice_created', payload);
+    return {
+      invoiceId: invoice.id,
+      invoiceNumber: invoiceWithNumber.invoiceNumber,
+      alreadyExisted: false,
+    };
   }
 
   async updateBookingNotes(businessId: string, bookingId: string, notes: string) {
@@ -844,6 +936,14 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           where: { id: booking.id },
           data: { invoiceId: invoice.id },
         });
+        // Emit on the bus so RevenueEventListener writes the canonical
+        // `invoice.from_booking` timeline row exactly once.
+        const payload: BookingInvoiceCreatedPayload = {
+          booking: { ...booking, invoiceId: invoice.id },
+          invoice,
+          businessId,
+        };
+        this.events.emit('booking.invoice_created', payload);
         this.logger.log(`Auto-generated invoice ${invoice.id} for completed booking ${booking.id}`);
       }
     } catch (err) {

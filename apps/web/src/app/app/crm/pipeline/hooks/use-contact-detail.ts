@@ -7,7 +7,7 @@ import type { HealthMetrics } from "@/components/contacts/contact-health-score";
 import type { JourneyMilestone } from "@/components/contacts/relationship-timeline";
 import type { ConversationContextData } from "@/components/contacts/conversation-context";
 import type { AiInsight } from "@/components/contacts/ai-copilot";
-import type { Contact, ContactDetail as ContactDetailAPI, ContactInsightSnapshot, CrossJourneyResponse } from "@/lib/client";
+import type { Contact, ContactDetail as ContactDetailAPI, ContactInsightSnapshot, ContactRevenueSummary, CrossJourneyResponse } from "@/lib/client";
 import {
   fetchContactDetail,
   fetchContactHealthMetrics,
@@ -17,6 +17,7 @@ import {
   recomputeContactInsightSnapshot,
   generateAiInsight,
   fetchContactCrossJourney,
+  fetchContactRevenueSummary,
 } from "@/lib/client";
 
 export function useContactDetail(businessId: string | null, contacts: Contact[]) {
@@ -34,6 +35,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   const [aiInsightLoading, setAiInsightLoading] = useState(false);
   const [insightSnapshot, setInsightSnapshot] = useState<ContactInsightSnapshot | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
+  const [revenueSummary, setRevenueSummary] = useState<ContactRevenueSummary | null>(null);
 
   const detailAbortRef = useRef<AbortController | null>(null);
   const aiAbortRef = useRef<AbortController | null>(null);
@@ -59,6 +61,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
       setConversationContext(null);
       setAiInsight(null);
       setInsightSnapshot(null);
+      setRevenueSummary(null);
       if (insightPollRef.current) {
         clearTimeout(insightPollRef.current);
         insightPollRef.current = null;
@@ -70,6 +73,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
           fetchContactJourney(contactId, businessId, { signal }),
           fetchConversationContext(contactId, businessId, { signal }),
           fetchContactCrossJourney(contactId, businessId, { signal }),
+          fetchContactRevenueSummary(contactId, businessId),
         ]);
         if (signal.aborted) return;
 
@@ -88,6 +92,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
         if (results[2].status === "fulfilled" && results[2].value.data) setJourneyMilestones(results[2].value.data);
         if (results[3].status === "fulfilled" && results[3].value.data) setConversationContext(results[3].value.data);
         if (results[4].status === "fulfilled" && results[4].value.data) setCrossJourney(results[4].value.data);
+        if (results[5]?.status === "fulfilled" && results[5].value.data) setRevenueSummary(results[5].value.data);
         setAiInsight(null);
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -222,6 +227,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     healthMetrics, journeyMilestones, crossJourney, conversationContext,
     aiInsight, aiInsightLoading,
     insightSnapshot, insightLoading, handleRecomputeInsight,
+    revenueSummary,
     selectedContact, detailEvents, detailNotes, detailTasks, detailInvoices, detailBookings, contactName,
     loadDetail, selectContact,
     handleGenerateAiInsight, handleRefreshConversationContext,

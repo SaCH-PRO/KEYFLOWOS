@@ -218,11 +218,19 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
   }
 
   async deleteRecurringInvoice(businessId: string, id: string) {
+    const existing = await this.prisma.client.recurringInvoice.findFirst({
+      where: { id, businessId },
+      select: { contactId: true },
+    });
     const result = await this.prisma.client.recurringInvoice.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
-    this.events.emit('recurring_invoice.deleted', { businessId, recurringInvoiceId: id });
+    this.events.emit('recurring_invoice.deleted', {
+      businessId,
+      recurringInvoiceId: id,
+      contactId: existing?.contactId ?? null,
+    });
     return result;
   }
 
@@ -345,6 +353,11 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
         } catch (writeErr) {
           this.logger.error(`Failed to record failure for recurring ${recurring.id}`, writeErr as Error);
         }
+        this.events.emit('recurring_invoice.failed', {
+          recurringInvoice: recurring,
+          businessId: recurring.businessId,
+          error: String(error?.message ?? error),
+        });
       }
     }
 
