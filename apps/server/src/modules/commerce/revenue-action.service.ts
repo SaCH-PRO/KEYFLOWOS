@@ -598,6 +598,88 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- Public CRUD for the controller ----------
 
+  /**
+   * Create a RevenueAction directly from an AI revenue-briefing chase suggestion.
+   * Uses a deterministic key derived from the chase target so repeated delegations
+   * of the same chase don't pile up duplicates.
+   */
+  async createFromBriefing(
+    businessId: string,
+    chase: {
+      title: string;
+      detail: string;
+      amountAtRisk?: number | null;
+      contactId?: string | null;
+      relatedType?: string | null;
+      relatedId?: string | null;
+    },
+  ): Promise<{ created: boolean; actionId?: string }> {
+    const relatedType = chase.relatedType ?? 'briefing';
+    const relatedId =
+      chase.relatedId ??
+      `briefing:${chase.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80)}`;
+    try {
+      const existing = await this.prisma.client.revenueAction.findUnique({
+        where: {
+          businessId_type_relatedType_relatedId: {
+            businessId,
+            type: 'CHASE_FROM_BRIEFING',
+            relatedType,
+            relatedId,
+          },
+        },
+        select: { id: true, status: true },
+      });
+      if (existing) {
+        if (existing.status === 'COMPLETED' || existing.status === 'DISMISSED') {
+          return { created: false, actionId: existing.id };
+        }
+        await this.prisma.client.revenueAction.update({
+          where: { id: existing.id },
+          data: {
+            title: chase.title,
+            detail: chase.detail,
+            amountAtRisk: chase.amountAtRisk ?? null,
+            contactId: chase.contactId ?? null,
+          },
+        });
+        return { created: false, actionId: existing.id };
+      }
+      const created = await this.prisma.client.revenueAction.create({
+        data: {
+          businessId,
+          type: 'CHASE_FROM_BRIEFING',
+          title: chase.title,
+          detail: chase.detail,
+          priority: 2,
+          contactId: chase.contactId ?? null,
+          relatedType,
+          relatedId,
+          amountAtRisk: chase.amountAtRisk ?? null,
+          recommendation: {
+            explanation: 'Delegated from your AI revenue briefing.',
+            suggestedAction: chase.detail || 'Reach out to this customer.',
+            source: 'ai',
+          } as Prisma.InputJsonValue,
+        },
+      });
+      const payload: RevenueActionCreatedPayload = {
+        businessId,
+        actionId: created.id,
+        type: 'CHASE_FROM_BRIEFING' as RevenueActionType,
+        priority: 2,
+        relatedType,
+        relatedId,
+        amountAtRisk: chase.amountAtRisk ?? null,
+      };
+      this.events.emit('revenue_action.created', payload);
+      return { created: true, actionId: created.id };
+    } catch (e) {
+      this.logger.warn(`createFromBriefing failed: ${(e as Error).message}`);
+      return { created: false };
+    }
+  }
+
   async list(businessId: string, opts?: { status?: string; limit?: number }) {
     const status = opts?.status ?? 'PENDING';
     const where: Prisma.RevenueActionWhereInput = { businessId };

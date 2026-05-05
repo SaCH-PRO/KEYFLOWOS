@@ -34,6 +34,7 @@ import {
 import { formatCurrencyCompact } from "@/lib/currency";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from "recharts";
 import { openKey } from "@/components/key/key-agent";
+import { RevenueIntelligenceSection } from "./revenue-intelligence-section";
 
 interface CommerceOverviewTabProps {
   businessId: string | null;
@@ -463,6 +464,10 @@ export function CommerceOverviewTab({
           View detailed reports →
         </Link>
       </div>
+
+      <motion.div variants={stagger.item}>
+        <RevenueIntelligenceSection businessId={businessId} currency={currency} />
+      </motion.div>
 
       {revenueOverview && (
         <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-3 gap-3">

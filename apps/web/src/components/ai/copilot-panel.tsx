@@ -155,6 +155,21 @@ const FALLBACK_PROMPTS: QuickPrompt[] = [
   { label: "Pending tasks", prompt: "Show me what needs my attention" },
 ];
 
+const MODULE_SCENARIO_PROMPTS: Record<string, QuickPrompt[]> = {
+  revenue: [
+    { label: "What should I chase this week?", prompt: "Look at my open invoices, accepted quotes and overdue items — what should I chase this week and in what order?" },
+    { label: "Which clients are slowing down?", prompt: "Which of my clients are paying slower than usual or going quiet? Show me the slow payers and what to do about them." },
+    { label: "Where's the upside?", prompt: "Where's the upside in my revenue right now? Look at high-margin products, pricing signals and quotes I could push to close." },
+    { label: "What's at risk?", prompt: "What revenue is at risk over the next 30 days? Use my forecast, slow payers and stale quotes to give me a worst-case view." },
+  ],
+  commerce: [
+    { label: "What should I chase this week?", prompt: "Look at my open invoices, accepted quotes and overdue items — what should I chase this week and in what order?" },
+    { label: "Which clients are slowing down?", prompt: "Which of my clients are paying slower than usual or going quiet? Show me the slow payers and what to do about them." },
+    { label: "Where's the upside?", prompt: "Where's the upside in my revenue right now? Look at high-margin products, pricing signals and quotes I could push to close." },
+    { label: "What's at risk?", prompt: "What revenue is at risk over the next 30 days? Use my forecast, slow payers and stale quotes to give me a worst-case view." },
+  ],
+};
+
 function ModuleBadge({ moduleId }: { moduleId: string }) {
   const info = MODULE_LABELS[moduleId] || MODULE_LABELS.cockpit;
   const Icon = info.icon;
@@ -451,8 +466,16 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
   const dynamicPrompts = useMemo((): QuickPrompt[] => {
     const prompts: QuickPrompt[] = [];
 
+    // Module-specific scenario prompts take priority for grounded modules
+    // (e.g. revenue/commerce get the 4 R5 revenue copilot scenarios).
+    const scenarioPrompts = currentModule ? MODULE_SCENARIO_PROMPTS[currentModule] ?? [] : [];
+    for (const sp of scenarioPrompts.slice(0, 4)) {
+      prompts.push(sp);
+    }
+
     const criticalInsights = insights.filter((i) => i.severity === "critical" || i.severity === "warning");
     for (const insight of criticalInsights.slice(0, 2)) {
+      if (prompts.length >= 4) break;
       prompts.push({
         label: insight.title,
         prompt: insight.suggestedAction || `Tell me about: ${insight.title}`,
@@ -463,6 +486,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
 
     const opportunities = insights.filter((i) => i.severity === "opportunity");
     for (const opp of opportunities.slice(0, 1)) {
+      if (prompts.length >= 4) break;
       prompts.push({
         label: opp.title,
         prompt: opp.suggestedAction || `How can I leverage: ${opp.title}`,
@@ -471,7 +495,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
       });
     }
 
-    if (pendingApprovals.length > 0) {
+    if (pendingApprovals.length > 0 && prompts.length < 4) {
       prompts.push({
         label: `${pendingApprovals.length} pending approval${pendingApprovals.length !== 1 ? "s" : ""}`,
         prompt: `Review my ${pendingApprovals.length} pending AI actions and help me decide`,
@@ -489,7 +513,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     }
 
     return prompts.slice(0, 4);
-  }, [insights, pendingApprovals]);
+  }, [insights, pendingApprovals, currentModule]);
 
   const moduleInsights = useMemo(() => {
     if (!currentModule || currentModule === "cockpit") return insights;
