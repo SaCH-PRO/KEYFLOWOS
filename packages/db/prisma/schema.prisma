@@ -729,6 +729,7 @@ model ContactList {
   color       String?
   type        String   @default("MANUAL")
   filters     Json?
+  rules       Json?
   contactIds  String[] @map("contact_ids")
   members     ContactListMember[]
   createdAt   DateTime @default(now()) @map("created_at")
@@ -758,6 +759,22 @@ model MergeOperation {
   @@index([businessId, primaryId])
   @@index([businessId, duplicateId])
   @@map("merge_operations")
+}
+
+model ContactSavedView {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  userId          String   @map("user_id")
+  name            String
+  filterState     Json     @map("filter_state")
+  sort            Json?
+  visibleColumns  String[] @default([]) @map("visible_columns")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, businessId, name])
+  @@index([businessId, userId])
+  @@map("contact_saved_views")
 }
 
 model ContactListMember {

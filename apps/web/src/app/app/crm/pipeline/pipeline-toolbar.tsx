@@ -34,6 +34,8 @@ import {
 import { CONTACT_AGE_GROUPS, CONTACT_AGE_GROUP_LABELS } from "@/lib/crm-constants";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { ContactScanButton } from "@/components/contacts/contact-scan-button";
+import { PipelineViewsPicker, type PipelineFilterState } from "./pipeline-views-picker";
+import type { ContactSavedView } from "@/lib/client";
 
 export type SortOption = "name" | "newest" | "oldest" | "revenue" | "score";
 export type SmartSegment = "high-value" | "needs-followup" | "new-this-week" | "at-risk" | "stale";
@@ -92,6 +94,9 @@ export interface PipelineToolbarProps {
   businessId?: string;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
+  savedViewState?: PipelineFilterState;
+  onApplySavedView?: (view: ContactSavedView) => void;
+  onClearSavedView?: () => void;
 }
 
 function PipelineToolbarInner({
@@ -120,6 +125,9 @@ function PipelineToolbarInner({
   businessId,
   viewMode,
   onViewModeChange,
+  savedViewState,
+  onApplySavedView,
+  onClearSavedView,
 }: PipelineToolbarProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
@@ -207,6 +215,15 @@ function PipelineToolbarInner({
             </button>
           )}
         </div>
+        {onApplySavedView && onClearSavedView && (
+          <PipelineViewsPicker
+            businessId={businessId}
+            currentFilterState={savedViewState ?? {}}
+            currentSort={{ sortBy }}
+            onApplyView={onApplySavedView}
+            onClearView={onClearSavedView}
+          />
+        )}
         <ContactScanButton businessId={businessId} onScanSuccess={onScanSuccess} />
         <AddContactControl
           onQuickCreate={onQuickCreate}

@@ -6546,7 +6546,7 @@ export async function fetchContactLists(businessId: string = DEFAULT_BUSINESS_ID
 
 export async function createContactList(
   businessId: string,
-  data: { name: string; description?: string; color?: string; type?: string; filters?: unknown; contactIds?: string[] },
+  data: { name: string; description?: string; color?: string; type?: string; filters?: unknown; rules?: unknown; contactIds?: string[] },
 ): Promise<ApiResult<ContactList>> {
   return apiPost<ContactList>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/lists`,
@@ -6557,7 +6557,7 @@ export async function createContactList(
 export async function updateContactList(
   businessId: string,
   listId: string,
-  data: { name?: string; description?: string; color?: string; type?: string; filters?: unknown; contactIds?: string[] },
+  data: { name?: string; description?: string; color?: string; type?: string; filters?: unknown; rules?: unknown; contactIds?: string[] },
 ): Promise<ApiResult<ContactList>> {
   const url = `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}`;
   try {
@@ -6578,11 +6578,101 @@ export async function deleteContactList(businessId: string, listId: string): Pro
   return apiDelete<void>(`/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}`);
 }
 
-export async function fetchContactListContacts(businessId: string, listId: string): Promise<ApiResult<Contact[]>> {
+// ---- Contact saved views (per-user) -----------------------------------
+
+export type ContactSavedViewSort = { sortBy?: string; sortOrder?: "asc" | "desc" };
+
+export interface ContactSavedView {
+  id: string;
+  businessId: string;
+  userId: string;
+  name: string;
+  filterState: Record<string, unknown>;
+  sort: ContactSavedViewSort | null;
+  visibleColumns: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+const contactSavedViewSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  userId: z.string(),
+  name: z.string(),
+  filterState: z.record(z.unknown()),
+  sort: z.object({ sortBy: z.string().optional(), sortOrder: z.enum(["asc", "desc"]).optional() }).nullable().optional(),
+  visibleColumns: z.array(z.string()).default([]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}) as unknown as z.ZodSchema<ContactSavedView>;
+
+export async function fetchSavedViews(
+  businessId: string = DEFAULT_BUSINESS_ID,
+): Promise<ApiResult<ContactSavedView[]>> {
   return apiGet(
-    `/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}/contacts`,
-    z.array(contactSchema),
+    `/crm/businesses/${encodeURIComponent(businessId)}/saved-views`,
+    z.array(contactSavedViewSchema),
     [],
+  );
+}
+
+export async function createSavedView(
+  businessId: string,
+  data: { name: string; filterState: Record<string, unknown>; sort?: ContactSavedViewSort | null; visibleColumns?: string[] | null },
+): Promise<ApiResult<ContactSavedView>> {
+  return apiPost<ContactSavedView>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/saved-views`,
+    body: data,
+  });
+}
+
+export async function updateSavedView(
+  businessId: string,
+  viewId: string,
+  data: { name?: string; filterState?: Record<string, unknown>; sort?: ContactSavedViewSort | null; visibleColumns?: string[] | null },
+): Promise<ApiResult<ContactSavedView>> {
+  return apiPatch<ContactSavedView>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/saved-views/${encodeURIComponent(viewId)}`,
+    data,
+  );
+}
+
+export async function deleteSavedView(
+  businessId: string,
+  viewId: string,
+): Promise<ApiResult<void>> {
+  return apiDelete<void>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/saved-views/${encodeURIComponent(viewId)}`,
+  );
+}
+
+export interface ContactListContactsResult {
+  contacts: Contact[];
+  total: number;
+  truncated: boolean;
+  limit: number;
+}
+
+const contactListContactsSchema = z.object({
+  contacts: z.array(contactSchema),
+  total: z.number(),
+  truncated: z.boolean(),
+  limit: z.number(),
+}) as unknown as z.ZodSchema<ContactListContactsResult>;
+
+export async function fetchContactListContacts(
+  businessId: string,
+  listId: string,
+  options?: { limit?: number; offset?: number },
+): Promise<ApiResult<ContactListContactsResult>> {
+  const qs = new URLSearchParams();
+  if (options?.limit !== undefined) qs.set('limit', String(options.limit));
+  if (options?.offset !== undefined) qs.set('offset', String(options.offset));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}/contacts${suffix}`,
+    contactListContactsSchema,
+    { contacts: [], total: 0, truncated: false, limit: 1000 },
   );
 }
 

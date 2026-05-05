@@ -17,6 +17,7 @@ import { CrmListsService } from './crm-lists.service';
 import { CrmFlowService } from './crm-flow.service';
 import type { ContactMeta, ContactWithStats } from './crm-stats.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { buildContactWhere } from './contact-filters.helper';
 import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
@@ -147,101 +148,30 @@ export class CrmService {
   }
 
   async listContacts(input: ContactListOptions) {
-    const where: any = { ...contactWhereBase(input.businessId) };
-    if (input.status) where.status = input.status;
-    const searchValue = input.search?.trim();
-    if (searchValue) {
-      const normalizedEmail = normalizeEmail(searchValue);
-      const normalizedPhone = normalizePhone(searchValue);
-      const orConditions: Prisma.ContactWhereInput[] = [
-        { firstName: { contains: searchValue, mode: 'insensitive' } },
-        { lastName: { contains: searchValue, mode: 'insensitive' } },
-        { displayName: { contains: searchValue, mode: 'insensitive' } },
-        { email: { contains: searchValue, mode: 'insensitive' } },
-        { phone: { contains: searchValue, mode: 'insensitive' } },
-        { companyName: { contains: searchValue, mode: 'insensitive' } },
-        { segment: { contains: searchValue, mode: 'insensitive' } },
-        { tags: { has: searchValue } },
-      ];
-      if (normalizedEmail) {
-        orConditions.push({ emailNormalized: { contains: normalizedEmail } });
-      }
-      if (normalizedPhone) {
-        orConditions.push({ phoneNormalized: { contains: normalizedPhone } });
-      }
-      where.OR = orConditions;
-    }
-    if (input.hasUnpaidInvoices) {
-      where.invoices = {
-        some: {
-          status: { in: ['SENT', 'OVERDUE'] },
-          deletedAt: null,
-        },
-      };
-    }
-    if (input.hasUpcomingBookings) {
-      where.bookings = {
-        some: {
-          startTime: { gt: new Date() },
-          status: { notIn: ['CANCELLED'] },
-          deletedAt: null,
-        },
-      };
-    }
-    if (input.staleDays) {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - input.staleDays);
-      where.NOT = [
-        {
-          bookings: {
-            some: {
-              startTime: { gt: cutoff },
-              deletedAt: null,
-            },
-          },
-        },
-      ];
-    }
-    if (input.newThisWeek) {
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
-      const day = start.getDay();
-      const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-      start.setDate(diff);
-      where.createdAt = { gte: start };
-    }
-    if (input.tags && input.tags.length > 0) {
-      where.tags = { hasSome: input.tags };
-    }
-    if (input.ownerId) where.ownerId = input.ownerId;
-    if (input.lifecycleStage) where.lifecycleStage = input.lifecycleStage;
-    if (input.companyName) where.companyName = { contains: input.companyName, mode: 'insensitive' };
-    if (input.industry) where.industry = { contains: input.industry, mode: 'insensitive' };
-    if (input.city) where.city = { contains: input.city, mode: 'insensitive' };
-    if (input.country) where.country = { contains: input.country, mode: 'insensitive' };
-    if (input.segment) where.segment = input.segment;
-    if (typeof input.doNotContact === 'boolean') where.doNotContact = input.doNotContact;
-    if (input.ageGroups && input.ageGroups.length > 0) {
-      where.ageGroup = { in: input.ageGroups };
-    }
-    if (input.relationshipTypes && input.relationshipTypes.length > 0) {
-      where.relationshipType = { in: input.relationshipTypes };
-    }
-    if (input.priorities && input.priorities.length > 0) {
-      where.priority = { in: input.priorities };
-    }
-    if (input.relationshipHealth && input.relationshipHealth.length > 0) {
-      where.relationshipHealth = { in: input.relationshipHealth };
-    }
-    if (input.pipelineStages && input.pipelineStages.length > 0) {
-      where.pipelineStage = { in: input.pipelineStages };
-    }
-    if (typeof input.favorite === 'boolean') {
-      where.favorite = input.favorite;
-    }
-    if (!input.includeArchived) {
-      where.archivedAt = null;
-    }
+    const where: any = buildContactWhere(input.businessId, {
+      status: input.status,
+      search: input.search,
+      hasUnpaidInvoices: input.hasUnpaidInvoices,
+      hasUpcomingBookings: input.hasUpcomingBookings,
+      staleDays: input.staleDays,
+      newThisWeek: input.newThisWeek,
+      tags: input.tags,
+      ownerId: input.ownerId,
+      lifecycleStage: input.lifecycleStage,
+      companyName: input.companyName,
+      industry: input.industry,
+      city: input.city,
+      country: input.country,
+      segment: input.segment,
+      doNotContact: input.doNotContact,
+      ageGroups: input.ageGroups,
+      relationshipTypes: input.relationshipTypes,
+      priorities: input.priorities,
+      relationshipHealth: input.relationshipHealth,
+      pipelineStages: input.pipelineStages,
+      favorite: input.favorite,
+      includeArchived: input.includeArchived,
+    });
 
     const take = Math.min(input.take ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 
@@ -1360,11 +1290,11 @@ export class CrmService {
     return this.lists.listContactLists(businessId);
   }
 
-  createContactList(input: { businessId: string; name: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] }) {
+  createContactList(input: { businessId: string; name: string; description?: string; color?: string; type?: string; filters?: any; rules?: any; contactIds?: string[] }) {
     return this.lists.createContactList(input);
   }
 
-  updateContactList(input: { businessId: string; listId: string; name?: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] }) {
+  updateContactList(input: { businessId: string; listId: string; name?: string; description?: string; color?: string; type?: string; filters?: any; rules?: any; contactIds?: string[] }) {
     return this.lists.updateContactList(input);
   }
 
@@ -1372,7 +1302,7 @@ export class CrmService {
     return this.lists.deleteContactList(input);
   }
 
-  getContactListContacts(input: { businessId: string; listId: string }) {
+  getContactListContacts(input: { businessId: string; listId: string; limit?: number; offset?: number }) {
     return this.lists.getContactListContacts(input);
   }
 

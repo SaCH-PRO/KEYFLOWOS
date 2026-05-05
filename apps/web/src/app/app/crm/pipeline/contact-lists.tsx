@@ -67,6 +67,7 @@ interface ContactListPayload {
   color: string;
   type: "MANUAL" | "SMART";
   filters?: SmartListFilters;
+  rules?: SmartListFilters;
 }
 
 interface ContactListsProps {
@@ -143,7 +144,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
           await Promise.all(smartLists.map(async (sl) => {
             try {
               const res = await fetchContactListContacts(businessId, sl.id);
-              counts[sl.id] = Array.isArray(res.data) ? res.data.length : 0;
+              counts[sl.id] = res.data?.total ?? 0;
             } catch { counts[sl.id] = 0; }
           }));
         }
@@ -172,8 +173,12 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     setLoadingMembers(listId);
     try {
       const res = await fetchContactListContacts(businessId, listId);
-      if (Array.isArray(res.data)) {
-        setMemberMap((prev) => ({ ...prev, [listId]: res.data as ListMember[] }));
+      const contacts = res.data?.contacts ?? [];
+      setMemberMap((prev) => ({ ...prev, [listId]: contacts as unknown as ListMember[] }));
+      if (res.data?.truncated) {
+        toast.message(`Showing ${contacts.length} of ${res.data.total}+ matching contacts`, {
+          description: `Smart segments cap at ${res.data.limit} for performance — refine the rules to narrow the result.`,
+        });
       }
     } catch {
       toast.error("Failed to load list members");
@@ -257,7 +262,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
         type: formType,
       };
       if (formType === "SMART") {
-        payload.filters = {
+        const rules: SmartListFilters = {
           status: formFilterStatus.length > 0 ? formFilterStatus : undefined,
           tags: formFilterTags.trim() ? formFilterTags.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
           source: formFilterSource.trim() ? [formFilterSource.trim()] : undefined,
@@ -267,6 +272,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
           minLeadScore: formFilterMinScore ? Number(formFilterMinScore) : undefined,
           minRevenue: formFilterMinRevenue ? Number(formFilterMinRevenue) : undefined,
         };
+        payload.rules = rules;
+        payload.filters = rules;
       }
 
       if (editList) {
@@ -325,8 +332,13 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     if (list.type === "SMART") {
       try {
         const res = await fetchContactListContacts(businessId, list.id);
-        const ids = Array.isArray(res.data) ? (res.data as { id: string }[]).map((c) => c.id) : [];
+        const ids = (res.data?.contacts ?? []).map((c) => c.id);
         onSelectList(list.id, ids);
+        if (res.data?.truncated) {
+          toast.message(`Selected first ${ids.length} of ${res.data.total}+ matching contacts`, {
+            description: `Smart segments cap at ${res.data.limit} for performance — refine the rules to narrow the result.`,
+          });
+        }
       } catch {
         onSelectList(list.id, []);
       }
