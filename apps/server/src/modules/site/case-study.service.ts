@@ -53,13 +53,14 @@ export class CaseStudyService {
     const priorWindowStart = new Date(now.getTime() - 120 * 24 * 60 * 60 * 1000);
 
     // Real platform metrics — we pull counts and totals directly.
-    const [recentOrders, priorOrders, recentBookings, priorBookings, topService, topProduct] = await Promise.all([
+    const [recentOrders, priorOrdersList, recentBookings, priorBookings, topService, topProduct] = await Promise.all([
       this.prisma.client.marketplaceOrder.findMany({
         where: { businessId, createdAt: { gte: sixtyDaysAgo }, paymentStatus: { in: ['PAID', 'COMPLETED'] } },
         select: { total: true, currency: true },
       }),
-      this.prisma.client.marketplaceOrder.count({
+      this.prisma.client.marketplaceOrder.findMany({
         where: { businessId, createdAt: { gte: priorWindowStart, lt: sixtyDaysAgo }, paymentStatus: { in: ['PAID', 'COMPLETED'] } },
+        select: { total: true },
       }),
       this.prisma.client.booking.count({
         where: { businessId, createdAt: { gte: sixtyDaysAgo }, status: { in: ['CONFIRMED', 'COMPLETED'] } },
@@ -84,9 +85,12 @@ export class CaseStudyService {
     ]);
 
     const recentRevenue = recentOrders.reduce((s, o) => s + (o.total ?? 0), 0);
+    const priorRevenue = priorOrdersList.reduce((s, o) => s + (o.total ?? 0), 0);
+    const priorOrders = priorOrdersList.length;
     const currency = recentOrders[0]?.currency ?? 'TTD';
     const recentOrderCount = recentOrders.length;
     const orderGrowth = priorOrders > 0 ? Math.round(((recentOrderCount - priorOrders) / priorOrders) * 100) : null;
+    const revenueGrowth = priorRevenue > 0 ? Math.round(((recentRevenue - priorRevenue) / priorRevenue) * 100) : null;
     const bookingGrowth = priorBookings > 0 ? Math.round(((recentBookings - priorBookings) / priorBookings) * 100) : null;
 
     const [topServiceName, topProductName] = await Promise.all([
@@ -108,6 +112,7 @@ export class CaseStudyService {
 
     const headlineParts: string[] = [];
     if (orderGrowth !== null && orderGrowth > 0) headlineParts.push(`grew online orders ${orderGrowth}%`);
+    if (revenueGrowth !== null && revenueGrowth > 0) headlineParts.push(`grew revenue ${revenueGrowth}%`);
     if (bookingGrowth !== null && bookingGrowth > 0) headlineParts.push(`grew bookings ${bookingGrowth}%`);
     if (headlineParts.length === 0 && recentOrderCount > 0) headlineParts.push(`completed ${recentOrderCount} online orders`);
     if (headlineParts.length === 0 && recentBookings > 0) headlineParts.push(`booked ${recentBookings} appointments`);
@@ -124,10 +129,14 @@ export class CaseStudyService {
       metrics: {
         windowDays: 60,
         recentOrders: recentOrderCount,
+        priorOrders,
         recentRevenue,
+        priorRevenue,
         currency,
         recentBookings,
+        priorBookings,
         orderGrowthPct: orderGrowth,
+        revenueGrowthPct: revenueGrowth,
         bookingGrowthPct: bookingGrowth,
         topService: topServiceName,
         topProduct: topProductName,
@@ -213,10 +222,14 @@ export type CaseStudy = {
   metrics: {
     windowDays: number;
     recentOrders: number;
+    priorOrders: number;
     recentRevenue: number;
+    priorRevenue: number;
     currency: string;
     recentBookings: number;
+    priorBookings: number;
     orderGrowthPct: number | null;
+    revenueGrowthPct: number | null;
     bookingGrowthPct: number | null;
     topService: string | null;
     topProduct: string | null;
