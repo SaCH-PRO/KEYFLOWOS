@@ -280,6 +280,32 @@ export class ExpenseCreatedPayload {
   businessId!: string;
 }
 
+export interface BillEventBill {
+  id: string;
+  businessId: string;
+  description: string;
+  amount: number;
+  currency: string;
+  status: string;
+  vendor: string | null;
+  contactId?: string | null;
+  categoryId?: string | null;
+  date: Date;
+  dueDate?: Date | null;
+  paidAt?: Date | null;
+  paymentMethod?: string | null;
+}
+
+export class BillCreatedPayload {
+  bill!: BillEventBill;
+  businessId!: string;
+}
+
+export class BillPaidPayload {
+  bill!: BillEventBill;
+  businessId!: string;
+}
+
 export class StoreOrderCreatedPayload {
   order!: any;
   businessId!: string;

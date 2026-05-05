@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { ExpensePostingService } from '../finance/expense-posting.service';
 
 /**
  * Canonical invoice statuses. Mirrors the string-typed `Invoice.status`
@@ -124,7 +125,45 @@ export class InvoiceWorkflowService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
+    @Inject(ExpensePostingService) private readonly expensePosting: ExpensePostingService,
   ) {}
+
+  /**
+   * FIN3 — post the COGS leg (Dr COGS / Cr Inventory) for an invoice
+   * that just transitioned to PAID. Hydrates product line items and
+   * delegates to ExpensePostingService inside `txClient` (or the
+   * default client) so the posting commits with the invoice update.
+   * Skipped silently when no inventory tracking exists for the product
+   * (FIN3 architectural rule — never fabricate cost values).
+   */
+  private async postCogsForPaidInvoice(
+    invoiceId: string,
+    businessId: string,
+    paidAt: Date | null,
+    currency: string,
+    txClient?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const db = (txClient ?? this.prisma.client) as Prisma.TransactionClient;
+    const items = await db.invoiceItem.findMany({
+      where: { invoiceId },
+      select: { productId: true, quantity: true },
+    });
+    const productItems = items
+      .filter((i) => i.productId && i.quantity > 0)
+      .map((i) => ({ productId: i.productId as string, quantity: i.quantity }));
+    if (productItems.length === 0) return;
+    await this.expensePosting.onProductSold(
+      {
+        businessId,
+        sourceType: 'Invoice',
+        sourceId: invoiceId,
+        date: paidAt ?? new Date(),
+        currency,
+        items: productItems,
+      },
+      txClient,
+    );
+  }
 
   /**
    * Throws 409 if `to` is not reachable from `from`. Pure check, useful from
@@ -172,13 +211,28 @@ export class InvoiceWorkflowService {
       return { status: current, balance, changed: false };
     }
     this.assertLegalTransition(current, next);
-    const updated = await this.prisma.client.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        status: next,
-        ...(next === 'PAID' ? { paidAt: new Date() } : {}),
-      },
-      include: { items: true, contact: true, booking: true },
+    // FIN3 — wrap status update + COGS posting in a single $transaction
+    // so a posting failure rolls back the PAID write. Listeners only see
+    // PAID after the ledger entries have been committed alongside it.
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const u = await tx.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          status: next,
+          ...(next === 'PAID' ? { paidAt: new Date() } : {}),
+        },
+        include: { items: true, contact: true, booking: true },
+      });
+      if (next === 'PAID') {
+        await this.postCogsForPaidInvoice(
+          invoiceId,
+          u.businessId,
+          u.paidAt,
+          u.currency,
+          tx as unknown as Prisma.TransactionClient,
+        );
+      }
+      return u;
     });
     if (next === 'PAID') {
       this.events.emit('invoice.paid', {
@@ -263,6 +317,17 @@ export class InvoiceWorkflowService {
       else this.events.emit(name, payload);
     };
     if (to === 'PAID') {
+      // FIN3 — same atomicity rule as reconcileFromPayments: COGS must
+      // be posted in the same tx as the status flip. If the caller
+      // passed a tx, ExpensePostingService runs against that tx; if
+      // not, it runs against the default client right after the update.
+      await this.postCogsForPaidInvoice(
+        invoiceId,
+        updated.businessId,
+        updated.paidAt,
+        updated.currency,
+        extra.tx,
+      );
       queue('invoice.paid', {
         invoice: updated,
         businessId: updated.businessId,
