@@ -2,6 +2,15 @@ import { Inject, Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
+import {
+  ensureGraph,
+  getStartNodeId,
+  graphToLegacySteps,
+  isSequenceGraph,
+  legacyStepsToGraph,
+  validateGraph,
+  type SequenceGraph,
+} from './crm-sequence-graph.util';
 
 @Injectable()
 export class CrmSequenceService {
@@ -14,6 +23,22 @@ export class CrmSequenceService {
     return this.prisma.client as any;
   }
 
+  private toClientSequence(s: any) {
+    const graph = ensureGraph({ graph: s.graph, steps: s.steps });
+    return {
+      id: s.id,
+      businessId: s.businessId,
+      name: s.name,
+      description: s.description,
+      steps: s.steps,
+      graph,
+      status: s.status,
+      createdAt: s.createdAt.toISOString(),
+      updatedAt: s.updatedAt.toISOString(),
+      enrollmentCount: s._count?.enrollments,
+    };
+  }
+
   async listSequences(businessId: string) {
     const sequences = await this.db.crmSequence.findMany({
       where: { businessId, status: { not: 'archived' } },
@@ -23,31 +48,21 @@ export class CrmSequenceService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return sequences.map((s: any) => ({
-      id: s.id,
-      businessId: s.businessId,
-      name: s.name,
-      description: s.description,
-      steps: s.steps,
-      status: s.status,
-      createdAt: s.createdAt.toISOString(),
-      updatedAt: s.updatedAt.toISOString(),
-      enrollmentCount: s._count.enrollments,
-    }));
+    return sequences.map((s: any) => this.toClientSequence(s));
   }
 
   private validateSteps(steps: unknown): void {
     if (!Array.isArray(steps)) {
       throw new HttpException('steps must be an array', HttpStatus.BAD_REQUEST);
     }
-    const validTypes = ['email', 'whatsapp', 'call', 'wait'];
+    const validTypes = ['email', 'whatsapp', 'sms', 'call', 'wait'];
     for (const step of steps) {
       if (!step || typeof step !== 'object') {
         throw new HttpException('Each step must be an object', HttpStatus.BAD_REQUEST);
       }
       const s = step as Record<string, unknown>;
       if (typeof s.stepNumber !== 'number' || !validTypes.includes(s.type as string)) {
-        throw new HttpException('Each step must have a valid stepNumber and type (email/whatsapp/call/wait)', HttpStatus.BAD_REQUEST);
+        throw new HttpException('Each step must have a valid stepNumber and type', HttpStatus.BAD_REQUEST);
       }
       if (typeof s.delayDays !== 'number' || s.delayDays < 0) {
         throw new HttpException('Each step must have a non-negative delayDays', HttpStatus.BAD_REQUEST);
@@ -55,33 +70,56 @@ export class CrmSequenceService {
     }
   }
 
-  async createSequence(businessId: string, data: { name: string; description?: string; steps: unknown }) {
+  private resolveGraphAndSteps(payload: { graph?: unknown; steps?: unknown; status?: string }): {
+    graph: SequenceGraph | null;
+    steps: unknown;
+  } {
+    if (payload.graph !== undefined && payload.graph !== null) {
+      if (!isSequenceGraph(payload.graph)) {
+        throw new HttpException('graph must be a valid SequenceGraph object', HttpStatus.BAD_REQUEST);
+      }
+      const graph = payload.graph as SequenceGraph;
+      // Strict content validation only when activating; drafts/paused can be partial
+      const strict = payload.status === 'active';
+      const result = validateGraph(graph, { strict });
+      if (!result.ok) {
+        throw new HttpException(`Invalid sequence graph: ${result.errors.join('; ')}`, HttpStatus.BAD_REQUEST);
+      }
+      const steps = graphToLegacySteps(graph);
+      return { graph, steps };
+    }
+    if (payload.steps !== undefined) {
+      this.validateSteps(payload.steps);
+      const graph = legacyStepsToGraph(payload.steps as any);
+      return { graph, steps: payload.steps };
+    }
+    return { graph: null, steps: undefined };
+  }
+
+  async createSequence(businessId: string, data: { name: string; description?: string; steps?: unknown; graph?: unknown; status?: string }) {
     if (!data.name) {
       throw new HttpException('name is required', HttpStatus.BAD_REQUEST);
     }
-    this.validateSteps(data.steps);
+    const status = data.status === 'draft' || data.status === 'paused' || data.status === 'active'
+      ? data.status
+      : 'draft';
+    const { graph, steps } = this.resolveGraphAndSteps({ ...data, status });
+    if (!graph || steps === undefined) {
+      throw new HttpException('Either steps or graph must be provided', HttpStatus.BAD_REQUEST);
+    }
 
     const sequence = await this.db.crmSequence.create({
       data: {
         businessId,
         name: data.name,
         description: data.description ?? null,
-        steps: data.steps as any,
-        status: 'active',
+        steps: steps as any,
+        graph: graph as any,
+        status,
       },
     });
 
-    return {
-      id: sequence.id,
-      businessId: sequence.businessId,
-      name: sequence.name,
-      description: sequence.description,
-      steps: sequence.steps,
-      status: sequence.status,
-      createdAt: sequence.createdAt.toISOString(),
-      updatedAt: sequence.updatedAt.toISOString(),
-      enrollmentCount: 0,
-    };
+    return this.toClientSequence({ ...sequence, _count: { enrollments: 0 } });
   }
 
   async getSequence(businessId: string, id: string) {
@@ -103,15 +141,9 @@ export class CrmSequenceService {
       throw new HttpException('Sequence not found', HttpStatus.NOT_FOUND);
     }
 
+    const base = this.toClientSequence(sequence);
     return {
-      id: sequence.id,
-      businessId: sequence.businessId,
-      name: sequence.name,
-      description: sequence.description,
-      steps: sequence.steps,
-      status: sequence.status,
-      createdAt: sequence.createdAt.toISOString(),
-      updatedAt: sequence.updatedAt.toISOString(),
+      ...base,
       enrollments: sequence.enrollments.map((e: any) => ({
         id: e.id,
         contactId: e.contactId,
@@ -119,6 +151,7 @@ export class CrmSequenceService {
         contactEmail: e.contact.email,
         contactStatus: e.contact.status,
         currentStep: e.currentStep,
+        currentNodeId: e.currentNodeId,
         status: e.status,
         nextStepAt: e.nextStepAt?.toISOString() ?? null,
         startedAt: e.startedAt.toISOString(),
@@ -127,7 +160,7 @@ export class CrmSequenceService {
     };
   }
 
-  async updateSequence(businessId: string, id: string, data: { name?: string; description?: string; steps?: unknown; status?: string }) {
+  async updateSequence(businessId: string, id: string, data: { name?: string; description?: string; steps?: unknown; graph?: unknown; status?: string }) {
     const existing = await this.db.crmSequence.findFirst({
       where: { id, businessId },
     });
@@ -139,9 +172,11 @@ export class CrmSequenceService {
     const updateData: Record<string, unknown> = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.description !== undefined) updateData.description = data.description;
-    if (data.steps !== undefined) {
-      this.validateSteps(data.steps);
-      updateData.steps = data.steps;
+    const effectiveStatus = data.status ?? existing.status;
+    if (data.graph !== undefined || data.steps !== undefined) {
+      const { graph, steps } = this.resolveGraphAndSteps({ ...data, status: effectiveStatus });
+      if (graph !== null) updateData.graph = graph;
+      if (steps !== undefined) updateData.steps = steps;
     }
     if (data.status !== undefined) updateData.status = data.status;
 
@@ -150,16 +185,7 @@ export class CrmSequenceService {
       data: updateData as any,
     });
 
-    return {
-      id: updated.id,
-      businessId: updated.businessId,
-      name: updated.name,
-      description: updated.description,
-      steps: updated.steps,
-      status: updated.status,
-      createdAt: updated.createdAt.toISOString(),
-      updatedAt: updated.updatedAt.toISOString(),
-    };
+    return this.toClientSequence(updated);
   }
 
   async deleteSequence(businessId: string, id: string) {
@@ -210,10 +236,19 @@ export class CrmSequenceService {
     if (!sequence) {
       throw new HttpException('Sequence not found', HttpStatus.NOT_FOUND);
     }
+    if (sequence.status !== 'active') {
+      throw new HttpException('Only active sequences can enroll contacts', HttpStatus.BAD_REQUEST);
+    }
 
-    const steps = sequence.steps as any[];
-    const firstStepDelay = steps?.[0]?.delayDays ?? 0;
-    const nextStepAt = new Date(Date.now() + firstStepDelay * 24 * 60 * 60 * 1000);
+    const graph = ensureGraph({ graph: sequence.graph, steps: sequence.steps });
+    const startNodeId = getStartNodeId(graph);
+    if (!startNodeId) {
+      throw new HttpException('Sequence has no start node', HttpStatus.BAD_REQUEST);
+    }
+    const startNode = graph.nodes.find((n) => n.id === startNodeId);
+    const firstDelayDays = startNode?.data?.delayDays ?? 0;
+    const firstDelayHours = startNode?.data?.delayHours ?? 0;
+    const nextStepAt = new Date(Date.now() + firstDelayDays * 86400_000 + firstDelayHours * 3600_000);
 
     const existingEnrollments = await this.db.crmSequenceEnrollment.findMany({
       where: {
@@ -236,6 +271,7 @@ export class CrmSequenceService {
         sequenceId,
         contactId,
         currentStep: 0,
+        currentNodeId: startNodeId,
         status: 'active',
         nextStepAt,
       })),
@@ -246,8 +282,8 @@ export class CrmSequenceService {
         this.logEvent(businessId, contactId, CONTACT_EVENT.SEQUENCE_ENROLLED, {
           sequenceId,
           sequenceName: sequence.name,
-          firstStepType: steps?.[0]?.type ?? null,
-          totalSteps: steps.length,
+          firstNodeType: startNode?.type ?? null,
+          totalNodes: graph.nodes.length,
         }),
       ),
     );
@@ -258,48 +294,55 @@ export class CrmSequenceService {
   async advanceEnrollment(businessId: string, enrollmentId: string) {
     const enrollment = await this.db.crmSequenceEnrollment.findFirst({
       where: { id: enrollmentId },
-      include: { sequence: { select: { businessId: true, name: true, steps: true } } },
+      include: { sequence: { select: { businessId: true, name: true, steps: true, graph: true } } },
     });
 
     if (!enrollment || enrollment.sequence.businessId !== businessId) {
       throw new HttpException('Enrollment not found', HttpStatus.NOT_FOUND);
     }
 
-    const steps = enrollment.sequence.steps as any[];
-    const nextStep = enrollment.currentStep + 1;
-    const currentStepData = steps[enrollment.currentStep] ?? null;
+    const graph = ensureGraph({ graph: enrollment.sequence.graph, steps: enrollment.sequence.steps });
+    const currentNodeId: string | null = enrollment.currentNodeId ?? getStartNodeId(graph);
+    const currentNode = currentNodeId ? graph.nodes.find((n) => n.id === currentNodeId) : null;
 
-    if (nextStep >= steps.length) {
+    // pick default outgoing edge
+    const nextEdge = graph.edges.find((e) => e.source === (currentNodeId ?? '') && (e.branch ?? 'default') !== 'no')
+      ?? graph.edges.find((e) => e.source === (currentNodeId ?? ''));
+    const nextNodeId = nextEdge?.target ?? null;
+    const nextNode = nextNodeId ? graph.nodes.find((n) => n.id === nextNodeId) : null;
+
+    if (!nextNode || nextNode.type === 'end') {
       await this.db.crmSequenceEnrollment.update({
         where: { id: enrollmentId },
         data: {
-          currentStep: nextStep,
           status: 'completed',
           completedAt: new Date(),
           nextStepAt: null,
+          currentNodeId: nextNodeId,
         },
       });
 
       await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_ADVANCED, {
         sequenceId: enrollment.sequenceId,
         sequenceName: enrollment.sequence.name,
-        fromStep: enrollment.currentStep,
-        toStep: nextStep,
-        stepType: currentStepData?.type ?? null,
-        stepSubject: currentStepData?.subject ?? null,
+        fromNodeId: currentNodeId,
+        toNodeId: nextNodeId,
+        nodeType: currentNode?.type ?? null,
         completed: true,
       });
 
-      return { status: 'completed', currentStep: nextStep };
+      return { status: 'completed', currentNodeId: nextNodeId };
     }
 
-    const nextDelay = steps[nextStep]?.delayDays ?? 0;
-    const nextStepAt = new Date(Date.now() + nextDelay * 24 * 60 * 60 * 1000);
+    const nextDelayDays = nextNode.data?.delayDays ?? 0;
+    const nextDelayHours = nextNode.data?.delayHours ?? 0;
+    const nextStepAt = new Date(Date.now() + nextDelayDays * 86400_000 + nextDelayHours * 3600_000);
 
     await this.db.crmSequenceEnrollment.update({
       where: { id: enrollmentId },
       data: {
-        currentStep: nextStep,
+        currentStep: enrollment.currentStep + 1,
+        currentNodeId: nextNodeId,
         nextStepAt,
       },
     });
@@ -307,15 +350,14 @@ export class CrmSequenceService {
     await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_ADVANCED, {
       sequenceId: enrollment.sequenceId,
       sequenceName: enrollment.sequence.name,
-      fromStep: enrollment.currentStep,
-      toStep: nextStep,
-      stepType: currentStepData?.type ?? null,
-      stepSubject: currentStepData?.subject ?? null,
-      nextStepType: steps[nextStep]?.type ?? null,
+      fromNodeId: currentNodeId,
+      toNodeId: nextNodeId,
+      nodeType: currentNode?.type ?? null,
+      nextNodeType: nextNode.type,
       completed: false,
     });
 
-    return { status: 'active', currentStep: nextStep, nextStepAt: nextStepAt.toISOString() };
+    return { status: 'active', currentNodeId: nextNodeId, nextStepAt: nextStepAt.toISOString() };
   }
 
   async duplicateSequence(businessId: string, id: string) {
@@ -333,27 +375,18 @@ export class CrmSequenceService {
         name: `${existing.name} (Copy)`,
         description: existing.description,
         steps: existing.steps as any,
-        status: 'active',
+        graph: existing.graph as any,
+        status: 'draft',
       },
     });
 
-    return {
-      id: sequence.id,
-      businessId: sequence.businessId,
-      name: sequence.name,
-      description: sequence.description,
-      steps: sequence.steps,
-      status: sequence.status,
-      createdAt: sequence.createdAt.toISOString(),
-      updatedAt: sequence.updatedAt.toISOString(),
-      enrollmentCount: 0,
-    };
+    return this.toClientSequence({ ...sequence, _count: { enrollments: 0 } });
   }
 
   async unenrollContact(businessId: string, enrollmentId: string) {
     const enrollment = await this.db.crmSequenceEnrollment.findFirst({
       where: { id: enrollmentId },
-      include: { sequence: { select: { businessId: true, name: true, steps: true } } },
+      include: { sequence: { select: { businessId: true, name: true, steps: true, graph: true } } },
     });
 
     if (!enrollment || enrollment.sequence.businessId !== businessId) {
@@ -365,12 +398,12 @@ export class CrmSequenceService {
       data: { status: 'unenrolled', nextStepAt: null },
     });
 
-    const steps = enrollment.sequence.steps as any[];
+    const graph = ensureGraph({ graph: enrollment.sequence.graph, steps: enrollment.sequence.steps });
     await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_UNENROLLED, {
       sequenceId: enrollment.sequenceId,
       sequenceName: enrollment.sequence.name,
-      stoppedAtStep: enrollment.currentStep,
-      totalSteps: steps.length,
+      stoppedAtNodeId: enrollment.currentNodeId,
+      totalNodes: graph.nodes.length,
     });
 
     return { success: true };

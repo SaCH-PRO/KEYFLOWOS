@@ -26,7 +26,7 @@ export class CrmSequenceController {
   @Post('businesses/:businessId/sequences')
   createSequence(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; description?: string; steps: unknown },
+    @Body() body: { name: string; description?: string; steps?: unknown; graph?: unknown; status?: string },
   ) {
     return this.sequences.createSequence(businessId, body);
   }
@@ -49,7 +49,7 @@ export class CrmSequenceController {
   updateSequence(
     @Param('businessId') businessId: string,
     @Param('id') id: string,
-    @Body() body: { name?: string; description?: string; steps?: unknown; status?: string },
+    @Body() body: { name?: string; description?: string; steps?: unknown; graph?: unknown; status?: string },
   ) {
     return this.sequences.updateSequence(businessId, id, body);
   }

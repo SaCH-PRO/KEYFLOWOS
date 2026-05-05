@@ -727,6 +727,8 @@ export function ContactsDatabase({
         onBulkPriorityChange={db.handleBulkPriorityChange}
         onBulkToggleFavorite={db.handleBulkToggleFavorite}
         onBulkArchive={db.handleBulkArchive}
+        onBulkEnrollInSequence={db.handleBulkEnrollInSequence}
+        activeSequences={db.activeSequences}
         onBulkDelete={db.handleBulkDelete}
         onBulkReassign={db.handleBulkReassign}
         teamMembers={db.teamMembers}

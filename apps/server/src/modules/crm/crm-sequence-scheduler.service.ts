@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
+import { ensureGraph, getNextNodeId, getStartNodeId } from './crm-sequence-graph.util';
 
 const MAX_RETRIES = 3;
 
@@ -108,10 +109,10 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
         .filter(Boolean)
         .join(' ') || enrollment.contact?.email || 'Unknown';
       const businessId = enrollment.sequence.businessId;
-      const steps = enrollment.sequence.steps as any[];
-      const currentStepIndex = enrollment.currentStep;
-      const step = steps[currentStepIndex];
-      const stepType = step?.type ?? 'unknown';
+      const graph = ensureGraph({ graph: enrollment.sequence.graph, steps: enrollment.sequence.steps });
+      const currentNodeId = enrollment.currentNodeId ?? getStartNodeId(graph);
+      const node = currentNodeId ? graph.nodes.find((n) => n.id === currentNodeId) : null;
+      const nodeType = node?.type ?? 'unknown';
 
       if (newRetries >= MAX_RETRIES) {
         await this.db.crmSequenceEnrollment.update({
@@ -126,8 +127,8 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
         await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_FAILED, {
           sequenceId: enrollment.sequenceId,
           sequenceName: enrollment.sequence.name,
-          stepIndex: currentStepIndex,
-          stepType,
+          nodeId: currentNodeId,
+          nodeType,
           error: errorMessage,
           retryCount: newRetries,
           permanent: true,
@@ -139,8 +140,8 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
           contactName,
           sequenceId: enrollment.sequenceId,
           sequenceName: enrollment.sequence.name,
-          stepIndex: currentStepIndex,
-          stepType,
+          nodeId: currentNodeId,
+          nodeType,
           enrollmentId: enrollment.id,
           error: errorMessage,
           retryCount: newRetries,
@@ -160,8 +161,8 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
         await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_RETRY, {
           sequenceId: enrollment.sequenceId,
           sequenceName: enrollment.sequence.name,
-          stepIndex: currentStepIndex,
-          stepType,
+          nodeId: currentNodeId,
+          nodeType,
           error: errorMessage,
           retryCount: newRetries,
         });
@@ -173,11 +174,40 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
     }
   }
 
-  private async processEnrollment(enrollment: any) {
-    const steps = enrollment.sequence.steps as any[];
-    const currentStepIndex = enrollment.currentStep;
+  private async advanceTo(
+    enrollmentId: string,
+    nodeId: string | null,
+    graph: ReturnType<typeof ensureGraph>,
+    opts: { skipDelay?: boolean } = {},
+  ) {
+    if (!nodeId) {
+      await this.db.crmSequenceEnrollment.update({
+        where: { id: enrollmentId },
+        data: { status: 'completed', completedAt: new Date(), nextStepAt: null },
+      });
+      return;
+    }
+    const node = graph.nodes.find((n) => n.id === nodeId);
+    if (!node || node.type === 'end') {
+      await this.db.crmSequenceEnrollment.update({
+        where: { id: enrollmentId },
+        data: { status: 'completed', completedAt: new Date(), nextStepAt: null, currentNodeId: nodeId },
+      });
+      return;
+    }
+    const delayDays = opts.skipDelay ? 0 : node.data?.delayDays ?? 0;
+    const delayHours = opts.skipDelay ? 0 : node.data?.delayHours ?? 0;
+    const nextStepAt = new Date(Date.now() + delayDays * 86400_000 + delayHours * 3600_000);
+    await this.db.crmSequenceEnrollment.update({
+      where: { id: enrollmentId },
+      data: { currentNodeId: nodeId, nextStepAt },
+    });
+  }
 
-    if (currentStepIndex >= steps.length) {
+  private async processEnrollment(enrollment: any) {
+    const graph = ensureGraph({ graph: enrollment.sequence.graph, steps: enrollment.sequence.steps });
+    const currentNodeId = enrollment.currentNodeId ?? getStartNodeId(graph);
+    if (!currentNodeId) {
       await this.db.crmSequenceEnrollment.update({
         where: { id: enrollment.id },
         data: { status: 'completed', completedAt: new Date(), nextStepAt: null },
@@ -185,70 +215,60 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
       return;
     }
 
-    const step = steps[currentStepIndex];
+    const node = graph.nodes.find((n) => n.id === currentNodeId);
+    if (!node || node.type === 'end') {
+      await this.db.crmSequenceEnrollment.update({
+        where: { id: enrollment.id },
+        data: { status: 'completed', completedAt: new Date(), nextStepAt: null, currentNodeId },
+      });
+      return;
+    }
+
     const contactName = [enrollment.contact?.firstName, enrollment.contact?.lastName]
       .filter(Boolean)
       .join(' ') || enrollment.contact?.email || 'Unknown';
     const businessId = enrollment.sequence.businessId;
 
-    if (step.type === 'wait') {
-      const nextStep = currentStepIndex + 1;
-      if (nextStep >= steps.length) {
-        await this.db.crmSequenceEnrollment.update({
-          where: { id: enrollment.id },
-          data: { currentStep: nextStep, status: 'completed', completedAt: new Date(), nextStepAt: null },
-        });
-      } else {
-        const nextDelay = steps[nextStep]?.delayDays ?? 0;
-        const nextStepAt = new Date(Date.now() + nextDelay * 24 * 60 * 60 * 1000);
-        await this.db.crmSequenceEnrollment.update({
-          where: { id: enrollment.id },
-          data: { currentStep: nextStep, nextStepAt },
-        });
-      }
-
+    if (node.type === 'wait') {
+      // Wait node's delay was already honored on entry. Advance to next node
+      // immediately so the next action's own delayDays is not double-counted.
+      const nextId = getNextNodeId(graph, currentNodeId, 'default');
+      await this.advanceTo(enrollment.id, nextId, graph, { skipDelay: true });
       await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_DUE, {
         sequenceId: enrollment.sequenceId,
         sequenceName: enrollment.sequence.name,
-        stepIndex: currentStepIndex,
-        stepType: 'wait',
+        nodeId: currentNodeId,
+        nodeType: 'wait',
         action: 'auto_advanced',
       });
-
       return;
     }
 
-    if (step.type === 'email' || step.type === 'whatsapp') {
+    if (node.type === 'branch') {
+      // Default branching: until engagement signals are wired (next M4 task), follow the "no" path
+      const branch: 'yes' | 'no' = 'no';
+      const nextId = getNextNodeId(graph, currentNodeId, branch);
+      await this.advanceTo(enrollment.id, nextId, graph);
       await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_DUE, {
         sequenceId: enrollment.sequenceId,
         sequenceName: enrollment.sequence.name,
-        stepIndex: currentStepIndex,
-        stepType: step.type,
-        subject: step.subject ?? null,
-        body: step.body ?? null,
-        action: 'needs_approval',
+        nodeId: currentNodeId,
+        nodeType: 'branch',
+        branch,
+        action: 'branched',
       });
+      return;
     }
 
-    if (step.type === 'call') {
-      await this.db.contactTask.create({
-        data: {
-          businessId,
-          contactId: enrollment.contactId,
-          title: `Call: ${step.subject || enrollment.sequence.name} - Step ${currentStepIndex + 1}`,
-          description: step.body || `Sequence "${enrollment.sequence.name}" requires a call to ${contactName}`,
-          priority: 'HIGH',
-          status: 'OPEN',
-          dueDate: new Date(),
-        },
-      });
-
+    if (node.type === 'email' || node.type === 'whatsapp' || node.type === 'sms') {
       await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_DUE, {
         sequenceId: enrollment.sequenceId,
         sequenceName: enrollment.sequence.name,
-        stepIndex: currentStepIndex,
-        stepType: 'call',
-        action: 'task_created',
+        nodeId: currentNodeId,
+        nodeType: node.type,
+        subject: node.data?.subject ?? null,
+        body: node.data?.body ?? null,
+        action: 'needs_approval',
       });
     }
 
@@ -258,25 +278,13 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
       contactName,
       sequenceId: enrollment.sequenceId,
       sequenceName: enrollment.sequence.name,
-      stepIndex: currentStepIndex,
-      stepType: step.type,
+      nodeId: currentNodeId,
+      nodeType: node.type,
       enrollmentId: enrollment.id,
     });
 
-    const nextStep = currentStepIndex + 1;
-    if (nextStep >= steps.length) {
-      await this.db.crmSequenceEnrollment.update({
-        where: { id: enrollment.id },
-        data: { currentStep: nextStep, status: 'completed', completedAt: new Date(), nextStepAt: null },
-      });
-    } else {
-      const nextDelay = steps[nextStep]?.delayDays ?? 0;
-      const nextStepAt = new Date(Date.now() + nextDelay * 24 * 60 * 60 * 1000);
-      await this.db.crmSequenceEnrollment.update({
-        where: { id: enrollment.id },
-        data: { currentStep: nextStep, nextStepAt },
-      });
-    }
+    const nextId = getNextNodeId(graph, currentNodeId, 'default');
+    await this.advanceTo(enrollment.id, nextId, graph);
   }
 
   private async logEvent(

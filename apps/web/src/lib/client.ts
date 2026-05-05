@@ -7173,11 +7173,42 @@ export async function saveAiGuidelines(
 
 export type CrmSequenceStep = {
   stepNumber: number;
-  type: 'email' | 'whatsapp' | 'call' | 'wait';
+  type: 'email' | 'whatsapp' | 'sms' | 'call' | 'wait';
   delayDays: number;
   subject?: string;
   template?: string;
   notes?: string;
+};
+
+export type SequenceNodeType = 'email' | 'whatsapp' | 'sms' | 'wait' | 'branch' | 'end';
+
+export type SequenceNode = {
+  id: string;
+  type: SequenceNodeType;
+  position?: { x: number; y: number };
+  data?: {
+    subject?: string;
+    body?: string;
+    label?: string;
+    delayDays?: number;
+    delayHours?: number;
+    condition?: 'opened' | 'clicked' | 'replied' | 'no_reply' | 'engaged';
+    waitForDays?: number;
+  };
+};
+
+export type SequenceEdge = {
+  id: string;
+  source: string;
+  target: string;
+  branch?: 'yes' | 'no' | 'default';
+};
+
+export type SequenceGraph = {
+  nodes: SequenceNode[];
+  edges: SequenceEdge[];
+  startNodeId: string | null;
+  version: number;
 };
 
 export type CrmSequence = {
@@ -7186,6 +7217,7 @@ export type CrmSequence = {
   name: string;
   description: string | null;
   steps: CrmSequenceStep[];
+  graph?: SequenceGraph;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -7199,6 +7231,7 @@ export type CrmSequenceEnrollment = {
   contactEmail: string | null;
   contactStatus: string;
   currentStep: number;
+  currentNodeId?: string | null;
   status: string;
   nextStepAt: string | null;
   startedAt: string;
@@ -7215,7 +7248,7 @@ export async function fetchSequences(businessId: string = DEFAULT_BUSINESS_ID): 
 
 export async function createSequence(
   businessId: string = DEFAULT_BUSINESS_ID,
-  data: { name: string; description?: string; steps: CrmSequenceStep[] },
+  data: { name: string; description?: string; steps?: CrmSequenceStep[]; graph?: SequenceGraph; status?: string },
 ): Promise<ApiResult<CrmSequence>> {
   return apiPost<CrmSequence>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/sequences`,
@@ -7235,7 +7268,7 @@ export async function fetchSequenceDetail(
 export async function updateSequence(
   businessId: string,
   sequenceId: string,
-  data: { name?: string; description?: string; steps?: CrmSequenceStep[]; status?: string },
+  data: { name?: string; description?: string; steps?: CrmSequenceStep[]; graph?: SequenceGraph; status?: string },
 ): Promise<ApiResult<CrmSequence>> {
   return apiPatch<CrmSequence>(
     `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}`,

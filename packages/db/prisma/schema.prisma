@@ -3046,6 +3046,7 @@ model CrmSequence {
   name        String
   description String?
   steps       Json
+  graph       Json?
   status      String   @default("active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -3056,16 +3057,18 @@ model CrmSequence {
 }
 
 model CrmSequenceEnrollment {
-  id          String      @id @default(cuid())
-  sequenceId  String      @map("sequence_id")
-  sequence    CrmSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
-  contactId   String      @map("contact_id")
-  contact     Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  currentStep Int         @default(0) @map("current_step")
-  status      String      @default("active")
-  nextStepAt  DateTime?   @map("next_step_at")
-  startedAt   DateTime    @default(now()) @map("started_at")
-  completedAt DateTime?   @map("completed_at")
+  id            String      @id @default(cuid())
+  sequenceId    String      @map("sequence_id")
+  sequence      CrmSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  contactId     String      @map("contact_id")
+  contact       Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  currentStep   Int         @default(0) @map("current_step")
+  currentNodeId String?     @map("current_node_id")
+  status        String      @default("active")
+  nextStepAt    DateTime?   @map("next_step_at")
+  startedAt     DateTime    @default(now()) @map("started_at")
+  completedAt   DateTime?   @map("completed_at")
+  metadata      Json?
 
   @@index([sequenceId])
   @@index([contactId])
