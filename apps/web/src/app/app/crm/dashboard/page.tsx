@@ -16,6 +16,7 @@ import {
   fetchSegmentSummary,
 } from "@/lib/client";
 import { NextActionsWidget } from "./next-actions-widget";
+import { PresenceAnalyticsWidget } from "./presence-analytics-widget";
 
 type SegmentCounts = { [key: string]: number };
 
@@ -212,6 +213,8 @@ export default function CrmDashboardPage() {
       </CardGrid>
 
       <NextActionsWidget windowDays={7} limit={25} />
+
+      <PresenceAnalyticsWidget />
 
       <SectionCard
         title="At-risk & dormant contacts"
