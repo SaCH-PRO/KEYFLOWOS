@@ -29,6 +29,7 @@ model User {
   aiApprovalItems    AiApprovalItem[]    @relation("UserAiApprovalItems")
   aiApprovalResolutions AiApprovalItem[] @relation("UserAiApprovalResolutions")
   aiPlans            AiPlan[]            @relation("UserAiPlans")
+  contactShares      ContactShare[]      @relation("UserContactShares")
 
   @@map("users")
 }
@@ -452,6 +453,7 @@ model Contact {
   department  String?
   industry    String?
   ownerId        String? @map("owner_id")
+  visibility     String  @default("TEAM") @map("visibility")
   lifecycleStage String? @map("lifecycle_stage")
   sourceDetail   String? @map("source_detail")
   segment        String?
@@ -495,6 +497,7 @@ model Contact {
     forgetRequest ContactForgetRequest?
     recurringInvoices RecurringInvoice[]
     sequenceEnrollments CrmSequenceEnrollment[]
+    shares              ContactShare[]
   listMembers         ContactListMember[]
   momentum            ContactMomentum[]
   channelStats        ContactChannelStat[]
@@ -529,6 +532,8 @@ model Contact {
   @@index([businessId, priority])
   @@index([businessId, nextActionAt])
   @@index([businessId, archivedAt])
+  @@index([businessId, ownerId])
+  @@index([businessId, visibility])
   @@unique([businessId, emailNormalized])
   @@unique([businessId, phoneNormalized])
   @@map("contacts")
@@ -624,6 +629,23 @@ model ContactRelationship {
   @@index([fromContactId])
   @@index([toContactId])
   @@map("contact_relationships")
+}
+
+model ContactShare {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  contactId  String   @map("contact_id")
+  userId     String   @map("user_id")
+  createdBy  String?  @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  user       User     @relation("UserContactShares", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, userId])
+  @@index([businessId, userId])
+  @@index([contactId])
+  @@map("contact_shares")
 }
 
 model ContactExternalMapping {

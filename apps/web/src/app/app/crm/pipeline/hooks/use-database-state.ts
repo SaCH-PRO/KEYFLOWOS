@@ -4,12 +4,13 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { LocalContact } from "@/lib/contacts-db";
 import { cacheContacts, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
 import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
-import { bulkUpdateContacts, bulkDeleteContacts, addContactsToList, fetchContacts } from "@/lib/client";
+import { bulkUpdateContacts, bulkDeleteContacts, bulkReassignContacts, addContactsToList, fetchContacts, fetchTeamMembers, type TeamMemberSummary } from "@/lib/client";
+import { getCachedUser } from "@/lib/workspace";
 import { toast } from "sonner";
 
 export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt" | "lastActive" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl";
 export type SortDir = "asc" | "desc";
-export type BulkAction = "status" | "tags" | "addToList" | "relationshipType" | "priority" | null;
+export type BulkAction = "status" | "tags" | "addToList" | "relationshipType" | "priority" | "reassign" | null;
 
 export interface ListSummary {
   id: string;
@@ -103,6 +104,14 @@ const DEFAULT_VIEWS: SavedView[] = [
     name: "Needs Attention",
     isDefault: true,
     config: { statusFilter: "LEAD", search: "", sortField: "createdAt", sortDir: "asc", visibleColumns: [...DEFAULT_VISIBLE_KEYS], pageSize: 25 },
+  },
+  {
+    // M7 "My Book" smart filter: server-side scopes contacts to those owned
+    // by the signed-in user via fetchContacts({ ownedByMe: true }).
+    id: "view_my_book",
+    name: "My Book",
+    isDefault: true,
+    config: { statusFilter: "ALL", search: "", sortField: "lastActive", sortDir: "desc", visibleColumns: [...DEFAULT_VISIBLE_KEYS], pageSize: 25 },
   },
 ];
 
@@ -249,6 +258,9 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const [savedViews, setSavedViews] = useState<SavedView[]>(() => loadSavedViews());
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [showViewsPicker, setShowViewsPicker] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMemberSummary[]>([]);
+  const currentUserId = getCachedUser()?.id ?? null;
+  const ownedByMe = activeViewId === "view_my_book" && !!currentUserId;
 
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
@@ -312,6 +324,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
         sortBy: apiSortBy,
         sortOrder: sortDir,
         includeStats: true,
+        ownedByMe,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
@@ -328,7 +341,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     } finally {
       if (!controller.signal.aborted) setServerLoading(false);
     }
-  }, [businessId, search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, bestChannelFilter, bestTimeNowFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi]);
+  }, [businessId, search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, bestChannelFilter, bestTimeNowFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi, ownedByMe]);
 
   useEffect(() => {
     if (isMobilePrev.current !== isMobile) {
@@ -348,7 +361,16 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     setNextCursor(null);
     void loadServerContacts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, bestChannelFilter, bestTimeNowFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, businessId]);
+  }, [search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, bestChannelFilter, bestTimeNowFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, businessId, ownedByMe]);
+
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    fetchTeamMembers(businessId).then((members) => {
+      if (!cancelled) setTeamMembers(members);
+    });
+    return () => { cancelled = true; };
+  }, [businessId]);
 
   useEffect(() => {
     getLastSyncTime().then(setLastSync);
@@ -685,6 +707,30 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     });
   }, [businessId, onRefresh]);
 
+  const handleBulkReassign = useCallback(async (newOwnerId: string) => {
+    if (!newOwnerId) return;
+    setBulkActing(true);
+    try {
+      const ids = Array.from(selectedIdsRef.current);
+      const res = await bulkReassignContacts({ businessId, contactIds: ids, newOwnerId });
+      if (res.error) throw new Error(res.error);
+      const ownerLabel = teamMembers.find((m) => m.userId === newOwnerId);
+      const ownerName = ownerLabel
+        ? (ownerLabel.user.firstName || ownerLabel.user.name || ownerLabel.user.email)
+        : "new owner";
+      toast.success(`Reassigned ${res.data?.reassigned ?? ids.length} contacts to ${ownerName}`);
+      setSelectedIds(new Set());
+      setAllPagesSelected(false);
+      setActiveBulkAction(null);
+      onRefresh();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Reassign failed";
+      toast.error(message);
+    } finally {
+      setBulkActing(false);
+    }
+  }, [businessId, onRefresh, teamMembers]);
+
   const handleConfirmClose = useCallback(() => {
     setConfirmState({ open: false, count: 0, onConfirm: () => {} });
   }, []);
@@ -901,6 +947,9 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     handleBulkToggleFavorite,
     handleBulkArchive,
     handleBulkDelete,
+    handleBulkReassign,
+    teamMembers,
+    currentUserId,
     clearSelection,
     toggleExport,
     closeExport,

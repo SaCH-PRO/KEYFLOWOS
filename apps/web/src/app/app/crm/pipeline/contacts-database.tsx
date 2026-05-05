@@ -728,6 +728,8 @@ export function ContactsDatabase({
         onBulkToggleFavorite={db.handleBulkToggleFavorite}
         onBulkArchive={db.handleBulkArchive}
         onBulkDelete={db.handleBulkDelete}
+        onBulkReassign={db.handleBulkReassign}
+        teamMembers={db.teamMembers}
         onClearSelection={db.clearSelection}
         availableLists={db.availableLists}
         allPagesSelected={db.allPagesSelected}
