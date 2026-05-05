@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { apiGet } from "@/lib/api";
+import { apiGet, API_BASE } from "@/lib/api";
 import { Loader2, LinkIcon } from "lucide-react";
 import { PublicPageState } from "@/components/ui/public-page-state";
+import { initPresence, trackPageView } from "@/app/_lib/presence-sdk";
 
 export default function PaymentLinkPage() {
   const params = useParams();
@@ -38,6 +39,11 @@ export default function PaymentLinkPage() {
   };
 
   useEffect(() => {
+    initPresence({ apiBase: API_BASE });
+    // We don't yet know the businessId on this redirect page — pass
+    // empty so the server resolves it from the /pay/link/<token>
+    // Referer URL. Fires before the redirect so the visit isn't lost.
+    trackPageView("");
     resolve();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);

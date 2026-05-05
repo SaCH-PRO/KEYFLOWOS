@@ -102,7 +102,7 @@ export function TimeIntelligenceRail({ businessId, rangeFrom, rangeTo, reloadKey
       <div className="rounded-lg border border-border/40 p-2.5 space-y-1.5">
         <div className="flex items-center gap-1.5 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
           <Sparkles className="w-3 h-3" />
-          Today's plan
+          Today&apos;s plan
         </div>
         {loading && !dailyPlan ? (
           <div className="text-muted-foreground">Generating…</div>

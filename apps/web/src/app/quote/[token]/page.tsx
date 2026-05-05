@@ -18,6 +18,8 @@ import {
   rejectPublicQuote,
   type Quote,
 } from "@/lib/client";
+import { initPresence, trackPageView, pickBusinessId } from "@/app/_lib/presence-sdk";
+import { API_BASE } from "@/lib/api";
 
 type RespondState = "idle" | "submitting" | "done" | "error";
 
@@ -86,6 +88,12 @@ export default function PublicQuotePage() {
   const token = params?.token ?? "";
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    initPresence({ apiBase: API_BASE });
+    const bizId = pickBusinessId(quote);
+    if (bizId) trackPageView(bizId);
+  }, [quote]);
   const [error, setError] = useState<string | null>(null);
   const [respondState, setRespondState] = useState<RespondState>("idle");
   const [respondError, setRespondError] = useState<string | null>(null);

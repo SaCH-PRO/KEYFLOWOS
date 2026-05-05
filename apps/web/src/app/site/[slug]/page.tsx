@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import PresenceRenderer from "../_components/presence-renderer";
 import { PresenceJsonLd } from "../_components/presence-jsonld";
+import { PresenceTracker } from "../../_lib/PresenceTracker";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -44,6 +45,7 @@ export default async function PublicSitePage({ params }: Props) {
   }
   return (
     <>
+      <PresenceTracker businessId={data.business?.id ?? null} />
       <PresenceJsonLd business={data.business} payload={data.payload} slug={slug} catalog={data.catalog} />
       <PresenceRenderer business={data.business} payload={data.payload} />
     </>

@@ -1,13 +1,19 @@
 'use client';
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
-import { Invoice } from "@/lib/client";
+import { Invoice, DEFAULT_BUSINESS_ID } from "@/lib/client";
 import { motion } from "framer-motion";
+import { initPresence, trackPageView } from "@/app/_lib/presence-sdk";
 
 export default function PublicPayPage() {
   const [invoiceId, setInvoiceId] = useState("");
+
+  useEffect(() => {
+    initPresence({ apiBase: API_BASE });
+    if (DEFAULT_BUSINESS_ID) trackPageView(DEFAULT_BUSINESS_ID);
+  }, []);
   const [status, setStatus] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [paidInvoiceId, setPaidInvoiceId] = useState<string | null>(null);

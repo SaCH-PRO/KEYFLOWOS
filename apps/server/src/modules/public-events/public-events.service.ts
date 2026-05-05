@@ -62,6 +62,7 @@ export class PublicEventsService {
     sourceDetail?: string | null;
     referralCode?: string | null;
     identity: PublicEventIdentity;
+    visitorId?: string | null;
   }) {
     const id = input.identity ?? {};
     const fromName = this.splitName(id.name);
@@ -70,19 +71,69 @@ export class PublicEventsService {
 
     if (!id.email && !id.phone && !firstName) return null;
 
-    const custom = input.referralCode
-      ? { referralCode: input.referralCode }
-      : undefined;
+    // Pull first-touch attribution from the visitor cookie row (S4) so
+    // the contact carries the original UTM/source it arrived with.
+    let firstTouch: Awaited<ReturnType<PublicEventsService['firstTouchFor']>> = null;
+    if (input.visitorId) {
+      firstTouch = await this.firstTouchFor(input.businessId, input.visitorId);
+    }
 
-    return this.crm.findOrCreateContact(input.businessId, {
+    const custom: Record<string, unknown> = {};
+    if (input.referralCode) custom.referralCode = input.referralCode;
+    if (firstTouch) {
+      if (firstTouch.firstSource) custom.firstSource = firstTouch.firstSource;
+      if (firstTouch.firstMedium) custom.utmMedium = firstTouch.firstMedium;
+      if (firstTouch.firstCampaign) custom.utmCampaign = firstTouch.firstCampaign;
+      if (firstTouch.firstReferrer) custom.firstReferrer = firstTouch.firstReferrer;
+      if (firstTouch.firstPath) custom.firstLandingPath = firstTouch.firstPath;
+    }
+
+    const sourceDetail = input.sourceDetail
+      ?? (firstTouch?.firstSource ? `utm:${firstTouch.firstSource}` : null);
+
+    const contact = await this.crm.findOrCreateContact(input.businessId, {
       firstName,
       lastName,
       email: id.email ?? null,
       phone: id.phone ?? null,
       companyName: id.companyName ?? null,
       source: STOREFRONT_SOURCE,
-      sourceDetail: input.sourceDetail ?? null,
-      ...(custom ? { custom } : {}),
+      sourceDetail,
+      ...(Object.keys(custom).length > 0 ? { custom } : {}),
+    });
+
+    if (contact?.id && input.visitorId) {
+      try {
+        await this.prisma.client.publicVisitor.update({
+          where: {
+            businessId_visitorId: {
+              businessId: input.businessId,
+              visitorId: input.visitorId,
+            },
+          },
+          data: { contactId: contact.id },
+        });
+      } catch {
+        // visitor row may not exist yet; ignore.
+      }
+    }
+
+    return contact;
+  }
+
+  /**
+   * Resolve first-touch attribution for an anonymous visitor cookie.
+   * Used by storefront flows when creating a Contact, and exposed for
+   * other server modules that want to enrich downstream records.
+   */
+  async firstTouchFor(businessId: string, visitorId: string | null | undefined) {
+    if (!visitorId || !businessId) return null;
+    return this.prisma.client.publicVisitor.findUnique({
+      where: { businessId_visitorId: { businessId, visitorId } },
+      select: {
+        firstSource: true, firstMedium: true, firstCampaign: true,
+        firstReferrer: true, firstPath: true,
+      },
     });
   }
 
@@ -105,6 +156,7 @@ export class PublicEventsService {
           sourceDetail: input.sourceDetail,
           referralCode: input.referralCode,
           identity: input.identity,
+          visitorId,
         });
         contactId = contact?.id ?? null;
       } catch (err) {

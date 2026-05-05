@@ -4765,6 +4765,38 @@ export async function trackStoreEvent(
     body: JSON.stringify({ type, itemId }),
   }).catch(() => {});
 
+  // S4 #479: feed the first-party presence pipeline. Best-effort, never
+  // blocks the storefront UX. Mapped types match the server allowlist.
+  try {
+    const { trackPresence, initPresence } = await import('@/app/_lib/presence-sdk');
+    initPresence({ apiBase: API_BASE });
+    const presenceMap: Record<string, string> = {
+      page_view: 'page_view',
+      item_view: 'product_view',
+      product_view: 'product_view',
+      service_view: 'service_view',
+      add_to_cart: 'view',
+      checkout_start: 'checkout_start',
+      checkout_complete: 'checkout_complete',
+      booking_start: 'booking_start',
+      booking_complete: 'booking_complete',
+      whatsapp_click: 'whatsapp_click',
+      share: 'share_click',
+      share_click: 'share_click',
+      form_submit: 'form_submit',
+    };
+    const presenceType = presenceMap[type];
+    if (presenceType) {
+      trackPresence(
+        businessId,
+        presenceType as Parameters<typeof trackPresence>[1],
+        itemId ? { itemId } : undefined,
+      );
+    }
+  } catch {
+    // Best-effort.
+  }
+
   const canonical = PUBLIC_EVENT_MAP[type];
   if (!canonical) return;
 

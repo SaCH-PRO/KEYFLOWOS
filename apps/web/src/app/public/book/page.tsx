@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
 import { DEFAULT_BUSINESS_ID } from "@/lib/client";
 import { motion } from "framer-motion";
+import { initPresence, trackPageView } from "@/app/_lib/presence-sdk";
 
 const serviceOptions = [
   { id: "svc_consult", label: "Consultation · TTD 500" },
@@ -17,6 +18,11 @@ const staffOptions = [
 
 export default function PublicBookPage() {
   const [businessId, setBusinessId] = useState(DEFAULT_BUSINESS_ID);
+
+  useEffect(() => {
+    initPresence({ apiBase: API_BASE });
+    if (businessId) trackPageView(businessId);
+  }, [businessId]);
   const [serviceId, setServiceId] = useState(serviceOptions[0]?.id ?? "");
   const [staffId, setStaffId] = useState(staffOptions[0]?.id ?? "");
   const [startTime, setStartTime] = useState("");
