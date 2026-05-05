@@ -7,6 +7,7 @@ import { CrmJourneyService } from './crm-journey.service';
 import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmRevenueService } from './crm-revenue.service';
 import { CrmStatsService } from './crm-stats.service';
+import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmService } from './crm.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -38,6 +39,7 @@ export class CrmController {
     @Inject(CrmActionsService) private readonly actions: CrmActionsService,
     @Inject(CrmRevenueService) private readonly revenue: CrmRevenueService,
     @Inject(CrmJourneyService) private readonly journey: CrmJourneyService,
+    @Inject(CrmDuplicateDetectionService) private readonly duplicates: CrmDuplicateDetectionService,
   ) {}
 
   @Get('health')
@@ -239,9 +241,49 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Param('duplicateId') duplicateId: string,
-    @Body() body?: { fieldOverrides?: Record<string, unknown> },
+    @Body() body: { fieldOverrides?: Record<string, unknown> } | undefined,
+    @Req() req: any,
   ) {
-    return this.crm.mergeContacts({ businessId, primaryId: contactId, duplicateId, fieldOverrides: body?.fieldOverrides });
+    return this.crm.mergeContacts({
+      businessId,
+      primaryId: contactId,
+      duplicateId,
+      fieldOverrides: body?.fieldOverrides,
+      actorId: req?.user?.id,
+      actorType: req?.user?.id ? 'USER' : 'SYSTEM',
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/duplicates/preview/:primaryId/:duplicateId')
+  async previewMerge(
+    @Param('businessId') businessId: string,
+    @Param('primaryId') primaryId: string,
+    @Param('duplicateId') duplicateId: string,
+  ) {
+    if (primaryId === duplicateId) throw new BadRequestException('primaryId and duplicateId must differ');
+    const preview = await this.duplicates.preview({ businessId, primaryId, duplicateId });
+    if (!preview) throw new HttpException('Contact pair not found', 404);
+    return preview;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/duplicates/merges/:mergeId/revert')
+  revertMerge(
+    @Param('businessId') businessId: string,
+    @Param('mergeId') mergeId: string,
+    @Req() req: any,
+  ) {
+    return this.crm.revertMerge({
+      businessId,
+      mergeId,
+      actorId: req?.user?.id,
+      actorType: req?.user?.id ? 'USER' : 'SYSTEM',
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -537,8 +579,26 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/duplicates')
-  findDuplicates(@Param('businessId') businessId: string) {
-    return this.crm.findDuplicates(businessId);
+  async findDuplicates(
+    @Param('businessId') businessId: string,
+    @Query('importId') importId?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const min = minConfidence ? Number(minConfidence) : 0.5;
+    const max = limit ? Math.min(Number(limit), 200) : 50;
+    const off = offset ? Math.max(0, Number(offset)) : 0;
+    const { pairs, total } = await this.duplicates.findCandidatesScoped({
+      businessId,
+      importId,
+      minConfidence: Number.isFinite(min) ? min : 0.5,
+      limit: Number.isFinite(max) ? max : 50,
+      offset: Number.isFinite(off) ? off : 0,
+    });
+    // Back-compat: also return legacy `groups` shape derived from pairs.
+    const legacy = await this.crm.findDuplicates(businessId);
+    return { pairs, total, offset: off, limit: max, ...legacy };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

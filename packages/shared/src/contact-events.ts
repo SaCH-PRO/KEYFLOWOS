@@ -26,6 +26,7 @@ export const CONTACT_EVENT_TYPES_BY_CATEGORY = {
     'contact.updated',
     'contact.deleted',
     'contact.merged',
+    'contact.merge_reverted',
     'contact.imported',
     'contact.imported_from_media',
     'status.changed',
@@ -121,6 +122,10 @@ export const CONTACT_EVENT_LEGACY_ALIASES: Record<string, ContactEventType> = {
   'whatsapp.logged': 'communication.whatsapp',
   'sms.logged': 'communication.sms',
   'meeting.logged': 'communication.meeting',
+  DUPLICATE_MERGED: 'contact.merged',
+  DUPLICATE_MERGE_REVERTED: 'contact.merge_reverted',
+  'duplicate.merged': 'contact.merged',
+  'duplicate.merge_reverted': 'contact.merge_reverted',
 };
 
 export function isCanonicalContactEventType(value: string): value is ContactEventType {
@@ -176,6 +181,7 @@ export const CONTACT_EVENT_LABELS: Record<ContactEventType, string> = {
   'contact.updated': 'Contact updated',
   'contact.deleted': 'Contact deleted',
   'contact.merged': 'Contacts merged',
+  'contact.merge_reverted': 'Merge reverted',
   'contact.imported': 'Contact imported',
   'contact.imported_from_media': 'Imported from media',
   'status.changed': 'Status changed',

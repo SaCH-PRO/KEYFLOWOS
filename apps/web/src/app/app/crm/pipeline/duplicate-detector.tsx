@@ -15,7 +15,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchDuplicateContacts, mergeContacts } from "@/lib/client";
+import { fetchDuplicateContacts, mergeContacts, revertMerge } from "@/lib/client";
 import { MergeContactsModal } from "@/components/contacts/merge-contacts-modal";
 
 interface DuplicateContact {
@@ -106,14 +106,35 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
   }, [loadDuplicates]);
 
 
-  const handleMerge = async (keepId: string, mergeId: string, fieldOverrides: Record<string, unknown>) => {
+  const handleMerge = async (keepId: string, dupeId: string, fieldOverrides: Record<string, unknown>) => {
     setMerging(true);
     try {
-      await mergeContacts({ businessId, contactId: keepId, duplicateId: mergeId, fieldOverrides });
-      toast.success("Contacts merged successfully");
+      const { data, error: err } = await mergeContacts({ businessId, contactId: keepId, duplicateId: dupeId, fieldOverrides });
+      if (err || !data) throw new Error(err || "Merge failed");
+      const mergeId = (data as { mergeId?: string }).mergeId;
       setMergeModal({ open: false, left: null, right: null });
       await loadDuplicates();
       onMergeComplete();
+      toast.success("Contacts merged", {
+        description: mergeId ? "You can undo this merge for the next 24 hours." : undefined,
+        duration: 12000,
+        action: mergeId
+          ? {
+              label: "Undo",
+              onClick: async () => {
+                try {
+                  const { data: rev, error: revErr } = await revertMerge({ businessId, mergeId });
+                  if (revErr || !rev) throw new Error(revErr || "Revert failed");
+                  toast.success("Merge reverted");
+                  await loadDuplicates();
+                  onMergeComplete();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Failed to revert");
+                }
+              },
+            }
+          : undefined,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to merge contacts";
       toast.error(message);

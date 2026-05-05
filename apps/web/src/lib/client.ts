@@ -862,20 +862,75 @@ export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_
   );
 }
 
-export async function fetchDuplicateContacts(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchDuplicateContacts(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  opts?: { importId?: string; minConfidence?: number; limit?: number; offset?: number },
+) {
   const duplicateGroupSchema = z.object({
     field: z.enum(["email", "phone", "name"]),
     value: z.string(),
     contacts: z.array(contactSchema),
   });
-  const duplicatesSchema = z.object({
-    groups: z.array(duplicateGroupSchema),
+  const candidateSchema = z.object({
+    id: z.string(),
+    firstName: z.string().nullable().optional(),
+    lastName: z.string().nullable().optional(),
+    displayName: z.string().nullable().optional(),
+    email: z.string().nullable().optional(),
+    phone: z.string().nullable().optional(),
+    companyName: z.string().nullable().optional(),
+    status: z.string().nullable().optional(),
+    createdAt: z.string().or(z.date()).optional(),
   });
+  const pairSchema = z.object({
+    primaryId: z.string(),
+    duplicateId: z.string(),
+    rule: z.string(),
+    confidence: z.number(),
+    reason: z.string(),
+    primary: candidateSchema,
+    duplicate: candidateSchema,
+  });
+  const duplicatesSchema = z.object({
+    pairs: z.array(pairSchema).optional().default([]),
+    groups: z.array(duplicateGroupSchema).optional().default([]),
+    total: z.number().optional().default(0),
+    offset: z.number().optional().default(0),
+    limit: z.number().optional().default(0),
+  });
+  const params = new URLSearchParams();
+  if (opts?.importId) params.set("importId", opts.importId);
+  if (opts?.minConfidence !== undefined) params.set("minConfidence", String(opts.minConfidence));
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.offset !== undefined) params.set("offset", String(opts.offset));
+  const qs = params.toString();
   return apiGet(
-    `/crm/businesses/${encodeURIComponent(businessId)}/duplicates`,
+    `/crm/businesses/${encodeURIComponent(businessId)}/duplicates${qs ? `?${qs}` : ""}`,
     duplicatesSchema,
-    { groups: [] },
+    { pairs: [], groups: [], total: 0, offset: 0, limit: 0 },
   );
+}
+
+export async function fetchMergePreview(input: { businessId?: string; primaryId: string; duplicateId: string }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const path = `/crm/businesses/${encodeURIComponent(businessId)}/duplicates/preview/${encodeURIComponent(input.primaryId)}/${encodeURIComponent(input.duplicateId)}`;
+  return apiGetSimple<{
+    primary: Record<string, unknown>;
+    duplicate: Record<string, unknown>;
+    fields: Array<{ key: string; label: string; primaryValue: unknown; duplicateValue: unknown; conflict: boolean; recommended: 'primary' | 'duplicate' }>;
+    customFields: Array<{ key: string; label: string; primaryValue: unknown; duplicateValue: unknown; conflict: boolean; recommended: 'primary' | 'duplicate' }>;
+    mergedTags: string[];
+    mergedCustom: Record<string, unknown>;
+    relatedRecords: Record<string, number>;
+  }>(path);
+}
+
+export async function revertMerge(input: { businessId?: string; mergeId: string }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ mergeId: string; primaryId: string; duplicateId: string; revertedAt: string }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/duplicates/merges/${encodeURIComponent(input.mergeId)}/revert`,
+    body: {},
+  });
 }
 
 export async function fetchCrmHighlights(businessId: string = DEFAULT_BUSINESS_ID) {
@@ -1054,7 +1109,7 @@ export async function reopenContactTask(taskId: string, businessId: string = DEF
 
 export async function mergeContacts(input: { businessId?: string; contactId: string; duplicateId: string; fieldOverrides?: Record<string, unknown> }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
-  return apiPost<Contact>({
+  return apiPost<Contact & { mergeId?: string; revertableUntil?: string }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}/merge/${encodeURIComponent(input.duplicateId)}`,
     body: { fieldOverrides: input.fieldOverrides },
   });

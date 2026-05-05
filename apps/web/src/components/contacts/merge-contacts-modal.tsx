@@ -62,6 +62,18 @@ interface MergeContactsModalProps {
   onClose: () => void;
 
   onMerge: (keepId: string, mergeId: string, fieldOverrides: Record<string, unknown>) => Promise<void>;
+  /**
+   * Optional async preview loader. When provided, the modal calls it on open
+   * to retrieve the authoritative server-side field-by-field comparison
+   * (covering address, custom fields, related-record counts, etc.) and
+   * augments the local conflict resolver with any extra fields it returns.
+   */
+  loadPreview?: (primaryId: string, duplicateId: string) => Promise<{
+    fields: Array<{ key: string; label: string; primaryValue: unknown; duplicateValue: unknown; conflict: boolean }>;
+    customFields?: Array<{ key: string; label: string; primaryValue: unknown; duplicateValue: unknown; conflict: boolean }>;
+    mergedCustom?: Record<string, unknown>;
+    relatedRecords?: Record<string, number>;
+  } | null>;
 }
 
 type FieldDef = {
@@ -112,11 +124,17 @@ function getVal(contact: MergeContact, key: string): string | null | undefined {
   return (contact as unknown as Record<string, unknown>)[key] as string | null | undefined;
 }
 
-export function MergeContactsModal({ open, left, right, onClose, onMerge }: MergeContactsModalProps) {
+export function MergeContactsModal({ open, left, right, onClose, onMerge, loadPreview }: MergeContactsModalProps) {
   const [primarySide, setPrimarySide] = useState<"left" | "right">("left");
-  const [fieldChoices, setFieldChoices] = useState<Record<string, "left" | "right">>({});
+  const [fieldChoices, setFieldChoices] = useState<Record<string, "left" | "right" | "both">>({});
+  const [tagOverrides, setTagOverrides] = useState<Record<string, boolean>>({});
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
+  const [serverFields, setServerFields] = useState<Array<{ key: string; label: string; primaryValue: unknown; duplicateValue: unknown; conflict: boolean }>>([]);
+  const [customFields, setCustomFields] = useState<Array<{ key: string; label: string; primaryValue: unknown; duplicateValue: unknown; conflict: boolean }>>([]);
+  const [mergedCustomBase, setMergedCustomBase] = useState<Record<string, unknown>>({});
+  const [customChoices, setCustomChoices] = useState<Record<string, "left" | "right" | "both">>({});
+  const [relatedRecords, setRelatedRecords] = useState<Record<string, number> | null>(null);
 
   const primary = primarySide === "left" ? left : right;
   const duplicate = primarySide === "left" ? right : left;
@@ -128,6 +146,27 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [open, merging, onClose]);
+
+  useEffect(() => {
+    if (!open || !loadPreview) return;
+    let cancelled = false;
+    loadPreview(primary.id, duplicate.id)
+      .then((res) => {
+        if (cancelled || !res) return;
+        setServerFields(res.fields ?? []);
+        setCustomFields(res.customFields ?? []);
+        setMergedCustomBase(res.mergedCustom ?? {});
+        setRelatedRecords(res.relatedRecords ?? null);
+      })
+      .catch(() => { /* preview is best-effort augment; modal still works without it */ });
+    return () => { cancelled = true; };
+  }, [open, loadPreview, primary.id, duplicate.id]);
+
+  const knownKeys = useMemo(() => new Set(FIELDS.map((f) => f.key)), []);
+  const extraServerConflicts = useMemo(
+    () => serverFields.filter((f) => f.conflict && !knownKeys.has(f.key)),
+    [serverFields, knownKeys],
+  );
 
   const conflictFields = useMemo(() => {
     return FIELDS.filter((f) => {
@@ -147,11 +186,58 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
     try {
 
       const fieldOverrides: Record<string, unknown> = {};
+      const serverByKey = new Map(serverFields.map((f) => [f.key, f] as const));
+      // Server preview values are keyed by primary/duplicate, but UI choices are
+      // in visual left/right coordinates. Map left/right -> primary/duplicate
+      // through the current `primarySide` so switching the survivor still
+      // resolves the value the user actually clicked on (left card vs right card).
+      const sideToCard = (side: "left" | "right"): "primary" | "duplicate" =>
+        (side === primarySide ? "primary" : "duplicate");
       for (const [key, side] of Object.entries(fieldChoices)) {
+        const sv = serverByKey.get(key);
+        if (side === "both") {
+          const lv = sv ? (primarySide === "left" ? sv.primaryValue : sv.duplicateValue) : getVal(left, key);
+          const rv = sv ? (primarySide === "left" ? sv.duplicateValue : sv.primaryValue) : getVal(right, key);
+          const combined = [lv, rv].filter((v) => v !== null && v !== undefined && v !== "").join(" / ");
+          if (combined) fieldOverrides[key] = combined;
+          continue;
+        }
+        if (sv) {
+          fieldOverrides[key] = sideToCard(side) === "primary" ? sv.primaryValue : sv.duplicateValue;
+          continue;
+        }
         const chosen = side === "left" ? left : right;
         const val = getVal(chosen, key);
         if (val !== undefined) {
           fieldOverrides[key] = val;
+        }
+      }
+      // Tag overrides: if any tag was unselected, send the trimmed array.
+      const allTags = Array.from(new Set([...(left.tags ?? []), ...(right.tags ?? [])]));
+      const removed = allTags.filter((t) => tagOverrides[t] === false);
+      if (removed.length > 0) {
+        fieldOverrides.tags = allTags.filter((t) => tagOverrides[t] !== false);
+      }
+      // Custom-field overrides: build the resolved custom map.
+      if (Object.keys(customChoices).length > 0 || Object.keys(mergedCustomBase).length > 0) {
+        const resolvedCustom: Record<string, unknown> = { ...mergedCustomBase };
+        const cfByKey = new Map(customFields.map((f) => [f.key, f] as const));
+        for (const [key, side] of Object.entries(customChoices)) {
+          const cf = cfByKey.get(key);
+          if (!cf) continue;
+          // Same left/right -> primary/duplicate translation as for standard fields.
+          if (side === "both") {
+            const lv = primarySide === "left" ? cf.primaryValue : cf.duplicateValue;
+            const rv = primarySide === "left" ? cf.duplicateValue : cf.primaryValue;
+            const combined = [lv, rv].filter((v) => v !== null && v !== undefined && v !== "").map((v) => typeof v === "string" ? v : JSON.stringify(v)).join(" / ");
+            resolvedCustom[key] = combined || null;
+          } else {
+            const wantPrimary = side === primarySide;
+            resolvedCustom[key] = wantPrimary ? cf.primaryValue : cf.duplicateValue;
+          }
+        }
+        if (Object.keys(customChoices).length > 0) {
+          fieldOverrides.custom = resolvedCustom;
         }
       }
       await onMerge(primary.id, duplicate.id, fieldOverrides);
@@ -162,9 +248,15 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
     }
   };
 
-  const getResolvedValue = (key: string): { value: string | null | undefined; side: "left" | "right" } => {
+  const getResolvedValue = (key: string): { value: string | null | undefined; side: "left" | "right" | "both" } => {
     if (fieldChoices[key]) {
-      return { value: getVal(fieldChoices[key] === "left" ? left : right, key), side: fieldChoices[key] };
+      const side = fieldChoices[key];
+      if (side === "both") {
+        const lv = getVal(left, key);
+        const rv = getVal(right, key);
+        return { value: [lv, rv].filter(Boolean).join(" / ") || null, side: "both" };
+      }
+      return { value: getVal(side === "left" ? left : right, key), side };
     }
     const pv = getVal(primary, key);
     if (pv) return { value: pv, side: primarySide };
@@ -271,7 +363,7 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
                     const Icon = field.icon;
 
                     return (
-                      <div key={field.key} className="grid grid-cols-[120px_1fr_1fr] gap-2 items-center">
+                      <div key={field.key} className="grid grid-cols-[110px_1fr_1fr_auto] gap-2 items-center">
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                           <Icon className="w-3 h-3" />
                           <span className="truncate">{field.label}</span>
@@ -300,6 +392,19 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
                         >
                           {rightVal || "—"}
                         </button>
+                        <button
+                          onClick={() => setFieldChoices((p) => ({ ...p, [field.key]: "both" }))}
+                          disabled={merging}
+                          title="Keep both values (combined with ' / ')"
+                          className={`text-[10px] px-2 py-1 min-h-[44px] rounded-lg border transition-all disabled:opacity-70 ${
+                            resolved.side === "both"
+                              ? "border-[hsl(var(--kf-accent2))] bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))]"
+                              : "border-border/30 text-muted-foreground hover:border-border/60"
+                          }`}
+                          aria-pressed={resolved.side === "both"}
+                        >
+                          Both
+                        </button>
                       </div>
                     );
                   })}
@@ -307,15 +412,123 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
               </div>
             )}
 
+            {extraServerConflicts.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-muted-foreground">Additional conflicting fields</h3>
+                <div className="space-y-1">
+                  {extraServerConflicts.map((field) => {
+                    const choice = fieldChoices[field.key];
+                    const leftStr = String(field.primaryValue ?? "—");
+                    const rightStr = String(field.duplicateValue ?? "—");
+                    return (
+                      <div key={field.key} className="grid grid-cols-[110px_1fr_1fr_auto] gap-2 items-center">
+                        <div className="text-xs text-muted-foreground truncate">{field.label}</div>
+                        <button
+                          onClick={() => setFieldChoices((p) => ({ ...p, [field.key]: "left" }))}
+                          disabled={merging}
+                          className={`text-left text-xs p-2 min-h-[44px] rounded-lg border truncate disabled:opacity-70 ${choice === "left" ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10" : "border-border/30"}`}
+                        >
+                          {leftStr}
+                        </button>
+                        <button
+                          onClick={() => setFieldChoices((p) => ({ ...p, [field.key]: "right" }))}
+                          disabled={merging}
+                          className={`text-left text-xs p-2 min-h-[44px] rounded-lg border truncate disabled:opacity-70 ${choice === "right" ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10" : "border-border/30"}`}
+                        >
+                          {rightStr}
+                        </button>
+                        <button
+                          onClick={() => setFieldChoices((p) => ({ ...p, [field.key]: "both" }))}
+                          disabled={merging}
+                          title="Keep both values (combined with ' / ')"
+                          className={`text-[10px] px-2 py-1 min-h-[44px] rounded-lg border disabled:opacity-70 ${choice === "both" ? "border-[hsl(var(--kf-accent2))] bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))]" : "border-border/30 text-muted-foreground"}`}
+                        >
+                          Both
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {customFields.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-muted-foreground">Custom fields {customFields.some((c) => c.conflict) ? "— resolve conflicts" : "(union)"}</h3>
+                <div className="space-y-1">
+                  {customFields.map((field) => {
+                    const choice = customChoices[field.key];
+                    const leftStr = field.primaryValue == null ? "—" : typeof field.primaryValue === "string" ? field.primaryValue : JSON.stringify(field.primaryValue);
+                    const rightStr = field.duplicateValue == null ? "—" : typeof field.duplicateValue === "string" ? field.duplicateValue : JSON.stringify(field.duplicateValue);
+                    return (
+                      <div key={field.key} className={`grid grid-cols-[110px_1fr_1fr_auto] gap-2 items-center ${field.conflict ? "" : "opacity-80"}`}>
+                        <div className="text-xs text-muted-foreground truncate" title={field.label}>{field.label}{field.conflict ? " ⚠" : ""}</div>
+                        <button
+                          onClick={() => setCustomChoices((p) => ({ ...p, [field.key]: "left" }))}
+                          disabled={merging}
+                          className={`text-left text-xs p-2 min-h-[44px] rounded-lg border truncate disabled:opacity-70 ${choice === "left" ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10" : "border-border/30"}`}
+                        >
+                          {leftStr}
+                        </button>
+                        <button
+                          onClick={() => setCustomChoices((p) => ({ ...p, [field.key]: "right" }))}
+                          disabled={merging}
+                          className={`text-left text-xs p-2 min-h-[44px] rounded-lg border truncate disabled:opacity-70 ${choice === "right" ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10" : "border-border/30"}`}
+                        >
+                          {rightStr}
+                        </button>
+                        <button
+                          onClick={() => setCustomChoices((p) => ({ ...p, [field.key]: "both" }))}
+                          disabled={merging}
+                          title="Keep both values (combined with ' / ')"
+                          className={`text-[10px] px-2 py-1 min-h-[44px] rounded-lg border disabled:opacity-70 ${choice === "both" ? "border-[hsl(var(--kf-accent2))] bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))]" : "border-border/30 text-muted-foreground"}`}
+                        >
+                          Both
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {relatedRecords && (
+              <div className="rounded-xl bg-muted/20 p-3 space-y-1">
+                <h3 className="text-sm font-medium">Related records on the merged-in contact</h3>
+                <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                  {Object.entries(relatedRecords)
+                    .filter(([, n]) => n > 0)
+                    .map(([k, n]) => (
+                      <span key={k}>{k}: <strong>{n}</strong></span>
+                    ))}
+                  {Object.values(relatedRecords).every((n) => n === 0) && <span>No related records.</span>}
+                </div>
+              </div>
+            )}
+
             {mergedTags.length > 0 && (
               <div className="space-y-1.5">
-                <h3 className="text-sm font-medium text-muted-foreground">Merged Tags (union)</h3>
+                <h3 className="text-sm font-medium text-muted-foreground">Merged Tags — click to drop a tag from the result</h3>
                 <div className="flex flex-wrap gap-1.5">
-                  {mergedTags.map((tag) => (
-                    <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-[hsl(var(--kf-accent2))]/15 font-medium text-[hsl(var(--kf-accent2))]">
-                      {tag}
-                    </span>
-                  ))}
+                  {mergedTags.map((tag) => {
+                    const kept = tagOverrides[tag] !== false;
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => setTagOverrides((p) => ({ ...p, [tag]: !kept }))}
+                        disabled={merging}
+                        aria-pressed={kept}
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-medium transition-colors disabled:opacity-50 ${
+                          kept
+                            ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] hover:bg-[hsl(var(--kf-accent2))]/25"
+                            : "bg-muted/40 text-muted-foreground line-through"
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

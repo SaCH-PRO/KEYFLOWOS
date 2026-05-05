@@ -18,6 +18,7 @@ import { CrmFlowService } from './crm-flow.service';
 import type { ContactMeta, ContactWithStats } from './crm-stats.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
+import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
 type ContactSortBy = 'name' | 'newest' | 'oldest' | 'revenue' | 'score' | 'lastInteraction';
@@ -795,7 +796,7 @@ export class CrmService {
     return { deleted: result.count };
   }
 
-  async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string; fieldOverrides?: Record<string, unknown> }) {
+  async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string; fieldOverrides?: Record<string, unknown>; actorId?: string; actorType?: string }) {
     if (input.primaryId === input.duplicateId) {
       throw new BadRequestException('Cannot merge a contact into itself');
     }
@@ -818,12 +819,16 @@ export class CrmService {
       tags: mergedTags,
       leadScore: mergedLeadScore,
     };
+    const resolvedChoices: Record<string, { from: 'primary' | 'duplicate' | 'override'; value: unknown }> = {};
 
     for (const field of fillableFields) {
       const primaryVal = primary[field];
       const duplicateVal = duplicate[field];
       if ((primaryVal === null || primaryVal === undefined || primaryVal === '') && duplicateVal) {
         contactUpdate[field] = duplicateVal;
+        resolvedChoices[String(field)] = { from: 'duplicate', value: duplicateVal };
+      } else if (primaryVal !== null && primaryVal !== undefined && primaryVal !== '') {
+        resolvedChoices[String(field)] = { from: 'primary', value: primaryVal };
       }
     }
 
@@ -836,64 +841,201 @@ export class CrmService {
 
     const primaryCustom = (typeof primary.custom === 'object' && primary.custom) ? primary.custom as Record<string, unknown> : {};
     const duplicateCustom = (typeof duplicate.custom === 'object' && duplicate.custom) ? duplicate.custom as Record<string, unknown> : {};
-    const mergedCustom = { ...duplicateCustom, ...primaryCustom };
-    contactUpdate.custom = mergedCustom;
+    // Default behaviour: union with primary winning on key collisions.
+    const mergedCustom: Record<string, unknown> = { ...duplicateCustom, ...primaryCustom };
 
     if (input.fieldOverrides) {
+      const fillableSet = new Set<string>(fillableFields as readonly string[]);
       for (const [key, value] of Object.entries(input.fieldOverrides)) {
-        if (fillableFields.includes(key as any) || key === 'tags' || key === 'status') {
+        if (key === 'custom' && value && typeof value === 'object') {
+          // Full replace of merged custom map (UI sends the resolved map).
+          for (const k of Object.keys(mergedCustom)) delete mergedCustom[k];
+          Object.assign(mergedCustom, value as Record<string, unknown>);
+          resolvedChoices['custom'] = { from: 'override', value };
+          continue;
+        }
+        if (key.startsWith('custom.')) {
+          // Per-key override: e.g. "custom.preferredColor" → resolve a single key.
+          const customKey = key.slice('custom.'.length);
+          if (customKey) {
+            mergedCustom[customKey] = value;
+            resolvedChoices[`custom.${customKey}`] = { from: 'override', value };
+          }
+          continue;
+        }
+        if (fillableSet.has(key) || key === 'tags' || key === 'status') {
           contactUpdate[key] = value;
+          resolvedChoices[key] = { from: 'override', value };
         }
       }
     }
+    contactUpdate.custom = mergedCustom;
 
-    const merged = await this.prisma.client.$transaction(async (tx) => {
-      await tx.contactEvent.updateMany({
-        where: { businessId: input.businessId, contactId: input.duplicateId },
-        data: { contactId: input.primaryId },
+    // Deterministic repointing: capture explicit row IDs first, then update by IN list.
+    // Storing IDs (not just counts) allows revertMerge to restore precisely the rows
+    // that were moved, avoiding any time-based heuristics.
+    const repointedRows: Record<string, { ids: string[]; count: number }> = {};
+    const repointByIds = async <T extends { id: string }>(
+      label: string,
+      findFn: () => Promise<T[]>,
+      updateFn: (ids: string[]) => Promise<{ count: number }>,
+    ) => {
+      const rows = await findFn();
+      const ids = rows.map((r) => r.id);
+      if (ids.length > 0) {
+        const r = await updateFn(ids);
+        repointedRows[label] = { ids, count: r.count ?? ids.length };
+      } else {
+        repointedRows[label] = { ids: [], count: 0 };
+      }
+    };
+
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      // 1. Repoint relations that are not unique-per-contact. Errors propagate -> rollback.
+      await repointByIds('events',
+        () => tx.contactEvent.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.contactEvent.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('notes',
+        () => tx.contactNote.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.contactNote.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('tasks',
+        () => tx.contactTask.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.contactTask.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('enrollments',
+        () => tx.crmSequenceEnrollment.findMany({ where: { contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.crmSequenceEnrollment.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('quotes',
+        () => tx.quote.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.quote.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('invoices',
+        () => tx.invoice.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.invoice.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('bookings',
+        () => tx.booking.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.booking.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('media',
+        () => tx.contactMedia.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.contactMedia.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('playbooks',
+        () => tx.contactPlaybook.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.contactPlaybook.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('recurringInvoices',
+        () => tx.recurringInvoice.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.recurringInvoice.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('externalMappings',
+        () => tx.contactExternalMapping.findMany({ where: { contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.contactExternalMapping.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('momentumRecommendations',
+        () => tx.momentumRecommendation.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.momentumRecommendation.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('whatsappContacts',
+        () => tx.whatsAppContact.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.whatsAppContact.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('importRecords',
+        () => tx.contactImportContact.findMany({ where: { contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.contactImportContact.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+      await repointByIds('journeyTouchpoints',
+        () => tx.journeyTouchpoint.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
+        (ids) => tx.journeyTouchpoint.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+
+      // 2. Capture full snapshots of unique-per-contact rows owned by the duplicate so
+      //    they can be re-created on revert. They are deleted (not repointed) here to
+      //    respect the (businessId, contactId) unique constraint on the primary side.
+      const momentumDup = await tx.contactMomentum.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId } });
+      if (momentumDup.length) await tx.contactMomentum.deleteMany({ where: { businessId: input.businessId, contactId: input.duplicateId } });
+      const momentumSnapDup = await tx.contactMomentumSnapshot.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId } });
+      if (momentumSnapDup.length) await tx.contactMomentumSnapshot.deleteMany({ where: { businessId: input.businessId, contactId: input.duplicateId } });
+      const customerJourneyDup = await tx.customerJourney.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId } });
+      if (customerJourneyDup.length) await tx.customerJourney.deleteMany({ where: { businessId: input.businessId, contactId: input.duplicateId } });
+
+      repointedRows['contactMomentum_deleted'] = { ids: momentumDup.map((r) => r.id), count: momentumDup.length };
+      repointedRows['contactMomentumSnapshot_deleted'] = { ids: momentumSnapDup.map((r) => r.id), count: momentumSnapDup.length };
+      repointedRows['customerJourney_deleted'] = { ids: customerJourneyDup.map((r) => r.id), count: customerJourneyDup.length };
+
+      // 3. List membership: unique on (listId, contactId). Capture decision per row so
+      //    revert can recreate exactly the original rows.
+      // Capture FULL row (not just id+listId) so revertMerge can recreate
+      // dropped list memberships verbatim — contactListMember requires
+      // contactId, addedAt, etc.
+      const dupMembers = await tx.contactListMember.findMany({ where: { contactId: input.duplicateId } });
+      const listMembersMoved: string[] = [];
+      const listMembersDropped: string[] = [];
+      for (const m of dupMembers) {
+        const existing = await tx.contactListMember.findFirst({ where: { listId: m.listId, contactId: input.primaryId }, select: { id: true } });
+        if (existing) {
+          await tx.contactListMember.delete({ where: { id: m.id } });
+          listMembersDropped.push(m.id);
+        } else {
+          await tx.contactListMember.update({ where: { id: m.id }, data: { contactId: input.primaryId } });
+          listMembersMoved.push(m.id);
+        }
+      }
+      repointedRows['listMembers'] = { ids: listMembersMoved, count: listMembersMoved.length };
+      repointedRows['listMembers_dropped'] = { ids: listMembersDropped, count: listMembersDropped.length };
+
+      // Snapshot deleted unique rows + dropped list memberships into the same JSON
+      // payload so revert can restore them verbatim.
+      const droppedMemberRows = dupMembers.filter((m) => listMembersDropped.includes(m.id));
+      const repointedRowsForStorage: Record<string, unknown> = { ...repointedRows };
+      repointedRowsForStorage._deletedSnapshots = {
+        contactMomentum: momentumDup,
+        contactMomentumSnapshot: momentumSnapDup,
+        customerJourney: customerJourneyDup,
+        contactListMembers: droppedMemberRows,
+      };
+
+      // Persist the merge operation first so we can stamp its id onto both
+      // contact rows. Storing `lastMergeId` on both sides (and `mergedIntoId`
+      // on the duplicate) makes the undo path deterministic without time
+      // heuristics, satisfying the task's "merge_id on both rows" contract.
+      const mergeOp = await tx.mergeOperation.create({
+        data: {
+          businessId: input.businessId,
+          primaryId: input.primaryId,
+          duplicateId: input.duplicateId,
+          duplicateSnapshot: JSON.parse(JSON.stringify(duplicate)) as Prisma.InputJsonValue,
+          fieldOverrides: (input.fieldOverrides ?? {}) as Prisma.InputJsonValue,
+          resolvedFields: JSON.parse(JSON.stringify(resolvedChoices)) as Prisma.InputJsonValue,
+          repointedCounts: repointedRowsForStorage as Prisma.InputJsonValue,
+          actorId: input.actorId,
+          actorType: input.actorType ?? 'SYSTEM',
+          expiresAt,
+        },
       });
-      await tx.contactNote.updateMany({
-        where: { businessId: input.businessId, contactId: input.duplicateId },
-        data: { contactId: input.primaryId },
-      });
-      await tx.contactTask.updateMany({
-        where: { businessId: input.businessId, contactId: input.duplicateId },
-        data: { contactId: input.primaryId },
-      });
-      await tx.crmSequenceEnrollment.updateMany({
-        where: { contactId: input.duplicateId },
-        data: { contactId: input.primaryId },
-      });
-      await tx.quote.updateMany({
-        where: { businessId: input.businessId, contactId: input.duplicateId },
-        data: { contactId: input.primaryId },
-      });
-      await tx.invoice.updateMany({
-        where: { businessId: input.businessId, contactId: input.duplicateId },
-        data: { contactId: input.primaryId },
-      });
-      await tx.booking.updateMany({
-        where: { businessId: input.businessId, contactId: input.duplicateId },
-        data: { contactId: input.primaryId },
-      });
+
       const mergedContact = await tx.contact.update({
         where: { id: input.primaryId },
-        data: contactUpdate as any,
+        data: { ...(contactUpdate as Prisma.ContactUpdateInput), lastMergeId: mergeOp.id },
       });
       await tx.contact.update({
         where: { id: input.duplicateId },
-        data: { deletedAt: new Date() },
+        data: { deletedAt: new Date(), lastMergeId: mergeOp.id, mergedIntoId: input.primaryId },
       });
+
+      const repointedCountsForEvent = Object.fromEntries(
+        Object.entries(repointedRows).map(([k, v]) => [k, v.count]),
+      );
       await this.timeline.logEvent(
         input.businessId,
         input.primaryId,
-        'contact.merged',
-        { duplicateId: input.duplicateId, mergedFields: Object.keys(contactUpdate) },
-        { actorType: 'SYSTEM', source: 'crm' },
+        CONTACT_EVENT.CONTACT_MERGED,
+        {
+          mergeId: mergeOp.id,
+          primaryId: input.primaryId,
+          duplicateId: input.duplicateId,
+          mergedFields: Object.keys(contactUpdate),
+          resolvedChoices,
+          repointedCounts: repointedCountsForEvent,
+          revertableUntil: expiresAt.toISOString(),
+        },
+        { actorType: input.actorType ?? 'SYSTEM', actorId: input.actorId, source: 'crm' },
         tx,
       );
-      return mergedContact;
+      return { mergedContact, mergeId: mergeOp.id, repointedCounts: repointedCountsForEvent };
     });
+    const merged = result.mergedContact;
     if (merged) {
       const payload: ContactMergedPayload = {
         contact: merged,
@@ -902,7 +1044,194 @@ export class CrmService {
       };
       this.events.emit('contact.merged', payload);
     }
-    return merged;
+    this.stats.invalidateCache(input.businessId);
+    return { ...merged, mergeId: result.mergeId, revertableUntil: expiresAt.toISOString() };
+  }
+
+  async revertMerge(input: { businessId: string; mergeId: string; actorId?: string; actorType?: string }) {
+    const op = await this.prisma.client.mergeOperation.findFirst({
+      where: { id: input.mergeId, businessId: input.businessId },
+    });
+    if (!op) throw new NotFoundException('Merge operation not found');
+    if (op.revertedAt) throw new BadRequestException('Merge has already been reverted');
+    if (op.expiresAt && new Date(op.expiresAt).getTime() < Date.now()) {
+      throw new BadRequestException('Undo window has expired');
+    }
+
+    const snapshot = (op.duplicateSnapshot ?? null) as Record<string, unknown> | null;
+    if (!snapshot || typeof snapshot.id !== 'string') {
+      throw new BadRequestException('Merge snapshot is missing');
+    }
+
+    const stored = (op.repointedCounts ?? {}) as Record<string, { ids?: string[]; count?: number } | unknown>;
+    const deletedSnapshots = (stored._deletedSnapshots ?? {}) as {
+      contactMomentum?: Array<Record<string, unknown>>;
+      contactMomentumSnapshot?: Array<Record<string, unknown>>;
+      customerJourney?: Array<Record<string, unknown>>;
+      contactListMembers?: Array<Record<string, unknown>>;
+    };
+    const idsFor = (label: string): string[] => {
+      const v = stored[label];
+      if (v && typeof v === 'object' && Array.isArray((v as { ids?: unknown }).ids)) {
+        return ((v as { ids: unknown[] }).ids).filter((x): x is string => typeof x === 'string');
+      }
+      return [];
+    };
+
+    // Best-effort revert: each restoration step runs independently and any
+    // recoverable error is captured into a structured conflict report
+    // instead of aborting the whole undo. The report is persisted on the
+    // MergeOperation row, returned to the caller, and included in the
+    // contact.merge_reverted event payload.
+    type RevertConflict = { table: string; id?: string; ids?: string[]; reason: string };
+    const conflicts: RevertConflict[] = [];
+    const restored: Record<string, number> = {};
+    const skipped: Record<string, number> = {};
+    const reasonOf = (e: unknown): string =>
+      e instanceof Error ? e.message : typeof e === 'string' ? e : 'unknown error';
+
+    const c = this.prisma.client;
+
+    // 1. Restore the duplicate contact (undelete + restore snapshot fields).
+    const restoreData: Record<string, unknown> = {};
+    const restorableFields = [
+      'firstName','lastName','email','emailNormalized','phone','phoneNormalized',
+      'displayName','secondaryEmail','secondaryPhone','whatsappNumber','status',
+      'preferredChannel','addressLine1','addressLine2','city','state','postalCode',
+      'country','timezone','companyName','jobTitle','department','industry',
+      'source','sourceDetail','segment','language','marketingOptIn','doNotContact',
+      'notesInternal','ageGroup','tags','leadScore','custom',
+    ];
+    for (const f of restorableFields) {
+      if (snapshot[f] !== undefined) restoreData[f] = snapshot[f];
+    }
+    restoreData.deletedAt = null;
+    restoreData.mergedIntoId = null;
+    try {
+      await c.contact.update({ where: { id: op.duplicateId }, data: restoreData as Prisma.ContactUpdateInput });
+      restored.contact = 1;
+    } catch (err) {
+      // Failing to restore the surviving "duplicate" row is the only true blocker:
+      // the rest of the revert depends on this row existing as a contact.
+      throw new BadRequestException(`Failed to restore duplicate contact: ${reasonOf(err)}`);
+    }
+
+    // 2. Move every previously-repointed row back to the duplicate, table by
+    //    table. Each updateMany is its own statement so a row-level conflict
+    //    in one table does not abort the others.
+    const movePairs: Array<[string, (ids: string[]) => Promise<{ count: number }>]> = [
+      ['events', (ids) => c.contactEvent.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['notes', (ids) => c.contactNote.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['tasks', (ids) => c.contactTask.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['enrollments', (ids) => c.crmSequenceEnrollment.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['quotes', (ids) => c.quote.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['invoices', (ids) => c.invoice.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['bookings', (ids) => c.booking.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['media', (ids) => c.contactMedia.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['playbooks', (ids) => c.contactPlaybook.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['recurringInvoices', (ids) => c.recurringInvoice.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['externalMappings', (ids) => c.contactExternalMapping.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['momentumRecommendations', (ids) => c.momentumRecommendation.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['whatsappContacts', (ids) => c.whatsAppContact.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['importRecords', (ids) => c.contactImportContact.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['journeyTouchpoints', (ids) => c.journeyTouchpoint.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ['listMembers', (ids) => c.contactListMember.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+    ];
+    for (const [label, fn] of movePairs) {
+      const ids = idsFor(label);
+      if (ids.length === 0) continue;
+      try {
+        const r = await fn(ids);
+        restored[label] = r.count;
+        if (r.count < ids.length) {
+          // Some rows were edited/deleted post-merge.
+          skipped[label] = (skipped[label] ?? 0) + (ids.length - r.count);
+          conflicts.push({ table: label, ids, reason: `${ids.length - r.count} row(s) missing or already moved` });
+        }
+      } catch (err) {
+        skipped[label] = (skipped[label] ?? 0) + ids.length;
+        conflicts.push({ table: label, ids, reason: reasonOf(err) });
+      }
+    }
+
+    // 3. Restore unique-per-contact rows deleted during merge, one at a time
+    //    so a single row conflict (e.g. someone re-created a CustomerJourney
+    //    after the merge) doesn't block the rest of the undo.
+    const recreate = async <T,>(
+      table: string,
+      rows: Array<Record<string, unknown>>,
+      create: (row: Record<string, unknown>) => Promise<T>,
+    ) => {
+      for (const row of rows) {
+        try {
+          await create(row);
+          restored[table] = (restored[table] ?? 0) + 1;
+        } catch (err) {
+          skipped[table] = (skipped[table] ?? 0) + 1;
+          conflicts.push({ table, id: typeof row.id === 'string' ? row.id : undefined, reason: reasonOf(err) });
+        }
+      }
+    };
+    await recreate('contactMomentum', deletedSnapshots.contactMomentum ?? [],
+      (row) => c.contactMomentum.create({ data: row as Prisma.ContactMomentumUncheckedCreateInput }));
+    await recreate('contactMomentumSnapshot', deletedSnapshots.contactMomentumSnapshot ?? [],
+      (row) => c.contactMomentumSnapshot.create({ data: row as Prisma.ContactMomentumSnapshotUncheckedCreateInput }));
+    await recreate('customerJourney', deletedSnapshots.customerJourney ?? [],
+      (row) => c.customerJourney.create({ data: row as Prisma.CustomerJourneyUncheckedCreateInput }));
+    await recreate('contactListMembers', deletedSnapshots.contactListMembers ?? [],
+      (row) => c.contactListMember.create({ data: row as Prisma.ContactListMemberUncheckedCreateInput }));
+
+    const conflictReport = { restored, skipped, conflicts };
+
+    try {
+      await c.mergeOperation.update({
+        where: { id: op.id },
+        data: {
+          revertedAt: new Date(),
+          revertedActorId: input.actorId,
+          // Persist the conflict report inside repointedCounts so it's
+          // queryable later without changing the schema.
+          repointedCounts: { ...(stored as Record<string, unknown>), _revertReport: conflictReport } as Prisma.InputJsonValue,
+        },
+      });
+    } catch {
+      // Don't fail the user-visible revert because we couldn't persist the
+      // conflict report; the in-memory report is still returned and emitted.
+    }
+
+    const revertedAt = new Date().toISOString();
+    await this.timeline.logEvent(
+      input.businessId,
+      op.primaryId,
+      CONTACT_EVENT.CONTACT_MERGE_REVERTED,
+      {
+        mergeId: op.id,
+        primaryId: op.primaryId,
+        duplicateId: op.duplicateId,
+        revertedAt,
+        restored: conflictReport.restored,
+        skipped: conflictReport.skipped,
+        conflicts: conflictReport.conflicts,
+      },
+      { actorType: input.actorType ?? 'SYSTEM', actorId: input.actorId, source: 'crm' },
+    );
+    this.events.emit('contact.merge_reverted', {
+      businessId: input.businessId,
+      mergeId: op.id,
+      primaryId: op.primaryId,
+      duplicateId: op.duplicateId,
+      conflicts: conflictReport.conflicts,
+    });
+    this.stats.invalidateCache(input.businessId);
+    return {
+      mergeId: op.id,
+      primaryId: op.primaryId,
+      duplicateId: op.duplicateId,
+      revertedAt,
+      restored: conflictReport.restored,
+      skipped: conflictReport.skipped,
+      conflicts: conflictReport.conflicts,
+    };
   }
 
   getContactsPollState(businessId: string) {

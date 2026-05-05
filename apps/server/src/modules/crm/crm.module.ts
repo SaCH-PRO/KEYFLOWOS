@@ -15,6 +15,7 @@ import { CrmRevenueService } from './crm-revenue.service';
 import { CrmSequenceService } from './crm-sequence.service';
 import { CrmSequenceSchedulerService } from './crm-sequence-scheduler.service';
 import { CrmStatsService } from './crm-stats.service';
+import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmService } from './crm.service';
 import { CrmRateLimitGuard } from './guards/rate-limit.guard';
@@ -27,7 +28,7 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
 @Module({
   imports: [SubscriptionsModule, AiModule, ConnectorModule],
   controllers: [CrmController, CrmAiController, CrmGoogleController, CrmSequenceController],
-  providers: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard],
-  exports: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService],
+  providers: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmDuplicateDetectionService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard],
+  exports: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmDuplicateDetectionService, CrmImportService, CrmPlaybookService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService],
 })
 export class CrmModule {}

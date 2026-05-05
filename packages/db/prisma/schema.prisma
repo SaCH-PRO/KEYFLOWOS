@@ -451,6 +451,13 @@ model Contact {
   favorite            Boolean?  @default(false)
   archivedAt          DateTime? @map("archived_at")
 
+  // Persists the most recent MergeOperation that touched this row (either
+  // as primary or as duplicate). Both contacts in a merge get the same id,
+  // which lets revertMerge — and any downstream auditor — locate the
+  // operation deterministically without scanning by time.
+  lastMergeId         String?   @map("last_merge_id")
+  mergedIntoId        String?   @map("merged_into_id")
+
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -489,6 +496,7 @@ model Contact {
   @@index([businessId, deletedAt])
   @@index([businessId, deletedAt, status])
   @@index([businessId, deletedAt, createdAt])
+  @@index([businessId, lastMergeId])
   @@index([businessId, relationshipType])
   @@index([businessId, pipelineStage])
   @@index([businessId, priority])
@@ -728,6 +736,28 @@ model ContactList {
 
   @@index([businessId])
   @@map("contact_lists")
+}
+
+model MergeOperation {
+  id                String    @id @default(cuid())
+  businessId        String    @map("business_id")
+  primaryId         String    @map("primary_id")
+  duplicateId       String    @map("duplicate_id")
+  duplicateSnapshot Json      @map("duplicate_snapshot")
+  fieldOverrides    Json?     @map("field_overrides")
+  resolvedFields    Json?     @map("resolved_fields")
+  repointedCounts   Json?     @map("repointed_counts")
+  actorId           String?   @map("actor_id")
+  actorType         String?   @map("actor_type")
+  revertedAt        DateTime? @map("reverted_at")
+  revertedActorId   String?   @map("reverted_actor_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  expiresAt         DateTime  @map("expires_at")
+
+  @@index([businessId, createdAt])
+  @@index([businessId, primaryId])
+  @@index([businessId, duplicateId])
+  @@map("merge_operations")
 }
 
 model ContactListMember {
