@@ -1278,6 +1278,129 @@ export class CrmService {
     return this.timeline.dueTasks(input);
   }
 
+  async listNextActions(input: { businessId: string; windowDays?: number; limit?: number }) {
+    const windowDays = Math.max(0, Math.min(60, input.windowDays ?? 7));
+    const limit = Math.max(1, Math.min(100, input.limit ?? 25));
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() + windowDays);
+    const now = new Date();
+
+    const contacts = await this.prisma.client.contact.findMany({
+      where: {
+        ...contactWhereBase(input.businessId),
+        archivedAt: null,
+        nextActionAt: { not: null, lte: cutoff },
+      },
+      orderBy: [
+        { nextActionAt: 'asc' },
+      ],
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+        email: true,
+        phone: true,
+        priority: true,
+        status: true,
+        nextActionAt: true,
+        nextActionType: true,
+      },
+    });
+
+    const priorityRank: Record<string, number> = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
+    const ranked = contacts
+      .map((c) => ({
+        ...c,
+        overdue: c.nextActionAt ? c.nextActionAt.getTime() < now.getTime() : false,
+        priorityRank: priorityRank[(c.priority ?? 'NORMAL').toUpperCase()] ?? 2,
+      }))
+      .sort((a, b) => {
+        if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+        if (a.priorityRank !== b.priorityRank) return a.priorityRank - b.priorityRank;
+        const at = a.nextActionAt?.getTime() ?? 0;
+        const bt = b.nextActionAt?.getTime() ?? 0;
+        return at - bt;
+      })
+      .slice(0, limit);
+
+    return {
+      windowDays,
+      now: now.toISOString(),
+      items: ranked.map(({ priorityRank: _r, ...rest }) => ({
+        ...rest,
+        nextActionAt: rest.nextActionAt?.toISOString() ?? null,
+      })),
+    };
+  }
+
+  async completeNextAction(input: { businessId: string; contactId: string; actorId?: string | null }) {
+    const existing = await this.assertContact(input.businessId, input.contactId);
+    if (!existing.nextActionAt && !existing.nextActionType) {
+      return existing;
+    }
+    const updated = await this.prisma.client.contact.update({
+      where: { id: input.contactId },
+      data: { nextActionAt: null, nextActionType: null },
+    });
+    await this.timeline.logEvent(
+      input.businessId,
+      input.contactId,
+      'next_action.completed',
+      {
+        previousNextActionAt: existing.nextActionAt?.toISOString() ?? null,
+        previousNextActionType: existing.nextActionType ?? null,
+      },
+      { actorType: 'USER', actorId: input.actorId ?? undefined, source: 'crm' },
+    );
+    this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
+    return updated;
+  }
+
+  async snoozeNextAction(input: {
+    businessId: string;
+    contactId: string;
+    snoozeUntil?: string | null;
+    days?: number | null;
+    actorId?: string | null;
+  }) {
+    const existing = await this.assertContact(input.businessId, input.contactId);
+    let target: Date | null = null;
+    if (input.snoozeUntil) {
+      const parsed = new Date(input.snoozeUntil);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException('snoozeUntil must be a valid ISO date');
+      }
+      target = parsed;
+    } else if (typeof input.days === 'number' && Number.isFinite(input.days)) {
+      const days = Math.max(1, Math.min(60, Math.floor(input.days)));
+      const now = new Date();
+      const baseMs = Math.max(existing.nextActionAt?.getTime() ?? 0, now.getTime());
+      target = new Date(baseMs + days * 24 * 60 * 60 * 1000);
+    } else {
+      throw new BadRequestException('Provide snoozeUntil (ISO date) or days (1-60)');
+    }
+    const updated = await this.prisma.client.contact.update({
+      where: { id: input.contactId },
+      data: { nextActionAt: target },
+    });
+    await this.timeline.logEvent(
+      input.businessId,
+      input.contactId,
+      'next_action.snoozed',
+      {
+        previousNextActionAt: existing.nextActionAt?.toISOString() ?? null,
+        nextActionAt: target.toISOString(),
+        nextActionType: existing.nextActionType ?? null,
+      },
+      { actorType: 'USER', actorId: input.actorId ?? undefined, source: 'crm' },
+    );
+    this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
+    return updated;
+  }
+
   approveAutopilotAction(input: { businessId: string; actionId: string }) {
     return this.timeline.approveAutopilotAction(input);
   }

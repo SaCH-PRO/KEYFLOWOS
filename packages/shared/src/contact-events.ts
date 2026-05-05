@@ -40,6 +40,8 @@ export const CONTACT_EVENT_TYPES_BY_CATEGORY = {
     'task.reopened',
     'task.deleted',
     'action.completed',
+    'next_action.completed',
+    'next_action.snoozed',
   ],
   sales_revenue: [
     'quote.created',
@@ -195,6 +197,8 @@ export const CONTACT_EVENT_LABELS: Record<ContactEventType, string> = {
   'task.reopened': 'Task reopened',
   'task.deleted': 'Task deleted',
   'action.completed': 'Action completed',
+  'next_action.completed': 'Next action completed',
+  'next_action.snoozed': 'Next action snoozed',
   'quote.created': 'Quote created',
   'quote.sent': 'Quote sent',
   'quote.accepted': 'Quote accepted',

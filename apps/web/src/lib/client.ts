@@ -947,6 +947,67 @@ export async function fetchCrmHighlights(businessId: string = DEFAULT_BUSINESS_I
   );
 }
 
+const nextActionItemSchema = z.object({
+  id: z.string(),
+  firstName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
+  displayName: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  priority: z.string().nullable().optional(),
+  status: z.string().nullable().optional(),
+  nextActionAt: z.string().nullable(),
+  nextActionType: z.string().nullable().optional(),
+  overdue: z.boolean(),
+});
+
+export type NextActionItem = z.infer<typeof nextActionItemSchema>;
+
+const nextActionsResponseSchema = z.object({
+  windowDays: z.number(),
+  now: z.string(),
+  items: z.array(nextActionItemSchema),
+});
+
+export async function fetchContactNextActions(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  windowDays = 7,
+  limit = 25,
+  opts?: { signal?: AbortSignal },
+) {
+  const params = new URLSearchParams({
+    windowDays: String(windowDays),
+    limit: String(limit),
+  });
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contact-next-actions?${params.toString()}`,
+    nextActionsResponseSchema,
+    { windowDays, now: new Date().toISOString(), items: [] },
+    { signal: opts?.signal },
+  );
+}
+
+export async function completeContactNextAction(
+  contactId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPost<Contact>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/next-action/complete`,
+    body: {},
+  });
+}
+
+export async function snoozeContactNextAction(
+  contactId: string,
+  input: { days?: number; snoozeUntil?: string },
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPost<Contact>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/next-action/snooze`,
+    body: input,
+  });
+}
+
 export async function fetchDueTasks(
   businessId: string = DEFAULT_BUSINESS_ID,
   windowDays = 7,

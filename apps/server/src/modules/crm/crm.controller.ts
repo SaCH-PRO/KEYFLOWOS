@@ -369,6 +369,65 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contact-next-actions')
+  listContactNextActions(
+    @Param('businessId') businessId: string,
+    @Query('windowDays') windowDays?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parseIntParam = (raw: string | undefined, name: string): number | undefined => {
+      if (raw === undefined || raw === null || raw === '') return undefined;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+        throw new BadRequestException(`${name} must be a positive integer`);
+      }
+      return n;
+    };
+    return this.crm.listNextActions({
+      businessId,
+      windowDays: parseIntParam(windowDays, 'windowDays'),
+      limit: parseIntParam(limit, 'limit'),
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(60, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/next-action/complete')
+  completeContactNextAction(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: any,
+  ) {
+    return this.crm.completeNextAction({
+      businessId,
+      contactId,
+      actorId: req?.user?.id,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(60, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/next-action/snooze')
+  snoozeContactNextAction(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: { snoozeUntil?: string; days?: number },
+    @Req() req: any,
+  ) {
+    return this.crm.snoozeNextAction({
+      businessId,
+      contactId,
+      snoozeUntil: body?.snoozeUntil,
+      days: body?.days,
+      actorId: req?.user?.id,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/tasks/:taskId/complete')

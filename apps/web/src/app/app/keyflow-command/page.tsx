@@ -31,6 +31,7 @@ import { RiskAlerts } from "../control-tower/components/risk-alerts";
 import { StorefrontIntel } from "../control-tower/components/storefront-intel";
 import { ServiceLinkWidget } from "../commerce/components/service-link-widget";
 import UnifiedCalendar from "./components/unified-calendar";
+import { NextActionsWidget } from "../crm/dashboard/next-actions-widget";
 import { AskKeyButton, KeyNoticedStream } from "@/components/key";
 import {
   KeyflowNotesDrawer,
@@ -316,6 +317,8 @@ export default function KeyflowCommandPage() {
               businessId={d.businessId}
               onActionExecuted={d.refreshSilent}
             />
+
+            <NextActionsWidget businessId={d.businessId} windowDays={7} limit={25} />
 
             <div id="keyflow-calendar">
               <UnifiedCalendar
