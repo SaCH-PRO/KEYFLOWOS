@@ -12,11 +12,12 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { BookingNoShowListener } from './booking-no-show.listener';
 
 @Module({
   imports: [CrmModule, PublicEventsModule, CommerceModule, SubscriptionsModule, AiModule, NotificationsModule],
   controllers: [BookingsController, BookingsAiController],
-  providers: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService, PlanLimitGuard],
+  providers: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService, PlanLimitGuard, BookingNoShowListener],
   exports: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService],
 })
 export class BookingsModule {}

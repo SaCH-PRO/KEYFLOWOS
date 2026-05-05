@@ -184,6 +184,15 @@ const bookingSchema = z.object({
     id: z.string(),
     name: z.string(),
   }).nullable().optional(),
+  invoiceId: z.string().nullable().optional(),
+  invoice: z.object({
+    id: z.string(),
+    invoiceNumber: z.string().optional(),
+    status: z.string().optional(),
+    total: z.number().nullable().optional(),
+    currency: z.string().nullable().optional(),
+    paidAt: z.string().nullable().optional(),
+  }).nullable().optional(),
 });
 
 const invoiceSummarySchema = z.object({
@@ -3151,6 +3160,47 @@ export async function updateBookingStatus(bookingId: string, status: string, bus
     path: `/bookings/businesses/${encodeURIComponent(bid)}/bookings/${encodeURIComponent(bookingId)}/status`,
     body: { status },
   });
+}
+
+export type BookingInvoiceResult = {
+  invoiceId: string;
+  invoiceNumber: string;
+  alreadyExisted: boolean;
+};
+
+export async function createInvoiceFromBooking(bookingId: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<BookingInvoiceResult>({
+    path: `/bookings/businesses/${encodeURIComponent(bid)}/bookings/${encodeURIComponent(bookingId)}/create-invoice`,
+    body: {},
+  });
+}
+
+export type ContactRevenueSummary = {
+  contactId: string;
+  currency: string;
+  lifetimeRevenue: number;
+  outstandingBalance: number;
+  openInvoices: number;
+  openQuotes: number;
+  lastPaymentAt: string | null;
+  lastPaymentAmount: number | null;
+  paymentReliability: number | null;
+  recentRevenueActions: Array<{
+    type: string;
+    label: string;
+    amount: number | null;
+    currency: string | null;
+    occurredAt: string;
+    entityId: string | null;
+  }>;
+};
+
+export async function fetchContactRevenueSummary(contactId: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<ContactRevenueSummary>(
+    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/revenue-summary`,
+  );
 }
 
 export type BookingStats = {

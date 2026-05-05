@@ -14,7 +14,7 @@ import {
   RotateCw,
   ChevronRight,
 } from "lucide-react";
-import type { ContactInsightSnapshot } from "@/lib/client";
+import type { ContactInsightSnapshot, ContactRevenueSummary } from "@/lib/client";
 import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 interface ContactInsightCardProps {
@@ -33,6 +33,7 @@ interface ContactInsightCardProps {
     title: string,
     options?: { dueDate?: string; priority?: string; remindAt?: string },
   ) => Promise<void> | void;
+  revenueSummary?: ContactRevenueSummary | null;
 }
 
 function formatCurrency(value: number, currency: string): string {
@@ -119,6 +120,7 @@ export function ContactInsightCard({
   contact,
   onRefresh,
   onAddTask,
+  revenueSummary,
 }: ContactInsightCardProps) {
   const [acting, setActing] = useState(false);
 
@@ -320,6 +322,70 @@ export function ContactInsightCard({
           <ChurnMeter score={p.churnRisk} />
         </div>
       </div>
+
+      {revenueSummary && (revenueSummary.lifetimeRevenue > 0 || revenueSummary.outstandingBalance > 0 || revenueSummary.openInvoices > 0 || revenueSummary.recentRevenueActions.length > 0) && (
+        <div
+          className="rounded-lg p-2.5 space-y-2"
+          style={{ background: "hsl(var(--kf-card) / 0.5)", border: "1px solid hsl(var(--kf-accent1) / 0.18)" }}
+          data-testid="contact-insight-card-revenue"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--kf-accent1))" }}>
+              Revenue snapshot
+            </span>
+            {typeof revenueSummary.paymentReliability === "number" && (
+              <span className="text-[10px] text-muted-foreground/70">
+                Pays on time {Math.round(revenueSummary.paymentReliability * 100)}%
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-[11px]">
+            <div>
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground/60">Lifetime</div>
+              <div className="font-semibold tabular-nums">
+                {formatCurrency(revenueSummary.lifetimeRevenue, revenueSummary.currency)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground/60">Outstanding</div>
+              <div className="font-semibold tabular-nums" style={{ color: revenueSummary.outstandingBalance > 0 ? "hsl(var(--kf-warning))" : undefined }}>
+                {formatCurrency(revenueSummary.outstandingBalance, revenueSummary.currency)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground/60">Open</div>
+              <div className="font-semibold tabular-nums">
+                {revenueSummary.openInvoices} inv
+                <span className="text-muted-foreground/70 ml-1">· {revenueSummary.openQuotes} qt</span>
+              </div>
+            </div>
+          </div>
+          {revenueSummary.lastPaymentAt && (
+            <div className="text-[10px] text-muted-foreground/70">
+              Last payment {new Date(revenueSummary.lastPaymentAt).toLocaleDateString()}
+              {typeof revenueSummary.lastPaymentAmount === "number" && revenueSummary.lastPaymentAmount > 0 && (
+                <span className="ml-1">
+                  · {formatCurrency(revenueSummary.lastPaymentAmount, revenueSummary.currency)}
+                </span>
+              )}
+            </div>
+          )}
+          {revenueSummary.recentRevenueActions.length > 0 && (
+            <div className="space-y-1 pt-1 border-t border-border/30">
+              {revenueSummary.recentRevenueActions.slice(0, 3).map((a) => (
+                <div key={`${a.type}-${a.entityId ?? a.occurredAt}`} className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="text-muted-foreground/80 truncate">{a.label}</span>
+                  {typeof a.amount === "number" && a.amount !== 0 && (
+                    <span className="tabular-nums text-foreground/80">
+                      {formatCurrency(a.amount, a.currency ?? revenueSummary.currency)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex items-start gap-2.5 pt-1">
         <div className="flex-1 min-w-0">

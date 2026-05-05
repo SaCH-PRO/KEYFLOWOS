@@ -200,7 +200,10 @@ export default function BookingDetailDrawer({
   );
 
   const canReschedule = selectedBooking.status === "PENDING" || selectedBooking.status === "CONFIRMED";
-  const canInvoice = selectedBooking.status === "COMPLETED" || selectedBooking.status === "CONFIRMED";
+  const linkedInvoice = selectedBooking.invoice ?? null;
+  const canInvoice =
+    !linkedInvoice &&
+    (selectedBooking.status === "COMPLETED" || selectedBooking.status === "CONFIRMED");
 
   const compose = useCompose();
   const contactPhone = selectedBooking.contact?.phone;
@@ -571,6 +574,30 @@ export default function BookingDetailDrawer({
           <div className="space-y-2 pt-2 border-t border-border/40">
             <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-2">Quick Actions</div>
 
+            {linkedInvoice && (
+              <Link
+                href={`/app/commerce?tab=invoices&invoiceId=${encodeURIComponent(linkedInvoice.id)}`}
+                className="w-full flex items-center justify-between gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-medium border transition-colors"
+                style={{
+                  background: "hsl(var(--kf-success) / 0.08)",
+                  borderColor: "hsl(var(--kf-success) / 0.2)",
+                  color: "hsl(var(--kf-success))",
+                }}
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5" />
+                  Invoice {linkedInvoice.invoiceNumber ?? ""}
+                  {linkedInvoice.status ? (
+                    <span className="text-[10px] opacity-80">· {linkedInvoice.status}</span>
+                  ) : null}
+                </span>
+                {typeof linkedInvoice.total === "number" && (
+                  <span className="tabular-nums text-[11px]">
+                    {formatAmount(linkedInvoice.total, linkedInvoice.currency ?? "TTD")}
+                  </span>
+                )}
+              </Link>
+            )}
             {canInvoice && onCreateInvoice && (
               <button
                 onClick={() => onCreateInvoice(selectedBooking)}

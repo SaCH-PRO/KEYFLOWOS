@@ -86,6 +86,47 @@ export class BookingRescheduledPayload {
   previousEndTime!: Date;
 }
 
+export class BookingNoShowPayload {
+  booking!: Booking;
+  contact?: Partial<Contact>;
+  businessId!: string;
+  markedAt!: Date;
+}
+
+export class BookingInvoiceCreatedPayload {
+  booking!: Booking;
+  invoice!: Invoice;
+  businessId!: string;
+}
+
+export class RecurringInvoiceCreatedPayload {
+  recurringInvoice!: { id: string; businessId: string; contactId: string | null; name?: string | null };
+  businessId!: string;
+}
+
+export class RecurringInvoiceUpdatedPayload {
+  recurringInvoice!: { id: string; businessId: string; contactId: string | null; name?: string | null };
+  businessId!: string;
+}
+
+export class RecurringInvoiceDeletedPayload {
+  businessId!: string;
+  recurringInvoiceId!: string;
+  contactId?: string | null;
+}
+
+export class RecurringInvoiceGeneratedPayload {
+  recurringInvoice!: { id: string; businessId: string; contactId: string | null; name?: string | null };
+  invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact | null };
+  businessId!: string;
+}
+
+export class RecurringInvoiceFailedPayload {
+  recurringInvoice!: { id: string; businessId: string; contactId: string | null; name?: string | null };
+  businessId!: string;
+  error!: string;
+}
+
 export class InvoicePaidPayload {
   invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact; bookingId?: string | null };
   businessId!: string;
@@ -268,6 +309,13 @@ export class StoreOrderRefundedPayload {
   order!: any;
   businessId!: string;
   refundAmount?: number;
+}
+
+export class StoreOrderRoutingFailedPayload {
+  businessId!: string;
+  orderId!: string;
+  contactId?: string | null;
+  error!: string;
 }
 
 export class InventoryLowPayload {
@@ -602,6 +650,15 @@ export interface KeyFlowEventMap {
   'booking.completed': BookingCompletedPayload;
   'booking.cancelled': BookingCancelledPayload;
   'booking.rescheduled': BookingRescheduledPayload;
+  'booking.no_show': BookingNoShowPayload;
+  'booking.invoice_created': BookingInvoiceCreatedPayload;
+  'recurring_invoice.created': RecurringInvoiceCreatedPayload;
+  'recurring_invoice.updated': RecurringInvoiceUpdatedPayload;
+  'recurring_invoice.deleted': RecurringInvoiceDeletedPayload;
+  'recurring_invoice.generated': RecurringInvoiceGeneratedPayload;
+  'recurring_invoice.failed': RecurringInvoiceFailedPayload;
+  'payment.received': PaymentReceivedPayload;
+  'payment.failed': PaymentFailedPayload;
   'invoice.paid': InvoicePaidPayload;
   'invoice.sent': InvoiceStatusPayload;
   'invoice.overdue': InvoiceStatusPayload;
@@ -635,6 +692,7 @@ export interface KeyFlowEventMap {
   'store_order.delivered': StoreOrderDeliveredPayload;
   'store_order.cancelled': StoreOrderCancelledPayload;
   'store_order.refunded': StoreOrderRefundedPayload;
+  'store_order.routing_failed': StoreOrderRoutingFailedPayload;
   'inventory.low': InventoryLowPayload;
   'inventory.out': InventoryOutPayload;
   'purchaseOrder.received': PurchaseOrderReceivedPayload;
@@ -657,8 +715,6 @@ export interface KeyFlowEventMap {
 
   'message.received': MessageReceivedPayload;
   'message.sent': MessageSentPayload;
-  'payment.received': PaymentReceivedPayload;
-  'payment.failed': PaymentFailedPayload;
   'calendar_event.created': CalendarEventCreatedPayload;
   'calendar_event.updated': CalendarEventUpdatedPayload;
   'file.uploaded': FileUploadedPayload;

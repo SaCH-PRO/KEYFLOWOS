@@ -34,6 +34,7 @@ export interface PipelineDetailPanelProps {
   insightSnapshot: ContactInsightSnapshot | null;
   insightLoading: boolean;
   onRecomputeInsight?: () => Promise<void> | void;
+  revenueSummary?: import("@/lib/client").ContactRevenueSummary | null;
   onTogglePin: (id: string) => void;
   onAddNote: (body: string, source?: string) => Promise<void>;
   onAddTask: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
@@ -75,6 +76,7 @@ function PipelineDetailPanelInner({
   insightSnapshot,
   insightLoading,
   onRecomputeInsight,
+  revenueSummary,
   onTogglePin,
   onAddNote,
   onAddTask,
@@ -149,6 +151,7 @@ function PipelineDetailPanelInner({
         insightSnapshot={insightSnapshot}
         insightLoading={insightLoading}
         onRecomputeInsight={onRecomputeInsight}
+        revenueSummary={revenueSummary ?? null}
         onGenerateAiInsight={onGenerateAiInsight}
         onRefreshConversationContext={onRefreshConversationContext}
         relatedContacts={relatedContacts}

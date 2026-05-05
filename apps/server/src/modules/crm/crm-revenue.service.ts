@@ -45,6 +45,140 @@ export class CrmRevenueService {
     return Number(v) || 0;
   }
 
+  /**
+   * Per-contact revenue rollup for the M5 Insight Card revenue panel.
+   * Idempotent read: pure aggregation over Quote/Invoice/Payment.
+   */
+  async getContactRevenueSummary(
+    businessId: string,
+    contactId: string,
+  ): Promise<{
+    contactId: string;
+    currency: string;
+    lifetimeRevenue: number;
+    outstandingBalance: number;
+    openInvoices: number;
+    openQuotes: number;
+    lastPaymentAt: string | null;
+    lastPaymentAmount: number | null;
+    paymentReliability: number | null;
+    recentRevenueActions: Array<{
+      type: string;
+      label: string;
+      amount: number | null;
+      currency: string | null;
+      occurredAt: string;
+      entityId: string | null;
+    }>;
+  }> {
+    const [quotes, invoices, payments, recentEvents] = await Promise.all([
+      this.db.quote.findMany({
+        where: { businessId, contactId, deletedAt: null },
+        select: { id: true, status: true, total: true, currency: true, sentAt: true, expiryDate: true },
+      }),
+      this.db.invoice.findMany({
+        where: { businessId, contactId, deletedAt: null },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          status: true,
+          total: true,
+          currency: true,
+          dueDate: true,
+          createdAt: true,
+        },
+      }),
+      this.db.payment.findMany({
+        where: { businessId, invoice: { contactId } },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: { id: true, amount: true, currency: true, status: true, provider: true, createdAt: true, invoiceId: true },
+      }),
+      this.db.contactEvent.findMany({
+        where: {
+          businessId,
+          contactId,
+          type: {
+            in: [
+              'invoice.paid',
+              'invoice.payment_recorded',
+              'invoice.overdue',
+              'payment.received',
+              'payment.failed',
+              'quote.accepted',
+              'quote.converted',
+              'recurring_invoice.generated',
+              'invoice.from_booking',
+            ],
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+        select: { id: true, type: true, data: true, createdAt: true },
+      }),
+    ]);
+
+    const successfulPayments = payments.filter((p) => p.status === 'SUCCESSFUL');
+    const failedPayments = payments.filter((p) => p.status === 'FAILED');
+    const lifetimeRevenue = successfulPayments.reduce((s, p) => s + this.toNum(p.amount), 0);
+    const openInvoices = invoices.filter((i) => ['SENT', 'OVERDUE', 'DRAFT'].includes(i.status));
+    const outstandingBalance = openInvoices.reduce((s, i) => s + this.toNum(i.total), 0);
+    const openQuotes = quotes.filter((q) => ['SENT', 'DRAFT'].includes(q.status));
+    const lastPayment = successfulPayments[0] ?? null;
+    const totalAttempts = successfulPayments.length + failedPayments.length;
+    const reliability = totalAttempts > 0
+      ? successfulPayments.length / totalAttempts
+      : null;
+    const currency =
+      lastPayment?.currency ?? invoices[0]?.currency ?? quotes[0]?.currency ?? 'TTD';
+
+    const labelFor = (type: string): string => {
+      switch (type) {
+        case 'invoice.paid': return 'Invoice paid';
+        case 'invoice.payment_recorded': return 'Payment recorded';
+        case 'invoice.overdue': return 'Invoice overdue';
+        case 'invoice.from_booking': return 'Invoice from booking';
+        case 'payment.received': return 'Payment received';
+        case 'payment.failed': return 'Payment failed';
+        case 'quote.accepted': return 'Quote accepted';
+        case 'quote.converted': return 'Quote converted';
+        case 'recurring_invoice.generated': return 'Recurring invoice generated';
+        default: return type;
+      }
+    };
+
+    return {
+      contactId,
+      currency,
+      lifetimeRevenue,
+      outstandingBalance,
+      openInvoices: openInvoices.length,
+      openQuotes: openQuotes.length,
+      lastPaymentAt: lastPayment?.createdAt?.toISOString() ?? null,
+      lastPaymentAmount: lastPayment ? this.toNum(lastPayment.amount) : null,
+      paymentReliability: reliability,
+      recentRevenueActions: recentEvents.map((e) => {
+        const data = (e.data ?? {}) as Record<string, unknown>;
+        const rawAmount = data.amount ?? data.total ?? data.value;
+        const amount = rawAmount != null ? this.toNum(rawAmount) : null;
+        const entityId =
+          (typeof data.invoiceId === 'string' && data.invoiceId) ||
+          (typeof data.quoteId === 'string' && data.quoteId) ||
+          (typeof data.paymentId === 'string' && data.paymentId) ||
+          (typeof data.id === 'string' && data.id) ||
+          null;
+        return {
+          type: e.type,
+          label: labelFor(e.type),
+          amount,
+          currency: typeof data.currency === 'string' ? data.currency : null,
+          occurredAt: e.createdAt.toISOString(),
+          entityId,
+        };
+      }),
+    };
+  }
+
   async getPredictiveRevenue(businessId: string): Promise<RevenueData> {
     const now = new Date();
     const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);

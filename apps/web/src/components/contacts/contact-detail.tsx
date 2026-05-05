@@ -125,6 +125,7 @@ interface ContactDetailProps {
   insightSnapshot?: import("@/lib/client").ContactInsightSnapshot | null;
   insightLoading?: boolean;
   onRecomputeInsight?: () => Promise<void> | void;
+  revenueSummary?: import("@/lib/client").ContactRevenueSummary | null;
   onRefreshConversationContext?: () => Promise<void>;
   relatedContacts?: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string | null; jobTitle?: string | null }>;
   onSelectRelatedContact?: (contactId: string) => void;
@@ -164,6 +165,7 @@ export function ContactDetail({
   insightSnapshot,
   insightLoading,
   onRecomputeInsight,
+  revenueSummary,
   onRefreshConversationContext,
   relatedContacts,
   onSelectRelatedContact,
@@ -346,6 +348,7 @@ export function ContactDetail({
             }}
             onRefresh={onRecomputeInsight}
             onAddTask={onAddTask}
+            revenueSummary={revenueSummary ?? null}
           />
         )}
 
