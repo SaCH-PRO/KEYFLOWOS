@@ -7614,6 +7614,132 @@ export async function unenrollFromSequence(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Sequence analytics & lifecycle reporting (M4)
+// ---------------------------------------------------------------------------
+export type SequenceFunnelStep = { label: string; count: number; stage?: 'sent' | 'opened' | 'replied' | 'goal' };
+export type SequenceStepAnalytics = {
+  nodeId: string;
+  nodeType: string;
+  label: string;
+  reached: number;
+  advanced: number;
+  failed: number;
+  dropOff: number;
+  dropOffRate: number;
+  openRate: number | null;
+  clickRate: number | null;
+  replyRate: number | null;
+  replyCount: number;
+};
+export type SequenceAttributedDeal = {
+  dealId: string;
+  contactId: string;
+  value: number;
+  currency: string | null;
+  wonAt: string;
+  enrolledAt: string;
+  windowDays: number;
+};
+export type SequenceAnalytics = {
+  sequenceId: string;
+  name: string;
+  status: string;
+  attributionWindowDays: number;
+  range: { from: string | null; to: string | null };
+  enrollment: { total: number; active: number; completed: number; failed: number };
+  funnel: SequenceFunnelStep[];
+  steps: SequenceStepAnalytics[];
+  attribution: {
+    deals: number;
+    contacts: number;
+    value: number;
+    currency: string | null;
+    items: SequenceAttributedDeal[];
+  };
+};
+export type SequenceKpi = {
+  sequenceId: string;
+  name: string;
+  status: string;
+  enrolled: number;
+  active: number;
+  completed: number;
+  failed: number;
+  replyRate: number;
+  attributedDeals: number;
+  attributedValue: number;
+  currency: string | null;
+};
+export type LifecycleBucket = {
+  key: string;
+  totalDeals: number;
+  totalValue: number;
+  best: { sequenceId: string; sequenceName: string; deals: number; value: number } | null;
+  breakdown: { sequenceId: string; sequenceName: string; deals: number; value: number }[];
+};
+export type LifecycleReport = {
+  range: { from: string | null; to: string | null };
+  totals: { deals: number; value: number; currency: string | null };
+  byRelationshipType: LifecycleBucket[];
+  bySource: LifecycleBucket[];
+  byBestChannel: LifecycleBucket[];
+};
+
+function buildRangeQuery(from?: string, to?: string): string {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  const s = params.toString();
+  return s ? `?${s}` : '';
+}
+
+export async function fetchSequenceAnalytics(
+  businessId: string,
+  sequenceId: string,
+  range?: { from?: string; to?: string },
+): Promise<ApiResult<SequenceAnalytics>> {
+  return apiGetSimple<SequenceAnalytics>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}/analytics${buildRangeQuery(range?.from, range?.to)}`,
+  );
+}
+
+export async function fetchSequencesSummary(
+  businessId: string,
+  range?: { from?: string; to?: string },
+): Promise<ApiResult<SequenceKpi[]>> {
+  return apiGetSimple<SequenceKpi[]>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/analytics/summary${buildRangeQuery(range?.from, range?.to)}`,
+  );
+}
+
+export async function fetchLifecycleReport(
+  businessId: string,
+  range?: { from?: string; to?: string },
+): Promise<ApiResult<LifecycleReport>> {
+  return apiGetSimple<LifecycleReport>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/analytics/lifecycle${buildRangeQuery(range?.from, range?.to)}`,
+  );
+}
+
+export async function fetchAttributionSettings(
+  businessId: string,
+): Promise<ApiResult<{ attributionWindowDays: number }>> {
+  return apiGetSimple<{ attributionWindowDays: number }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/settings/attribution`,
+  );
+}
+
+export async function updateAttributionSettings(
+  businessId: string,
+  body: { attributionWindowDays: number | null },
+): Promise<ApiResult<{ attributionWindowDays: number }>> {
+  return apiPatch<{ attributionWindowDays: number }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/settings/attribution`,
+    body,
+  );
+}
+
 export type AiContactSummary = {
   summary: string;
   sentiment: 'positive' | 'neutral' | 'negative' | 'at_risk';

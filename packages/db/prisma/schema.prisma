@@ -104,6 +104,10 @@ model Business {
   // Shape: { hot, warm, cold, atRiskClientDays } in days
   crmHealthThresholds Json?  @map("crm_health_thresholds")
 
+  // Sequence attribution window (days). Used to attribute won deals back to
+  // sequence enrollments. Defaults to 14 days when null.
+  crmAttributionWindowDays Int? @map("crm_attribution_window_days")
+
   // Module Relationships
   members          Membership[]
   contacts         Contact[]
@@ -3208,10 +3212,37 @@ model CrmSequenceEnrollment {
   completedAt   DateTime?   @map("completed_at")
   metadata      Json?
 
+  attributions SequenceAttribution[]
+
   @@index([sequenceId])
   @@index([contactId])
   @@index([status, nextStepAt])
   @@map("crm_sequence_enrollments")
+}
+
+/// Links a won Deal back to a sequence enrollment when the deal is won
+/// within the per-business attribution window after enrollment start.
+/// Populated by the sequence-attribution listener on `deal.won` events.
+model SequenceAttribution {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  sequenceId      String   @map("sequence_id")
+  enrollmentId    String   @map("enrollment_id")
+  dealId          String   @map("deal_id")
+  contactId       String   @map("contact_id")
+  attributedValue Decimal? @db.Decimal(12, 2) @map("attributed_value")
+  currency        String?
+  wonAt           DateTime @map("won_at")
+  enrolledAt      DateTime @map("enrolled_at")
+  windowDays      Int      @map("window_days")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  enrollment CrmSequenceEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId])
+  @@index([businessId, sequenceId])
+  @@index([businessId, wonAt])
+  @@map("sequence_attributions")
 }
 
 model ContactMomentum {
