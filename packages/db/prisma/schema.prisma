@@ -185,6 +185,15 @@ model Business {
   guidanceAssessments  GuidanceAssessment[]
   revenueActions       RevenueAction[]
 
+  // Finance OS (FIN1)
+  financialAccounts     FinancialAccount[]
+  chartOfAccounts       ChartOfAccount[]
+  financialTransactions FinancialTransaction[]
+  ledgerEntries         LedgerEntry[]
+  bankTransactions      BankTransaction[]
+  reconciliations       Reconciliation[]
+  taxLiabilities        TaxLiability[]
+
   // Business Builder
   businessPlans        BusinessPlan[]
 
@@ -553,6 +562,7 @@ model Contact {
   conversationInsights ConversationAIInsight[]
   relationshipsFrom   ContactRelationship[] @relation("ContactRelationshipFrom")
   relationshipsTo     ContactRelationship[] @relation("ContactRelationshipTo")
+  financialTransactions FinancialTransaction[]
   insightSnapshot      ContactInsightSnapshot?
 
   createdAt DateTime  @default(now()) @map("created_at")
@@ -2316,10 +2326,16 @@ model ExpenseCategory {
   expenses   Expense[]
   budgets    ExpenseBudget[]
 
+  // FIN1: link expense categories to a Chart of Account row so reports can
+  // group spend by COA bucket. Nullable until FIN3 backfills the mapping.
+  chartOfAccountId String?         @map("chart_of_account_id")
+  chartOfAccount   ChartOfAccount? @relation(fields: [chartOfAccountId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now()) @map("created_at")
 
   @@unique([businessId, name])
   @@index([businessId])
+  @@index([businessId, chartOfAccountId])
   @@map("expense_categories")
 }
 
@@ -5993,4 +6009,268 @@ model PresenceDailyStat {
   @@index([businessId, day])
   @@index([businessId, metric, day])
   @@map("presence_daily_stats")
+}
+
+// ---
+// MODULE 25: FINANCE OS (FIN1)
+// ---
+// Schema foundation for the unified Financial Operating System. The audit
+// at attached_assets/gh_1777950587461.docx specifies these primitives. All
+// monetary fields use Decimal(18,4) (NOT Float) because rounding drift
+// accumulates over a ledger and breaks reconciliation.
+//
+// Architectural rules:
+//  - LedgerEntry rows are append-only. Reversals create offsetting entries
+//    via FinancialTransaction.reversalOfId.
+//  - Every monetary write must go through PostingService. Direct INSERTs
+//    into LedgerEntry from anywhere except PostingService are forbidden.
+//  - businessId scoping is enforced inside services, not at the route layer.
+
+/// Cash container — bank account, payment processor, credit card, loan,
+/// equity account, etc. Each FinancialAccount maps 1:1 to a ChartOfAccount
+/// row of asset/liability/equity type so balances roll up into reports.
+model FinancialAccount {
+  id               String   @id @default(cuid())
+  businessId       String   @map("business_id")
+  business         Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  chartOfAccountId String   @map("chart_of_account_id")
+  chartOfAccount   ChartOfAccount @relation("FinancialAccountChartLink", fields: [chartOfAccountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  name             String
+  type             String   // CASH, BANK, PAYMENT_PROCESSOR, CREDIT_CARD, LOAN, EQUITY, TAX, OTHER
+  subtype          String?  // e.g. "wipay", "paypal", "stripe", "savings"
+  currency         String   @default("TTD")
+  openingBalance   Decimal  @default(0) @db.Decimal(18, 4) @map("opening_balance")
+  currentBalance   Decimal  @default(0) @db.Decimal(18, 4) @map("current_balance")
+  institution      String?
+  accountLast4     String?  @map("account_last4")
+  isDefault        Boolean  @default(false) @map("is_default")
+  isActive         Boolean  @default(true)  @map("is_active")
+  metadata         Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt      @map("updated_at")
+
+  bankTransactions BankTransaction[]
+  reconciliations  Reconciliation[]
+
+  @@unique([businessId, name])
+  @@index([businessId])
+  @@index([businessId, type])
+  @@index([businessId, isActive])
+  @@index([businessId, chartOfAccountId])
+  @@map("financial_accounts")
+}
+
+/// Chart of Accounts — the accounting buckets every ledger entry posts
+/// against (Cash, Accounts Receivable, Revenue, COGS, Operating Expense
+/// sub-buckets, Tax Payable, Owner Equity, etc.). System rows are seeded
+/// per-business by ChartOfAccountsSeederService and cannot be deleted.
+model ChartOfAccount {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  code        String?
+  name        String
+  type        String   // ASSET, LIABILITY, EQUITY, INCOME, COGS, EXPENSE
+  subtype     String?
+  /// Canonical key for system rows — lets services look up "the AR account"
+  /// without hard-coding an id. e.g. CASH, BANK, ACCOUNTS_RECEIVABLE,
+  /// ACCOUNTS_PAYABLE, REVENUE, COGS, TAX_PAYABLE, OWNER_EQUITY.
+  systemKey   String?  @map("system_key")
+
+  parentId    String?  @map("parent_id")
+  parent      ChartOfAccount?  @relation("CoaParent", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children    ChartOfAccount[] @relation("CoaParent")
+
+  isSystem    Boolean  @default(false) @map("is_system")
+  isActive    Boolean  @default(true)  @map("is_active")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  ledgerEntries     LedgerEntry[]
+  expenseCategories ExpenseCategory[]
+  financialAccounts FinancialAccount[] @relation("FinancialAccountChartLink")
+
+  @@unique([businessId, systemKey])
+  @@index([businessId])
+  @@index([businessId, type])
+  @@index([businessId, parentId])
+  @@map("chart_of_accounts")
+}
+
+/// Unified transaction wrapper. One FinancialTransaction owns N LedgerEntry
+/// rows whose debits must equal credits (validated by PostingService).
+model FinancialTransaction {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  type          String   // INCOME, EXPENSE, TRANSFER, REFUND, TAX, ADJUSTMENT, REVERSAL, OPENING_BALANCE
+  status        String   @default("POSTED") // DRAFT, POSTED, VOID, REVERSED
+  date          DateTime
+  description   String?
+  amount        Decimal  @default(0) @db.Decimal(18, 4)
+  currency      String   @default("TTD")
+
+  contactId     String?  @map("contact_id")
+  contact       Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  /// Source pointer for traceability — e.g. ('Invoice', 'inv_123').
+  sourceType    String?  @map("source_type")
+  sourceId      String?  @map("source_id")
+
+  /// Idempotency key. Deterministic external ref of the form
+  /// `${sourceType}:${sourceId}:${kind}` lets re-posting be a no-op.
+  /// Scoped per business via the @@unique([businessId, externalRef])
+  /// composite index — never global, to prevent cross-tenant collision.
+  externalRef   String?  @map("external_ref")
+
+  reversalOfId  String?  @unique @map("reversal_of_id")
+  reversalOf    FinancialTransaction?  @relation("TxnReversal", fields: [reversalOfId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  reversedBy    FinancialTransaction?  @relation("TxnReversal")
+
+  reference     String?
+  notes         String?
+  metadata      Json?
+  postedAt      DateTime? @map("posted_at")
+  createdById   String?  @map("created_by_id")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  entries       LedgerEntry[]
+
+  @@unique([businessId, externalRef])
+  @@index([businessId, date])
+  @@index([businessId, sourceType, sourceId])
+  @@index([businessId, type])
+  @@index([businessId, contactId])
+  @@map("financial_transactions")
+}
+
+/// Append-only double-entry ledger row. Every monetary movement is at least
+/// two entries summing to zero (debits == credits) on the parent
+/// FinancialTransaction. Locked entries (post-reconciliation) cannot be
+/// reversed without admin override (FIN6 enforces).
+model LedgerEntry {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  transactionId String   @map("transaction_id")
+  /// Restrict (NoAction) — ledger rows are append-only. Deleting a
+  /// FinancialTransaction must be blocked at the DB level so reversals
+  /// stay the only path to "undo" a posting.
+  transaction   FinancialTransaction @relation(fields: [transactionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  /// ChartOfAccount this entry posts against (e.g. Cash, AR, Revenue).
+  accountId     String   @map("account_id")
+  account       ChartOfAccount @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  debit         Decimal  @default(0) @db.Decimal(18, 4)
+  credit        Decimal  @default(0) @db.Decimal(18, 4)
+  currency      String   @default("TTD")
+  date          DateTime
+  memo          String?
+
+  /// Set by FIN6 reconciliation completion; locked entries reject reversal
+  /// from PostingService unless admin-overridden.
+  lockedByReconciliationId String? @map("locked_by_reconciliation_id")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, date])
+  @@index([businessId, accountId, date])
+  @@index([transactionId])
+  @@index([lockedByReconciliationId])
+  @@map("ledger_entries")
+}
+
+/// Imported bank statement row (CSV upload in FIN6). Auto-matched against
+/// system payments/expenses; status flows UNMATCHED -> MATCHED -> IGNORED.
+model BankTransaction {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  accountId   String   @map("account_id")
+  account     FinancialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  date        DateTime
+  description String
+  amount      Decimal  @db.Decimal(18, 4)
+  currency    String   @default("TTD")
+  reference   String?
+
+  matchedTransactionId String? @map("matched_transaction_id")
+  status      String   @default("UNMATCHED") // UNMATCHED, MATCHED, IGNORED
+  rawData     Json?
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, accountId, date])
+  @@index([businessId, status])
+  @@index([businessId, accountId, status])
+  @@map("bank_transactions")
+}
+
+/// Bank-statement reconciliation session. On completion, all in-period
+/// LedgerEntry rows on the account are stamped with this row's id and
+/// become locked.
+model Reconciliation {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  accountId       String   @map("account_id")
+  account         FinancialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  periodStart     DateTime @map("period_start")
+  periodEnd       DateTime @map("period_end")
+  statementBalance Decimal  @db.Decimal(18, 4) @map("statement_balance")
+  systemBalance    Decimal  @db.Decimal(18, 4) @map("system_balance")
+  difference       Decimal  @db.Decimal(18, 4)
+
+  status          String   @default("OPEN") // OPEN, RECONCILED, NEEDS_REVIEW
+  notes           String?
+
+  completedAt     DateTime? @map("completed_at")
+  completedById   String?   @map("completed_by_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt      @map("updated_at")
+
+  @@index([businessId, accountId, periodEnd])
+  @@index([businessId, status])
+  @@map("reconciliations")
+}
+
+/// Per-period tax rollup (VAT, sales tax, business levy, withholding).
+/// FIN7 fills these via TaxLiabilityRollupScheduler.
+model TaxLiability {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  type         String   // VAT, SALES_TAX, WITHHOLDING, BUSINESS_LEVY, OTHER
+  periodStart  DateTime @map("period_start")
+  periodEnd    DateTime @map("period_end")
+  taxableSales Decimal  @default(0) @db.Decimal(18, 4) @map("taxable_sales")
+  taxCollected Decimal  @default(0) @db.Decimal(18, 4) @map("tax_collected")
+  taxPaid      Decimal  @default(0) @db.Decimal(18, 4) @map("tax_paid")
+  amountDue    Decimal  @default(0) @db.Decimal(18, 4) @map("amount_due")
+  dueDate      DateTime? @map("due_date")
+  status       String   @default("OPEN") // OPEN, FILED, PAID, AMENDED
+  notes        String?
+
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, type, periodStart, periodEnd])
+  @@index([businessId, status])
+  @@index([businessId, type, periodEnd])
+  @@map("tax_liabilities")
 }
