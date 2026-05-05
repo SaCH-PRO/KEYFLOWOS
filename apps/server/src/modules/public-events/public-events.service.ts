@@ -122,6 +122,79 @@ export class PublicEventsService {
   }
 
   /**
+   * Link an existing Contact to a visitor cookie and back-fill first-touch
+   * attribution custom fields when they are still blank. Used by flows
+   * (e.g. public quote accept/reject) where the Contact already exists but
+   * was created without a visitorId, so first-touch UTM/source/referrer
+   * never landed on the Contact record.
+   */
+  async attachVisitorToContact(input: {
+    businessId: string;
+    contactId: string;
+    visitorId: string;
+    sourceDetail?: string | null;
+  }): Promise<void> {
+    if (!input.visitorId || !input.contactId || !input.businessId) return;
+
+    const firstTouch = await this.firstTouchFor(input.businessId, input.visitorId);
+
+    if (firstTouch) {
+      try {
+        const contact = await this.prisma.client.contact.findUnique({
+          where: { id: input.contactId },
+          select: { custom: true },
+        });
+        const existingCustom =
+          contact?.custom && typeof contact.custom === 'object' && !Array.isArray(contact.custom)
+            ? (contact.custom as Record<string, unknown>)
+            : {};
+        const merged: Record<string, unknown> = { ...existingCustom };
+        const setIfBlank = (key: string, value: unknown) => {
+          if (value && (merged[key] === undefined || merged[key] === null || merged[key] === '')) {
+            merged[key] = value;
+          }
+        };
+        setIfBlank('firstSource', firstTouch.firstSource);
+        setIfBlank('utmMedium', firstTouch.firstMedium);
+        setIfBlank('utmCampaign', firstTouch.firstCampaign);
+        setIfBlank('firstReferrer', firstTouch.firstReferrer);
+        setIfBlank('firstLandingPath', firstTouch.firstPath);
+        if (Object.keys(merged).length !== Object.keys(existingCustom).length) {
+          await this.prisma.client.contact.update({
+            where: { id: input.contactId },
+            data: { custom: merged as Prisma.InputJsonValue },
+          });
+        }
+      } catch (err) {
+        this.logger.warn(
+          `[public-events] attach first-touch failed contact=${input.contactId}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    try {
+      await this.prisma.client.publicVisitor.update({
+        where: {
+          businessId_visitorId: {
+            businessId: input.businessId,
+            visitorId: input.visitorId,
+          },
+        },
+        data: { contactId: input.contactId },
+      });
+    } catch {
+      // visitor row may not exist for this cookie yet; safe to ignore.
+    }
+
+    await this.backstitchVisitor({
+      businessId: input.businessId,
+      visitorId: input.visitorId,
+      contactId: input.contactId,
+      sourceDetail: input.sourceDetail ?? null,
+    }).catch(() => undefined);
+  }
+
+  /**
    * Resolve first-touch attribution for an anonymous visitor cookie.
    * Used by storefront flows when creating a Contact, and exposed for
    * other server modules that want to enrich downstream records.

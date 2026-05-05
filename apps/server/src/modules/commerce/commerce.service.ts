@@ -18,6 +18,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus } from './invoice-workflow.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { PublicEventsService } from '../public-events/public-events.service';
 
 @Injectable()
 export class CommerceService {
@@ -29,6 +30,7 @@ export class CommerceService {
     @Inject(CommerceStatsService) private readonly statsCache: CommerceStatsService,
     @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
   ) {}
 
   /**
@@ -839,7 +841,7 @@ export class CommerceService {
     return this.decorateQuote(quote);
   }
 
-  async markQuoteViewedByToken(token: string) {
+  async markQuoteViewedByToken(token: string, visitorId?: string | null) {
     const quote = await this.prisma.client.quote.findUnique({
       where: { viewToken: token },
       select: {
@@ -878,12 +880,27 @@ export class CommerceService {
         actorType: 'SYSTEM',
         source: 'commerce',
       });
+      if (visitorId) {
+        await this.publicEvents
+          .attachVisitorToContact({
+            businessId: quote.businessId,
+            contactId: quote.contactId,
+            visitorId,
+            sourceDetail: `quote:${quote.id}`,
+          })
+          .catch(() => undefined);
+      }
     }
     this.statsCache.invalidateCache(quote.businessId);
     return this.getQuoteByToken(token);
   }
 
-  async respondToQuoteByToken(token: string, decision: 'accept' | 'reject', reason?: string) {
+  async respondToQuoteByToken(
+    token: string,
+    decision: 'accept' | 'reject',
+    reason?: string,
+    visitorId?: string | null,
+  ) {
     const quote = await this.prisma.client.quote.findUnique({
       where: { viewToken: token },
       select: {
@@ -893,6 +910,7 @@ export class CommerceService {
         invoiceId: true,
         deletedAt: true,
         expiryDate: true,
+        contactId: true,
       },
     });
     if (!quote || quote.deletedAt) {
@@ -914,12 +932,27 @@ export class CommerceService {
       throw new BadRequestException('This quote has expired and can no longer be responded to.');
     }
     const target: 'ACCEPTED' | 'REJECTED' = decision === 'accept' ? 'ACCEPTED' : 'REJECTED';
-    return this.updateQuoteStatus({
+    const result = await this.updateQuoteStatus({
       quoteId: quote.id,
       status: target,
       source: 'public',
       reason: reason ?? null,
     });
+    // Stitch the public visitor cookie onto the quote's contact so first-touch
+    // attribution (firstSource / utmMedium / utmCampaign / firstReferrer /
+    // firstLandingPath) lands on the Contact even though it was originally
+    // created internally without a visitorId.
+    if (visitorId && quote.contactId) {
+      await this.publicEvents
+        .attachVisitorToContact({
+          businessId: quote.businessId,
+          contactId: quote.contactId,
+          visitorId,
+          sourceDetail: `quote:${quote.id}`,
+        })
+        .catch(() => undefined);
+    }
+    return result;
   }
 
   async createQuote(input: {

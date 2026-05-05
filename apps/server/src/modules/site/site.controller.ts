@@ -1,4 +1,6 @@
-import { Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
+import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
 import { SiteService } from './site.service';
 import { StoreOrderService } from './store-order.service';
 import { PromoCodeService } from './promo-code.service';
@@ -148,9 +150,15 @@ export class SiteController {
       visitorId?: string;
       referralCode?: string;
     },
+    @Req() req: Request,
   ) {
     const storefront = await this.siteService.getPublicStorefront(slug);
     const businessId = storefront.business.id;
+    const cookieVid = readVisitorIdFromRequest(req);
+    const resolvedVid =
+      (body.visitorId ? sanitize(body.visitorId, 100) ?? undefined : undefined) ??
+      cookieVid ??
+      undefined;
 
     const cleanCustomer = {
       ...body.customer,
@@ -169,7 +177,7 @@ export class SiteController {
       paymentMethod: body.paymentMethod,
       notes: sanitize(body.notes ?? null) ?? undefined,
       storefrontSlug: slug,
-      visitorId: body.visitorId ? sanitize(body.visitorId, 100) ?? undefined : undefined,
+      visitorId: resolvedVid,
       referralCode: body.referralCode ? sanitize(body.referralCode, 100) ?? undefined : undefined,
     });
 
@@ -411,8 +419,14 @@ export class SiteController {
       _hp?: string;
       _t?: number;
     },
+    @Req() req: Request,
   ) {
     const allowedUrgency = new Set(['low', 'normal', 'high', 'urgent']);
+    const cookieVid = readVisitorIdFromRequest(req);
+    const resolvedVid =
+      (body.visitorId ? sanitize(body.visitorId, 100) ?? undefined : undefined) ??
+      cookieVid ??
+      undefined;
     return this.intakeService.submitIntake(slug, {
       name: sanitize(body.name ?? '', 200) ?? '',
       email: sanitize(body.email ?? '', 320) ?? '',
@@ -421,7 +435,7 @@ export class SiteController {
       description: sanitize(body.description ?? '', 5000) ?? '',
       budget: body.budget ? (sanitize(body.budget, 100) ?? undefined) : undefined,
       urgency: body.urgency && allowedUrgency.has(body.urgency) ? body.urgency : 'normal',
-      visitorId: body.visitorId ? sanitize(body.visitorId, 100) ?? undefined : undefined,
+      visitorId: resolvedVid,
       referralCode: body.referralCode ? sanitize(body.referralCode, 100) ?? undefined : undefined,
     });
   }

@@ -34,6 +34,7 @@ import { RevenueReportingService } from './revenue-reporting.service';
 import { RevenueReportingController } from './revenue-reporting.controller';
 import { RevenueReportingRollupScheduler } from './revenue-reporting-rollup.scheduler';
 import { CrmModule } from '../crm/crm.module';
+import { PublicEventsModule } from '../public-events/public-events.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -43,6 +44,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
 @Module({
   imports: [
     CrmModule,
+    PublicEventsModule,
     SubscriptionsModule,
     AiModule,
     CatalogModule,

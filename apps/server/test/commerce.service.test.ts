@@ -85,7 +85,7 @@ describe('CommerceService', () => {
     const events = { emit } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any, { createProduct: vi.fn(async (i: any) => ({ id: 'p_1', businessId: i.businessId, name: i.name, price: i.price, currency: i.currency ?? 'TTD' })), updateProduct: vi.fn(), deleteProduct: vi.fn(), bulkUpdateProducts: vi.fn(), listProducts: vi.fn(async (bid: string) => ({ data: [{ id: 'p_1', businessId: bid, name: 'Plan', price: 10 }], total: 1, page: 1, pageSize: 50, totalPages: 1 })), listPublicProducts: vi.fn(), deactivateProduct: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any, { createProduct: vi.fn(async (i: any) => ({ id: 'p_1', businessId: i.businessId, name: i.name, price: i.price, currency: i.currency ?? 'TTD' })), updateProduct: vi.fn(), deleteProduct: vi.fn(), bulkUpdateProducts: vi.fn(), listProducts: vi.fn(async (bid: string) => ({ data: [{ id: 'p_1', businessId: bid, name: 'Plan', price: 10 }], total: 1, page: 1, pageSize: 50, totalPages: 1 })), listPublicProducts: vi.fn(), deactivateProduct: vi.fn() } as any, { upsertStorefrontContact: vi.fn(), attachVisitorToContact: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn(), firstTouchFor: vi.fn() } as any);
 
     const invoice = await service.markInvoicePaid('inv_1');
 
@@ -103,7 +103,7 @@ describe('CommerceService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any, { createProduct: vi.fn(async (i: any) => ({ id: 'p_1', businessId: i.businessId, name: i.name, price: i.price, currency: i.currency ?? 'TTD' })), updateProduct: vi.fn(), deleteProduct: vi.fn(), bulkUpdateProducts: vi.fn(), listProducts: vi.fn(async (bid: string) => ({ data: [{ id: 'p_1', businessId: bid, name: 'Plan', price: 10 }], total: 1, page: 1, pageSize: 50, totalPages: 1 })), listPublicProducts: vi.fn(), deactivateProduct: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any, { createProduct: vi.fn(async (i: any) => ({ id: 'p_1', businessId: i.businessId, name: i.name, price: i.price, currency: i.currency ?? 'TTD' })), updateProduct: vi.fn(), deleteProduct: vi.fn(), bulkUpdateProducts: vi.fn(), listProducts: vi.fn(async (bid: string) => ({ data: [{ id: 'p_1', businessId: bid, name: 'Plan', price: 10 }], total: 1, page: 1, pageSize: 50, totalPages: 1 })), listPublicProducts: vi.fn(), deactivateProduct: vi.fn() } as any, { upsertStorefrontContact: vi.fn(), attachVisitorToContact: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn(), firstTouchFor: vi.fn() } as any);
 
     await service.createProduct({ businessId: 'biz_1', name: 'Plan', price: 10 });
     const products = await service.listProducts('biz_1');
@@ -116,7 +116,7 @@ describe('CommerceService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any, { createProduct: vi.fn(async (i: any) => ({ id: 'p_1', businessId: i.businessId, name: i.name, price: i.price, currency: i.currency ?? 'TTD' })), updateProduct: vi.fn(), deleteProduct: vi.fn(), bulkUpdateProducts: vi.fn(), listProducts: vi.fn(async (bid: string) => ({ data: [{ id: 'p_1', businessId: bid, name: 'Plan', price: 10 }], total: 1, page: 1, pageSize: 50, totalPages: 1 })), listPublicProducts: vi.fn(), deactivateProduct: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any, { createProduct: vi.fn(async (i: any) => ({ id: 'p_1', businessId: i.businessId, name: i.name, price: i.price, currency: i.currency ?? 'TTD' })), updateProduct: vi.fn(), deleteProduct: vi.fn(), bulkUpdateProducts: vi.fn(), listProducts: vi.fn(async (bid: string) => ({ data: [{ id: 'p_1', businessId: bid, name: 'Plan', price: 10 }], total: 1, page: 1, pageSize: 50, totalPages: 1 })), listPublicProducts: vi.fn(), deactivateProduct: vi.fn() } as any, { upsertStorefrontContact: vi.fn(), attachVisitorToContact: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn(), firstTouchFor: vi.fn() } as any);
 
     const invoice = await service.createInvoiceForService('biz_1', 'contact_1', {
       id: 'service_1',
@@ -139,7 +139,7 @@ describe('CommerceService', () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any, { createProduct: vi.fn(async (i: any) => ({ id: 'p_1', businessId: i.businessId, name: i.name, price: i.price, currency: i.currency ?? 'TTD' })), updateProduct: vi.fn(), deleteProduct: vi.fn(), bulkUpdateProducts: vi.fn(), listProducts: vi.fn(async (bid: string) => ({ data: [{ id: 'p_1', businessId: bid, name: 'Plan', price: 10 }], total: 1, page: 1, pageSize: 50, totalPages: 1 })), listPublicProducts: vi.fn(), deactivateProduct: vi.fn() } as any);
+    const service = new CommerceService(prisma, events, crm, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any, makeWorkflowMock(prisma, events) as any, { createProduct: vi.fn(async (i: any) => ({ id: 'p_1', businessId: i.businessId, name: i.name, price: i.price, currency: i.currency ?? 'TTD' })), updateProduct: vi.fn(), deleteProduct: vi.fn(), bulkUpdateProducts: vi.fn(), listProducts: vi.fn(async (bid: string) => ({ data: [{ id: 'p_1', businessId: bid, name: 'Plan', price: 10 }], total: 1, page: 1, pageSize: 50, totalPages: 1 })), listPublicProducts: vi.fn(), deactivateProduct: vi.fn() } as any, { upsertStorefrontContact: vi.fn(), attachVisitorToContact: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn(), firstTouchFor: vi.fn() } as any);
 
     const quote = await service.updateQuoteStatus({ quoteId: 'quote_1', status: 'ACCEPTED', actorId: 'user_1' });
 
