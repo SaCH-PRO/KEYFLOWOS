@@ -59,7 +59,8 @@ export default function PrivacySettingsPage() {
     }
   };
 
-  useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [activeBusinessId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(); }, [activeBusinessId]);
 
   const save = async () => {
     if (!activeBusinessId) return;

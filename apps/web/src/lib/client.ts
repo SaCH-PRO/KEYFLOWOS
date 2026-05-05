@@ -7468,6 +7468,24 @@ export type CrmSequenceStep = {
 
 export type SequenceNodeType = 'email' | 'whatsapp' | 'sms' | 'wait' | 'branch' | 'end';
 
+export type SequenceVariant = {
+  id: string;
+  label?: string;
+  weight: number;
+  subject?: string;
+  body?: string;
+};
+
+export type BranchConditionType =
+  | 'opened'
+  | 'clicked'
+  | 'replied'
+  | 'no_reply'
+  | 'engaged'
+  | 'not_opened_in_days'
+  | 'relationship_health_changed_to'
+  | 'best_channel';
+
 export type SequenceNode = {
   id: string;
   type: SequenceNodeType;
@@ -7478,10 +7496,62 @@ export type SequenceNode = {
     label?: string;
     delayDays?: number;
     delayHours?: number;
-    condition?: 'opened' | 'clicked' | 'replied' | 'no_reply' | 'engaged';
+    condition?: BranchConditionType;
     waitForDays?: number;
+    targetHealth?: 'HOT' | 'WARM' | 'COLD' | 'DORMANT' | 'AT_RISK';
+    targetChannel?: 'email' | 'whatsapp' | 'sms' | 'call';
+    variants?: SequenceVariant[];
+    promotedVariantId?: string | null;
   };
 };
+
+export type VariantStepReport = {
+  nodeId: string;
+  nodeType: string;
+  nodeLabel: string;
+  totalEnrollments: number;
+  promotedVariantId: string | null;
+  winnerVariantId: string | null;
+  winnerConfidence: number;
+  variants: Array<{
+    variantId: string;
+    label: string;
+    weight: number;
+    sent: number;
+    opened: number;
+    clicked: number;
+    replied: number;
+    converted: number;
+    openRate: number;
+    clickRate: number;
+    replyRate: number;
+    conversionRate: number;
+    isPromoted: boolean;
+    isWinner: boolean;
+    confidence: number;
+  }>;
+};
+
+export async function fetchSequenceVariantReport(
+  businessId: string,
+  sequenceId: string,
+): Promise<ApiResult<VariantStepReport[]>> {
+  return apiGetSimple<VariantStepReport[]>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}/variants/report`,
+  );
+}
+
+export async function promoteSequenceVariant(
+  businessId: string,
+  sequenceId: string,
+  nodeId: string,
+  variantId: string,
+): Promise<ApiResult<{ success: boolean; promotedVariantId: string; nodeId: string }>> {
+  return apiPost<{ success: boolean; promotedVariantId: string; nodeId: string }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}/nodes/${encodeURIComponent(nodeId)}/promote-variant`,
+    body: { variantId },
+  });
+}
 
 export type SequenceEdge = {
   id: string;

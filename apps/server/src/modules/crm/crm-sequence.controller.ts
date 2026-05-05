@@ -116,6 +116,30 @@ export class CrmSequenceController {
 
   @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
   @RequireFeature('sequences')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/sequences/:id/variants/report')
+  getVariantReport(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.sequences.getVariantReport(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('sequences')
+  @CrmRateLimit(30, 60_000)
+  @Post('businesses/:businessId/sequences/:id/nodes/:nodeId/promote-variant')
+  promoteVariant(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Param('nodeId') nodeId: string,
+    @Body() body: { variantId: string },
+  ) {
+    return this.sequences.promoteVariant(businessId, id, nodeId, body.variantId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('sequences')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/sequences/:id/enrollments/:enrollmentId/unenroll')
   unenrollContact(
