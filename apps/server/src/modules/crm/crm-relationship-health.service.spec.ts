@@ -168,7 +168,7 @@ describe('CrmRelationshipHealthService', () => {
       const svc = build(p, timeline);
       await svc.recomputeForBusiness(businessId);
       expect(timeline.logEvent).toHaveBeenCalledTimes(1);
-      const args = timeline.logEvent.mock.calls[0];
+      const args = timeline.logEvent.mock.calls[0] as unknown as [string, string, string, Record<string, unknown>];
       expect(args[0]).toBe(businessId);
       expect(args[1]).toBe('c1');
       expect(args[2]).toBe('relationship_health.changed');

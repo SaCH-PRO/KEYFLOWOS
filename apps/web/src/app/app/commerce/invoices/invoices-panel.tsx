@@ -27,14 +27,19 @@ import {
   Files,
   DollarSign,
   CreditCard,
+  Receipt,
 } from "lucide-react";
+import { InvoiceMobileActions } from "../components/invoice-mobile-actions";
 import {
   createProduct,
   createInvoice,
   updateInvoice,
   markInvoicePaid,
   updateInvoiceStatus,
-  sendQuoteEmail,
+  sendInvoiceEmail,
+  sendInvoiceReminder,
+  resendInvoiceReceipt,
+  createInvoicePaymentLink,
   recordInvoicePayment,
   listInvoicePayments,
   bulkUpdateInvoices,
@@ -209,6 +214,7 @@ export default function InvoicesPanel({
   const [formError, setFormError] = useState<string | null>(null);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailMode, setEmailMode] = useState<"send" | "reminder">("send");
   const [emailForm, setEmailForm] = useState({ email: "", message: "" });
   const [sendingEmail, setSendingEmail] = useState(false);
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
@@ -217,6 +223,8 @@ export default function InvoicesPanel({
   const [paymentForm, setPaymentForm] = useState({ amount: "", method: "Cash", reference: "", notes: "" });
   const [recordingPayment, setRecordingPayment] = useState(false);
   const [paymentHistory, setPaymentHistory] = useState<Record<string, PaymentRecord[]>>({});
+  const [mobileSheetFor, setMobileSheetFor] = useState<Invoice | null>(null);
+  const [timelineRefreshTick, setTimelineRefreshTick] = useState(0);
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -408,26 +416,48 @@ export default function InvoicesPanel({
     }
   }
 
+  // Builds the canonical public invoice URL via the server payment-link
+  // endpoint so the same token works across email/WhatsApp/copy. Falls back
+  // to the local /pay/:id route only if the API is unreachable.
+  async function buildPublicInvoiceUrl(invoiceId: string): Promise<string> {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    if (!businessId) return `${origin}/pay/${invoiceId}`;
+    const { data } = await createInvoicePaymentLink(businessId, invoiceId);
+    if (data?.token) return `${origin}/public/invoice/${data.token}`;
+    return `${origin}/pay/${invoiceId}`;
+  }
+
   async function copyPaymentLink(invoiceId: string) {
-    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-    const link = `${baseUrl}/pay/${invoiceId}`;
     try {
+      const link = await buildPublicInvoiceUrl(invoiceId);
       await navigator.clipboard.writeText(link);
       setCopiedLink(invoiceId);
       setTimeout(() => setCopiedLink(null), 2000);
+      toast.success("Payment link copied");
     } catch {
       setInvoiceError("Failed to copy link");
     }
   }
 
-  function shareViaWhatsApp(inv: Invoice) {
-    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-    const link = `${baseUrl}/pay/${inv.id}`;
+  async function shareViaWhatsApp(inv: Invoice) {
+    const link = await buildPublicInvoiceUrl(inv.id);
     const contactName = inv.contact
       ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim()
       : "there";
     const msg = `Hi ${contactName}, here is your invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)}. You can view and pay it here: ${link}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+  }
+
+  async function handleResendReceipt(inv: Invoice) {
+    if (!businessId) return;
+    setActionLoading((prev) => ({ ...prev, [inv.id]: "receipt" }));
+    try {
+      const { data, error } = await resendInvoiceReceipt(businessId, inv.id);
+      if (error) toast.error(error);
+      else if (data?.success) toast.success("Receipt resent");
+    } finally {
+      setActionLoading((prev) => { const next = { ...prev }; delete next[inv.id]; return next; });
+    }
   }
 
   function duplicateInvoice(inv: Invoice) {
@@ -598,6 +628,24 @@ export default function InvoicesPanel({
       toast.error("Enter a valid payment amount");
       return;
     }
+    // Over-payment nudge: warn before recording so the operator can either
+    // adjust the amount or knowingly create an over-payment that will need
+    // to be refunded. Refund flow lives under /app/payments.
+    const paidAlready = (paymentHistory[paymentModal.invoice.id] ?? [])
+      .filter((p) => p.status === "SUCCESSFUL")
+      .reduce((s, p) => s + p.amount, 0);
+    const remaining = Math.max(0, Number(paymentModal.invoice.total) - paidAlready);
+    if (amount > remaining + 0.005) {
+      const over = amount - remaining;
+      const proceed = typeof window !== "undefined"
+        ? window.confirm(
+            `Over-payment of ${formatAmount(over, paymentModal.invoice.currency)} detected. ` +
+              `This invoice only has ${formatAmount(remaining, paymentModal.invoice.currency)} remaining. ` +
+              `Continue and record the over-payment? You'll need to issue a refund afterwards.`
+          )
+        : true;
+      if (!proceed) return;
+    }
     setRecordingPayment(true);
     try {
       const { data, error } = await recordInvoicePayment(businessId, paymentModal.invoice.id, {
@@ -609,7 +657,20 @@ export default function InvoicesPanel({
       if (!error && data) {
         setInvoices((prev) => prev.map((i) => (i.id === paymentModal.invoice.id ? { ...data.invoice, payments: data.invoice.payments } : i)));
         setPaymentHistory((prev) => ({ ...prev, [paymentModal.invoice.id]: [data.payment, ...(prev[paymentModal.invoice.id] ?? [])] }));
-        toast.success(data.invoice.status === "PAID" ? "Invoice fully paid!" : `Payment of ${formatAmount(amount, paymentModal.invoice.currency)} recorded`);
+        const overPaid = data.paidAmount - Number(data.invoice.total);
+        if (overPaid > 0.005) {
+          toast.warning(
+            `Over-payment of ${formatAmount(overPaid, paymentModal.invoice.currency)} recorded. ` +
+              `Issue a refund from the Payments tab to settle.`,
+            { duration: 8000 }
+          );
+        } else {
+          toast.success(
+            data.invoice.status === "PAID"
+              ? "Invoice fully paid!"
+              : `Payment of ${formatAmount(amount, paymentModal.invoice.currency)} recorded`
+          );
+        }
         setPaymentModal(null);
         if (data.invoice.status === "PAID") {
           emitEvent("commerce:invoice_paid", "commerce", { invoiceId: paymentModal.invoice.id, total: data.invoice.total });
@@ -676,6 +737,7 @@ export default function InvoicesPanel({
       email: inv.contact?.email ?? "",
       message: `Hi ${contactName}, this is a friendly reminder that invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)} is ${inv.status === "OVERDUE" ? "overdue" : "awaiting payment"}. Please let us know if you have any questions.`,
     });
+    setEmailMode("reminder");
     setShowEmailModal(true);
   }
 
@@ -688,22 +750,28 @@ export default function InvoicesPanel({
     }
     setSendingEmail(true);
     try {
-      const res = await sendQuoteEmail({
-        businessId,
-        quoteId: selectedInvoice.id,
-        recipientEmail: targetEmail,
-        message: emailForm.message || `Please find attached your invoice ${selectedInvoice.invoiceNumber ?? ""} for ${formatAmount(selectedInvoice.total, selectedInvoice.currency)}.`,
-      });
-      if (res.data?.success) {
-        setInvoices((prev) =>
-          prev.map((i) => (i.id === selectedInvoice.id && i.status === "DRAFT" ? { ...i, status: "SENT" } : i))
-        );
+      const res = emailMode === "reminder"
+        ? await sendInvoiceReminder(businessId, selectedInvoice.id, {
+            recipientEmail: targetEmail,
+            message: emailForm.message,
+            channel: "email",
+          })
+        : await sendInvoiceEmail(businessId, selectedInvoice.id, {
+            recipientEmail: targetEmail,
+            message: emailForm.message,
+          });
+      if (res.error) {
+        toast.error(res.error);
+      } else {
+        if (emailMode === "send") {
+          setInvoices((prev) =>
+            prev.map((i) => (i.id === selectedInvoice.id && i.status === "DRAFT" ? { ...i, status: "SENT" } : i))
+          );
+        }
         setShowEmailModal(false);
         setEmailForm({ email: "", message: "" });
         setInvoiceError(null);
-        toast.success("Invoice sent via email");
-      } else {
-        toast.error(res.error || "Failed to send email");
+        toast.success(emailMode === "reminder" ? "Reminder sent" : "Invoice sent via email");
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to send email");
@@ -987,7 +1055,13 @@ export default function InvoicesPanel({
                   dueDate={inv.dueDate}
                   badges={cardBadges}
                   selected={selectedInvoice?.id === inv.id}
-                  onClick={() => setSelectedInvoice(inv)}
+                  onClick={() => {
+                    if (typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches) {
+                      setMobileSheetFor(inv);
+                    } else {
+                      setSelectedInvoice(inv);
+                    }
+                  }}
                   linkedService={(inv.items ?? []).find((item) => item.description)?.description?.slice(0, 30) || null}
                   onViewContact={onViewContact && inv.contactId ? () => onViewContact(inv.contactId!) : undefined}
                   smartCTA={
@@ -1033,10 +1107,13 @@ export default function InvoicesPanel({
                       <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateInvoice(inv)} />
                       <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareViaWhatsApp(inv)} />
                       {gmailStatus?.connected && (
-                        <OverflowMenuItem icon={Mail} label="Send via email" onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }} />
+                        <OverflowMenuItem icon={Mail} label="Send via email" onClick={() => { setSelectedInvoice(inv); setEmailMode("send"); setShowEmailModal(true); }} />
                       )}
-                      {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
+                      {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && gmailStatus?.connected && (
                         <OverflowMenuItem icon={Bell} label="Send reminder" onClick={() => openReminderEmail(inv)} />
+                      )}
+                      {inv.status === "PAID" && gmailStatus?.connected && inv.contact?.email && (
+                        <OverflowMenuItem icon={Receipt} label="Resend receipt" onClick={() => handleResendReceipt(inv)} />
                       )}
                       {inv.status === "DRAFT" && (
                         <OverflowMenuItem icon={Send} label="Mark as sent" onClick={() => handleSendInvoice(inv.id)} disabled={!!actionLoading[inv.id]} />
@@ -1087,6 +1164,32 @@ export default function InvoicesPanel({
         entityLabel="invoices"
       />
 
+      <InvoiceMobileActions
+        open={!!mobileSheetFor}
+        onClose={() => setMobileSheetFor(null)}
+        invoiceNumber={mobileSheetFor?.invoiceNumber ?? mobileSheetFor?.id?.slice(0, 8) ?? ""}
+        status={mobileSheetFor?.status ?? "DRAFT"}
+        hasGmail={!!gmailStatus?.connected}
+        onSend={
+          mobileSheetFor && gmailStatus?.connected
+            ? () => {
+                setSelectedInvoice(mobileSheetFor);
+                setEmailMode("send");
+                setShowEmailModal(true);
+              }
+            : undefined
+        }
+        onCopyPaymentLink={() => mobileSheetFor && copyPaymentLink(mobileSheetFor.id)}
+        onShareWhatsApp={mobileSheetFor ? () => shareViaWhatsApp(mobileSheetFor) : undefined}
+        onRecordPayment={mobileSheetFor ? () => openPaymentModal(mobileSheetFor) : undefined}
+        onSendReminder={
+          mobileSheetFor && gmailStatus?.connected ? () => openReminderEmail(mobileSheetFor) : undefined
+        }
+        onResendReceipt={
+          mobileSheetFor && gmailStatus?.connected ? () => handleResendReceipt(mobileSheetFor) : undefined
+        }
+      />
+
       <AnimatePresence>
         {selectedInvoice && !showEmailModal && (
           <BillingDetailModal
@@ -1107,6 +1210,9 @@ export default function InvoicesPanel({
             discountValue={selectedInvoice.discountValue ? Number(selectedInvoice.discountValue) : undefined}
             notes={selectedInvoice.notes}
             allInvoices={invoices.map((inv) => ({ id: inv.id, contactId: inv.contactId, status: inv.status, total: Number(inv.total), invoiceNumber: inv.invoiceNumber, dueDate: inv.dueDate }))}
+            itemId={selectedInvoice.id}
+            businessIdForTimeline={businessId}
+            timelineRefreshKey={timelineRefreshTick}
             onClose={() => setSelectedInvoice(null)}
             businessData={businessData}
             onSaveBranding={saveBranding}
@@ -1130,13 +1236,18 @@ export default function InvoicesPanel({
                       <MessageCircle className="w-4 h-4 text-emerald-400" />
                     </button>
                     {gmailStatus?.connected && (
-                      <button onClick={() => setShowEmailModal(true)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-blue-500/10 transition-colors" title="Send via email">
+                      <button onClick={() => { setEmailMode("send"); setShowEmailModal(true); }} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-blue-500/10 transition-colors" title="Send via email">
                         <Mail className="w-4 h-4 text-blue-400" />
                       </button>
                     )}
-                    {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && gmailStatus?.connected && (
+                    {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE" || selectedInvoice.status === "PARTIALLY_PAID") && gmailStatus?.connected && (
                       <button onClick={() => openReminderEmail(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-amber-500/10 transition-colors" title="Send payment reminder">
                         <Bell className="w-4 h-4 text-amber-400" />
+                      </button>
+                    )}
+                    {selectedInvoice.status === "PAID" && gmailStatus?.connected && selectedInvoice.contact?.email && (
+                      <button onClick={async () => { await handleResendReceipt(selectedInvoice); setTimelineRefreshTick((n) => n + 1); }} disabled={actionLoading[selectedInvoice.id] === "receipt"} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-emerald-500/10 transition-colors" title="Resend receipt">
+                        {actionLoading[selectedInvoice.id] === "receipt" ? <Loader2 className="w-4 h-4 animate-spin text-emerald-400" /> : <Receipt className="w-4 h-4 text-emerald-400" />}
                       </button>
                     )}
                   </div>

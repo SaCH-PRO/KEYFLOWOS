@@ -37,6 +37,7 @@ import { TemplateCustomizer } from "./invoice-templates/template-customizer";
 import { InvoiceTemplateRenderer } from "./invoice-templates/template-renderer";
 import { printFromRef } from "./invoice-templates/print-document";
 import type { TemplateId, InvoiceTemplateData } from "./invoice-templates/template-types";
+import { InvoiceTimeline } from "./invoice-timeline";
 
 export interface BusinessDataForPreview {
   name: string;
@@ -99,6 +100,11 @@ interface BillingDetailModalProps {
   onSelectProduct?: (productId: string) => void;
   onAiDraftReminder?: (invoiceId: string) => void;
   allInvoices?: Array<{ id: string; contactId?: string | null; status?: string; total?: number; invoiceNumber?: string | null; createdAt?: string | Date | null; dueDate?: string | null }>;
+  // Optional: when both are provided + type is "invoice", the activity
+  // timeline section is rendered inside the drawer body.
+  itemId?: string;
+  businessIdForTimeline?: string | null;
+  timelineRefreshKey?: number | string;
 }
 
 // R2: Quote lifecycle is the visual state machine in the detail drawer.
@@ -222,6 +228,9 @@ export function BillingDetailModal({
   onSelectProduct,
   onAiDraftReminder,
   allInvoices = [],
+  itemId,
+  businessIdForTimeline,
+  timelineRefreshKey,
 }: BillingDetailModalProps) {
   const theme = BILLING_DOC_THEME[type];
   const compose = useCompose();
@@ -716,6 +725,15 @@ export function BillingDetailModal({
                   </div>
                 </div>
               </div>
+            )}
+
+            {type === "invoice" && itemId && businessIdForTimeline && (
+              <InvoiceTimeline
+                businessId={businessIdForTimeline}
+                invoiceId={itemId}
+                accentColor={theme.accentColor}
+                refreshKey={timelineRefreshKey}
+              />
             )}
 
             {notes && (
