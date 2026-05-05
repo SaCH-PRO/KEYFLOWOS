@@ -19,6 +19,7 @@ import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus } from './invoice-workflow.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
+import { RevenuePostingService } from '../finance/revenue-posting.service';
 
 @Injectable()
 export class CommerceService {
@@ -31,6 +32,7 @@ export class CommerceService {
     @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
     @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
+    @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
   ) {}
 
   /**
@@ -1256,19 +1258,30 @@ export class CommerceService {
     const paymentAmount = input.amount;
     const isOverPayment = paymentAmount > remaining + 0.005;
 
-    const payment = await this.prisma.client.payment.create({
-      data: {
-        amount: paymentAmount,
-        currency: invoice.currency,
-        status: 'SUCCESSFUL',
-        provider: input.method,
-        method: input.method,
-        providerPaymentId: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        reference: input.reference ?? null,
-        notes: input.notes ?? null,
-        businessId,
-        invoiceId,
-      },
+    // FIN2 — record the payment row and post the deposit-side ledger
+    // entries in a single transaction so a posting failure rolls back the
+    // payment row (preserves invariant: every SUCCESSFUL payment has a
+    // matching ledger transaction unless basis is CASH and posting silently
+    // skipped — also fine, idempotent on replay).
+    const payment = await this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.payment.create({
+        data: {
+          amount: paymentAmount,
+          currency: invoice.currency,
+          status: 'SUCCESSFUL',
+          provider: input.method,
+          method: input.method,
+          providerPaymentId: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          reference: input.reference ?? null,
+          notes: input.notes ?? null,
+          businessId,
+          invoiceId,
+        },
+      });
+      await this.revenuePosting.onPaymentRecorded(created.id, {
+        tx: tx as unknown as Prisma.TransactionClient,
+      });
+      return created;
     });
 
     // Single source of truth: workflow recomputes status from payment rows
@@ -1372,12 +1385,20 @@ export class CommerceService {
       where: { id: paymentId, businessId },
     });
     if (!payment) throw new NotFoundException('Payment not found');
-    const updated = await this.prisma.client.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: 'REFUNDED',
-        notes: reason ? `${payment.notes ? payment.notes + ' | ' : ''}Refunded: ${reason}` : payment.notes,
-      },
+    // FIN2 — flip the row + reverse the original posting in one tx so the
+    // refunded state and the offsetting ledger entries commit together.
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const next = await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: 'REFUNDED',
+          notes: reason ? `${payment.notes ? payment.notes + ' | ' : ''}Refunded: ${reason}` : payment.notes,
+        },
+      });
+      await this.revenuePosting.onPaymentRefunded(paymentId, {
+        tx: tx as unknown as Prisma.TransactionClient,
+      });
+      return next;
     });
     if (payment.invoiceId) {
       await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId).catch(() => null);
@@ -1957,6 +1978,8 @@ export class CommerceService {
     if (!invoice) throw new NotFoundException('Invoice not found');
     if (invoice.status === 'PAID') throw new BadRequestException('Invoice is already paid');
 
+    // PENDING — customer-asserted intent, no money yet, so no FIN2 posting
+    // until the operator records the actual receipt via recordPayment().
     await this.prisma.client.payment.create({
       data: {
         invoiceId,

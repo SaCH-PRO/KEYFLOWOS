@@ -5,6 +5,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CrmModule } from '../crm/crm.module';
 import { CommerceModule } from '../commerce/commerce.module';
+import { FinanceModule } from '../finance/finance.module';
 import { PublicEventsModule } from '../public-events/public-events.module';
 import { SiteController } from './site.controller';
 import { SiteService } from './site.service';
@@ -30,6 +31,7 @@ import { CaseStudyService } from './case-study.service';
     NotificationsModule,
     CrmModule,
     CommerceModule,
+    FinanceModule,
     forwardRef(() => PublicEventsModule),
   ],
   controllers: [SiteController, PresenceController],

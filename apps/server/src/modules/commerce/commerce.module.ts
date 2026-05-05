@@ -47,6 +47,7 @@ import { PublicEventsModule } from '../public-events/public-events.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
 import { CatalogModule } from '../catalog/catalog.module';
+import { FinanceModule } from '../finance/finance.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import type { NotificationsModule as NotificationsModuleType } from '../notifications/notifications.module';
 
@@ -57,6 +58,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     SubscriptionsModule,
     AiModule,
     CatalogModule,
+    FinanceModule,
     // notifications -> commerce -> notifications is a circular cycle, so we
     // mirror the lazy require pattern used in NotificationsModule itself to
     // avoid a TDZ "Cannot access ... before initialization" error.

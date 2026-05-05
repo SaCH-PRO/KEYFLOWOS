@@ -6,9 +6,10 @@ import { PaymentsOpsService } from './payments-ops.service';
 import { CurrencyRatesService } from './currency-rates.service';
 import { CurrencyRatesScheduler } from './currency-rates.scheduler';
 import { CommerceModule } from '../commerce/commerce.module';
+import { FinanceModule } from '../finance/finance.module';
 
 @Module({
-  imports: [CommerceModule],
+  imports: [CommerceModule, FinanceModule],
   controllers: [PaymentsController, PaymentsOpsController],
   providers: [PaymentsService, PaymentsOpsService, CurrencyRatesService, CurrencyRatesScheduler],
   exports: [PaymentsService, PaymentsOpsService, CurrencyRatesService],

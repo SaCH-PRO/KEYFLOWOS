@@ -41,6 +41,7 @@ class PrismaMock {
   businesses = new Map<string, any>();
 
   client: any = {
+    $transaction: vi.fn(async (fn: any) => fn(this.client)),
     invoice: {
       findUnique: vi.fn(async ({ where }: any) => this.invoices.get(where.id) ?? null),
     },
@@ -105,6 +106,12 @@ describe('PaymentsService Stripe webhooks', () => {
       prisma as unknown as PrismaService,
       commerce as unknown as CommerceService,
       wf.workflow,
+      {
+        onPaymentRecorded: vi.fn(),
+        onPaymentRefunded: vi.fn(),
+        onInvoiceFinalized: vi.fn(),
+        onInvoiceVoided: vi.fn(),
+      } as any,
     );
   });
 
@@ -302,6 +309,12 @@ describe('PaymentsService PayPal webhooks', () => {
       prisma as unknown as PrismaService,
       commerce as unknown as CommerceService,
       makeWorkflowMock().workflow,
+      {
+        onPaymentRecorded: vi.fn(),
+        onPaymentRefunded: vi.fn(),
+        onInvoiceFinalized: vi.fn(),
+        onInvoiceVoided: vi.fn(),
+      } as any,
     );
   });
 

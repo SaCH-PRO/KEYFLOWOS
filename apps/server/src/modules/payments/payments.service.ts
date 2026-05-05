@@ -1,8 +1,10 @@
 import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
+import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
@@ -29,9 +31,79 @@ export class PaymentsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommerceService) private readonly commerceService: CommerceService,
     @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
+    @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
     @Optional() @Inject(WiPayConnector) private readonly wipayConnector?: WiPayConnector,
     @Optional() @Inject(PayPalConnector) private readonly paypalConnector?: PayPalConnector,
   ) {}
+
+  /**
+   * FIN2 — single tx wrapper for SUCCESSFUL provider payments. Persists
+   * the Payment row and posts the deposit-side ledger entries together;
+   * returns the created row so callers can keep their existing logging.
+   * Idempotency on (Payment, id, payment_recorded) means replay is safe.
+   */
+  private async createPaymentWithPosting(data: Prisma.PaymentUncheckedCreateInput) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.payment.create({ data });
+      if (created.status === 'SUCCESSFUL') {
+        await this.revenuePosting.onPaymentRecorded(created.id, {
+          tx: tx as unknown as Prisma.TransactionClient,
+        });
+      }
+      return created;
+    });
+  }
+
+  /**
+   * FIN2 — single tx wrapper for provider refunds. Records the negative
+   * Payment row tagged REFUNDED and reverses the original posting (looked
+   * up by externalRef) in one commit.
+   */
+  private async createRefundWithPosting(
+    originalPaymentProviderId: string,
+    data: Prisma.PaymentUncheckedCreateInput,
+  ) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.payment.create({ data });
+      const original = await tx.payment.findUnique({
+        where: { providerPaymentId: originalPaymentProviderId },
+        select: { id: true },
+      });
+      if (original) {
+        await this.revenuePosting.onPaymentRefunded(original.id, {
+          tx: tx as unknown as Prisma.TransactionClient,
+        });
+      }
+      return created;
+    });
+  }
+
+  /**
+   * Refund variant used when the original capture id is unavailable (e.g.
+   * a PayPal refund webhook with no `supplementary_data.related_ids`). We
+   * still need to reverse the original payment's ledger posting, so we
+   * resolve it by invoiceId — picking the most recent SUCCESSFUL payment
+   * on that invoice and reversing its posting in the same commit.
+   */
+  private async createRefundWithPostingByInvoice(
+    invoiceId: string,
+    data: Prisma.PaymentUncheckedCreateInput,
+  ) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.payment.create({ data });
+      const original = await tx.payment.findFirst({
+        where: { invoiceId, status: 'SUCCESSFUL' },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+      if (original) {
+        await this.revenuePosting.onPaymentRefunded(original.id, {
+          tx: tx as unknown as Prisma.TransactionClient,
+        });
+      }
+      return created;
+    });
+  }
 
   private getPaypalClient(clientId?: string, clientSecret?: string): { client: Client; ordersController: OrdersController } | null {
     const id = clientId || process.env.PAYPAL_CLIENT_ID;
@@ -364,17 +436,15 @@ export class PaymentsService {
       (typeof obj.latest_charge === 'string' ? obj.latest_charge : null) ||
       null;
 
-    await this.prisma.client.payment.create({
-      data: {
-        provider: 'stripe',
-        providerPaymentId,
-        amount: amount > 0 ? amount : expectedAmount,
-        currency,
-        status: 'SUCCESSFUL',
-        invoiceId,
-        businessId: invoice.businessId,
-        reference,
-      },
+    await this.createPaymentWithPosting({
+      provider: 'stripe',
+      providerPaymentId,
+      amount: amount > 0 ? amount : expectedAmount,
+      currency,
+      status: 'SUCCESSFUL',
+      invoiceId,
+      businessId: invoice.businessId,
+      reference,
     });
     // Workflow recomputes the invoice balance from ALL payment rows and
     // decides PARTIALLY_PAID vs PAID. Single source of truth for state.
@@ -463,18 +533,16 @@ export class PaymentsService {
         continue;
       }
 
-      const persisted = await this.prisma.client.payment.create({
-        data: {
-          provider: 'stripe',
-          providerPaymentId: refund.id,
-          amount: -Math.abs((refund.amount ?? 0) / 100),
-          currency: (refund.currency || original.currency || 'USD').toUpperCase(),
-          status: 'REFUNDED',
-          invoiceId: original.invoiceId,
-          businessId: original.businessId,
-          reference: refund.charge,
-          notes: refund.reason ?? null,
-        },
+      const persisted = await this.createRefundWithPosting(original.providerPaymentId, {
+        provider: 'stripe',
+        providerPaymentId: refund.id,
+        amount: -Math.abs((refund.amount ?? 0) / 100),
+        currency: (refund.currency || original.currency || 'USD').toUpperCase(),
+        status: 'REFUNDED',
+        invoiceId: original.invoiceId,
+        businessId: original.businessId,
+        reference: refund.charge,
+        notes: refund.reason ?? null,
       }).catch((e) => {
         this.logger.warn(`Failed to persist Stripe refund ${refund.id}: ${e instanceof Error ? e.message : e}`);
         return null;
@@ -752,17 +820,15 @@ export class PaymentsService {
     const amount = Number(resource?.amount?.value ?? invoice.total);
     const currency = (resource?.amount?.currency_code || invoice.currency || 'USD').toUpperCase();
 
-    await this.prisma.client.payment.create({
-      data: {
-        provider: 'paypal',
-        providerPaymentId: captureId,
-        amount,
-        currency,
-        status: 'SUCCESSFUL',
-        invoiceId: invoice.id,
-        businessId: invoice.businessId,
-        reference: resource?.supplementary_data?.related_ids?.order_id ?? null,
-      },
+    await this.createPaymentWithPosting({
+      provider: 'paypal',
+      providerPaymentId: captureId,
+      amount,
+      currency,
+      status: 'SUCCESSFUL',
+      invoiceId: invoice.id,
+      businessId: invoice.businessId,
+      reference: resource?.supplementary_data?.related_ids?.order_id ?? null,
     });
 
     await this.invoiceWorkflow.reconcileFromPayments(invoice.id).catch((e) => {
@@ -819,19 +885,21 @@ export class PaymentsService {
     }
 
     const amount = Number(resource?.amount?.value ?? 0);
-    const persisted = await this.prisma.client.payment.create({
-      data: {
-        provider: 'paypal',
-        providerPaymentId: refundId,
-        amount: -Math.abs(amount),
-        currency: (resource?.amount?.currency_code || original.currency || 'USD').toUpperCase(),
-        status: 'REFUNDED',
-        invoiceId: original.invoiceId,
-        businessId: original.businessId,
-        reference: captureId ?? null,
-        notes: resource?.note_to_payer ?? null,
-      },
-    }).catch((e) => {
+    const refundData = {
+      provider: 'paypal',
+      providerPaymentId: refundId,
+      amount: -Math.abs(amount),
+      currency: (resource?.amount?.currency_code || original.currency || 'USD').toUpperCase(),
+      status: 'REFUNDED',
+      invoiceId: original.invoiceId,
+      businessId: original.businessId,
+      reference: captureId ?? null,
+      notes: resource?.note_to_payer ?? null,
+    };
+    const persisted = await (captureId
+      ? this.createRefundWithPosting(captureId, refundData)
+      : this.createRefundWithPostingByInvoice(original.invoiceId, refundData)
+    ).catch((e) => {
       this.logger.warn(`Failed to persist PayPal refund ${refundId}: ${e instanceof Error ? e.message : e}`);
       return null;
     });
@@ -983,16 +1051,14 @@ export class PaymentsService {
         });
 
         if (!existingPayment) {
-          await this.prisma.client.payment.create({
-            data: {
-              provider: 'wipay',
-              providerPaymentId: transaction_id || `wipay_${order_id}_${Date.now()}`,
-              amount: parseFloat(total || String(invoice.total)),
-              currency: invoice.currency,
-              status: 'SUCCESSFUL',
-              invoiceId: order_id,
-              businessId: invoice.businessId,
-            },
+          await this.createPaymentWithPosting({
+            provider: 'wipay',
+            providerPaymentId: transaction_id || `wipay_${order_id}_${Date.now()}`,
+            amount: parseFloat(total || String(invoice.total)),
+            currency: invoice.currency,
+            status: 'SUCCESSFUL',
+            invoiceId: order_id,
+            businessId: invoice.businessId,
           });
 
           await this.invoiceWorkflow.reconcileFromPayments(order_id).catch((e) => {
