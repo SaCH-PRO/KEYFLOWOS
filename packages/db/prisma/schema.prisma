@@ -226,6 +226,7 @@ model Business {
   // WhatsApp Inbox
   whatsappContacts     WhatsAppContact[]
   whatsappMessages     WhatsAppMessage[]
+  conversationAiInsights ConversationAIInsight[]
 
   // SEO Operations Engine
   seoPages          SeoPage[]
@@ -504,6 +505,7 @@ model Contact {
   customerJourney     CustomerJourney?
   journeyTouchpoints  JourneyTouchpoint[]
   whatsappContacts    WhatsAppContact[]
+  conversationInsights ConversationAIInsight[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
@@ -735,6 +737,46 @@ model ContactChannelStat {
   @@unique([contactId, channel])
   @@index([businessId, contactId])
   @@map("contact_channel_stats")
+}
+
+model ConversationAIInsight {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  contactId  String   @map("contact_id")
+
+  // 'thread_summary' | 'message_analysis'
+  kind       String
+
+  // For message_analysis: source message id like 'wa:<id>' or 'event:<id>'.
+  // For thread_summary: null.
+  messageRef String?  @map("message_ref")
+
+  // SHA256 of the inputs used to compute this insight; allows skipping
+  // recomputation when the underlying thread hasn't changed.
+  hash       String
+
+  // Normalized signals surfaced in UI.
+  sentiment  String?  // 'positive' | 'neutral' | 'negative' | 'mixed'
+  intent     String?  // free-form short label e.g. 'pricing_question', 'booking_request'
+  summary    String?  // short one-liner
+
+  // Full structured payload returned by the model (suggestions, reasons, scores, etc.)
+  payload    Json?
+
+  modelUsed  String?  @map("model_used")
+  feature    String?
+
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt      @map("updated_at")
+
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, contactId, kind, messageRef])
+  @@index([businessId, contactId, kind])
+  @@index([businessId, contactId, createdAt])
+  @@index([businessId, hash])
+  @@map("conversation_ai_insights")
 }
 
 model ContactNote {

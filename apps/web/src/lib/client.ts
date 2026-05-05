@@ -9645,6 +9645,8 @@ const conversationEntrySchema = z.object({
   actorId: z.string().nullable().optional(),
   actorType: z.string().nullable().optional(),
   meta: z.record(z.unknown()).optional(),
+  sentiment: z.string().nullable().optional(),
+  intent: z.string().nullable().optional(),
 });
 
 export type ConversationEntry = z.infer<typeof conversationEntrySchema>;
@@ -9711,6 +9713,95 @@ export async function sendContactReply(
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/reply`,
     body: input,
   });
+}
+
+// ----- Conversation AI -----
+
+const threadSummarySchema = z.object({
+  summary: z.string(),
+  sentiment: z.string(),
+  lastIntent: z.string(),
+  openQuestions: z.array(z.string()),
+  actionItems: z.array(z.string()),
+});
+export type ThreadSummary = z.infer<typeof threadSummarySchema>;
+
+const conversationSummaryResponseSchema = z.object({
+  summary: threadSummarySchema.nullable(),
+  cached: z.boolean(),
+});
+
+export async function fetchConversationSummary(
+  contactId: string,
+  opts?: { businessId?: string; refresh?: boolean; signal?: AbortSignal },
+) {
+  const businessId = opts?.businessId ?? DEFAULT_BUSINESS_ID;
+  const qs = opts?.refresh ? "?refresh=1" : "";
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/summary${qs}`,
+    conversationSummaryResponseSchema,
+    { summary: null, cached: false },
+    { signal: opts?.signal },
+  );
+}
+
+export async function regenerateConversationSummary(
+  contactId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPost<{ summary: ThreadSummary | null; cached: boolean }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/summary/regenerate`,
+    body: {},
+  });
+}
+
+export interface SuggestedReply {
+  channel: string;
+  body: string;
+  tone: string;
+  rationale: string;
+}
+
+export async function fetchSuggestedReplies(
+  contactId: string,
+  input: { count?: number; preferredChannel?: string; tone?: string },
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPost<{ replies: SuggestedReply[] }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/suggest-replies`,
+    body: input,
+  });
+}
+
+const conversationInsightsSchema = z.object({
+  rollup: z.object({
+    dominantSentiment: z.string().nullable(),
+    lastIntent: z.string().nullable(),
+    lastSummary: z.string().nullable(),
+    lastAnalyzedAt: z.string().nullable(),
+  }),
+  perMessage: z.record(z.object({
+    sentiment: z.string().nullable(),
+    intent: z.string().nullable(),
+    urgency: z.string().nullable().optional(),
+  })),
+});
+export type ConversationInsights = z.infer<typeof conversationInsightsSchema>;
+
+export async function fetchConversationInsights(
+  contactId: string,
+  opts?: { businessId?: string; messageRefs?: string[]; signal?: AbortSignal },
+) {
+  const businessId = opts?.businessId ?? DEFAULT_BUSINESS_ID;
+  const qs = opts?.messageRefs && opts.messageRefs.length > 0
+    ? `?messageRefs=${encodeURIComponent(opts.messageRefs.join(","))}`
+    : "";
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/insights${qs}`,
+    conversationInsightsSchema,
+    { rollup: { dominantSentiment: null, lastIntent: null, lastSummary: null, lastAnalyzedAt: null }, perMessage: {} },
+    { signal: opts?.signal },
+  );
 }
 
 /**
