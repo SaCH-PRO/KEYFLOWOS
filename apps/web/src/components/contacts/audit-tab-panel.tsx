@@ -41,6 +41,7 @@ const ACTION_LABELS: Record<string, string> = {
   shared: "Shared",
   imported: "Imported",
   exported: "Exported",
+  export_downloaded: "Export downloaded",
   forget_requested: "Forget requested",
   forget_cancelled: "Forget cancelled",
   forget_purged: "Forget purged",

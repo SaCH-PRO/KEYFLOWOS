@@ -151,7 +151,7 @@ Currency is TTD. Timezone is America/Port_of_Spain. Pick at most 5 topPriorities
         maxTokens: 900,
         expectedContract: 'daily_plan',
       });
-      const parsed = this.parseJson(response.content);
+      const parsed = this.parseJson(response.content ?? '');
       if (parsed && typeof parsed === 'object') {
         return {
           date: dayIso,
@@ -298,7 +298,7 @@ Use the byDay totals provided as ground truth. Add 1-3 recommendations to balanc
         maxTokens: 700,
         expectedContract: 'weekly_capacity',
       });
-      const parsed = this.parseJson(response.content);
+      const parsed = this.parseJson(response.content ?? '');
       if (parsed && typeof parsed === 'object') {
         const obj = parsed as Record<string, unknown>;
         return {
