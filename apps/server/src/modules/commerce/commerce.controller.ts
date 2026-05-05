@@ -14,6 +14,8 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { sanitizeString } from '../../core/utils/sanitize';
+import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
+import type { Request } from 'express';
 import { BulkProductsDto } from './dto/bulk-products.dto';
 import { ReceiptService } from './receipt.service';
 import { GmailService } from './gmail.service';
@@ -465,8 +467,9 @@ export class CommerceController {
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(60, 60_000)
   @Get('public/quotes/:token')
-  async getPublicQuote(@Param('token') token: string) {
-    const quote = await this.commerce.markQuoteViewedByToken(token);
+  async getPublicQuote(@Param('token') token: string, @Req() req: Request) {
+    const visitorId = readVisitorIdFromRequest(req);
+    const quote = await this.commerce.markQuoteViewedByToken(token, visitorId);
     if (!quote) {
       throw new ForbiddenException('Quote not found');
     }
@@ -476,8 +479,15 @@ export class CommerceController {
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(20, 60_000)
   @Post('public/quotes/:token/accept')
-  acceptPublicQuote(@Param('token') token: string) {
-    return this.commerce.respondToQuoteByToken(token, 'accept');
+  acceptPublicQuote(
+    @Param('token') token: string,
+    @Body() body: { visitorId?: string } | undefined,
+    @Req() req: Request,
+  ) {
+    const visitorId =
+      (body?.visitorId ? sanitizeString(body.visitorId, 100) : null) ??
+      readVisitorIdFromRequest(req);
+    return this.commerce.respondToQuoteByToken(token, 'accept', undefined, visitorId);
   }
 
   @UseGuards(PublicRateLimitGuard)
@@ -485,9 +495,13 @@ export class CommerceController {
   @Post('public/quotes/:token/reject')
   rejectPublicQuote(
     @Param('token') token: string,
-    @Body() body: { reason?: string },
+    @Body() body: { reason?: string; visitorId?: string },
+    @Req() req: Request,
   ) {
-    return this.commerce.respondToQuoteByToken(token, 'reject', body?.reason);
+    const visitorId =
+      (body?.visitorId ? sanitizeString(body.visitorId, 100) : null) ??
+      readVisitorIdFromRequest(req);
+    return this.commerce.respondToQuoteByToken(token, 'reject', body?.reason, visitorId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

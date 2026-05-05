@@ -78,15 +78,33 @@ export class IntakeService {
 
     try {
       const nameParts = input.name.trim().split(/\s+/);
-      const contact = await this.crm.findOrCreateContact(business.id, {
-        firstName: nameParts[0] ?? null,
-        lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
-        email: input.email,
-        phone: input.phone ?? null,
-        source: 'storefront',
-        sourceDetail: `intake:${slug}`,
-        ...(input.referralCode ? { custom: { referralCode: input.referralCode } } : {}),
-      });
+      // Route through upsertStorefrontContact so first-touch attribution
+      // (firstSource / utmMedium / utmCampaign / firstReferrer / firstLandingPath)
+      // recorded against the visitor cookie lands on the new Contact's
+      // custom fields. Falls back to a basic findOrCreateContact when no
+      // visitorId is available.
+      const contact = input.visitorId
+        ? await this.publicEvents.upsertStorefrontContact({
+            businessId: business.id,
+            sourceDetail: `intake:${slug}`,
+            referralCode: input.referralCode ?? null,
+            visitorId: input.visitorId,
+            identity: {
+              firstName: nameParts[0] ?? null,
+              lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+              email: input.email,
+              phone: input.phone ?? null,
+            },
+          })
+        : await this.crm.findOrCreateContact(business.id, {
+            firstName: nameParts[0] ?? null,
+            lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+            email: input.email,
+            phone: input.phone ?? null,
+            source: 'storefront',
+            sourceDetail: `intake:${slug}`,
+            ...(input.referralCode ? { custom: { referralCode: input.referralCode } } : {}),
+          });
 
       if (contact?.id) {
         if (input.visitorId) {

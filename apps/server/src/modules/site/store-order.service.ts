@@ -228,15 +228,31 @@ export class StoreOrderService {
         ? `storefront:${input.storefrontSlug}`
         : `order:${order.orderNumber}`;
       const nameParts = (input.customerInfo.name ?? '').trim().split(/\s+/);
-      const contact = await this.crm.findOrCreateContact(input.businessId, {
-        firstName: nameParts[0] ?? null,
-        lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
-        email: input.customerInfo.email ?? null,
-        phone: input.customerInfo.phone ?? null,
-        source: 'storefront',
-        sourceDetail,
-        ...(input.referralCode ? { custom: { referralCode: input.referralCode } } : {}),
-      });
+      // When we have a visitorId, route through upsertStorefrontContact so
+      // first-touch attribution (firstSource / utmMedium / utmCampaign /
+      // firstReferrer / firstLandingPath) is enriched onto the Contact.
+      const contact = input.visitorId
+        ? await this.publicEvents.upsertStorefrontContact({
+            businessId: input.businessId,
+            sourceDetail,
+            referralCode: input.referralCode ?? null,
+            visitorId: input.visitorId,
+            identity: {
+              firstName: nameParts[0] ?? null,
+              lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+              email: input.customerInfo.email ?? null,
+              phone: input.customerInfo.phone ?? null,
+            },
+          })
+        : await this.crm.findOrCreateContact(input.businessId, {
+            firstName: nameParts[0] ?? null,
+            lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+            email: input.customerInfo.email ?? null,
+            phone: input.customerInfo.phone ?? null,
+            source: 'storefront',
+            sourceDetail,
+            ...(input.referralCode ? { custom: { referralCode: input.referralCode } } : {}),
+          });
       if (contact?.id) {
         if (input.visitorId) {
           await this.publicEvents.backstitchVisitor({
