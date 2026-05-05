@@ -32,6 +32,7 @@ export interface AuditContext {
 import type { ContactMeta, ContactWithStats } from './crm-stats.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactWhere } from './contact-filters.helper';
+import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
 import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
@@ -73,6 +74,17 @@ export type ContactListOptions = {
   includeStats?: boolean;
   sortBy?: ContactSortBy;
   sortOrder?: 'asc' | 'desc';
+  /**
+   * When provided, applies M7 ownership/visibility scoping based on the
+   * caller's effective CRM permissions. Server callers (cron, internal
+   * jobs) can omit this to bypass scoping.
+   */
+  actorUserId?: string;
+  /**
+   * Restrict the result set to contacts owned by `actorUserId`. Used by
+   * the "My Book" smart view in the web UI.
+   */
+  ownedByActor?: boolean;
 };
 
 type ContactExtraAttributes = {
@@ -198,6 +210,15 @@ export class CrmService {
   }
 
   async listContacts(input: ContactListOptions) {
+    let access: CrmAccess | null = null;
+    if (input.actorUserId) {
+      access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+    }
+
+    const ownerFilter = input.ownedByActor && input.actorUserId
+      ? input.actorUserId
+      : input.ownerId;
+
     const where: any = buildContactWhere(input.businessId, {
       status: input.status,
       search: input.search,
@@ -208,7 +229,7 @@ export class CrmService {
       staleDays: input.staleDays,
       newThisWeek: input.newThisWeek,
       tags: input.tags,
-      ownerId: input.ownerId,
+      ownerId: ownerFilter,
       lifecycleStage: input.lifecycleStage,
       companyName: input.companyName,
       industry: input.industry,
@@ -232,6 +253,13 @@ export class CrmService {
         where.id = { in: ['__none__'] };
       } else {
         where.id = { in: input.bestTimeNowIds };
+      }
+    }
+
+    if (access && input.actorUserId) {
+      const visClause = visibilityClause(access, input.actorUserId);
+      if (visClause) {
+        where.AND = [...(where.AND ?? []), visClause];
       }
     }
 
@@ -559,8 +587,32 @@ export class CrmService {
     sourceDetail?: string | null;
     tags?: string[];
     custom?: any;
+    actorUserId?: string;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      if (!access.isOwner && !access.isSuperAdmin) {
+        if (access.editScope === 'none') {
+          throw new ForbiddenException('You do not have permission to edit contacts');
+        }
+        if (access.editScope === 'owned') {
+          const owned = await this.prisma.client.contact.findFirst({
+            where: {
+              ...contactWhereWithId(input.businessId, input.contactId),
+              OR: [
+                { ownerId: input.actorUserId },
+                { shares: { some: { userId: input.actorUserId } } },
+              ],
+            },
+            select: { id: true },
+          });
+          if (!owned) {
+            throw new ForbiddenException('You can only edit contacts you own');
+          }
+        }
+      }
+    }
     const trimOptional = (value?: string | null) => {
       if (value === undefined) return undefined;
       const trimmed = value?.trim();
@@ -717,8 +769,23 @@ export class CrmService {
     return updated;
   }
 
-  async softDeleteContact(input: { businessId: string; contactId: string }, _audit?: AuditContext) {
+  async softDeleteContact(input: { businessId: string; contactId: string; actorUserId?: string }, _audit?: AuditContext) {
     const contact = await this.assertContact(input.businessId, input.contactId);
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      if (!access.isOwner && !access.isSuperAdmin) {
+        if (access.deleteScope === 'none') {
+          throw new ForbiddenException('You do not have permission to delete contacts');
+        }
+        if (access.deleteScope === 'owned' && contact.ownerId !== input.actorUserId) {
+          throw new ForbiddenException('You can only delete contacts you own');
+        }
+        if (!access.viewAll && contact.ownerId !== input.actorUserId) {
+          // Defensive: cannot delete a contact you can't even see.
+          throw new NotFoundException('Contact not found');
+        }
+      }
+    }
     await this.timeline.logEvent(
       input.businessId,
       input.contactId,
@@ -754,10 +821,36 @@ export class CrmService {
     priority?: string | null;
     favorite?: boolean;
     archived?: boolean;
+    actorUserId?: string;
   }, _audit?: AuditContext) {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
     }
+    let allowedIds = input.contactIds;
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      if (!access.isOwner && !access.isSuperAdmin) {
+        if (access.editScope === 'none') {
+          throw new ForbiddenException('You do not have permission to edit contacts');
+        }
+        const ownershipWhere: any = { ...contactWhereBase(input.businessId), id: { in: input.contactIds } };
+        if (access.editScope === 'owned') {
+          ownershipWhere.OR = [
+            { ownerId: input.actorUserId },
+            { shares: { some: { userId: input.actorUserId } } },
+          ];
+        }
+        const editable = await this.prisma.client.contact.findMany({
+          where: ownershipWhere,
+          select: { id: true },
+        });
+        allowedIds = editable.map((c) => c.id);
+        if (allowedIds.length === 0) {
+          throw new ForbiddenException('You cannot edit any of the selected contacts');
+        }
+      }
+    }
+    input = { ...input, contactIds: allowedIds };
     const auditAfter = {
       ...(input.status ? { status: input.status } : {}),
       ...(input.addTags ? { addedTags: input.addTags } : {}),
@@ -766,7 +859,7 @@ export class CrmService {
       ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
       ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
     };
-    for (const cid of input.contactIds) {
+    for (const cid of allowedIds) {
       this.auditContact({
         businessId: input.businessId,
         contactId: cid,
@@ -839,9 +932,31 @@ export class CrmService {
     return { updated: result.count };
   }
 
-  async bulkDeleteContacts(input: { businessId: string; contactIds: string[] }, _audit?: AuditContext) {
+  async bulkDeleteContacts(input: { businessId: string; contactIds: string[]; actorUserId?: string }, _audit?: AuditContext) {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
+    }
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      if (!access.isOwner && !access.isSuperAdmin) {
+        if (access.deleteScope === 'none') {
+          throw new ForbiddenException('You do not have permission to delete contacts');
+        }
+        if (access.deleteScope === 'owned') {
+          const owned = await this.prisma.client.contact.findMany({
+            where: {
+              ...contactWhereBase(input.businessId),
+              id: { in: input.contactIds },
+              ownerId: input.actorUserId,
+            },
+            select: { id: true },
+          });
+          input = { ...input, contactIds: owned.map((c) => c.id) };
+          if (input.contactIds.length === 0) {
+            throw new ForbiddenException('You can only delete contacts you own');
+          }
+        }
+      }
     }
     const eventOps = input.contactIds.map((cid) =>
       this.timeline.logEvent(input.businessId, cid, 'contact.deleted', { bulk: true }),
@@ -862,6 +977,80 @@ export class CrmService {
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     return { deleted: result.count };
+  }
+
+  /**
+   * Reassign ownership of one or more contacts. Verifies that
+   *   - the actor has crm_reassign permission (or is OWNER/SUPER_ADMIN);
+   *   - the new owner is a member of the same business; and
+   *   - every target contact lives in the business and is currently
+   *     visible to the actor under their effective scope.
+   * Logs a `contact.reassigned` timeline event per contact for full audit.
+   */
+  async reassignContacts(input: {
+    businessId: string;
+    contactIds: string[];
+    newOwnerId: string;
+    actorUserId?: string;
+  }) {
+    if (!input.contactIds || input.contactIds.length === 0) {
+      throw new BadRequestException('contactIds is required');
+    }
+
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      if (!access.isOwner && !access.isSuperAdmin && !access.reassign) {
+        throw new ForbiddenException('You do not have permission to reassign contacts');
+      }
+    }
+
+    const newOwnerMembership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: input.newOwnerId, businessId: input.businessId } },
+    });
+    if (!newOwnerMembership) {
+      throw new BadRequestException('newOwnerId must belong to a member of this business');
+    }
+
+    const eligibleWhere: any = {
+      ...contactWhereBase(input.businessId),
+      id: { in: input.contactIds },
+    };
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      const visClause = visibilityClause(access, input.actorUserId);
+      if (visClause) {
+        eligibleWhere.AND = [visClause];
+      }
+    }
+
+    const eligible = await this.prisma.client.contact.findMany({
+      where: eligibleWhere,
+      select: { id: true, ownerId: true },
+    });
+    if (eligible.length === 0) {
+      throw new ForbiddenException('No eligible contacts to reassign');
+    }
+
+    const eligibleIds = eligible.map((c) => c.id);
+    const result = await this.prisma.client.contact.updateMany({
+      where: { id: { in: eligibleIds }, ...contactWhereBase(input.businessId) },
+      data: { ownerId: input.newOwnerId },
+    });
+
+    await Promise.allSettled(
+      eligible.map((c) =>
+        this.timeline.logEvent(input.businessId, c.id, 'contact.reassigned', {
+          fromOwnerId: c.ownerId ?? null,
+          toOwnerId: input.newOwnerId,
+          actorUserId: input.actorUserId ?? null,
+        }),
+      ),
+    );
+
+    this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
+
+    return { reassigned: result.count, newOwnerId: input.newOwnerId };
   }
 
   async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string; fieldOverrides?: Record<string, unknown>; actorId?: string; actorType?: string }, _audit?: AuditContext) {

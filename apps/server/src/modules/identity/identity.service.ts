@@ -480,9 +480,24 @@ export class IdentityService {
   private validateScopesPayload(scopes: Record<string, string>, tier: number): void {
     const validLevels = new Set(['none', 'read', 'write', 'admin']);
     const validModules = new Set(IdentityService.PERMISSION_MODULES as readonly string[]);
+    // M7 CRM ownership sub-permissions layered on top of the per-module level.
+    const crmExtraKeys: Record<string, Set<string>> = {
+      crm_view: new Set(['all', 'owned']),
+      crm_edit: new Set(['any', 'owned', 'none']),
+      crm_reassign: new Set(['true', 'false', 'yes', 'no']),
+      crm_delete: new Set(['any', 'owned', 'none']),
+    };
     for (const [key, value] of Object.entries(scopes)) {
-      if (!validModules.has(key)) throw new BadRequestException(`Invalid module: ${key}`);
-      if (!validLevels.has(value)) throw new BadRequestException(`Invalid permission level: ${value} for module ${key}`);
+      if (validModules.has(key)) {
+        if (!validLevels.has(value)) throw new BadRequestException(`Invalid permission level: ${value} for module ${key}`);
+        continue;
+      }
+      const allowed = crmExtraKeys[key];
+      if (allowed) {
+        if (!allowed.has(value)) throw new BadRequestException(`Invalid value '${value}' for ${key}`);
+        continue;
+      }
+      throw new BadRequestException(`Invalid module: ${key}`);
     }
     if (typeof tier !== 'number' || tier < 0 || tier > 4 || !Number.isInteger(tier)) {
       throw new BadRequestException('maxApprovalTier must be an integer between 0 and 4');

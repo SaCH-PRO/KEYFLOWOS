@@ -224,6 +224,8 @@ export class CrmController {
     @Query('includeStats') includeStats?: string,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: string,
+    @Query('ownedByMe') ownedByMe?: string,
+    @Req() req?: any,
   ) {
     const validSortBy = ['name', 'newest', 'oldest', 'revenue', 'score', 'lastInteraction'];
     const validSortOrder = ['asc', 'desc'];
@@ -235,6 +237,8 @@ export class CrmController {
         : undefined;
       return this.crm.listContacts({
       businessId,
+      actorUserId: req?.user?.id,
+      ownedByActor: ownedByMe === 'true',
       status,
       search,
       hasUnpaidInvoices: hasUnpaidInvoices === 'true',
@@ -326,10 +330,12 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: UpdateContactDto,
+    @Req() req: any,
   ) {
     return this.crm.updateContact({
       businessId,
       contactId,
+      actorUserId: req?.user?.id,
       ...body,
     });
   }
@@ -349,6 +355,7 @@ export class CrmController {
       favorite?: boolean;
       archived?: boolean;
     },
+    @Req() req: any,
   ) {
     if (!Array.isArray(body.contactIds) || body.contactIds.length > 100) {
       throw new HttpException('contactIds must be an array of at most 100 items', 400);
@@ -362,6 +369,32 @@ export class CrmController {
       priority: body.priority,
       favorite: body.favorite,
       archived: body.archived,
+      actorUserId: req?.user?.id,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('crm', 'contact_reassigned', 'contact')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/contacts/bulk/reassign')
+  bulkReassignContacts(
+    @Param('businessId') businessId: string,
+    @Body() body: { contactIds: string[]; newOwnerId: string },
+    @Req() req: any,
+  ) {
+    if (!Array.isArray(body.contactIds) || body.contactIds.length === 0 || body.contactIds.length > 200) {
+      throw new HttpException('contactIds must be an array of 1..200 items', 400);
+    }
+    if (!body.newOwnerId || typeof body.newOwnerId !== 'string') {
+      throw new HttpException('newOwnerId is required', 400);
+    }
+    return this.crm.reassignContacts({
+      businessId,
+      contactIds: body.contactIds,
+      newOwnerId: body.newOwnerId,
+      actorUserId: req?.user?.id,
     });
   }
 
@@ -372,11 +405,12 @@ export class CrmController {
   bulkDeleteContacts(
     @Param('businessId') businessId: string,
     @Body() body: { contactIds: string[] },
+    @Req() req: any,
   ) {
     if (!Array.isArray(body.contactIds) || body.contactIds.length > 100) {
       throw new HttpException('contactIds must be an array of at most 100 items', 400);
     }
-    return this.crm.bulkDeleteContacts({ businessId, contactIds: body.contactIds });
+    return this.crm.bulkDeleteContacts({ businessId, contactIds: body.contactIds, actorUserId: req?.user?.id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -388,8 +422,9 @@ export class CrmController {
   softDeleteContact(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: any,
   ) {
-    return this.crm.softDeleteContact({ businessId, contactId });
+    return this.crm.softDeleteContact({ businessId, contactId, actorUserId: req?.user?.id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

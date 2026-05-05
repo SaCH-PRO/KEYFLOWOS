@@ -354,24 +354,79 @@ function PermissionEditor({
           })}
         </div>
         {PERMISSION_MODULES.map((mod) => (
-          <div key={mod.key} className="grid grid-cols-[1fr_repeat(4,56px)] gap-1 items-center px-2 py-1.5 rounded-lg hover:bg-muted/10 transition-colors">
-            <span className="text-xs">{mod.label}</span>
-            {PERMISSION_LEVELS.map((level) => (
-              <button
-                key={level}
-                onClick={() => setScopes((prev) => ({ ...prev, [mod.key]: level }))}
-                className={`h-7 w-7 mx-auto rounded-md border transition-all ${
-                  scopes[mod.key] === level
-                    ? `${levelColor[level]} border-current bg-current/10 ring-1 ring-current/30`
-                    : "border-border/30 hover:border-border/60"
-                }`}
-                aria-label={`Set ${mod.label} to ${level}`}
-              >
-                {scopes[mod.key] === level && (
-                  <CheckCircle2 className="h-3.5 w-3.5 mx-auto" />
-                )}
-              </button>
-            ))}
+          <div key={mod.key}>
+            <div className="grid grid-cols-[1fr_repeat(4,56px)] gap-1 items-center px-2 py-1.5 rounded-lg hover:bg-muted/10 transition-colors">
+              <span className="text-xs">{mod.label}</span>
+              {PERMISSION_LEVELS.map((level) => (
+                <button
+                  key={level}
+                  onClick={() => setScopes((prev) => ({ ...prev, [mod.key]: level }))}
+                  className={`h-7 w-7 mx-auto rounded-md border transition-all ${
+                    scopes[mod.key] === level
+                      ? `${levelColor[level]} border-current bg-current/10 ring-1 ring-current/30`
+                      : "border-border/30 hover:border-border/60"
+                  }`}
+                  aria-label={`Set ${mod.label} to ${level}`}
+                >
+                  {scopes[mod.key] === level && (
+                    <CheckCircle2 className="h-3.5 w-3.5 mx-auto" />
+                  )}
+                </button>
+              ))}
+            </div>
+            {mod.key === "crm" && scopes.crm && scopes.crm !== "none" && (
+              <div className="ml-4 mb-2 px-3 py-2.5 rounded-lg border border-blue-500/20 bg-blue-500/5 space-y-2 text-[11px]">
+                <div className="text-[10px] uppercase tracking-wide text-blue-300/80 font-semibold">CRM ownership rules</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted-foreground">Can view</span>
+                    <select
+                      value={scopes.crm_view ?? "all"}
+                      onChange={(e) => setScopes((p) => ({ ...p, crm_view: e.target.value }))}
+                      className="rounded-md border border-border/40 bg-[#111113] px-2 py-1 text-xs"
+                    >
+                      <option value="all">All contacts</option>
+                      <option value="owned">Only their book</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted-foreground">Can edit</span>
+                    <select
+                      value={scopes.crm_edit ?? (scopes.crm === "admin" ? "any" : scopes.crm === "write" ? "any" : "none")}
+                      onChange={(e) => setScopes((p) => ({ ...p, crm_edit: e.target.value }))}
+                      className="rounded-md border border-border/40 bg-[#111113] px-2 py-1 text-xs"
+                    >
+                      <option value="any">Any contact</option>
+                      <option value="owned">Only owned/shared</option>
+                      <option value="none">Read-only</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted-foreground">Can delete</span>
+                    <select
+                      value={scopes.crm_delete ?? (scopes.crm === "admin" ? "any" : scopes.crm === "write" ? "owned" : "none")}
+                      onChange={(e) => setScopes((p) => ({ ...p, crm_delete: e.target.value }))}
+                      className="rounded-md border border-border/40 bg-[#111113] px-2 py-1 text-xs"
+                    >
+                      <option value="any">Any contact</option>
+                      <option value="owned">Only owned</option>
+                      <option value="none">Cannot delete</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted-foreground">Reassign owner</span>
+                    <select
+                      value={scopes.crm_reassign ?? (scopes.crm === "admin" ? "true" : "false")}
+                      onChange={(e) => setScopes((p) => ({ ...p, crm_reassign: e.target.value }))}
+                      className="rounded-md border border-border/40 bg-[#111113] px-2 py-1 text-xs"
+                    >
+                      <option value="true">Allowed</option>
+                      <option value="false">Not allowed</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

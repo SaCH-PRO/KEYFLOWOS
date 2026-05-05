@@ -15,7 +15,9 @@ import {
   Flag,
   Star,
   Archive,
+  UserCog,
 } from "lucide-react";
+import type { TeamMemberSummary } from "@/lib/client";
 import { Button } from "@keyflow/ui";
 import type { BulkAction, ListSummary } from "./hooks/use-database-state";
 import {
@@ -49,6 +51,8 @@ interface DatabaseBulkBarProps {
   onBulkToggleFavorite: (favorite: boolean) => void;
   onBulkArchive: (archived: boolean) => void;
   onBulkDelete: () => void;
+  onBulkReassign?: (newOwnerId: string) => void;
+  teamMembers?: TeamMemberSummary[];
   onClearSelection: () => void;
   availableLists: ListSummary[];
   allPagesSelected?: boolean;
@@ -71,6 +75,8 @@ function DatabaseBulkBarInner({
   onBulkToggleFavorite,
   onBulkArchive,
   onBulkDelete,
+  onBulkReassign,
+  teamMembers,
   onClearSelection,
   availableLists,
   allPagesSelected,
@@ -124,6 +130,10 @@ function DatabaseBulkBarInner({
 
   const togglePriorityAction = useCallback(() => {
     onSetBulkAction(activeBulkAction === "priority" ? null : "priority");
+  }, [activeBulkAction, onSetBulkAction]);
+
+  const toggleReassignAction = useCallback(() => {
+    onSetBulkAction(activeBulkAction === "reassign" ? null : "reassign");
   }, [activeBulkAction, onSetBulkAction]);
 
   const handleApplyTags = useCallback(() => {
@@ -412,6 +422,60 @@ function DatabaseBulkBarInner({
               <Star className="w-3 h-3" />
               Favorite
             </button>
+
+            {onBulkReassign && (
+              <div className="relative">
+                <button
+                  onClick={toggleReassignAction}
+                  disabled={bulkActing}
+                  className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-[hsl(var(--kf-accent1))]/30 bg-[hsl(var(--kf-accent1))]/[0.08] text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/15 transition-all disabled:opacity-40"
+                  aria-label="Reassign owner of selected contacts"
+                  aria-haspopup="listbox"
+                  aria-expanded={activeBulkAction === "reassign"}
+                >
+                  {bulkActing && activeBulkAction === "reassign" ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <UserCog className="w-3 h-3" />
+                  )}
+                  Reassign
+                  <ChevronDown className="w-2.5 h-2.5" />
+                </button>
+                {activeBulkAction === "reassign" && (
+                  <div
+                    className="absolute bottom-full left-0 mb-2 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 w-56 z-50 max-h-64 overflow-y-auto"
+                    role="listbox"
+                    aria-label="Select new owner"
+                  >
+                    {(teamMembers ?? []).length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-muted-foreground/60">
+                        No team members available.
+                      </div>
+                    ) : (
+                      (teamMembers ?? []).map((m) => {
+                        const label = m.user.firstName || m.user.name || m.user.email;
+                        return (
+                          <button
+                            key={m.userId}
+                            onClick={() => onBulkReassign(m.userId)}
+                            disabled={bulkActing}
+                            className="w-full text-left px-3 min-h-[44px] flex items-center gap-2 text-[11px] hover:bg-muted/30 transition-colors disabled:opacity-50"
+                            role="option"
+                            aria-selected={false}
+                          >
+                            <span className="w-6 h-6 rounded-full bg-gradient-to-br from-[hsl(var(--kf-accent1))]/30 to-[hsl(var(--kf-accent2))]/30 flex items-center justify-center text-[10px] font-bold uppercase">
+                              {(label || "?").charAt(0)}
+                            </span>
+                            <span className="flex-1 truncate">{label}</span>
+                            <span className="text-[9px] uppercase tracking-wide text-muted-foreground/50">{m.role}</span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <button
               onClick={() => onBulkArchive(true)}

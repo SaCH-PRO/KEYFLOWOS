@@ -367,6 +367,7 @@ export async function fetchContacts(
     includeStats?: boolean;
     sortBy?: string;
     sortOrder?: "asc" | "desc";
+    ownedByMe?: boolean;
     signal?: AbortSignal;
   },
 ): Promise<{ data: ContactListResponse | null; error: string | null }> {
@@ -395,6 +396,7 @@ export async function fetchContacts(
   if (opts?.includeStats) params.set("includeStats", "true");
   if (opts?.sortBy) params.set("sortBy", opts.sortBy);
   if (opts?.sortOrder) params.set("sortOrder", opts.sortOrder);
+  if (opts?.ownedByMe) params.set("ownedByMe", "true");
   const result = await apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts${params.toString() ? `?${params.toString()}` : ""}`,
     contactListResponseSchema,
@@ -1368,6 +1370,37 @@ export async function bulkDeleteContacts(input: {
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk`,
     { contactIds: input.contactIds },
   );
+}
+
+export async function bulkReassignContacts(input: {
+  businessId?: string;
+  contactIds: string[];
+  newOwnerId: string;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ reassigned: number; newOwnerId: string }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk/reassign`,
+    body: { contactIds: input.contactIds, newOwnerId: input.newOwnerId },
+  });
+}
+
+export type TeamMemberSummary = {
+  id: string;
+  userId: string;
+  role: string;
+  user: { id: string; email: string; name: string | null; firstName?: string | null; lastName?: string | null; avatarUrl?: string | null };
+};
+
+export async function fetchTeamMembers(businessId: string = DEFAULT_BUSINESS_ID) {
+  try {
+    const res = await apiGetSimple<TeamMemberSummary[]>(
+      `/identity/businesses/${encodeURIComponent(businessId)}/team`,
+    );
+    if (Array.isArray(res?.data)) return res.data;
+  } catch {
+    /* ignore */
+  }
+  return [] as TeamMemberSummary[];
 }
 
 export async function checkImportDuplicates(
