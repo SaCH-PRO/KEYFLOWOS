@@ -5014,6 +5014,10 @@ export interface RecurringInvoice {
   endDate?: string;
   isActive: boolean;
   runCount: number;
+  failureCount?: number;
+  lastFailureAt?: string | null;
+  lastError?: string | null;
+  cancelledAt?: string | null;
   contactId: string;
   contact?: { id: string; firstName?: string; lastName?: string; email?: string };
   lineItems: { description: string; quantity: number; unitPrice: number; total: number }[];
@@ -5025,6 +5029,43 @@ export interface RecurringInvoice {
   currency: string;
   notes?: string;
   createdAt: string;
+}
+export interface RecurringGenerationEntry {
+  id: string;
+  invoiceNumber: string | null;
+  status: string;
+  total: number | string;
+  currency: string;
+  issueDate: string | null;
+  dueDate: string | null;
+  paidAt: string | null;
+  createdAt: string;
+}
+export interface BusinessPayment {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  provider: string;
+  method?: string | null;
+  providerPaymentId: string;
+  reference?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  businessId: string;
+  invoiceId: string;
+  invoice?: {
+    id: string;
+    invoiceNumber: string | null;
+    status: string;
+    currency: string;
+    total: number | string;
+    dueDate: string | null;
+    issueDate: string | null;
+    receiptSentAt: string | null;
+    contactId: string | null;
+    contact?: { id: string; firstName?: string | null; lastName?: string | null; email?: string | null } | null;
+  };
 }
 export async function fetchRecurringInvoices(businessId: string): Promise<ApiResult<RecurringInvoice[]>> {
   return apiGetSimple<RecurringInvoice[]>(`/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices`);
@@ -5040,6 +5081,42 @@ export async function deleteRecurringInvoice(businessId: string, id: string): Pr
 }
 export async function toggleRecurringInvoice(businessId: string, id: string): Promise<ApiResult<RecurringInvoice>> {
   return apiPost<RecurringInvoice>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}/toggle`, body: {} });
+}
+export async function cancelRecurringInvoice(businessId: string, id: string): Promise<ApiResult<RecurringInvoice>> {
+  return apiPost<RecurringInvoice>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}/cancel`, body: {} });
+}
+export async function fetchRecurringGenerationHistory(businessId: string, id: string): Promise<ApiResult<RecurringGenerationEntry[]>> {
+  return apiGetSimple<RecurringGenerationEntry[]>(`/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}/history`);
+}
+
+export interface PaymentFilters {
+  status?: string;
+  method?: string;
+  provider?: string;
+  contactId?: string;
+  minAmount?: number;
+  maxAmount?: number;
+  from?: string;
+  to?: string;
+}
+export async function fetchBusinessPayments(businessId: string, filters: PaymentFilters = {}): Promise<ApiResult<BusinessPayment[]>> {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters)) {
+    if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
+  }
+  const qs = params.toString();
+  return apiGetSimple<BusinessPayment[]>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/payments${qs ? `?${qs}` : ""}`,
+  );
+}
+export async function refundPayment(businessId: string, paymentId: string, reason?: string): Promise<ApiResult<BusinessPayment>> {
+  return apiPost<BusinessPayment>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/payments/${paymentId}/refund`, body: { reason } });
+}
+export async function retryPayment(businessId: string, paymentId: string): Promise<ApiResult<BusinessPayment>> {
+  return apiPost<BusinessPayment>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/payments/${paymentId}/retry`, body: {} });
+}
+export async function resendReceipt(businessId: string, invoiceId: string): Promise<ApiResult<{ id: string; receiptSentAt: string }>> {
+  return apiPost<{ id: string; receiptSentAt: string }>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${invoiceId}/receipt/resend`, body: {} });
 }
 
 // ---

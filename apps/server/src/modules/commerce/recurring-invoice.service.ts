@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
@@ -38,6 +38,43 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
   getRecurringInvoice(businessId: string, id: string) {
     return this.prisma.client.recurringInvoice.findFirst({
       where: { id, businessId, deletedAt: null },
+      include: { contact: true },
+    });
+  }
+
+  /** Generation history: invoices created by a recurring schedule. */
+  async getGenerationHistory(businessId: string, recurringId: string) {
+    const recurring = await this.prisma.client.recurringInvoice.findFirst({
+      where: { id: recurringId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!recurring) throw new NotFoundException('Recurring schedule not found');
+    return this.prisma.client.invoice.findMany({
+      where: { businessId, recurringInvoiceId: recurringId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        status: true,
+        total: true,
+        currency: true,
+        issueDate: true,
+        dueDate: true,
+        paidAt: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  /** Cancel a schedule (soft-stop, kept for audit). */
+  async cancelRecurringInvoice(businessId: string, id: string) {
+    const existing = await this.prisma.client.recurringInvoice.findFirst({
+      where: { id, businessId, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Recurring invoice not found');
+    return this.prisma.client.recurringInvoice.update({
+      where: { id },
+      data: { isActive: false, cancelledAt: new Date() },
       include: { contact: true },
     });
   }
@@ -108,7 +145,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
       where: { id: input.id, businessId: input.businessId, deletedAt: null },
     });
     if (!existing) {
-      throw new Error('Recurring invoice not found');
+      throw new NotFoundException('Recurring invoice not found');
     }
 
     const updateData: any = {};
@@ -180,7 +217,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
       where: { id, businessId, deletedAt: null },
     });
     if (!existing) {
-      throw new Error('Recurring invoice not found');
+      throw new NotFoundException('Recurring invoice not found');
     }
     return this.prisma.client.recurringInvoice.update({
       where: { id },
@@ -237,6 +274,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
             total,
             currency: recurring.currency,
             notes: recurring.notes,
+            recurringInvoiceId: recurring.id,
             items: {
               create: lineItems.map((item: any) => ({
                 description: item.description,
@@ -258,6 +296,9 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
             lastRunDate: now,
             nextRunDate,
             runCount: { increment: 1 },
+            failureCount: 0,
+            lastError: null,
+            lastFailureAt: null,
           },
         });
 
@@ -265,6 +306,18 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
         results.push({ recurringId: recurring.id, invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber });
       } catch (error: any) {
         this.logger.error(`Failed to process recurring invoice ${recurring.id}: ${error?.message}`, error?.stack);
+        try {
+          await this.prisma.client.recurringInvoice.update({
+            where: { id: recurring.id },
+            data: {
+              failureCount: { increment: 1 },
+              lastFailureAt: now,
+              lastError: String(error?.message ?? error).slice(0, 500),
+            },
+          });
+        } catch (writeErr) {
+          this.logger.error(`Failed to record failure for recurring ${recurring.id}`, writeErr as Error);
+        }
       }
     }
 

@@ -1414,6 +1414,10 @@ model Invoice {
   externalAccountingId     String? @map("external_accounting_id")
   externalAccountingSyncedAt DateTime? @map("external_accounting_synced_at")
 
+  recurringInvoiceId String?           @map("recurring_invoice_id")
+  recurringInvoice   RecurringInvoice? @relation(fields: [recurringInvoiceId], references: [id], onDelete: SetNull)
+  receiptSentAt      DateTime?         @map("receipt_sent_at")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at") // Soft delete
@@ -1421,6 +1425,7 @@ model Invoice {
   @@unique([businessId, invoiceNumber])
   @@index([businessId, contactId])
   @@index([businessId, externalAccountingSource, externalAccountingId])
+  @@index([businessId, recurringInvoiceId])
   @@map("invoices")
 }
 
@@ -2355,6 +2360,12 @@ model RecurringInvoice {
   endDate     DateTime? @map("end_date")
   isActive    Boolean  @default(true) @map("is_active")
   runCount    Int      @default(0) @map("run_count")
+  failureCount   Int       @default(0) @map("failure_count")
+  lastFailureAt  DateTime? @map("last_failure_at")
+  lastError      String?   @map("last_error")
+  cancelledAt    DateTime? @map("cancelled_at")
+
+  generatedInvoices Invoice[]
 
   contactId  String   @map("contact_id")
   contact    Contact  @relation(fields: [contactId], references: [id], onDelete: NoAction)

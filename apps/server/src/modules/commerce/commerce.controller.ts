@@ -850,6 +850,85 @@ export class CommerceController {
     return this.recurringInvoices.toggleActive(businessId, id);
   }
 
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/recurring-invoices/:id/cancel')
+  cancelRecurringInvoice(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.recurringInvoices.cancelRecurringInvoice(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/recurring-invoices/:id/history')
+  getRecurringHistory(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.recurringInvoices.getGenerationHistory(businessId, id);
+  }
+
+  // ========== PAYMENTS (BUSINESS-SCOPED) ==========
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/payments')
+  listAllPayments(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('method') method?: string,
+    @Query('provider') provider?: string,
+    @Query('contactId') contactId?: string,
+    @Query('minAmount') minAmount?: string,
+    @Query('maxAmount') maxAmount?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.commerce.listAllPayments(businessId, {
+      status,
+      method,
+      provider,
+      contactId,
+      minAmount: minAmount ? Number(minAmount) : undefined,
+      maxAmount: maxAmount ? Number(maxAmount) : undefined,
+      from,
+      to,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/payments/:paymentId/refund')
+  refundPayment(
+    @Param('businessId') businessId: string,
+    @Param('paymentId') paymentId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.commerce.markPaymentRefunded(paymentId, businessId, body?.reason);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/payments/:paymentId/retry')
+  retryPayment(
+    @Param('businessId') businessId: string,
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.commerce.retryPayment(paymentId, businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/invoices/:invoiceId/receipt/resend')
+  resendReceipt(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+  ) {
+    return this.commerce.markReceiptSent(invoiceId, businessId);
+  }
+
   // ========== PAYMENT LINKS ==========
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
