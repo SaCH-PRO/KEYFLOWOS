@@ -10459,8 +10459,8 @@ export async function bulkApplyDataQualityFix(businessId: string, issueIds: stri
 }
 
 export async function updateDataQualitySettings(businessId: string, body: { staleDays?: number }) {
-  return apiPatch<{ dataQualityStaleDays: number; dataQualityLastRunAt: string | null }>({
-    path: `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/settings`,
+  return apiPatch<{ dataQualityStaleDays: number; dataQualityLastRunAt: string | null }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/settings`,
     body,
-  });
+  );
 }
