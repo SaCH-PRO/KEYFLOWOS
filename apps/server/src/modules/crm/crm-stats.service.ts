@@ -603,7 +603,7 @@ export class CrmStatsService {
     const staleCutoff = new Date();
     staleCutoff.setDate(staleCutoff.getDate() - 30);
 
-    const [lead, prospect, client, lost, unpaid, stale, newThisWeek] = await Promise.all([
+    const [lead, prospect, client, lost, unpaid, stale, newThisWeek, atRisk, dormant] = await Promise.all([
       this.prisma.client.contact.count({ where: { ...base, status: 'LEAD' } }),
       this.prisma.client.contact.count({ where: { ...base, status: 'PROSPECT' } }),
       this.prisma.client.contact.count({ where: { ...base, status: 'CLIENT' } }),
@@ -619,8 +619,10 @@ export class CrmStatsService {
         },
       }),
       this.prisma.client.contact.count({ where: { ...base, createdAt: { gte: start } } }),
+      this.prisma.client.contact.count({ where: { ...base, relationshipHealth: 'AT_RISK' } }),
+      this.prisma.client.contact.count({ where: { ...base, relationshipHealth: 'DORMANT' } }),
     ]);
-    const segResult = { lead, prospect, client, lost, unpaid, stale, newThisWeek };
+    const segResult = { lead, prospect, client, lost, unpaid, stale, newThisWeek, atRisk, dormant };
     this.setCache(cacheKey, segResult);
     return segResult;
   }

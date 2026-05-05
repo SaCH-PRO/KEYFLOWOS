@@ -6,11 +6,17 @@ import { CrmImportService } from './crm-import.service';
 import { CrmJourneyService } from './crm-journey.service';
 import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmRevenueService } from './crm-revenue.service';
+import { CrmRelationshipHealthService } from './crm-relationship-health.service';
 import { CrmStatsService } from './crm-stats.service';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmService } from './crm.service';
 import { CrmSavedViewsService } from './crm-saved-views.service';
+import {
+  CONTACT_RELATIONSHIP_HEALTH_VALUES,
+  ContactRelationshipHealth,
+  RelationshipHealthThresholds,
+} from '@keyflow/shared';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -42,6 +48,7 @@ export class CrmController {
     @Inject(CrmJourneyService) private readonly journey: CrmJourneyService,
     @Inject(CrmDuplicateDetectionService) private readonly duplicates: CrmDuplicateDetectionService,
     @Inject(CrmSavedViewsService) private readonly savedViews: CrmSavedViewsService,
+    @Inject(CrmRelationshipHealthService) private readonly relationshipHealth: CrmRelationshipHealthService,
   ) {}
 
   @Get('health')
@@ -321,6 +328,105 @@ export class CrmController {
   @Get('businesses/:businessId/segments')
   segmentSummary(@Param('businessId') businessId: string) {
     return this.crmStats.segmentSummary({ businessId });
+  }
+
+  // -- Relationship-health (auto-warn) ----------------------------------
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/relationship-health/settings')
+  async getRelationshipHealthSettings(@Param('businessId') businessId: string) {
+    const thresholds = await this.relationshipHealth.getThresholdsFor(businessId);
+    return { thresholds };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(20, 60_000)
+  @Patch('businesses/:businessId/relationship-health/settings')
+  async updateRelationshipHealthSettings(
+    @Param('businessId') businessId: string,
+    @Body() body: Partial<RelationshipHealthThresholds> | { reset?: boolean },
+  ) {
+    if ((body as { reset?: boolean })?.reset) {
+      const thresholds = await this.relationshipHealth.setThresholdsFor(businessId, null);
+      return { thresholds };
+    }
+    const thresholds = await this.relationshipHealth.setThresholdsFor(
+      businessId,
+      body as Partial<RelationshipHealthThresholds>,
+    );
+    return { thresholds };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/relationship-health/at-risk')
+  listAtRisk(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.relationshipHealth.listAtRisk(businessId, {
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(5, 60_000)
+  @Post('businesses/:businessId/relationship-health/recompute')
+  recomputeRelationshipHealth(
+    @Param('businessId') businessId: string,
+    @Body() body?: { dryRun?: boolean },
+    @Req() req?: any,
+  ) {
+    return this.relationshipHealth.recomputeForBusiness(businessId, {
+      dryRun: !!body?.dryRun,
+      actorId: req?.user?.id,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(60, 60_000)
+  @Put('businesses/:businessId/contacts/:contactId/relationship-health')
+  setRelationshipHealthOverride(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: { value: ContactRelationshipHealth | null },
+    @Req() req: any,
+  ) {
+    if (
+      body?.value !== null &&
+      !(CONTACT_RELATIONSHIP_HEALTH_VALUES as readonly string[]).includes(body?.value as string)
+    ) {
+      throw new BadRequestException('Invalid relationship health value');
+    }
+    return this.relationshipHealth.setManualOverride({
+      businessId,
+      contactId,
+      value: body.value,
+      actorId: req?.user?.id ?? null,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(60, 60_000)
+  @Delete('businesses/:businessId/contacts/:contactId/relationship-health')
+  clearRelationshipHealthOverride(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: any,
+  ) {
+    return this.relationshipHealth.setManualOverride({
+      businessId,
+      contactId,
+      value: null,
+      actorId: req?.user?.id ?? null,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

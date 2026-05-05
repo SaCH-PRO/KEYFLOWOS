@@ -99,6 +99,10 @@ model Business {
   complianceData   Json?    @map("compliance_data")    // { itemId: boolean, ... }
   lastHealthCheck  DateTime? @map("last_health_check")
 
+  // CRM Relationship-Health thresholds (override defaults per business)
+  // Shape: { hot, warm, cold, atRiskClientDays } in days
+  crmHealthThresholds Json?  @map("crm_health_thresholds")
+
   // Module Relationships
   members          Membership[]
   contacts         Contact[]
