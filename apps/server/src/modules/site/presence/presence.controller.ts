@@ -1,12 +1,16 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { PresenceService } from './presence.service';
+import { PresenceOverviewService } from './presence-overview.service';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../../core/guards/public-rate-limit.guard';
 
 @Controller('site/presence')
 export class PresenceController {
-  constructor(@Inject(PresenceService) private readonly presence: PresenceService) {}
+  constructor(
+    @Inject(PresenceService) private readonly presence: PresenceService,
+    @Inject(PresenceOverviewService) private readonly overview: PresenceOverviewService,
+  ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/draft')
@@ -52,6 +56,55 @@ export class PresenceController {
   @Get('businesses/:businessId/completeness')
   completeness(@Param('businessId') businessId: string) {
     return this.presence.getSectionCompleteness(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/overview')
+  getOverview(
+    @Param('businessId') businessId: string,
+    @Query('days') days?: string,
+  ) {
+    const d = days ? Math.min(Math.max(parseInt(days, 10) || 30, 1), 365) : 30;
+    return this.overview.getOverview(businessId, d);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/action-cards/sync')
+  syncActionCards(@Param('businessId') businessId: string) {
+    return this.overview.syncActionCardsToQueue(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/leads')
+  listLeads(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.overview.listStorefrontLeads(businessId, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/orders')
+  listOrders(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.overview.listStorefrontOrders(businessId, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/bookings')
+  listBookings(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.overview.listStorefrontBookings(businessId, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @UseGuards(PublicRateLimitGuard)

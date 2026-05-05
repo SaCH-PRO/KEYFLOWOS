@@ -102,6 +102,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     InventoryRiskService,
     RevenueAttributionService,
     RevenueReportingService,
+    RevenueActionService,
   ],
 })
 export class CommerceModule {}

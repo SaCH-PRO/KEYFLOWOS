@@ -11468,6 +11468,135 @@ export async function fetchPresenceCompleteness(businessId: string) {
   }>(`/site/presence/businesses/${encodeURIComponent(businessId)}/completeness`);
 }
 
+export type PresenceActionKey =
+  | 'ADD_FIRST_SERVICE'
+  | 'ADD_FIRST_PRODUCT'
+  | 'ADD_BOOKING_CTA'
+  | 'ENABLE_PAYMENTS'
+  | 'ENABLE_WHATSAPP'
+  | 'SHARE_VIA_WHATSAPP'
+  | 'PRODUCT_VIEWS_NO_SALES'
+  | 'POPULAR_SERVICE_ADD_DEPOSIT'
+  | 'NO_TRUST_SECTION'
+  | 'ADD_HOURS_LOCATION'
+  | 'COMPLETE_BRANDING'
+  | 'COMPLETE_SEO'
+  | 'PUBLISH_SITE';
+
+export interface PresenceActionCard {
+  key: PresenceActionKey;
+  title: string;
+  description: string;
+  severity: 'info' | 'warning' | 'critical';
+  ctaLabel: string;
+  ctaHref: string;
+  relatedType?: string | null;
+  relatedId?: string | null;
+}
+
+export interface PresenceHealthCheck {
+  key: string;
+  label: string;
+  passed: boolean;
+  weight: number;
+  hint?: string;
+}
+
+export interface PresenceHealthScore {
+  score: number;
+  band: 'critical' | 'needs-work' | 'good' | 'great';
+  passed: number;
+  total: number;
+  checks: PresenceHealthCheck[];
+}
+
+export interface PresenceCommandOverview {
+  period: { days: number; since: string };
+  kpis: {
+    visits: number;
+    leadsCaptured: number;
+    bookingsCreated: number;
+    ordersCreated: number;
+    revenue: number;
+    currency: string;
+    conversionRate: number;
+    abandoned: number;
+    shareClicks: number;
+    whatsappClicks: number;
+  };
+  topProduct: { id: string; name: string; views: number; orders: number } | null;
+  topService: { id: string; name: string; views: number; bookings: number } | null;
+  health: PresenceHealthScore;
+  actionCards: PresenceActionCard[];
+  site: { slug: string | null; published: boolean; publishedAt: string | null };
+}
+
+export async function fetchPresenceCommandOverview(businessId: string, days = 30) {
+  return apiGetSimple<PresenceCommandOverview>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/overview?days=${days}`,
+  );
+}
+
+export async function syncPresenceActionCards(businessId: string) {
+  return apiPostSimple<{ synced: number }>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/action-cards/sync`,
+    {},
+  );
+}
+
+export interface PresenceLead {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  email: string | null;
+  phone: string | null;
+  whatsappNumber: string | null;
+  sourceDetail: string | null;
+  createdAt: string;
+  lastContactedAt: string | null;
+  relationshipHealth: string | null;
+  lifecycleStage: string | null;
+}
+export async function fetchPresenceLeads(businessId: string, limit = 25) {
+  return apiGetSimple<{ items: PresenceLead[] }>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/leads?limit=${limit}`,
+  );
+}
+
+export interface PresenceOrder {
+  id: string;
+  orderNumber: string;
+  status: string;
+  paymentStatus: string;
+  customerName: string;
+  customerEmail: string | null;
+  total: number;
+  currency: string;
+  createdAt: string;
+  items: { name: string; quantity: number }[];
+}
+export async function fetchPresenceOrders(businessId: string, limit = 25) {
+  return apiGetSimple<{ items: PresenceOrder[] }>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/orders?limit=${limit}`,
+  );
+}
+
+export interface PresenceBooking {
+  id: string;
+  status: string;
+  paymentStatus: string;
+  startTime: string;
+  endTime: string;
+  contact: { id: string; firstName: string | null; lastName: string | null; displayName: string | null; email: string | null } | null;
+  service: { id: string; name: string; price: number | null } | null;
+}
+export async function fetchPresenceBookings(businessId: string, limit = 25) {
+  return apiGetSimple<{ items: PresenceBooking[]; sourceFiltered: boolean }>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/bookings?limit=${limit}`,
+  );
+}
+
 export interface PresenceOverviewResponse {
   period: { days: number; since: string; until: string };
   totals: Record<string, { count: number; uniques: number }>;
