@@ -359,6 +359,36 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         businessId={businessId ?? undefined}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
+        savedViewState={{
+          search: searchInput,
+          status: statusFilter,
+          sortBy,
+          activeSegment,
+          activeListTab,
+          viewMode,
+        }}
+        onApplySavedView={(view) => {
+          const fs = view.filterState as Record<string, unknown>;
+          if (typeof fs.search === "string") setSearchInput(fs.search);
+          if (typeof fs.status === "string") setStatusFilter(fs.status);
+          if (typeof fs.sortBy === "string") setSortBy(fs.sortBy as typeof sortBy);
+          if (fs.activeSegment === null || typeof fs.activeSegment === "string") {
+            setActiveSegment(fs.activeSegment as typeof activeSegment);
+          }
+          if (typeof fs.activeListTab === "string") {
+            state.setActiveListTab(fs.activeListTab as typeof activeListTab);
+          }
+          if (fs.viewMode === "list" || fs.viewMode === "kanban" || fs.viewMode === "table") {
+            handleViewModeChange(fs.viewMode);
+          }
+          // Visible columns are applied by ContactsDatabase via its own
+          // `savedColumnsOverride` prop (kept in sync via the picker payload).
+        }}
+        onClearSavedView={() => {
+          setSearchInput("");
+          setStatusFilter("ALL");
+          setActiveSegment(null);
+        }}
       />
 
       {viewMode === "kanban" ? (

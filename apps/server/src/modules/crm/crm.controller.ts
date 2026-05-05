@@ -10,6 +10,7 @@ import { CrmStatsService } from './crm-stats.service';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmService } from './crm.service';
+import { CrmSavedViewsService } from './crm-saved-views.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -40,6 +41,7 @@ export class CrmController {
     @Inject(CrmRevenueService) private readonly revenue: CrmRevenueService,
     @Inject(CrmJourneyService) private readonly journey: CrmJourneyService,
     @Inject(CrmDuplicateDetectionService) private readonly duplicates: CrmDuplicateDetectionService,
+    @Inject(CrmSavedViewsService) private readonly savedViews: CrmSavedViewsService,
   ) {}
 
   @Get('health')
@@ -719,9 +721,67 @@ export class CrmController {
   @Post('businesses/:businessId/lists')
   createContactList(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] },
+    @Body() body: { name: string; description?: string; color?: string; type?: string; filters?: any; rules?: any; contactIds?: string[] },
   ) {
     return this.crm.createContactList({ businessId, ...body });
+  }
+
+  // ---- Per-user contact saved views ---------------------------------
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/saved-views')
+  listSavedViews(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    return this.savedViews.list(businessId, userId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Post('businesses/:businessId/saved-views')
+  createSavedView(
+    @Param('businessId') businessId: string,
+    @Body() body: { name: string; filterState: Record<string, unknown>; sort?: { sortBy?: string; sortOrder?: 'asc' | 'desc' } | null; visibleColumns?: string[] },
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    return this.savedViews.create(businessId, userId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Patch('businesses/:businessId/saved-views/:viewId')
+  updateSavedView(
+    @Param('businessId') businessId: string,
+    @Param('viewId') viewId: string,
+    @Body() body: { name?: string; filterState?: Record<string, unknown>; sort?: { sortBy?: string; sortOrder?: 'asc' | 'desc' } | null; visibleColumns?: string[] },
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    return this.savedViews.update(businessId, userId, viewId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Delete('businesses/:businessId/saved-views/:viewId')
+  deleteSavedView(
+    @Param('businessId') businessId: string,
+    @Param('viewId') viewId: string,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    return this.savedViews.delete(businessId, userId, viewId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -731,7 +791,7 @@ export class CrmController {
   updateContactList(
     @Param('businessId') businessId: string,
     @Param('listId') listId: string,
-    @Body() body: { name?: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] },
+    @Body() body: { name?: string; description?: string; color?: string; type?: string; filters?: any; rules?: any; contactIds?: string[] },
   ) {
     return this.crm.updateContactList({ businessId, listId, ...body });
   }
@@ -754,8 +814,17 @@ export class CrmController {
   getContactListContacts(
     @Param('businessId') businessId: string,
     @Param('listId') listId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
-    return this.crm.getContactListContacts({ businessId, listId });
+    const lim = limit !== undefined ? Number(limit) : undefined;
+    const off = offset !== undefined ? Number(offset) : undefined;
+    return this.crm.getContactListContacts({
+      businessId,
+      listId,
+      limit: Number.isFinite(lim as number) ? (lim as number) : undefined,
+      offset: Number.isFinite(off as number) ? (off as number) : undefined,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
