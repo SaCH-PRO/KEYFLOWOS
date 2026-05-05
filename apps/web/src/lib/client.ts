@@ -1062,7 +1062,7 @@ export async function createDeal(data: {
   title: string; contactId: string; description?: string; companyName?: string;
   value?: number; currency?: string; stageId?: string; ownerUserId?: string | null;
   source?: string; sourceDetail?: string; tags?: string[]; notes?: string;
-  expectedCloseAt?: string; probability?: number;
+  expectedCloseAt?: string; probability?: number; accountId?: string | null;
 }, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals`, body: data });
 }
@@ -1072,8 +1072,131 @@ export async function updateDeal(dealId: string, data: Partial<{
   value: number | null; currency: string; ownerUserId: string | null;
   source: string | null; sourceDetail: string | null; tags: string[];
   notes: string | null; expectedCloseAt: string | null; probability: number | null;
+  accountId: string | null;
 }>, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiPatch<Deal>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}`, data);
+}
+
+// ---------------------------------------------------------------------------
+// Accounts (M5 — company rollup)
+// ---------------------------------------------------------------------------
+
+export type Account = {
+  id: string;
+  name: string;
+  domain: string | null;
+  industry: string | null;
+  size: string | null;
+  website: string | null;
+  ownerUserId: string | null;
+  primaryContactId: string | null;
+  tags: string[];
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AccountSummary = Account & {
+  contactCount: number;
+  dealCount: number;
+  openDealValue: number;
+  lifetimeRevenue: number;
+  currency: string;
+  lastActivityAt: string | null;
+  nextActionAt: string | null;
+};
+
+export type AccountListFilters = {
+  search?: string;
+  industry?: string;
+  ownerUserId?: string;
+  tags?: string[];
+  minDealValue?: number;
+  lastActivityWithinDays?: number;
+  skip?: number;
+  take?: number;
+};
+
+export async function fetchAccounts(filters: AccountListFilters = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+  const p = new URLSearchParams();
+  if (filters.search) p.set('search', filters.search);
+  if (filters.industry) p.set('industry', filters.industry);
+  if (filters.ownerUserId) p.set('ownerUserId', filters.ownerUserId);
+  if (filters.tags?.length) p.set('tags', filters.tags.join(','));
+  if (filters.minDealValue != null) p.set('minDealValue', String(filters.minDealValue));
+  if (filters.lastActivityWithinDays != null) p.set('lastActivityWithinDays', String(filters.lastActivityWithinDays));
+  if (filters.skip != null) p.set('skip', String(filters.skip));
+  if (filters.take != null) p.set('take', String(filters.take));
+  const qs = p.toString() ? `?${p.toString()}` : '';
+  return apiGetSimple<{ accounts: AccountSummary[]; total: number }>(`/crm/businesses/${encodeURIComponent(businessId)}/accounts${qs}`);
+}
+
+export async function fetchAccountDetail(accountId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<{
+    account: Account;
+    contacts: Array<{ id: string; firstName: string | null; lastName: string | null; displayName: string | null; email: string | null; phone: string | null; jobTitle: string | null; lifecycleStage: string | null; relationshipHealth: string | null; ownerId: string | null; lastInteractionAt: string | null; nextActionAt: string | null; nextActionType: string | null; leadScore: number | null }>;
+    deals: Deal[];
+    recentEvents: Array<{ id: string; createdAt: string; type: string; data: unknown; source: string | null; contact: { id: string; firstName: string | null; lastName: string | null; displayName: string | null } }>;
+    rollup: {
+      contactCount: number; dealCount: number; openDealCount: number; wonDealCount: number; lostDealCount: number;
+      openDealValue: number; lifetimeRevenue: number; currency: string; winRate: number; eventsPerMonth: number;
+      lastActivityAt: string | null;
+      nextAction: { contactId: string; dueAt: string; type: string | null; contactName: string | null } | null;
+    };
+  }>(`/crm/businesses/${encodeURIComponent(businessId)}/accounts/${encodeURIComponent(accountId)}`);
+}
+
+export type AccountInsight = {
+  version: number;
+  computedAt: string;
+  summary: string;
+  lifetimeRevenue: number;
+  currency: string;
+  dealCount: number;
+  openDealValue: number;
+  winRate: number;
+  contactCount: number;
+  primaryContactId: string | null;
+  lastActivityAt: string | null;
+  recentInteractionCount30d: number;
+  nextAction: { contactId: string; type: string | null; dueAt: string | null; title: string | null } | null;
+  tags: string[];
+};
+
+export async function fetchAccountInsight(accountId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<AccountInsight>(`/crm/businesses/${encodeURIComponent(businessId)}/accounts/${encodeURIComponent(accountId)}/insight`);
+}
+
+export async function createAccount(data: { name: string; domain?: string | null; industry?: string | null; size?: string | null; website?: string | null; ownerUserId?: string | null; tags?: string[]; notes?: string | null; primaryContactId?: string | null }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<Account>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/accounts`, body: data });
+}
+
+export async function updateAccount(accountId: string, data: Partial<{ name: string; domain: string | null; industry: string | null; size: string | null; website: string | null; ownerUserId: string | null; tags: string[]; notes: string | null; primaryContactId: string | null }>, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPatch<Account>(`/crm/businesses/${encodeURIComponent(businessId)}/accounts/${encodeURIComponent(accountId)}`, data);
+}
+
+export async function deleteAccount(accountId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/accounts/${encodeURIComponent(accountId)}`);
+}
+
+export async function suggestAccountForContact(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<{ account: Account | null; reason: 'linked' | 'email_domain' | 'company_name' | 'none' }>(`/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/account-suggestion`);
+}
+
+export async function previewAccountMerge(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<{ proposals: Array<{ companyName: string; contactCount: number; existingAccountId: string | null; suggestedDomain: string | null }> }>(`/crm/businesses/${encodeURIComponent(businessId)}/accounts-merge/preview`);
+}
+
+export async function applyAccountMerge(items: Array<{ companyName: string; useExistingAccountId?: string | null; createWithDomain?: string | null }>, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<{ results: Array<{ companyName: string; accountId: string; contactsLinked: number; dealsLinked: number; created: boolean }> }>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/accounts-merge/apply`, body: { items } });
+}
+
+export async function fetchDealsByAccountPivot(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<{ buckets: Array<{ accountId: string | null; label: string; count: number; openValue: number; wonValue: number; currency: string }> }>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/pivot/by-account`);
+}
+
+export async function fetchLifecycleByAccountPivot(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<{ rows: Array<{ accountId: string | null; label: string; total: number; stages: Record<string, number> }> }>(`/crm/businesses/${encodeURIComponent(businessId)}/lifecycle/pivot/by-account`);
 }
 
 export async function deleteDeal(dealId: string, businessId: string = DEFAULT_BUSINESS_ID) {

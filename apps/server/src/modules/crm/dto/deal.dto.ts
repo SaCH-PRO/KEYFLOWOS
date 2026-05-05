@@ -44,6 +44,9 @@ export class CreateDealDto {
 
   @IsInt() @IsOptional() @Min(0) @Max(100)
   probability?: number;
+
+  @IsString() @IsOptional()
+  accountId?: string | null;
 }
 
 export class UpdateDealDto {
@@ -82,6 +85,9 @@ export class UpdateDealDto {
 
   @IsInt() @IsOptional() @Min(0) @Max(100)
   probability?: number | null;
+
+  @IsString() @IsOptional()
+  accountId?: string | null;
 }
 
 export class CreateDealStageDto {

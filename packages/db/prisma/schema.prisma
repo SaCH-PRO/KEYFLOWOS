@@ -107,6 +107,7 @@ model Business {
   // Module Relationships
   members          Membership[]
   contacts         Contact[]
+  accounts         Account[]
   deals            Deal[]
   dealStages       DealStage[]
   wonLostReasons   WonLostReason[]
@@ -523,6 +524,8 @@ model Contact {
   momentumRecommendations MomentumRecommendation[]
   externalMappings    ContactExternalMapping[]
   deals               Deal[]
+  accountId           String?  @map("account_id")
+  account             Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
   customerJourney     CustomerJourney?
   journeyTouchpoints  JourneyTouchpoint[]
   whatsappContacts    WhatsAppContact[]
@@ -560,9 +563,45 @@ model Contact {
   @@index([businessId, archivedAt])
   @@index([businessId, ownerId])
   @@index([businessId, visibility])
+  @@index([businessId, accountId])
   @@unique([businessId, emailNormalized])
   @@unique([businessId, phoneNormalized])
   @@map("contacts")
+}
+
+/// Account / Company rollup. Multiple contacts and deals can belong to a single
+/// account so we can surface company-level KPIs (lifetime revenue, deal value,
+/// communication frequency, etc.). Flat structure for v1 — no parent/subsidiary.
+model Account {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name              String
+  /// Lower-cased domain extracted from website (used for de-dupe / email matching).
+  domain            String?
+  industry          String?
+  /// Free-text size band: SOLO | SMALL | MEDIUM | LARGE | ENTERPRISE.
+  size              String?
+  website           String?
+  primaryContactId  String?  @map("primary_contact_id")
+  ownerUserId       String?  @map("owner_user_id")
+  tags              String[] @default([])
+  notes             String?
+
+  contacts          Contact[]
+  deals             Deal[]
+
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt      @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  @@unique([businessId, domain])
+  @@index([businessId, name])
+  @@index([businessId, industry])
+  @@index([businessId, ownerUserId])
+  @@index([businessId, deletedAt])
+  @@map("accounts")
 }
 
 model DealStage {
@@ -593,6 +632,8 @@ model Deal {
   business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   contactId       String   @map("contact_id")
   contact         Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  accountId       String?  @map("account_id")
+  account         Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
 
   title           String
   description     String?
@@ -640,6 +681,7 @@ model Deal {
   @@index([businessId, ownerUserId])
   @@index([businessId, expectedCloseAt])
   @@index([contactId])
+  @@index([businessId, accountId])
   @@index([businessId, deletedAt])
   @@index([businessId, bottleneckFlag])
   @@map("deals")
