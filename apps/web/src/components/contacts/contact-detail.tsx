@@ -53,6 +53,7 @@ export type ContactDetailData = {
 
   custom?: Record<string, unknown> | null;
   createdAt?: string | null;
+  dataQualityScore?: number | null;
   meta?: {
     leadScore?: number | null;
     outstandingBalance?: number | null;
@@ -304,6 +305,7 @@ export function ContactDetail({
       >
         <ContactDetailHeader
           contact={contact}
+          businessId={businessId}
           isPinned={isPinned}
           onTogglePin={onTogglePin}
           onClose={onClose}

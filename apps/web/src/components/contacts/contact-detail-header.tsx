@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, DetailQuickAction } from "./contact-detail";
+import { DataQualityBadge } from "./data-quality-badge";
 
 const STATUS_COLORS: Record<string, string> = {
   LEAD: "hsl(var(--kf-accent1))",
@@ -118,6 +119,7 @@ interface ContactDetailHeaderProps {
   isPinned?: boolean;
   onTogglePin?: (id: string) => void;
   onClose?: () => void;
+  businessId?: string | null;
   onEdit?: () => void;
   onDelete?: () => void;
   onExport?: () => void;
@@ -133,6 +135,7 @@ export function ContactDetailHeader({
   isPinned,
   onTogglePin,
   onClose,
+  businessId,
   onEdit,
   onDelete,
   onExport,
@@ -212,6 +215,9 @@ export function ContactDetailHeader({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold">{fullName}</h2>
+              {businessId && (
+                <DataQualityBadge businessId={businessId} contactId={contact.id} score={contact.dataQualityScore ?? null} />
+              )}
               {onTogglePin && (
                 <button
                   onClick={() => onTogglePin(contact.id)}
