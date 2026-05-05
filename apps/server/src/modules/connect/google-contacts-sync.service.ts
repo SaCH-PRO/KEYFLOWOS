@@ -467,4 +467,130 @@ export class GoogleContactsSyncService {
       appliedRules: hasRules,
     };
   }
+
+  /**
+   * Push a local KEYFLOW contact up to Google People API. Mirrors
+   * OutlookContactsSyncService.pushContact so ContactSyncService can replicate
+   * local edits to Google for any contact mapped via google_contacts.
+   * Returns the external resourceName, or null if not mapped / failed.
+   */
+  async pushContact(businessId: string, contactId: string): Promise<string | null> {
+    const token = await this.accessToken(businessId);
+    const contact = await this.prisma.client.contact.findUnique({
+      where: { id: contactId },
+      select: {
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        companyName: true,
+        jobTitle: true,
+        deletedAt: true,
+      },
+    });
+    if (!contact) return null;
+    const mapping = await this.prisma.client.contactExternalMapping.findFirst({
+      where: { businessId, contactId, source: 'google_contacts' },
+    });
+
+    if (contact.deletedAt && mapping) {
+      // People API uses resourceName (e.g. people/c123). DELETE expects
+      // /v1/{resourceName}:deleteContact.
+      await fetch(
+        `https://people.googleapis.com/v1/${encodeURIComponent(mapping.externalId)}:deleteContact`,
+        { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } },
+      ).catch(() => undefined);
+      await this.prisma.client.contactExternalMapping
+        .delete({ where: { id: mapping.id } })
+        .catch(() => undefined);
+      return null;
+    }
+
+    const body: Record<string, unknown> = {
+      names: [
+        {
+          givenName: contact.firstName ?? undefined,
+          familyName: contact.lastName ?? undefined,
+        },
+      ],
+      emailAddresses: contact.email ? [{ value: contact.email }] : [],
+      phoneNumbers: contact.phone ? [{ value: contact.phone }] : [],
+      organizations:
+        contact.companyName || contact.jobTitle
+          ? [{ name: contact.companyName ?? undefined, title: contact.jobTitle ?? undefined }]
+          : [],
+    };
+
+    if (mapping) {
+      const updateMask = 'names,emailAddresses,phoneNumbers,organizations';
+      // People API requires the latest etag for updates; fetch it first.
+      const get = await fetch(
+        `https://people.googleapis.com/v1/${encodeURIComponent(mapping.externalId)}?personFields=metadata`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      let etag: string | undefined;
+      if (get.ok) {
+        const j = (await get.json()) as { etag?: string };
+        etag = j.etag;
+      }
+      const res = await fetch(
+        `https://people.googleapis.com/v1/${encodeURIComponent(mapping.externalId)}:updateContact?updatePersonFields=${updateMask}`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, ...(etag ? { etag } : {}) }),
+        },
+      );
+      if (!res.ok) {
+        this.logger.warn(`PATCH google contact failed: ${res.status}`);
+        return null;
+      }
+      return mapping.externalId;
+    }
+
+    const res = await fetch('https://people.googleapis.com/v1/people:createContact', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      this.logger.warn(`POST google contact failed: ${res.status}`);
+      return null;
+    }
+    const created = (await res.json()) as { resourceName?: string };
+    if (!created.resourceName) return null;
+    await this.prisma.client.contactExternalMapping
+      .create({
+        data: {
+          businessId,
+          contactId,
+          source: 'google_contacts',
+          externalId: created.resourceName,
+        },
+      })
+      .catch(() => undefined);
+    return created.resourceName;
+  }
+
+  /** Disconnect Google Contacts: clear tokens and mark connector_status. */
+  async disconnect(businessId: string): Promise<void> {
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: {
+        contactsAccessToken: null,
+        contactsRefreshToken: null,
+        contactsTokenExpiry: null,
+        contactsSyncToken: null,
+      },
+    });
+    await this.prisma.client.connectorStatus
+      .upsert({
+        where: {
+          businessId_connectorType: { businessId, connectorType: 'google_contacts' },
+        },
+        create: { businessId, connectorType: 'google_contacts', status: 'disconnected' },
+        update: { status: 'disconnected', connectedAt: null },
+      })
+      .catch(() => undefined);
+  }
 }

@@ -311,6 +311,17 @@ model Business {
   contactsLastSyncAt   DateTime? @map("contacts_last_sync_at")
   contactsSyncToken    String?   @map("contacts_sync_token")
 
+  // Microsoft / Outlook Contacts Integration (M6)
+  msContactsEmail        String?   @map("ms_contacts_email")
+  msContactsAccessToken  String?   @map("ms_contacts_access_token")
+  msContactsRefreshToken String?   @map("ms_contacts_refresh_token")
+  msContactsTokenExpiry  DateTime? @map("ms_contacts_token_expiry")
+  msContactsLastSyncAt   DateTime? @map("ms_contacts_last_sync_at")
+  msContactsDeltaLink    String?   @map("ms_contacts_delta_link")
+
+  // Email signature parsing settings (M6)
+  signatureParsingEnabled Boolean @default(false) @map("signature_parsing_enabled")
+
   // Google Business Profile
   bpEmail         String?   @map("bp_email")
   bpAccessToken   String?   @map("bp_access_token")
@@ -704,6 +715,23 @@ model ContactExternalMapping {
   @@unique([businessId, source, externalId])
   @@index([contactId])
   @@map("contact_external_mappings")
+}
+
+model ContactSyncAudit {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  contactId    String?  @map("contact_id")
+  source       String   // google_contacts | outlook_contacts | signature
+  externalId   String?  @map("external_id")
+  action       String   // imported | updated | deleted | conflict_resolved | enriched_from_signature | created_from_signature
+  resolution   String?  // most_recent_write_wins | local_kept | external_kept | merged
+  fieldsChanged String[] @default([]) @map("fields_changed")
+  detail       Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, source, createdAt])
+  @@index([businessId, contactId])
+  @@map("contact_sync_audits")
 }
 
 model CalendarSyncConflict {

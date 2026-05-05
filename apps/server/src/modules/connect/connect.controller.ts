@@ -23,6 +23,12 @@ import {
   GoogleContactsSyncService,
   ContactMappingRules,
 } from './google-contacts-sync.service';
+import {
+  OutlookContactsSyncService,
+  OutlookContactMappingRules,
+} from './outlook-contacts-sync.service';
+import { ContactSyncService } from './contact-sync.service';
+import { SignatureParserService } from './signature-parser.service';
 import { GoogleBusinessProfileService } from './google-business-profile.service';
 import {
   ConnectorFormMappingService,
@@ -44,6 +50,9 @@ export class ConnectController {
     @Inject(GoogleFormsService) private readonly forms: GoogleFormsService,
     @Inject(GoogleFormsMappingService) private readonly formsMapping: GoogleFormsMappingService,
     @Inject(GoogleContactsSyncService) private readonly contacts: GoogleContactsSyncService,
+    @Inject(OutlookContactsSyncService) private readonly outlook: OutlookContactsSyncService,
+    @Inject(ContactSyncService) private readonly contactSync: ContactSyncService,
+    @Inject(SignatureParserService) private readonly signatures: SignatureParserService,
     @Inject(GoogleBusinessProfileService) private readonly bp: GoogleBusinessProfileService,
     @Inject(ConnectorFormMappingService)
     private readonly connectorForms: ConnectorFormMappingService,
@@ -241,6 +250,94 @@ export class ConnectController {
     @Body() body: Partial<ContactMappingRules>,
   ) {
     return this.contacts.saveMappingRules(businessId, body ?? {});
+  }
+
+  // ----- Outlook Contacts -----
+  @Post('businesses/:businessId/outlook-contacts/sync')
+  syncOutlookContacts(@Param('businessId') businessId: string) {
+    return this.outlook.sync(businessId);
+  }
+
+  @Get('businesses/:businessId/outlook-contacts/status')
+  getOutlookStatus(@Param('businessId') businessId: string) {
+    return this.outlook.getStatus(businessId);
+  }
+
+  @Get('businesses/:businessId/outlook-contacts/recent')
+  getOutlookRecent(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.outlook.getRecent(businessId, limit ? Number(limit) : undefined);
+  }
+
+  @Get('businesses/:businessId/outlook-contacts/mapping-rules')
+  getOutlookRules(@Param('businessId') businessId: string) {
+    return this.outlook.getMappingRules(businessId);
+  }
+
+  @Put('businesses/:businessId/outlook-contacts/mapping-rules')
+  saveOutlookRules(
+    @Param('businessId') businessId: string,
+    @Body() body: Partial<OutlookContactMappingRules>,
+  ) {
+    return this.outlook.saveMappingRules(businessId, body ?? {});
+  }
+
+  // ----- Cross-Source Contact Sync -----
+  @Get('businesses/:businessId/contact-sources/summary')
+  getContactSourcesSummary(@Param('businessId') businessId: string) {
+    return this.contactSync.getSummary(businessId);
+  }
+
+  @Post('businesses/:businessId/contact-sources/sync-all')
+  syncAllSources(@Param('businessId') businessId: string) {
+    return this.contactSync.syncAll(businessId);
+  }
+
+  @Get('businesses/:businessId/contact-sources/audit')
+  getContactSourcesAudit(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.contactSync.listAudit(businessId, limit ? Number(limit) : undefined);
+  }
+
+  @Put('businesses/:businessId/contact-sources/signature-parsing')
+  setSignatureParsing(
+    @Param('businessId') businessId: string,
+    @Body() body: { enabled: boolean },
+  ) {
+    return this.contactSync.setSignatureParsingEnabled(businessId, !!body?.enabled);
+  }
+
+  @Post('businesses/:businessId/contact-sources/:source/resync')
+  resyncSource(
+    @Param('businessId') businessId: string,
+    @Param('source') source: string,
+  ) {
+    if (source === 'google_contacts') return this.contacts.sync(businessId);
+    if (source === 'outlook_contacts') return this.outlook.sync(businessId);
+    throw new BadRequestException(`Unknown source "${source}"`);
+  }
+
+  @Delete('businesses/:businessId/contact-sources/:source')
+  disconnectSource(
+    @Param('businessId') businessId: string,
+    @Param('source') source: string,
+  ) {
+    if (source === 'google_contacts') return this.contacts.disconnect(businessId);
+    if (source === 'outlook_contacts') return this.outlook.disconnect(businessId);
+    throw new BadRequestException(`Unknown source "${source}"`);
+  }
+
+  @Post('businesses/:businessId/contact-sources/parse-signature')
+  parseSignature(
+    @Param('businessId') businessId: string,
+    @Body() body: { emailBody: string },
+  ) {
+    if (!body?.emailBody) throw new BadRequestException('emailBody required');
+    return this.signatures.parseAndApply(businessId, body.emailBody);
   }
 
   // ----- Business Profile -----
