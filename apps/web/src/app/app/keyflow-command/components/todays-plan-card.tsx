@@ -40,7 +40,7 @@ export function TodaysPlanCard({ businessId }: Props) {
     <div className="kf-card p-4 space-y-3">
       <div className="flex items-center gap-2">
         <Sparkles className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-        <h3 className="text-sm font-semibold">Today's Plan</h3>
+        <h3 className="text-sm font-semibold">Today&apos;s Plan</h3>
         <span className="text-[10px] text-muted-foreground">AI · refreshes hourly</span>
         <button
           type="button"

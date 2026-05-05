@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { Button } from "@keyflow/ui";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
+import { initPresence, trackPageView, pickBusinessId } from "@/app/_lib/presence-sdk";
 import { formatPrice } from "@/lib/format";
 import { PublicPageState } from "@/components/ui/public-page-state";
 import {
@@ -163,6 +164,12 @@ function PublicPaymentPageInner() {
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    initPresence({ apiBase: API_BASE });
+    const bizId = pickBusinessId(invoice);
+    if (bizId) trackPageView(bizId);
+  }, [invoice]);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [paid, setPaid] = useState(false);

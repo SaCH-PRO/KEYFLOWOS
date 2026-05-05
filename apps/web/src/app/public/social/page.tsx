@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge, Button, Card, Input } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
+import { initPresence, trackPageView } from "@/app/_lib/presence-sdk";
 
 type SocialPostResponse = {
   id?: string;
@@ -12,6 +13,11 @@ type SocialPostResponse = {
 
 export default function PublicSocialPage() {
   const [businessId, setBusinessId] = useState("");
+
+  useEffect(() => {
+    initPresence({ apiBase: API_BASE });
+    if (businessId) trackPageView(businessId);
+  }, [businessId]);
   const [postId, setPostId] = useState("");
   const [content, setContent] = useState("");
   const [mediaUrls, setMediaUrls] = useState("");

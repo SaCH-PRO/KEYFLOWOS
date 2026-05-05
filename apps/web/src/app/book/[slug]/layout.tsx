@@ -1,4 +1,5 @@
 import type { Metadata, ResolvingMetadata } from "next";
+import { PresenceTracker } from "../../_lib/PresenceTracker";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -78,6 +79,13 @@ export async function generateMetadata(
   };
 }
 
-export default function BookingLayout({ children }: Props) {
-  return <>{children}</>;
+export default async function BookingLayout({ params, children }: Props) {
+  const { slug } = await params;
+  const biz = await fetchBusiness(slug);
+  return (
+    <>
+      <PresenceTracker businessId={biz?.id ?? null} />
+      {children}
+    </>
+  );
 }

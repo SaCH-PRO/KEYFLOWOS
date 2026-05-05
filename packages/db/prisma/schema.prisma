@@ -121,6 +121,9 @@ model Business {
   bookings         Booking[]
   contactEvents    ContactEvent[]
   publicVisitorEvents PublicVisitorEvent[]
+  publicEvents        PublicEvent[]
+  publicVisitors      PublicVisitor[]
+  presenceDailyStats  PresenceDailyStat[]
   contactChannelStats ContactChannelStat[]
   contactNotes     ContactNote[]
   contactTasks     ContactTask[]
@@ -5773,4 +5776,82 @@ model PublicVisitorEvent {
   @@index([businessId, contactId])
   @@index([businessId, type, createdAt])
   @@map("public_visitor_events")
+}
+
+/// First-party public-page event capture (S4). Schema-level superset of
+/// PublicVisitorEvent — `PublicEvent` is the raw, batched ingestion table
+/// from the browser SDK (page views, item views, clicks, share, etc).
+/// Nightly aggregation rolls these up into PresenceDailyStat. Raw events
+/// are subject to TTL-based cleanup (default 90 days).
+model PublicEvent {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  visitorId  String   @map("visitor_id")
+  sessionId  String?  @map("session_id")
+  contactId  String?  @map("contact_id")
+  type       String
+  path       String?
+  source     String?  // utm_source or referrer host
+  medium     String?  // utm_medium
+  campaign   String?  // utm_campaign
+  referrer   String?
+  payload    Json     @default("{}")
+  ipHash     String?  @map("ip_hash")
+  ts         DateTime @default(now())
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, ts])
+  @@index([businessId, type, ts])
+  @@index([businessId, visitorId])
+  @@index([businessId, sessionId])
+  @@map("public_events")
+}
+
+/// Persistent first-touch attribution for an anonymous visitor cookie.
+/// Created on first PublicEvent and propagated to any Contact created via
+/// storefront flows (S2 hand-off).
+model PublicVisitor {
+  businessId    String   @map("business_id")
+  visitorId     String   @map("visitor_id") // value of kf_vid cookie
+  firstSource   String?  @map("first_source")
+  firstMedium   String?  @map("first_medium")
+  firstCampaign String?  @map("first_campaign")
+  firstReferrer String?  @map("first_referrer")
+  firstPath     String?  @map("first_path")
+  firstSeenAt   DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime @default(now()) @map("last_seen_at")
+  contactId     String?  @map("contact_id")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@id([businessId, visitorId])
+  @@index([businessId, lastSeenAt])
+  @@index([businessId, contactId])
+  @@map("public_visitors")
+}
+
+/// Daily roll-up of public events per business / metric / dimension.
+/// `metric` is one of: visit, view, conv_started, conv_completed,
+/// share, whatsapp_click, form_submit, etc. `dimension` describes how
+/// `dimKey` is keyed: 'all' | 'page' | 'product' | 'service' | 'source'
+/// | 'medium' | 'campaign' | 'referrer'.
+model PresenceDailyStat {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  day        DateTime @db.Date
+  metric     String
+  dimension  String
+  dimKey     String   @map("dim_key")
+  count      Int      @default(0)
+  uniques    Int      @default(0)
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, day, metric, dimension, dimKey])
+  @@index([businessId, day])
+  @@index([businessId, metric, day])
+  @@map("presence_daily_stats")
 }
