@@ -11468,3 +11468,70 @@ export async function fetchPresenceCompleteness(businessId: string) {
   }>(`/site/presence/businesses/${encodeURIComponent(businessId)}/completeness`);
 }
 
+export interface PresenceOverviewResponse {
+  period: { days: number; since: string; until: string };
+  totals: Record<string, { count: number; uniques: number }>;
+  rawTotals: Record<string, number>;
+  series: Record<string, Array<{ day: string; count: number; uniques: number }>>;
+}
+
+export interface PresenceSourcesResponse {
+  period: { days: number };
+  sources: Record<string, Array<{ key: string; count: number; uniques: number }>>;
+}
+
+export interface PresencePagesResponse {
+  period: { days: number };
+  pages: Record<string, Array<{ key: string; count: number; uniques: number; metrics: Record<string, number> }>>;
+}
+
+export interface PresenceFunnelResponse {
+  period: { days: number };
+  totals: Record<string, number>;
+  stages: Array<{ metric: string; count: number; conversionFromPrev: number }>;
+}
+
+export async function fetchPresenceOverview(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  days = 30,
+  opts?: { signal?: AbortSignal },
+) {
+  return apiGetSimple<PresenceOverviewResponse>(
+    `/businesses/${encodeURIComponent(businessId)}/presence/stats/overview?days=${days}`,
+    { signal: opts?.signal },
+  );
+}
+
+export async function fetchPresenceSourcesReport(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  days = 30,
+  opts?: { signal?: AbortSignal },
+) {
+  return apiGetSimple<PresenceSourcesResponse>(
+    `/businesses/${encodeURIComponent(businessId)}/reports/presence/sources?days=${days}`,
+    { signal: opts?.signal },
+  );
+}
+
+export async function fetchPresencePagesReport(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  days = 30,
+  opts?: { signal?: AbortSignal },
+) {
+  return apiGetSimple<PresencePagesResponse>(
+    `/businesses/${encodeURIComponent(businessId)}/reports/presence/pages?days=${days}`,
+    { signal: opts?.signal },
+  );
+}
+
+export async function fetchPresenceFunnelReport(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  days = 30,
+  opts?: { signal?: AbortSignal },
+) {
+  return apiGetSimple<PresenceFunnelResponse>(
+    `/businesses/${encodeURIComponent(businessId)}/reports/presence/funnel?days=${days}`,
+    { signal: opts?.signal },
+  );
+}
+
