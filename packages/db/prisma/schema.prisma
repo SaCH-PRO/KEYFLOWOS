@@ -297,6 +297,7 @@ model Business {
   calendarSyncDirection String   @default("two_way") @map("calendar_sync_direction")
   calendarSyncEnabled   Boolean  @default(true) @map("calendar_sync_enabled")
   calendarSyncConflicts CalendarSyncConflict[]
+  calendarEvents        CalendarEvent[]
 
   // Google Drive Integration for document viewing/editing
   driveEmail        String?   @map("drive_email")
@@ -838,6 +839,72 @@ model CalendarSyncConflict {
   @@index([businessId, status])
   @@index([businessId, createdAt])
   @@map("calendar_sync_conflicts")
+}
+
+/// CalendarEvent — canonical projection of every scheduled / due / planned
+/// record across the product. See packages/shared/src/calendar-events.ts
+/// for the legal values of `type`, `module`, `status`, `priority`,
+/// `visibility`, `syncStatus`, and `sourceType`.
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+
+  /// One of CALENDAR_EVENT_TYPES (e.g. BOOKING, INVOICE_DUE, ...)
+  type        String
+  /// One of CALENDAR_EVENT_MODULES (e.g. BOOKINGS, REVENUE, ...)
+  module      String
+
+  startAt     DateTime  @map("start_at")
+  endAt       DateTime? @map("end_at")
+  allDay      Boolean   @default(false) @map("all_day")
+  timezone    String?
+
+  /// One of CALENDAR_EVENT_STATUSES
+  status      String    @default("SCHEDULED")
+  /// One of CALENDAR_EVENT_PRIORITIES
+  priority    String    @default("NORMAL")
+  color       String?
+  /// One of CALENDAR_EVENT_VISIBILITIES
+  visibility  String    @default("TEAM")
+
+  /// Origin model identifier (one of CALENDAR_SOURCE_TYPES)
+  sourceType  String    @map("source_type")
+  /// Primary key of the origin row
+  sourceId    String    @map("source_id")
+  sourceUrl   String?   @map("source_url")
+
+  contactId   String?   @map("contact_id")
+  staffId     String?   @map("staff_id")
+  assigneeId  String?   @map("assignee_id")
+
+  amount      Float?
+  currency    String?
+
+  meta        Json?
+
+  /// One of CALENDAR_SYNC_STATUSES
+  syncStatus       String    @default("LOCAL") @map("sync_status")
+  googleEventId    String?   @map("google_event_id")
+  googleCalendarId String?   @map("google_calendar_id")
+  lastSyncedAt     DateTime? @map("last_synced_at")
+  syncError        String?   @map("sync_error")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@unique([businessId, sourceType, sourceId])
+  @@index([businessId, startAt])
+  @@index([businessId, module, startAt])
+  @@index([businessId, type, startAt])
+  @@index([businessId, contactId])
+  @@index([businessId, staffId])
+  @@index([businessId, syncStatus])
+  @@map("calendar_events")
 }
 
 model ConnectorStatus {

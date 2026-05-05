@@ -22,7 +22,6 @@ import {
   sendContactReply,
   subscribeContactConversationStream,
   fetchConversationSummary,
-  regenerateConversationSummary,
   fetchSuggestedReplies,
   fetchConversationInsights,
   type ConversationEntry,
@@ -193,7 +192,9 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
   }, [contact.id]);
 
   useEffect(() => {
-    void loadSummary(false);
+    queueMicrotask(() => {
+      void loadSummary(false);
+    });
   }, [loadSummary]);
 
   // Load per-message insights whenever entries change.
@@ -224,7 +225,7 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
     setSuggestions(res.data.replies ?? []);
   };
 
-  const useSuggestion = (s: SuggestedReply) => {
+  const applySuggestion = (s: SuggestedReply) => {
     setComposer(s.body);
     if (s.channel === "whatsapp" || s.channel === "email" || s.channel === "sms" || s.channel === "call" || s.channel === "note" || s.channel === "meeting") {
       setComposerChannel(s.channel);
@@ -495,7 +496,7 @@ export function ConversationsTabPanel({ contact, businessId }: ConversationsTabP
                 <button
                   key={i}
                   type="button"
-                  onClick={() => useSuggestion(s)}
+                  onClick={() => applySuggestion(s)}
                   className="w-full text-left rounded-lg border border-[hsl(var(--kf-accent2))]/20 bg-[hsl(var(--kf-accent2))]/[0.04] p-2 hover:bg-[hsl(var(--kf-accent2))]/[0.08] transition-colors"
                 >
                   <div className="flex items-center gap-1.5 mb-1">

@@ -52,6 +52,7 @@ import { ConnectModule } from './modules/connect/connect.module';
 import { SeoModule } from './modules/seo/seo.module';
 import { GrowthIntelligenceModule } from './modules/growth-intelligence/growth-intelligence.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
+import { CalendarModule } from './modules/calendar/calendar.module';
 
 @Module({
   imports: [
@@ -105,6 +106,7 @@ import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module
     SeoModule,
     GrowthIntelligenceModule,
     FeatureFlagsModule,
+    CalendarModule,
   ],
   controllers: [AppController],
   providers: [
