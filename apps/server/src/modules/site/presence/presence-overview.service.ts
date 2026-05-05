@@ -4,6 +4,7 @@ import { PrismaService } from '../../../core/prisma/prisma.service';
 import { PresenceService } from './presence.service';
 import { RevenueActionService } from '../../commerce/revenue-action.service';
 import { StoreOrderService } from '../store-order.service';
+import { PresenceStatsService, PRESENCE_METRICS } from '../../public-events/presence-stats.service';
 
 /**
  * Presence Command Center backend.
@@ -60,12 +61,6 @@ export interface PresenceHealthScore {
   checks: PresenceHealthCheck[];
 }
 
-interface StorefrontEvent {
-  type: string;
-  itemId?: string;
-  timestamp: string;
-}
-
 @Injectable()
 export class PresenceOverviewService {
   private readonly logger = new Logger(PresenceOverviewService.name);
@@ -75,6 +70,7 @@ export class PresenceOverviewService {
     @Inject(PresenceService) private readonly presence: PresenceService,
     @Inject(RevenueActionService) private readonly revenueActions: RevenueActionService,
     @Inject(StoreOrderService) private readonly storeOrders: StoreOrderService,
+    @Inject(PresenceStatsService) private readonly presenceStats: PresenceStatsService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -87,34 +83,123 @@ export class PresenceOverviewService {
       select: {
         id: true, name: true, slug: true, whatsapp: true, phone: true,
         email: true, address: true, businessHours: true, storeEnabled: true,
-        metaData: true,
       },
     });
     if (!business) throw new NotFoundException('Business not found');
 
-    const since = new Date();
-    since.setDate(since.getDate() - days);
+    // Canonical analytics from PresenceDailyStat. We normalize the
+    // window to UTC-day buckets (the same buckets PresenceDailyStat
+    // uses) and split: aggregated rows for [since, todayStart) plus
+    // raw PublicEvent rows for the current incomplete UTC day. The two
+    // ranges are disjoint so totals are additive — no double counting,
+    // no gap before the nightly aggregator runs.
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const since = new Date(todayStart);
+    since.setUTCDate(since.getUTCDate() - (days - 1));
 
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    const events: StorefrontEvent[] = Array.isArray(meta.storefrontEvents) ? meta.storefrontEvents : [];
-    const recentEvents = events.filter((e) => {
-      try { return new Date(e.timestamp).getTime() >= since.getTime(); } catch { return false; }
-    });
-    const eventCounts: Record<string, number> = {};
-    for (const e of recentEvents) eventCounts[e.type] = (eventCounts[e.type] ?? 0) + 1;
+    // Visit-event types map to PRESENCE_METRICS.visit — used to compute
+    // period-level distinct visitor counts from raw events.
+    const visitEventTypes = ['page_view'];
 
-    const visits = eventCounts['page_view'] ?? 0;
-    const checkoutStarts = eventCounts['checkout_start'] ?? 0;
-    const checkoutCompletes = eventCounts['checkout_complete'] ?? 0;
-    const abandoned = Math.max(0, checkoutStarts - checkoutCompletes);
-    const shareClicks = (eventCounts['share_click'] ?? 0) + (eventCounts['share'] ?? 0);
-    const whatsappClicks = eventCounts['whatsapp_click'] ?? 0;
+    const [aggRows, itemAggRows, todayRaw, periodDistinctVisitors] = await Promise.all([
+      this.prisma.client.presenceDailyStat.findMany({
+        where: { businessId, day: { gte: since, lt: todayStart }, dimension: 'all' },
+        select: { metric: true, count: true, uniques: true },
+      }),
+      this.prisma.client.presenceDailyStat.findMany({
+        where: {
+          businessId,
+          day: { gte: since, lt: todayStart },
+          dimension: { in: ['product', 'service'] },
+        },
+        select: { dimension: true, dimKey: true, metric: true, count: true },
+      }),
+      this.prisma.client.publicEvent.findMany({
+        where: { businessId, ts: { gte: todayStart } },
+        select: {
+          type: true, visitorId: true, payload: true,
+        },
+      }),
+      // True period-level unique visitor count: distinct visitorIds for
+      // visit-type events across the entire selected window. Raw events
+      // are retained for 90d (>= our max selectable window), so this
+      // gives an accurate dedupe across days.
+      this.prisma.client.publicEvent.findMany({
+        where: {
+          businessId,
+          ts: { gte: since },
+          type: { in: visitEventTypes },
+        },
+        select: { visitorId: true },
+        distinct: ['visitorId'],
+      }),
+    ]);
 
-    // Top item by views from raw event log (item-level analytics live here).
+    // Merge aggregated 'all' counts with today's raw events (additive).
+    // Aggregated rows cover [since, todayStart); raw events cover today
+    // only — the two windows are disjoint so we can sum counts directly.
+    const totals: Record<string, number> = {};
+    for (const r of aggRows) totals[r.metric] = (totals[r.metric] ?? 0) + r.count;
+    for (const ev of todayRaw) {
+      const m = this.presenceStats.metricForType(ev.type);
+      if (!m) continue;
+      totals[m] = (totals[m] ?? 0) + 1;
+    }
+    const metricCount = (m: string) => totals[m] ?? 0;
+
+    // True period-level distinct visitors (deduped across days) come
+    // from raw PublicEvent rows for the whole window.
+    const visits = periodDistinctVisitors.length || metricCount(PRESENCE_METRICS.visit);
+    const checkoutStarts = metricCount(PRESENCE_METRICS.checkoutStart);
+    const checkoutCompletes = metricCount(PRESENCE_METRICS.checkoutComplete);
+    const bookingStarts = metricCount(PRESENCE_METRICS.bookingStart);
+    const bookingCompletes = metricCount(PRESENCE_METRICS.bookingComplete);
+    const abandoned = Math.max(0, checkoutStarts - checkoutCompletes)
+      + Math.max(0, bookingStarts - bookingCompletes);
+    const shareClicks = metricCount(PRESENCE_METRICS.shareClick);
+    const whatsappClicks = metricCount(PRESENCE_METRICS.whatsappClick);
+
+    // Item-level views & canonical service bookings from PresenceDailyStat,
+    // additively merged with today's raw events.
     const itemViewCounts = new Map<string, number>();
-    for (const e of recentEvents) {
-      if ((e.type === 'item_view' || e.type === 'product_view' || e.type === 'service_view') && e.itemId) {
-        itemViewCounts.set(e.itemId, (itemViewCounts.get(e.itemId) ?? 0) + 1);
+    const canonicalServiceBookings = new Map<string, number>();
+    const addItemView = (id: string, n: number) =>
+      itemViewCounts.set(id, (itemViewCounts.get(id) ?? 0) + n);
+    const addServiceBooking = (id: string, n: number) =>
+      canonicalServiceBookings.set(id, (canonicalServiceBookings.get(id) ?? 0) + n);
+
+    for (const r of itemAggRows) {
+      if (r.dimension === 'product') {
+        if (r.metric === PRESENCE_METRICS.productView || r.metric === PRESENCE_METRICS.view) {
+          addItemView(r.dimKey, r.count);
+        }
+      } else if (r.dimension === 'service') {
+        if (r.metric === PRESENCE_METRICS.serviceView || r.metric === PRESENCE_METRICS.view) {
+          addItemView(r.dimKey, r.count);
+        }
+        // Use booking_complete only — counting both start + complete
+        // would double-count a single booking flow.
+        if (r.metric === PRESENCE_METRICS.bookingComplete) {
+          addServiceBooking(r.dimKey, r.count);
+        }
+      }
+    }
+    for (const ev of todayRaw) {
+      const m = this.presenceStats.metricForType(ev.type);
+      if (!m) continue;
+      const payload = (ev.payload && typeof ev.payload === 'object' && !Array.isArray(ev.payload))
+        ? (ev.payload as Record<string, unknown>)
+        : {};
+      const productId = typeof payload.productId === 'string' ? payload.productId
+        : (typeof payload.itemId === 'string' && (m === PRESENCE_METRICS.productView || m === PRESENCE_METRICS.view) ? payload.itemId : null);
+      const serviceId = typeof payload.serviceId === 'string' ? payload.serviceId : null;
+      if (productId && (m === PRESENCE_METRICS.productView || m === PRESENCE_METRICS.view)) {
+        addItemView(productId, 1);
+      }
+      if (serviceId) {
+        if (m === PRESENCE_METRICS.serviceView || m === PRESENCE_METRICS.view) addItemView(serviceId, 1);
+        if (m === PRESENCE_METRICS.bookingComplete) addServiceBooking(serviceId, 1);
       }
     }
 
@@ -172,8 +257,10 @@ export class PresenceOverviewService {
     const bookingsCreated = bookingsInPeriod.length;
     const ordersCreated = ordersInPeriod.length;
 
-    const conversions = bookingsCreated + ordersCreated;
-    const conversionRate = visits > 0 ? Math.min(1, conversions / visits) : 0;
+    // Canonical conversion: completed checkouts + completed bookings out
+    // of unique visitors, both sourced from PresenceDailyStat.
+    const canonicalConversions = checkoutCompletes + bookingCompletes;
+    const conversionRate = visits > 0 ? Math.min(1, canonicalConversions / visits) : 0;
 
     // Top product/service by views with sales fallback so we still have
     // something useful to show before public analytics ingestion lands.
@@ -181,7 +268,7 @@ export class PresenceOverviewService {
     const serviceById = new Map(services.map((s) => [s.id, s]));
 
     const topProduct = pickTop(itemViewCounts, productOrderCounts, products.map((p) => p.id));
-    const topService = pickTop(itemViewCounts, new Map(bookingsInPeriod.filter((b) => b.serviceId).map((b) => [b.serviceId!, 1])), services.map((s) => s.id));
+    const topService = pickTop(itemViewCounts, canonicalServiceBookings, services.map((s) => s.id));
 
     // Find products with views but no sales — surfaces an action card.
     const viewedNoSales: { id: string; name: string; views: number }[] = [];
@@ -195,13 +282,12 @@ export class PresenceOverviewService {
     }
     viewedNoSales.sort((a, b) => b.views - a.views);
 
-    // Find popular services without a deposit configured.
-    const serviceBookingCount = new Map<string, number>();
-    for (const b of bookingsInPeriod) {
-      if (b.serviceId) serviceBookingCount.set(b.serviceId, (serviceBookingCount.get(b.serviceId) ?? 0) + 1);
-    }
+    // Find popular services without a deposit configured. Popularity is
+    // sourced from canonical PresenceDailyStat booking_complete /
+    // booking_start counts on the service dimension (already merged with
+    // today's raw events above).
     const popularNoDeposit: { id: string; name: string; bookings: number }[] = [];
-    for (const [id, count] of serviceBookingCount.entries()) {
+    for (const [id, count] of canonicalServiceBookings.entries()) {
       const svc = serviceById.get(id);
       if (!svc) continue;
       if (count >= 3 && (!svc.depositAmount || Number(svc.depositAmount) === 0)) {
@@ -262,7 +348,7 @@ export class PresenceOverviewService {
         id: topService,
         name: serviceById.get(topService)?.name ?? 'Service',
         views: itemViewCounts.get(topService) ?? 0,
-        bookings: serviceBookingCount.get(topService) ?? 0,
+        bookings: canonicalServiceBookings.get(topService) ?? 0,
       } : null,
       health,
       actionCards: cards,
