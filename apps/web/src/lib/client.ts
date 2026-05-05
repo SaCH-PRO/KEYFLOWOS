@@ -11535,3 +11535,128 @@ export async function fetchPresenceFunnelReport(
   );
 }
 
+
+// ============================================================
+// R3: Revenue Action Queue
+// ============================================================
+
+export type RevenueActionStatus = "PENDING" | "COMPLETED" | "DISMISSED" | "SNOOZED";
+export type RevenueActionType =
+  | "OVERDUE_INVOICE"
+  | "STALE_QUOTE"
+  | "ACCEPTED_QUOTE_NO_INVOICE"
+  | "PAID_INVOICE_NO_RECEIPT"
+  | "RECURRING_FAILURE"
+  | "DORMANT_HIGH_VALUE";
+
+export interface RevenueActionRecommendation {
+  explanation: string;
+  suggestedAction: string;
+  draft?: { subject?: string; body?: string };
+  source: "ai" | "template";
+}
+
+export interface RevenueAction {
+  id: string;
+  businessId: string;
+  contactId: string | null;
+  type: RevenueActionType;
+  title: string;
+  detail: string | null;
+  priority: number;
+  status: RevenueActionStatus;
+  dueAt: string | null;
+  snoozedUntil: string | null;
+  relatedType: string | null;
+  relatedId: string | null;
+  amountAtRisk: number | null;
+  recommendation: RevenueActionRecommendation | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RevenueOverviewKpis {
+  collectedThisMonth: number;
+  outstanding: number;
+  outstandingCount: number;
+  overdue: number;
+  overdueCount: number;
+  quotePipeline: number;
+  quoteCount: number;
+  recurringExpected: number;
+  recurringActive: number;
+  cashCollectionRate: number;
+}
+
+export interface RevenuePulseWeek {
+  weekStart: string;
+  collected: number;
+  billed: number;
+  outstanding: number;
+}
+
+export interface RevenueOverview {
+  kpis: RevenueOverviewKpis;
+  pulse: RevenuePulseWeek[];
+  top: RevenueAction[];
+}
+
+export async function fetchRevenueActions(
+  businessId: string,
+  opts: { status?: RevenueActionStatus | "ALL"; limit?: number } = {},
+) {
+  const qs = new URLSearchParams();
+  if (opts.status) qs.set("status", opts.status);
+  if (opts.limit) qs.set("limit", String(opts.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiGetSimple<{ items: RevenueAction[] }>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-actions${suffix}`,
+  );
+}
+
+export async function fetchRevenueOverview(businessId: string) {
+  return apiGetSimple<RevenueOverview>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-actions/overview`,
+  );
+}
+
+export async function reconcileRevenueActions(businessId: string) {
+  return apiPost<{ created: number }>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-actions/reconcile`,
+    body: {},
+  });
+}
+
+export async function completeRevenueAction(
+  businessId: string,
+  id: string,
+  resolution?: string,
+) {
+  return apiPost<RevenueAction>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-actions/${encodeURIComponent(id)}/complete`,
+    body: { resolution: resolution ?? null },
+  });
+}
+
+export async function dismissRevenueAction(
+  businessId: string,
+  id: string,
+  resolution?: string,
+) {
+  return apiPost<RevenueAction>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-actions/${encodeURIComponent(id)}/dismiss`,
+    body: { resolution: resolution ?? null },
+  });
+}
+
+export async function snoozeRevenueAction(
+  businessId: string,
+  id: string,
+  hours: number,
+) {
+  return apiPost<RevenueAction>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/revenue-actions/${encodeURIComponent(id)}/snooze`,
+    body: { hours },
+  });
+}

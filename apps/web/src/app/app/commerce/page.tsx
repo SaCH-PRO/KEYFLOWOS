@@ -20,7 +20,6 @@ import {
   Settings as SettingsIcon,
   BarChart3,
   Send,
-  CheckCircle2,
   Repeat,
   LayoutDashboard,
 } from "lucide-react";
@@ -57,6 +56,7 @@ import QuotesPanel from "./quotes/quotes-panel";
 import RecurringPanel from "./recurring/recurring-panel";
 import PaymentsTab from "./payments/payments-tab";
 import { CommerceOverviewTab } from "./components/commerce-overview-tab";
+import { RevenueActionsTab } from "./components/revenue-actions-tab";
 import { ServiceLinkWidget } from "./components/service-link-widget";
 
 type RevenueTabKey = "overview" | "quotes" | "invoices" | "payments" | "recurring" | "actions";
@@ -200,7 +200,7 @@ export default function CommercePage() {
     (key: string) => {
       const next = (VALID_TABS.has(key as RevenueTabKey) ? key : "overview") as RevenueTabKey;
       setActiveTab(next);
-      overview.handleTabChange(next === "actions" ? "invoices" : next);
+      overview.handleTabChange(next);
       const url = new URL(window.location.href);
       url.searchParams.set("tab", next);
       window.history.replaceState({}, "", url.toString());
@@ -790,83 +790,15 @@ export default function CommercePage() {
         <TabFrame
           loading={shell.loading}
           error={shell.error}
-          isEmpty={actionQueue.length === 0}
-          emptyIcon={CheckCircle2}
-          emptyTitle="No cashflow actions right now"
-          emptyDescription="Drafts, overdue invoices, and pending quotes will surface here so you can act quickly."
-          emptyActionLabel="Create a new invoice"
-          onEmptyAction={() => {
-            handleTabChange("invoices");
-            billing.setTriggerNewInvoice((n: number) => n + 1);
-          }}
         >
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 px-1">
-              <Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
-              <h3 className="text-xs font-semibold">Cashflow Action Queue</h3>
-              <span className="text-[10px] text-muted-foreground">
-                {actionQueue.length} item{actionQueue.length !== 1 ? "s" : ""} need attention
-              </span>
-            </div>
-            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {actionQueue.map((action) => (
-                <li
-                  key={action.id}
-                  className="flex items-center gap-2.5 p-3 rounded-xl border"
-                  style={{
-                    borderColor:
-                      action.urgency === "high"
-                        ? "hsl(var(--kf-error) / 0.25)"
-                        : action.urgency === "medium"
-                        ? "hsl(var(--kf-warning) / 0.2)"
-                        : "hsl(var(--border) / 0.4)",
-                    background:
-                      action.urgency === "high" ? "hsl(var(--kf-error) / 0.04)" : "hsl(var(--card))",
-                  }}
-                >
-                  <div
-                    className="p-1.5 rounded-lg shrink-0"
-                    style={{
-                      background:
-                        action.urgency === "high"
-                          ? "hsl(var(--kf-error) / 0.1)"
-                          : action.urgency === "medium"
-                          ? "hsl(var(--kf-warning) / 0.1)"
-                          : "hsl(var(--muted) / 0.15)",
-                    }}
-                  >
-                    <action.icon
-                      className="w-3.5 h-3.5"
-                      style={{
-                        color:
-                          action.urgency === "high"
-                            ? "hsl(var(--kf-error))"
-                            : action.urgency === "medium"
-                            ? "hsl(var(--kf-warning))"
-                            : "hsl(var(--muted-foreground))",
-                      }}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium truncate">{action.label}</p>
-                    {action.detail && <p className="text-[10px] text-muted-foreground">{action.detail}</p>}
-                  </div>
-                  <button
-                    onClick={action.onCta}
-                    className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg shrink-0 min-h-[32px]"
-                    style={{
-                      background: "hsl(var(--kf-accent1) / 0.1)",
-                      color: "hsl(var(--kf-accent1))",
-                      borderWidth: 1,
-                      borderColor: "hsl(var(--kf-accent1) / 0.15)",
-                    }}
-                  >
-                    {action.cta}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <RevenueActionsTab
+            businessId={businessId}
+            currency={businessCurrency}
+            onOpenInvoice={(id) => openRecordDrawer("invoice", id)}
+            onOpenQuote={(id) => openRecordDrawer("quote", id)}
+            onOpenContact={(id) => router.push(`/app/crm/contacts/${id}`)}
+            onNavigate={(t) => handleTabChange(t)}
+          />
         </TabFrame>
       )}
 
