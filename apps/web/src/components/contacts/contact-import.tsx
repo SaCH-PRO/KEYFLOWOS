@@ -20,8 +20,9 @@ import {
   Smartphone,
   Loader2,
 } from "lucide-react";
-import { getGoogleContactsAuthUrl, checkImportDuplicates } from "@/lib/client";
+import { getGoogleContactsAuthUrl, checkImportDuplicates, fetchDuplicateContacts } from "@/lib/client";
 import { toast } from "sonner";
+import Link from "next/link";
 
 type ImportMethod = "file" | "url" | "google" | "device";
 type FileType = "csv" | "xlsx" | "vcf";
@@ -33,7 +34,7 @@ interface DeviceContact {
 }
 
 interface ContactImportProps {
-  onImportFile: (type: FileType | "image", file: File) => Promise<void>;
+  onImportFile: (type: FileType | "image", file: File) => Promise<{ importId?: string } | void>;
   onImportLink: (url: string) => Promise<void>;
   onDeviceImport?: (contacts: { firstName?: string; lastName?: string; email?: string; phone?: string }[]) => Promise<void>;
   loading?: boolean;
@@ -295,6 +296,8 @@ export function ContactImport({ onImportFile, onImportLink, onDeviceImport, load
   } | null>(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [, setSkipDuplicates] = useState(false);
+  const [postImportDuplicateCount, setPostImportDuplicateCount] = useState(0);
+  const [postImportImportId, setPostImportImportId] = useState<string | null>(null);
   const [deviceSupported, setDeviceSupported] = useState(false);
   const [deviceLoading, setDeviceLoading] = useState(false);
   const [deviceSelected, setDeviceSelected] = useState<{ firstName?: string; lastName?: string; email?: string; phone?: string }[]>([]);
@@ -471,13 +474,27 @@ export function ContactImport({ onImportFile, onImportLink, onDeviceImport, load
   const handleFileImport = async () => {
     if (!file) return;
     try {
-      await onImportFile(fileType, file);
+      const result = await onImportFile(fileType, file);
       toast.success("Contacts imported successfully");
       setFile(null);
       setMappingState(null);
       setDuplicateResult(null);
       setSkipDuplicates(false);
       setUploadSuccess(true);
+      const importId = result && typeof result === "object" && "importId" in result ? result.importId ?? null : null;
+      setPostImportImportId(importId);
+      // Drive the post-import CTA from the actual server-side detection
+      // (5-rule scoring) scoped to this import, not the pre-import quick check.
+      if (businessId && importId) {
+        try {
+          const dupResp = await fetchDuplicateContacts(businessId, { importId, limit: 1, minConfidence: 0.5 });
+          setPostImportDuplicateCount(dupResp.data?.total ?? 0);
+        } catch {
+          setPostImportDuplicateCount(duplicateResult?.duplicateCount ?? 0);
+        }
+      } else {
+        setPostImportDuplicateCount(duplicateResult?.duplicateCount ?? 0);
+      }
       setTimeout(() => setUploadSuccess(false), 3000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Import failed";
@@ -542,6 +559,15 @@ export function ContactImport({ onImportFile, onImportLink, onDeviceImport, load
               <CheckCircle2 className="w-4 h-4" />
               Imported!
             </span>
+          )}
+          {postImportDuplicateCount > 0 && (
+            <Link
+              href={postImportImportId ? `/app/crm/duplicates?importId=${encodeURIComponent(postImportImportId)}` : "/app/crm/duplicates"}
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs px-2 py-1 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition-colors"
+            >
+              Review {postImportDuplicateCount} likely duplicate{postImportDuplicateCount !== 1 ? "s" : ""}
+            </Link>
           )}
           {expanded ? (
             <ChevronUp className="w-5 h-5 text-muted-foreground" />

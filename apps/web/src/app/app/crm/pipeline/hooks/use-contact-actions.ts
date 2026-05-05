@@ -370,9 +370,10 @@ export function useContactActions({
   const handleImportFile = useCallback(async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {
     if (!businessId) return;
     try {
-      await importContactsFromFile({ businessId, type, file });
+      const job = await importContactsFromFile({ businessId, type, file });
       void loadContacts();
       void loadFlowData();
+      return { importId: job?.id };
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Import failed";
       toast.error(msg);
