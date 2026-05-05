@@ -9,6 +9,9 @@ type PublicBusiness = {
   id: string; name: string; slug?: string | null; logoUrl?: string | null; tagline?: string | null;
   description?: string | null; address?: string | null; city?: string | null; country?: string | null;
   phone?: string | null; email?: string | null; whatsapp?: string | null;
+  website?: string | null;
+  facebook?: string | null; instagram?: string | null; twitter?: string | null;
+  linkedin?: string | null; tiktok?: string | null; youtube?: string | null;
 };
 
 type CatalogService = {
@@ -49,22 +52,53 @@ export function PresenceJsonLd({
   const heroSection = payload.sections.find((s) => s.type === "hero");
   const aboutSection = payload.sections.find((s) => s.type === "about");
   const url = payload.seo.canonicalUrl || `/site/${slug}`;
-  const ld = {
+  const description = payload.seo.metaDescription
+    || (aboutSection?.data?.body as string)
+    || business.description
+    || (heroSection?.data?.subheadline as string)
+    || undefined;
+  const image = payload.seo.socialImageUrl || business.logoUrl || payload.branding.logoUrl || undefined;
+  const sameAs = [
+    business.website,
+    business.facebook,
+    business.instagram,
+    business.twitter,
+    business.linkedin,
+    business.tiktok,
+    business.youtube,
+  ].filter((u): u is string => typeof u === "string" && u.length > 0);
+
+  const localBusinessLd = {
     "@context": "https://schema.org",
     "@type": "LocalBusiness",
     "@id": url,
     name: payload.seo.metaTitle || business.name,
-    description: payload.seo.metaDescription || (aboutSection?.data?.body as string) || business.description || (heroSection?.data?.subheadline as string) || undefined,
+    description,
     url,
-    image: payload.seo.socialImageUrl || business.logoUrl || payload.branding.logoUrl || undefined,
+    image,
     telephone: business.phone || undefined,
     email: business.email || undefined,
+    sameAs: sameAs.length ? sameAs : undefined,
     address: business.address ? {
       "@type": "PostalAddress",
       streetAddress: business.address,
       addressLocality: business.city || undefined,
       addressCountry: business.country || undefined,
     } : undefined,
+  };
+
+  // Organization is a sibling schema that crawlers (Google, LinkedIn,
+  // Twitter) prefer over LocalBusiness for "company" facts. Emitting
+  // both is the recommended pattern when a single entity is both.
+  const organizationLd = {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "@id": `${url}#org`,
+    name: business.name,
+    url,
+    logo: business.logoUrl || image,
+    description,
+    sameAs: sameAs.length ? sameAs : undefined,
   };
   const servicesVisible = payload.sections.some((s) => s.type === "services" && s.visible);
   const productsVisible = payload.sections.some((s) => s.type === "products" && s.visible);
@@ -92,6 +126,24 @@ export function PresenceJsonLd({
       }))
     : [];
 
+  // OfferCatalog wraps the service list in a single browseable catalog —
+  // this is the schema Google Rich Results recommends for a service-led
+  // business homepage. It cross-references each individual Service via @id.
+  const offerCatalogLd = servicesVisible && services.length > 0
+    ? {
+        "@context": "https://schema.org",
+        "@type": "OfferCatalog",
+        "@id": `${url}#service-catalog`,
+        name: `${business.name} services`,
+        itemListElement: services.map((svc) => ({
+          "@type": "Offer",
+          itemOffered: { "@id": `${url}#service-${svc.id}`, "@type": "Service", name: svc.name },
+          price: svc.price != null ? Number(svc.price) : undefined,
+          priceCurrency: svc.price != null ? "USD" : undefined,
+        })),
+      }
+    : null;
+
   const productLd = productsVisible
     ? products.map((p) => ({
         "@context": "https://schema.org",
@@ -117,7 +169,11 @@ export function PresenceJsonLd({
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJson(ld) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJson(localBusinessLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJson(organizationLd) }} />
+      {offerCatalogLd ? (
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJson(offerCatalogLd) }} />
+      ) : null}
       {serviceLd.map((s) => (
         <script
           key={s["@id"]}

@@ -5,6 +5,8 @@ import { PromoCodeService } from './promo-code.service';
 import { IntakeService } from './intake.service';
 import { QualificationService } from './qualification.service';
 import { StorefrontConversionService } from './storefront-conversion.service';
+import { CustomerReferralService } from './customer-referral.service';
+import { CaseStudyService } from './case-study.service';
 import { PaymentsService } from '../payments/payments.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -20,6 +22,8 @@ export class SiteController {
     @Inject(PromoCodeService) private readonly promoCodeService: PromoCodeService,
     @Inject(IntakeService) private readonly intakeService: IntakeService,
     @Inject(QualificationService) private readonly qualificationService: QualificationService,
+    @Inject(CustomerReferralService) private readonly customerReferralService: CustomerReferralService,
+    @Inject(CaseStudyService) private readonly caseStudyService: CaseStudyService,
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
     @Inject(StorefrontConversionService) private readonly conversionService: StorefrontConversionService,
   ) {}
@@ -525,5 +529,65 @@ export class SiteController {
     const { _hp: _hp, _t: _t, website_url: _wu, company_url: _cu, ...rest } = body ?? {};
     const cleanBody = sanitizeObject(rest, 5000);
     return this.qualificationService.submitAssetIntake(journeyId, cleanBody);
+  }
+
+  // -------------------------------------------------------------------------
+  // S5 — Customer referral surface (`/me/refer`).
+  // A customer with a confirmed booking or paid order can mint a personal
+  // referral link, scoped to a single storefront.
+  // -------------------------------------------------------------------------
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(10, 60_000)
+  @Post('storefront/public/:slug/customer-referral')
+  customerReferral(
+    @Param('slug') slug: string,
+    @Body() body: { email: string },
+  ) {
+    const cleanEmail = sanitize(body?.email ?? '', 320) ?? '';
+    return this.customerReferralService.getReferralForCustomer(slug, cleanEmail);
+  }
+
+  // -------------------------------------------------------------------------
+  // S5 — Consent-gated case studies. Drafts are generated from real
+  // platform data; publication requires explicit owner consent.
+  // -------------------------------------------------------------------------
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/case-studies')
+  listCaseStudies(@Param('businessId') businessId: string) {
+    return this.caseStudyService.list(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/case-studies/generate')
+  generateCaseStudy(@Param('businessId') businessId: string) {
+    return this.caseStudyService.generateDraft(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/case-studies/:caseStudyId/publish')
+  publishCaseStudy(
+    @Param('businessId') businessId: string,
+    @Param('caseStudyId') caseStudyId: string,
+    @Body() body: { consent: boolean },
+    // Best-effort user attribution; we don't fail if the request user is
+    // missing because BusinessGuard already proves admin authority.
+  ) {
+    return this.caseStudyService.publish(businessId, caseStudyId, { consent: !!body?.consent });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/case-studies/:caseStudyId/unpublish')
+  unpublishCaseStudy(
+    @Param('businessId') businessId: string,
+    @Param('caseStudyId') caseStudyId: string,
+  ) {
+    return this.caseStudyService.unpublish(businessId, caseStudyId);
+  }
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(60, 60_000)
+  @Get('storefront/public/:slug/case-studies')
+  publicCaseStudies(@Param('slug') slug: string) {
+    return this.caseStudyService.listPublic(slug);
   }
 }

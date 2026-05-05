@@ -989,6 +989,13 @@ export class SiteService {
     if (data.reviewText && data.reviewText.length > 2000) {
       throw new BadRequestException('Review text is too long');
     }
+    // Real-only reviews per S5: every review must be tied to a real
+    // confirmed booking/order. We require an email so we can match the
+    // review to the customer record on the original transaction; without
+    // it we cannot prove the review is genuine and we refuse it.
+    if (!data.customerEmail || data.customerEmail.trim().length === 0) {
+      throw new BadRequestException('Email is required to verify your purchase');
+    }
 
     const productExists = await this.prisma.client.product.findFirst({
       where: { id: data.productId, businessId: business.id, deletedAt: null },
@@ -1005,20 +1012,72 @@ export class SiteService {
       throw new BadRequestException('Product or service not found');
     }
 
+    // Verify the reviewer actually bought / booked the item. We accept
+    // either:
+    //   - a paid MarketplaceOrder for the productId/email combo, or
+    //   - a completed Booking for the serviceId/email combo, or
+    //   - the supplied orderReference matches a real order on this business.
+    // Reviews without verification are refused — synthetic reviews must
+    // not enter the system.
+    const normalizedEmail = data.customerEmail.trim().toLowerCase();
+    let verified = false;
+    let verifiedOrderRef: string | null = null;
+
+    if (productExists) {
+      const order = await this.prisma.client.marketplaceOrder.findFirst({
+        where: {
+          businessId: business.id,
+          customerEmail: { equals: normalizedEmail, mode: 'insensitive' },
+          paymentStatus: { in: ['PAID', 'COMPLETED'] },
+          items: { some: { productId: data.productId } },
+        },
+        select: { orderNumber: true },
+      });
+      if (order) { verified = true; verifiedOrderRef = order.orderNumber; }
+    } else if (serviceExists) {
+      const booking = await this.prisma.client.booking.findFirst({
+        where: {
+          businessId: business.id,
+          customerEmail: { equals: normalizedEmail, mode: 'insensitive' },
+          serviceId: data.productId,
+          status: 'COMPLETED',
+        },
+        select: { id: true },
+      });
+      if (booking) { verified = true; verifiedOrderRef = booking.id; }
+    }
+
+    if (!verified && data.orderReference) {
+      const ref = data.orderReference.trim();
+      const matched = await this.prisma.client.marketplaceOrder.findFirst({
+        where: { businessId: business.id, orderNumber: ref },
+        select: { orderNumber: true },
+      });
+      if (matched) { verified = true; verifiedOrderRef = matched.orderNumber; }
+    }
+
+    if (!verified) {
+      throw new BadRequestException(
+        'We could not match your email to a completed order or booking for this item. Reviews are only accepted from verified customers.',
+      );
+    }
+
     const review = await this.prisma.client.productReview.create({
       data: {
         productId: data.productId,
         businessId: business.id,
         customerName: data.customerName.trim().slice(0, 100),
-        customerEmail: data.customerEmail?.trim().slice(0, 255) || null,
+        customerEmail: normalizedEmail.slice(0, 255),
         rating: Math.round(data.rating),
         reviewText: data.reviewText?.trim().slice(0, 2000) || null,
-        status: 'PENDING',
-        orderReference: data.orderReference?.trim().slice(0, 100) || null,
+        // Verified-purchase reviews are auto-approved so they surface
+        // immediately; sellers can still moderate via the admin endpoint.
+        status: 'APPROVED',
+        orderReference: verifiedOrderRef ?? data.orderReference?.trim().slice(0, 100) ?? null,
       },
     });
 
-    return { id: review.id, status: review.status };
+    return { id: review.id, status: review.status, verified: true };
   }
 
   async getProductReviews(slug: string, productId: string) {

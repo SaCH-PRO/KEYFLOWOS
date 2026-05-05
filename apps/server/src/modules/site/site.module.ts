@@ -16,6 +16,8 @@ import { StorefrontConversionService } from './storefront-conversion.service';
 import { StorefrontConversionScheduler } from './storefront-conversion.scheduler';
 import { PresenceController } from './presence/presence.controller';
 import { PresenceService } from './presence/presence.service';
+import { CustomerReferralService } from './customer-referral.service';
+import { CaseStudyService } from './case-study.service';
 
 @Module({
   imports: [
@@ -28,7 +30,7 @@ import { PresenceService } from './presence/presence.service';
     forwardRef(() => PublicEventsModule),
   ],
   controllers: [SiteController, PresenceController],
-  providers: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService, StorefrontConversionService, StorefrontConversionScheduler, PresenceService],
-  exports: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService, StorefrontConversionService, PresenceService],
+  providers: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService, StorefrontConversionService, StorefrontConversionScheduler, PresenceService, CustomerReferralService, CaseStudyService],
+  exports: [SiteService, StoreOrderService, PromoCodeService, IntakeService, QualificationService, StorefrontConversionService, PresenceService, CustomerReferralService, CaseStudyService],
 })
 export class SiteModule {}
