@@ -72,6 +72,23 @@ function ctaButton(text: string, url: string, color?: string): string {
 </table>`;
 }
 
+function referralCta(referUrl: string, businessName: string, primaryColor?: string): string {
+  const accent = primaryColor || '#F97316';
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 8px;background-color:#0f172a;border:1px solid #1e293b;border-radius:12px;">
+<tr><td style="padding:20px 20px 8px;">
+<p style="margin:0 0 6px;color:#fafafa;font-size:15px;font-weight:600;">&#127873; Love ${escapeHtml(businessName)}? Refer a friend.</p>
+<p style="margin:0 0 8px;color:#a1a1aa;font-size:13px;line-height:1.55;">Share your personal referral link &mdash; we&rsquo;ve already filled in your details, so it only takes a tap.</p>
+</td></tr>
+<tr><td style="padding:0 20px 18px;">
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr><td style="background-color:${accent};border-radius:8px;padding:10px 20px;">
+<a href="${referUrl}" target="_blank" style="color:#ffffff;font-size:13px;font-weight:600;text-decoration:none;display:inline-block;">Get my referral link</a>
+</td></tr>
+</table>
+</td></tr>
+</table>`;
+}
+
 function formatDate(date: Date | string): string {
   const d = new Date(date);
   return d.toLocaleDateString('en-TT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -138,6 +155,7 @@ export function bookingConfirmedTemplate(ctx: TemplateContext & {
   location?: string | null;
   locationPlaceId?: string | null;
   locationLatLng?: { lat: number; lng: number } | null;
+  referUrl?: string;
 }): { subject: string; html: string } {
   const subject = `Your booking with ${ctx.businessName} is confirmed`;
   const hasBookingLocation = !!(
@@ -168,6 +186,7 @@ export function bookingConfirmedTemplate(ctx: TemplateContext & {
       ? locationLine({ text: ctx.businessAddress, label: hasBookingLocation ? 'Business' : 'Location' })
       : '',
     paragraph('We look forward to seeing you!'),
+    ctx.referUrl ? referralCta(ctx.referUrl, ctx.businessName, ctx.primaryColor) : '',
   ].join('');
   return { subject, html: baseLayout(ctx, subject, body) };
 }
@@ -339,6 +358,7 @@ export function orderConfirmedTemplate(ctx: TemplateContext & {
   currency: string;
   estimatedDelivery?: string;
   orderStatusUrl?: string;
+  referUrl?: string;
 }): { subject: string; html: string } {
   const subject = `Order ${ctx.orderNumber} confirmed — ${ctx.businessName}`;
   const itemRows = ctx.items.map(item =>
@@ -358,6 +378,7 @@ export function orderConfirmedTemplate(ctx: TemplateContext & {
     ].join('')),
     ctx.orderStatusUrl ? ctaButton('Track Your Order', ctx.orderStatusUrl) : '',
     paragraph('We\'ll send you updates as your order progresses.'),
+    ctx.referUrl ? referralCta(ctx.referUrl, ctx.businessName, ctx.primaryColor) : '',
   ].join('');
   return { subject, html: baseLayout(ctx, subject, body) };
 }
