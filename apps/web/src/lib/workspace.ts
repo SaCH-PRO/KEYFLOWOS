@@ -65,6 +65,7 @@ export function ensureTokenCookieMirror(): boolean {
 export interface CachedBusiness {
   id: string;
   name: string;
+  slug?: string | null;
   businessIntent?: string | null;
   archetype?: string | null;
   industry?: string | null;

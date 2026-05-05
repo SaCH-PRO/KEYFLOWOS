@@ -4,6 +4,7 @@ import { PresenceJsonLd } from "../_components/presence-jsonld";
 import { PresenceTracker } from "../../_lib/PresenceTracker";
 import { PoweredByKeyFlow } from "../_components/powered-by-keyflow";
 import { WhatsAppShare } from "../_components/whatsapp-share";
+import CaseStudiesSection, { type PublicCaseStudy } from "../_components/case-studies-section";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 const PUBLIC_BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? "";
@@ -18,6 +19,17 @@ async function fetchPublished(slug: string) {
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
+}
+
+async function fetchPublicCaseStudies(slug: string): Promise<PublicCaseStudy[]> {
+  try {
+    const res = await fetch(`${API_BASE}/site/storefront/public/${encodeURIComponent(slug)}/case-studies`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? (data as PublicCaseStudy[]) : [];
+  } catch { return []; }
 }
 
 export async function generateMetadata({ params }: Props) {
@@ -60,7 +72,10 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function PublicSitePage({ params }: Props) {
   const { slug } = await params;
-  const data = await fetchPublished(slug);
+  const [data, caseStudies] = await Promise.all([
+    fetchPublished(slug),
+    fetchPublicCaseStudies(slug),
+  ]);
   if (!data) {
     // Fall back to legacy /book/[slug] storefront if there's no published presence yet
     redirect(`/book/${encodeURIComponent(slug)}`);
@@ -75,6 +90,7 @@ export default async function PublicSitePage({ params }: Props) {
       <PresenceTracker businessId={data.business?.id ?? null} />
       <PresenceJsonLd business={data.business} payload={data.payload} slug={slug} catalog={data.catalog} />
       <PresenceRenderer business={data.business} payload={data.payload} />
+      <CaseStudiesSection studies={caseStudies} primaryColor={data.business.primaryColor || undefined} />
       <div className="px-6 py-6 flex justify-center">
         <WhatsAppShare
           businessId={data.business?.id ?? undefined}
