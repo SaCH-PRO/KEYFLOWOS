@@ -311,6 +311,10 @@ export class CommerceService {
           },
         },
         items: true,
+        // Required by buildInvoiceEmailContext so amountPaid/remaining
+        // render correctly on invoice/reminder/receipt emails — without
+        // payments the customer-facing template falls back to 0 paid.
+        payments: true,
         business: {
           select: {
             id: true,
@@ -1179,10 +1183,15 @@ export class CommerceService {
     }
 
     const existingPaid = invoice.payments
-      .filter((p: any) => p.status === 'SUCCESSFUL')
-      .reduce((sum: number, p: any) => sum + p.amount, 0);
-    const remaining = Number(invoice.total) - existingPaid;
-    const paymentAmount = Math.min(input.amount, remaining);
+      .filter((p) => p.status === 'SUCCESSFUL')
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const remaining = Math.max(0, Number(invoice.total) - existingPaid);
+    // Allow over-payment: store the actual amount the operator received so the
+    // ledger stays truthful. The UI presents an explicit confirm + warning
+    // toast when amount > remaining and prompts the operator to issue a refund
+    // from the Payments tab to settle the over-paid balance.
+    const paymentAmount = input.amount;
+    const isOverPayment = paymentAmount > remaining + 0.005;
 
     const payment = await this.prisma.client.payment.create({
       data: {
@@ -1222,6 +1231,7 @@ export class CommerceService {
           totalPaid: newPaidTotal,
           invoiceTotal: invoice.total,
           newStatus,
+          overPaid: isOverPayment ? Number((newPaidTotal - Number(invoice.total)).toFixed(2)) : 0,
         },
         actorType: 'USER',
         source: 'commerce',
@@ -1364,6 +1374,285 @@ export class CommerceService {
     return updated;
   }
 
+  /**
+   * Returns a unified, time-ordered invoice activity timeline assembled from
+   * payments, the invoice's own status timestamps, and matching ContactEvent
+   * rows. Used by the invoice detail drawer to show created/sent/viewed/
+   * partial-payment/paid/reminder/receipt entries.
+   */
+  async getInvoiceTimeline(invoiceId: string, businessId: string) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+      include: { payments: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    const entries: Array<{
+      id: string;
+      type: string;
+      label: string;
+      at: Date;
+      data?: Record<string, unknown>;
+    }> = [];
+
+    entries.push({
+      id: `created-${invoice.id}`,
+      type: 'invoice.created',
+      label: 'Invoice created',
+      at: invoice.createdAt,
+      data: { total: invoice.total, currency: invoice.currency },
+    });
+    if (invoice.sentAt) {
+      entries.push({
+        id: `sent-${invoice.id}`,
+        type: 'invoice.sent',
+        label: 'Invoice sent',
+        at: invoice.sentAt,
+      });
+    }
+    for (const p of invoice.payments) {
+      if (p.status === 'SUCCESSFUL') {
+        entries.push({
+          id: `pay-${p.id}`,
+          type: 'invoice.payment_recorded',
+          label: `Payment of ${p.amount} ${p.currency} via ${p.method ?? p.provider ?? 'manual'}`,
+          at: p.createdAt,
+          data: { amount: p.amount, method: p.method, reference: p.reference },
+        });
+      } else if (p.status === 'REFUNDED') {
+        entries.push({
+          id: `refund-${p.id}`,
+          type: 'invoice.refund',
+          label: `Refund of ${Math.abs(p.amount)} ${p.currency}`,
+          at: p.createdAt,
+        });
+      } else if (p.status === 'FAILED') {
+        entries.push({
+          id: `fail-${p.id}`,
+          type: 'invoice.payment_failed',
+          label: 'Payment attempt failed',
+          at: p.createdAt,
+        });
+      }
+    }
+    if (invoice.paidAt) {
+      entries.push({
+        id: `paid-${invoice.id}`,
+        type: 'invoice.paid',
+        label: 'Invoice fully paid',
+        at: invoice.paidAt,
+      });
+    }
+    if (invoice.contactId) {
+      const events = await this.prisma.client.contactEvent.findMany({
+        where: {
+          businessId,
+          contactId: invoice.contactId,
+          type: {
+            in: [
+              'invoice.viewed',
+              'invoice.payment_reminder_sent',
+              'invoice.receipt_sent',
+              'invoice.overdue',
+              'invoice.void',
+            ],
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      for (const e of events) {
+        const data = (e.data as Record<string, unknown>) ?? {};
+        if (data.invoiceId !== invoice.id) continue;
+        const labels: Record<string, string> = {
+          'invoice.viewed': 'Invoice viewed by client',
+          'invoice.payment_reminder_sent': `Reminder sent${data.channel ? ` (${String(data.channel)})` : ''}`,
+          'invoice.receipt_sent': `Receipt sent${data.channel ? ` (${String(data.channel)})` : ''}`,
+          'invoice.overdue': 'Invoice marked overdue',
+          'invoice.void': 'Invoice voided',
+        };
+        entries.push({
+          id: `evt-${e.id}`,
+          type: e.type,
+          label: labels[e.type] ?? e.type,
+          at: e.createdAt,
+          data,
+        });
+      }
+    }
+
+    entries.sort((a, b) => a.at.getTime() - b.at.getTime());
+    return { invoiceId, entries };
+  }
+
+  /**
+   * Sends a payment reminder for the given invoice via Gmail (if connected)
+   * and persists the canonical `invoice.payment_reminder_sent` ContactEvent
+   * (the PAYMENT_REMINDER_SENT spec event from R2). Returns success metadata
+   * even when Gmail isn't connected so the UI can fall back to a local copy.
+   */
+  async sendInvoiceReminder(input: {
+    invoiceId: string;
+    businessId: string;
+    actorId?: string;
+    customMessage?: string;
+    channel?: 'email' | 'whatsapp' | 'manual';
+    deliver: (params: {
+      invoice: import('@prisma/client').Invoice & {
+        contact: import('@prisma/client').Contact | null;
+        items: import('@prisma/client').InvoiceItem[];
+        payments: import('@prisma/client').Payment[];
+        business: import('@prisma/client').Business | null;
+      };
+      recipientEmail: string | null;
+      paymentUrl: string | null;
+    }) => Promise<{ delivered: boolean; messageId?: string }>;
+  }) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: input.invoiceId, businessId: input.businessId, deletedAt: null },
+      include: { contact: true, items: true, payments: true, business: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    if (invoice.status === 'PAID' || invoice.status === 'VOID') {
+      throw new BadRequestException(`Cannot send reminder for ${invoice.status} invoice`);
+    }
+
+    // Always provide a pay CTA in the reminder. Reuse the active link if one
+    // already exists, otherwise create one — `createPaymentLink` itself
+    // returns the existing active row when present, so this is idempotent.
+    let paymentUrl: string | null = null;
+    let link = await this.prisma.client.paymentLink.findFirst({
+      where: { invoiceId: invoice.id, businessId: input.businessId, active: true },
+    });
+    if (!link) {
+      try {
+        link = await this.createPaymentLink(invoice.id, input.businessId);
+      } catch (err) {
+        // Reminders are only sent for non-PAID/non-VOID invoices, so the
+        // "paid or voided" refusal shouldn't normally fire — but if a
+        // payment landed between the status check above and link creation
+        // we degrade to a CTA-less reminder rather than 500. Anything else
+        // is a real failure and should surface.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/paid or voided/i.test(msg)) throw err;
+        link = null;
+      }
+    }
+    if (link) {
+      const { appUrl } = await import('../../core/config/runtime-urls');
+      paymentUrl = `${appUrl()}/public/invoice/${link.token}`;
+    }
+
+    const recipientEmail = invoice.contact?.email ?? null;
+    const channel = input.channel ?? (recipientEmail ? 'email' : 'manual');
+
+    let delivered = false;
+    let messageId: string | undefined;
+    try {
+      const result = await input.deliver({ invoice, recipientEmail, paymentUrl });
+      delivered = result.delivered;
+      messageId = result.messageId;
+    } catch (err) {
+      // Persist the event regardless so the timeline shows the operator's
+      // intent even when delivery fails — but surface the error to the UI.
+      this.events.emit('invoice.reminder_failed', {
+        invoice,
+        businessId: invoice.businessId,
+        reason: (err as Error).message,
+      });
+      throw err;
+    }
+
+    if (invoice.contactId) {
+      await this.crm.logContactEvent({
+        businessId: invoice.businessId,
+        contactId: invoice.contactId,
+        type: 'invoice.payment_reminder_sent',
+        data: {
+          invoiceId: invoice.id,
+          channel,
+          messageId: messageId ?? null,
+          recipientEmail,
+          status: invoice.status,
+        },
+        actorType: input.actorId ? 'USER' : 'SYSTEM',
+        actorId: input.actorId,
+        source: 'commerce',
+      });
+    }
+
+    this.events.emit('invoice.payment_reminder_sent', {
+      invoice,
+      businessId: invoice.businessId,
+      channel,
+      eventName: 'invoice.payment_reminder_sent',
+    });
+
+    return { delivered, channel, messageId, paymentUrl };
+  }
+
+  /**
+   * Logs a `invoice.receipt_sent` event (called by the controller after
+   * rendering & emailing the receipt). Centralised so both the auto-on-paid
+   * listener and the manual "Resend receipt" path use the same log shape.
+   */
+  async recordReceiptSent(input: {
+    invoiceId: string;
+    businessId: string;
+    channel: 'email' | 'manual';
+    recipientEmail?: string | null;
+    messageId?: string | null;
+    actorId?: string | null;
+  }) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: input.invoiceId, businessId: input.businessId },
+      select: { id: true, contactId: true, businessId: true },
+    });
+    if (!invoice || !invoice.contactId) return;
+    await this.crm.logContactEvent({
+      businessId: invoice.businessId,
+      contactId: invoice.contactId,
+      type: 'invoice.receipt_sent',
+      data: {
+        invoiceId: invoice.id,
+        channel: input.channel,
+        recipientEmail: input.recipientEmail ?? null,
+        messageId: input.messageId ?? null,
+      },
+      actorType: input.actorId ? 'USER' : 'SYSTEM',
+      actorId: input.actorId ?? undefined,
+      source: 'commerce',
+    });
+  }
+
+  /**
+   * Records a one-shot `invoice.viewed` ContactEvent the first time a
+   * client opens the public payment-link page. Subsequent views within the
+   * same calendar day are coalesced so we don't spam the timeline.
+   */
+  async recordInvoiceView(invoiceId: string, businessId: string, contactId: string) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recent = await this.prisma.client.contactEvent.findFirst({
+      where: {
+        businessId,
+        contactId,
+        type: 'invoice.viewed',
+        createdAt: { gte: since },
+      },
+    });
+    if (recent) {
+      const data = (recent.data as Record<string, unknown>) ?? {};
+      if (data.invoiceId === invoiceId) return;
+    }
+    await this.crm.logContactEvent({
+      businessId,
+      contactId,
+      type: 'invoice.viewed',
+      data: { invoiceId, channel: 'public_link' },
+      actorType: 'SYSTEM',
+      source: 'commerce',
+    });
+  }
+
   async listPayments(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
@@ -1376,8 +1665,8 @@ export class CommerceService {
       orderBy: { createdAt: 'desc' },
     });
     const paidAmount = payments
-      .filter((p: any) => p.status === 'SUCCESSFUL')
-      .reduce((sum: number, p: any) => sum + p.amount, 0);
+      .filter((p) => p.status === 'SUCCESSFUL')
+      .reduce((sum, p) => sum + Number(p.amount), 0);
     return {
       payments,
       paidAmount,
@@ -1512,6 +1801,19 @@ export class CommerceService {
       invoiceCount: invoices.length,
       currency: invoices[0]?.currency || 'TTD',
     };
+  }
+
+  /**
+   * Returns any payment link (active or not) for an invoice — used by flows
+   * that need to surface a previously-issued public URL even when the invoice
+   * is no longer eligible for new link creation (PAID / VOID). Most recent
+   * link first.
+   */
+  async findAnyPaymentLink(invoiceId: string, businessId: string) {
+    return this.prisma.client.paymentLink.findFirst({
+      where: { invoiceId, businessId },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async createPaymentLink(invoiceId: string, businessId: string, expiresInDays?: number) {

@@ -25,6 +25,7 @@ import { CommerceIntelligenceService } from './commerce-intelligence.service';
 import { MarginSnapshotSchedulerService } from './margin-snapshot-scheduler.service';
 import { StoreReadinessService } from './store-readiness.service';
 import { QuoteNotificationsListener } from './quote-notifications.listener';
+import { InvoiceReceiptListener } from './invoice-receipt.listener';
 import { CrmModule } from '../crm/crm.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
@@ -71,6 +72,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     MarginSnapshotSchedulerService,
     StoreReadinessService,
     QuoteNotificationsListener,
+    InvoiceReceiptListener,
     PlanLimitGuard,
   ],
   exports: [

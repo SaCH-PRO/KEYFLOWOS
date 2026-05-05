@@ -20,6 +20,8 @@ import { GmailService } from './gmail.service';
 import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
+import { buildInvoiceEmailHtml } from './invoice-email.template';
+import { sumSuccessfulPayments, type InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
@@ -764,6 +766,230 @@ export class CommerceController {
     });
 
     return { success: true, quote };
+  }
+
+  // ========== INVOICE EMAIL / REMINDER / RECEIPT ==========
+
+  /**
+   * Build the standardized public invoice URL (uses payment-link token if
+   * available, falls back to the invoice id under the same /public/invoice
+   * path so the frontend has one canonical place to render).
+   */
+  private async buildPublicInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
+    // createPaymentLink throws for PAID/VOID invoices; for those (e.g. the
+    // resend-receipt flow) we still want to surface the previously-issued
+    // token so the customer can revisit the invoice page. Only the known
+    // "paid or voided" refusal is swallowed — other failures bubble up.
+    try {
+      const link = await this.commerce.createPaymentLink(invoiceId, businessId);
+      return `${appUrl()}/public/invoice/${link.token}`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/paid or voided/i.test(msg)) throw err;
+      const existing = await this.commerce.findAnyPaymentLink(invoiceId, businessId);
+      return existing ? `${appUrl()}/public/invoice/${existing.token}` : null;
+    }
+  }
+
+  private buildInvoiceEmailContext(
+    invoice: InvoiceForEmail,
+    paymentUrl: string | null,
+    customMessage?: string | null,
+    variant: 'invoice' | 'reminder' | 'receipt' = 'invoice',
+  ) {
+    const business = invoice.business;
+    const contact = invoice.contact;
+    const paid = sumSuccessfulPayments(invoice.payments);
+    return buildInvoiceEmailHtml({
+      businessName: business?.name ?? 'Your business',
+      businessLogo: business?.logoUrl,
+      businessEmail: business?.email,
+      businessPhone: business?.phone,
+      primaryColor: business?.primaryColor || '#F97316',
+      contactName: contact
+        ? `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || contact.email || 'Customer'
+        : 'Customer',
+      invoiceNumber: invoice.invoiceNumber,
+      invoiceDate: new Date(invoice.issueDate ?? invoice.createdAt ?? Date.now()).toLocaleDateString(
+        'en-TT',
+        { dateStyle: 'medium' },
+      ),
+      dueDate: invoice.dueDate
+        ? new Date(invoice.dueDate).toLocaleDateString('en-TT', { dateStyle: 'medium' })
+        : null,
+      items: (invoice.items ?? []).map((it) => ({
+        description: it.description,
+        quantity: Number(it.quantity),
+        unitPrice: Number(it.unitPrice),
+      })),
+      subtotal: Number(invoice.subtotal ?? invoice.total),
+      taxRate: invoice.taxRate != null ? Number(invoice.taxRate) : null,
+      taxAmount: invoice.taxAmount != null ? Number(invoice.taxAmount) : null,
+      discountType: invoice.discountType,
+      discountValue: invoice.discountValue != null ? Number(invoice.discountValue) : null,
+      discountAmount: invoice.discountAmount != null ? Number(invoice.discountAmount) : null,
+      total: Number(invoice.total),
+      amountPaid: paid,
+      amountRemaining: Math.max(0, Number(invoice.total) - paid),
+      currency: invoice.currency,
+      notes: invoice.notes,
+      invoiceUrl: paymentUrl,
+      paymentUrl,
+      customMessage: customMessage ?? null,
+      variant,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/invoices/:invoiceId/send-email')
+  async sendInvoiceEmail(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { recipientEmail?: string; message?: string },
+    @Req() req: any,
+  ) {
+    // Allow drafts: sending the email is precisely what transitions DRAFT -> SENT.
+    const invoice = (await this.commerce.getInvoiceWithBusiness(invoiceId, false)) as
+      | InvoiceForEmail
+      | null;
+    if (!invoice || invoice.businessId !== businessId) throw new ForbiddenException('Invoice not found');
+    if (invoice.status === 'VOID') throw new ForbiddenException('Cannot email a voided invoice');
+    const recipient = body.recipientEmail || invoice.contact?.email;
+    if (!recipient) throw new ForbiddenException('Recipient email is required');
+    const paymentUrl = await this.buildPublicInvoiceUrl(invoiceId, businessId);
+    const html = this.buildInvoiceEmailContext(invoice, paymentUrl, body.message, 'invoice');
+    const send = await this.gmail.sendEmail({
+      businessId,
+      to: recipient,
+      subject: `Invoice #${invoice.invoiceNumber} from ${invoice.business?.name ?? 'us'}`,
+      htmlBody: html,
+    });
+    if (invoice.status === 'DRAFT') {
+      await this.commerce.updateInvoiceStatus({
+        invoiceId,
+        status: 'SENT',
+        actorId: req?.user?.id,
+        sentAt: new Date(),
+      });
+    }
+    return { success: true, messageId: send.messageId, paymentUrl };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/invoices/:invoiceId/send-reminder')
+  async sendInvoiceReminder(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { recipientEmail?: string; message?: string; channel?: 'email' | 'whatsapp' | 'manual' },
+    @Req() req: any,
+  ) {
+    return this.commerce.sendInvoiceReminder({
+      invoiceId,
+      businessId,
+      actorId: req?.user?.id,
+      customMessage: body.message,
+      channel: body.channel,
+      deliver: async ({ invoice, recipientEmail, paymentUrl }) => {
+        const channel = body.channel ?? (recipientEmail ? 'email' : 'manual');
+        if (channel !== 'email') return { delivered: false };
+        const target = body.recipientEmail || recipientEmail;
+        if (!target) return { delivered: false };
+        const html = this.buildInvoiceEmailContext(invoice, paymentUrl, body.message, 'reminder');
+        const result = await this.gmail.sendEmail({
+          businessId,
+          to: target,
+          subject: `Reminder: Invoice #${invoice.invoiceNumber} — payment due`,
+          htmlBody: html,
+        });
+        return { delivered: true, messageId: result.messageId };
+      },
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/invoices/:invoiceId/resend-receipt')
+  async resendInvoiceReceipt(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { recipientEmail?: string },
+    @Req() req: any,
+  ) {
+    // Receipts are only meaningful for paid invoices; explicit guard.
+    const invoice = (await this.commerce.getInvoiceWithBusiness(invoiceId, false)) as
+      | InvoiceForEmail
+      | null;
+    if (!invoice || invoice.businessId !== businessId) throw new ForbiddenException('Invoice not found');
+    if (invoice.status !== 'PAID') throw new ForbiddenException('Invoice is not yet paid');
+    const recipient = body.recipientEmail || invoice.contact?.email;
+    if (!recipient) throw new ForbiddenException('Recipient email is required');
+    const paymentUrl = await this.buildPublicInvoiceUrl(invoiceId, businessId);
+    const html = this.buildInvoiceEmailContext(invoice, paymentUrl, null, 'receipt');
+    const send = await this.gmail.sendEmail({
+      businessId,
+      to: recipient,
+      subject: `Receipt for Invoice #${invoice.invoiceNumber}`,
+      htmlBody: html,
+    });
+    await this.commerce.recordReceiptSent({
+      invoiceId,
+      businessId,
+      channel: 'email',
+      recipientEmail: recipient,
+      messageId: send.messageId,
+      actorId: req?.user?.id,
+    });
+    return { success: true, messageId: send.messageId };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/invoices/:invoiceId/timeline')
+  getInvoiceTimeline(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+  ) {
+    return this.commerce.getInvoiceTimeline(invoiceId, businessId);
+  }
+
+  // Public viewer for /public/invoice/[token] — records a `invoice.viewed`
+  // event on first view so the timeline / dunning logic can react.
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(60, 60_000)
+  @Get('public/invoice-link/:token')
+  async getPublicInvoiceByToken(@Param('token') token: string) {
+    const link = await this.commerce.getPaymentLinkByToken(token);
+    if (!link) return { ok: false, reason: 'invalid_or_expired' };
+    const invoice = (await this.commerce.getInvoiceWithBusiness(link.invoiceId, true)) as
+      | InvoiceForEmail
+      | null;
+    if (!invoice) return { ok: false, reason: 'not_found' };
+    if (invoice.contactId) {
+      // Best-effort, fire-and-forget so a transient CRM failure doesn't break
+      // the public view.
+      this.commerce
+        .recordInvoiceView(invoice.id, invoice.businessId, invoice.contactId)
+        .catch(() => undefined);
+    }
+    return {
+      ok: true,
+      token: link.token,
+      invoice: {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        status: invoice.status,
+        total: invoice.total,
+        currency: invoice.currency,
+        issueDate: invoice.issueDate,
+        dueDate: invoice.dueDate,
+        notes: invoice.notes,
+        items: invoice.items,
+        contact: invoice.contact ? { firstName: invoice.contact.firstName, lastName: invoice.contact.lastName } : null,
+        business: invoice.business ? { name: invoice.business.name, logoUrl: invoice.business.logoUrl, primaryColor: invoice.business.primaryColor, email: invoice.business.email, phone: invoice.business.phone } : null,
+      },
+    };
   }
 
   // ========== PARTIAL PAYMENTS ==========

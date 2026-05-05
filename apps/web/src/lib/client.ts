@@ -2016,6 +2016,90 @@ export async function listInvoicePayments(businessId: string, invoiceId: string)
   return apiGet(`/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments`);
 }
 
+export interface InvoiceTimelineEntry {
+  id: string;
+  type: string;
+  label: string;
+  at: string;
+  data?: Record<string, unknown>;
+}
+
+export async function getInvoiceTimeline(
+  businessId: string,
+  invoiceId: string,
+): Promise<ApiResult<{ invoiceId: string; entries: InvoiceTimelineEntry[] }>> {
+  return apiGet(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/timeline`,
+  );
+}
+
+export async function createInvoicePaymentLink(
+  businessId: string,
+  invoiceId: string,
+  expiresInDays?: number,
+): Promise<ApiResult<{ id: string; token: string; url: string; expiresAt: string | null }>> {
+  return apiPost({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payment-link`,
+    body: { expiresInDays },
+  });
+}
+
+export async function sendInvoiceEmail(
+  businessId: string,
+  invoiceId: string,
+  body: { recipientEmail?: string; message?: string },
+): Promise<ApiResult<{ success: boolean; messageId: string; paymentUrl: string }>> {
+  return apiPost({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/send-email`,
+    body,
+  });
+}
+
+export async function sendInvoiceReminder(
+  businessId: string,
+  invoiceId: string,
+  body: { recipientEmail?: string; message?: string; channel?: "email" | "whatsapp" | "manual" },
+): Promise<ApiResult<{ delivered: boolean; channel: string; messageId?: string; paymentUrl: string | null }>> {
+  return apiPost({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/send-reminder`,
+    body,
+  });
+}
+
+export async function resendInvoiceReceipt(
+  businessId: string,
+  invoiceId: string,
+  body: { recipientEmail?: string } = {},
+): Promise<ApiResult<{ success: boolean; messageId: string }>> {
+  return apiPost({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/resend-receipt`,
+    body,
+  });
+}
+
+export interface PublicInvoicePayload {
+  ok: boolean;
+  reason?: string;
+  token?: string;
+  invoice?: {
+    id: string;
+    invoiceNumber: string;
+    status: string;
+    total: number;
+    currency: string;
+    issueDate?: string | null;
+    dueDate?: string | null;
+    notes?: string | null;
+    items?: Array<{ description: string; quantity: number; unitPrice: number; total: number }>;
+    contact?: { firstName?: string | null; lastName?: string | null } | null;
+    business?: { name: string; logoUrl?: string | null; primaryColor?: string | null; email?: string | null; phone?: string | null } | null;
+  };
+}
+
+export async function getPublicInvoiceByToken(token: string): Promise<ApiResult<PublicInvoicePayload>> {
+  return apiGet(`/commerce/public/invoice-link/${encodeURIComponent(token)}`);
+}
+
 export async function createInvoice(input: {
   businessId?: string;
   contactId?: string;

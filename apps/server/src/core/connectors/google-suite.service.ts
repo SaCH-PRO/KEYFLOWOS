@@ -236,7 +236,7 @@ export class GoogleSuiteService {
         businessId: state.businessId,
         connectorType: ct,
         action: 'connect',
-        status: ok ? 'success' : 'error',
+        status: ok ? 'success' : 'failure',
         message: ok
           ? `Connected via unified Google sign-in (${email}) — live verification OK`
           : `OAuth granted but live verification failed: ${error ?? 'unknown error'}`,

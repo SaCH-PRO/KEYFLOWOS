@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OnEvent } from '@nestjs/event-emitter';
 import { createHash } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import type { MessageReceivedPayload } from '../../core/event-bus/events.types';
@@ -196,7 +197,7 @@ export class ConversationAiService {
       sentiment: args.sentiment ?? null,
       intent: args.intent ?? null,
       summary: args.summary ?? null,
-      payload: (args.payload as object | null) ?? null,
+      payload: (args.payload as object | null) ?? Prisma.JsonNull,
       feature: args.feature ?? null,
       modelUsed: args.modelUsed ?? null,
     };

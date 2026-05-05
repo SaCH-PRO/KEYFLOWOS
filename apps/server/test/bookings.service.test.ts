@@ -12,10 +12,10 @@ interface PrismaMockOptions {
 
 class PrismaMock {
   bookings: any[] = [];
-  services: any[];
-  availabilities: PrismaMockOptions['availabilities'];
-  businessHours: PrismaMockOptions['businessHours'];
-  storeEnabled: boolean;
+  services!: any[];
+  availabilities!: PrismaMockOptions['availabilities'];
+  businessHours!: PrismaMockOptions['businessHours'];
+  storeEnabled!: boolean;
   client: any;
 
   constructor(opts: PrismaMockOptions = {}) {
