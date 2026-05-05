@@ -120,4 +120,23 @@ export class PresenceController {
   getPublic(@Param('slug') slug: string) {
     return this.presence.getPublishedBySlug(slug);
   }
-}
+
+    @UseGuards(PublicRateLimitGuard)
+    @PublicRateLimit(120, 60_000)
+    @Get('directory')
+    getDirectory(
+      @Query('industry') industry?: string,
+      @Query('city') city?: string,
+      @Query('q') q?: string,
+      @Query('page') page?: string,
+      @Query('pageSize') pageSize?: string,
+    ) {
+      return this.presence.listDirectory({
+        industry: industry?.trim() || undefined,
+        city: city?.trim() || undefined,
+        q: q?.trim() || undefined,
+        page: page ? Number(page) : undefined,
+        pageSize: pageSize ? Number(pageSize) : undefined,
+      });
+    }
+  }
