@@ -16,10 +16,15 @@ import { FinanceSettingsService } from './finance-settings.service';
 import { BankImportService } from './bank-import.service';
 import { BankMatchingService } from './bank-matching.service';
 import { ReconciliationService } from './reconciliation.service';
+import { ExpensePostingService } from './expense-posting.service';
 import { FinanceController } from './finance.controller';
 
 /**
  * FIN1/FIN2 — Finance OS foundation + revenue/receivables read APIs.
+ * FIN3 — Adds ExpensePostingService for expense/bill/PO/COGS recipes,
+ * invoked synchronously by Expenses, Marketplace, and Commerce modules
+ * inside the same Prisma $transaction as the source-row write (no async
+ * listeners — atomic ledger + source commit).
  * FIN5 — Adds the unified `/finance/businesses/:bid/*` controller for the
  * new Finance cockpit (Overview, Accounts CRUD, COA CRUD, Tax Rates,
  * Settings) plus its sub-services.
@@ -43,6 +48,7 @@ import { FinanceController } from './finance.controller';
     BankImportService,
     BankMatchingService,
     ReconciliationService,
+    ExpensePostingService,
   ],
   exports: [
     PostingService,
@@ -60,6 +66,7 @@ import { FinanceController } from './finance.controller';
     BankImportService,
     BankMatchingService,
     ReconciliationService,
+    ExpensePostingService,
   ],
 })
 export class FinanceModule {}

@@ -9,9 +9,10 @@ import { PrismaModule } from '../../core/prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CrmModule } from '../crm/crm.module';
 import { ExpensesModule } from '../expenses/expenses.module';
+import { FinanceModule } from '../finance/finance.module';
 
 @Module({
-  imports: [PrismaModule, NotificationsModule, forwardRef(() => CrmModule), ExpensesModule],
+  imports: [PrismaModule, NotificationsModule, forwardRef(() => CrmModule), ExpensesModule, FinanceModule],
   controllers: [MarketplaceController, MarketplacePublicController],
   providers: [MarketplaceService, FulfillmentRoutingService, CommerceIntegrationService, StoreOrderRoutingListener],
   exports: [MarketplaceService, FulfillmentRoutingService, CommerceIntegrationService],

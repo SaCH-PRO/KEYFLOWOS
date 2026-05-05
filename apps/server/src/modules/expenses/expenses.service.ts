@@ -1,13 +1,15 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpenseCreatedPayload } from '../../core/event-bus/events.types';
+import { ExpensePostingService } from '../finance/expense-posting.service';
 
 @Injectable()
 export class ExpensesService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(ExpensePostingService) private readonly posting: ExpensePostingService,
   ) {}
 
   async listExpenses(
@@ -22,6 +24,7 @@ export class ExpensesService {
       paymentMethod?: string;
       tag?: string;
       isRecurring?: boolean;
+      status?: string;
       page?: number;
       limit?: number;
     },
@@ -53,6 +56,9 @@ export class ExpensesService {
     }
     if (filters?.isRecurring !== undefined) {
       where.isRecurring = filters.isRecurring;
+    }
+    if (filters?.status) {
+      where.status = filters.status;
     }
 
     const page = filters?.page ?? 1;
@@ -97,6 +103,12 @@ export class ExpensesService {
     projectId?: string;
     contactId?: string;
     serviceId?: string;
+    /** PAID (default) or BILL — BILL credits AP instead of cash. */
+    status?: 'PAID' | 'BILL';
+    dueDate?: string | Date;
+    /** When status=PAID and explicit, used as paidAt; otherwise = date. */
+    paidAt?: string | Date;
+    recurringExpenseId?: string;
   }) {
     let validProjectId: string | null = null;
     let validContactId: string | null = null;
@@ -118,34 +130,345 @@ export class ExpensesService {
       validServiceId = input.serviceId;
     }
 
-    const expense = await this.prisma.client.expense.create({
-      data: {
-        businessId: input.businessId,
-        description: input.description,
-        amount: input.amount,
-        currency: input.currency ?? 'TTD',
-        date: input.date ? new Date(input.date) : new Date(),
-        vendor: input.vendor ?? null,
-        receiptUrl: input.receiptUrl ?? null,
-        notes: input.notes ?? null,
-        paymentMethod: input.paymentMethod ?? null,
-        tags: input.tags ?? [],
-        isRecurring: input.isRecurring ?? false,
-        recurringFrequency: input.recurringFrequency ?? null,
-        categoryId: input.categoryId ?? null,
-        projectId: validProjectId,
-        contactId: validContactId,
-        serviceId: validServiceId,
-      },
-      include: { category: true },
+    const status = input.status ?? 'PAID';
+    if (status !== 'PAID' && status !== 'BILL') {
+      throw new BadRequestException(`Invalid expense status: ${status}`);
+    }
+    const expenseDate = input.date ? new Date(input.date) : new Date();
+    const paidAt = status === 'PAID' ? (input.paidAt ? new Date(input.paidAt) : expenseDate) : null;
+    const dueDate = input.dueDate
+      ? new Date(input.dueDate)
+      : status === 'BILL'
+      ? new Date(expenseDate.getTime() + 30 * 86400000)
+      : null;
+
+    // Create + post in a single transaction so a failed posting rolls
+    // back the expense row (no orphan business writes vs. ledger).
+    const expense = await this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as import('@prisma/client').Prisma.TransactionClient;
+      const created = await tx.expense.create({
+        data: {
+          businessId: input.businessId,
+          description: input.description,
+          amount: input.amount,
+          currency: input.currency ?? 'TTD',
+          date: expenseDate,
+          vendor: input.vendor ?? null,
+          receiptUrl: input.receiptUrl ?? null,
+          notes: input.notes ?? null,
+          paymentMethod: input.paymentMethod ?? null,
+          tags: input.tags ?? [],
+          isRecurring: input.isRecurring ?? false,
+          recurringFrequency: input.recurringFrequency ?? null,
+          categoryId: input.categoryId ?? null,
+          projectId: validProjectId,
+          contactId: validContactId,
+          serviceId: validServiceId,
+          recurringExpenseId: input.recurringExpenseId ?? null,
+          status,
+          dueDate,
+          paidAt,
+        },
+        include: { category: true },
+      });
+
+      const postPayload = {
+        id: created.id,
+        businessId: created.businessId,
+        amount: created.amount,
+        currency: created.currency,
+        date: created.date,
+        categoryId: created.categoryId,
+        paymentMethod: created.paymentMethod,
+        description: created.description,
+        contactId: created.contactId,
+        vendor: created.vendor,
+      };
+      if (status === 'PAID') {
+        await this.posting.onExpensePaid(postPayload, tx);
+      } else {
+        await this.posting.onBillCreated(postPayload, tx);
+      }
+      return created;
     });
 
     this.events.emit('expense.created', {
       expense: { id: expense.id, businessId: input.businessId, amount: expense.amount, description: expense.description, categoryId: expense.categoryId },
       businessId: input.businessId,
     } as ExpenseCreatedPayload);
+    if (status === 'BILL') {
+      this.events.emit('bill.created', {
+        bill: expense,
+        businessId: input.businessId,
+      });
+    }
 
     return expense;
+  }
+
+  /**
+   * Mark an existing BILL as paid: posts Dr AP / Cr Cash and stamps
+   * status=PAID + paidAt. Idempotent — calling twice on an already-paid
+   * bill is a no-op (the posting service deduplicates by external_ref).
+   */
+  async markBillPaid(input: {
+    businessId: string;
+    expenseId: string;
+    paymentMethod?: string;
+    paidAt?: string | Date;
+  }) {
+    const existing = await this.prisma.client.expense.findFirst({
+      where: { id: input.expenseId, businessId: input.businessId, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Expense not found');
+    if (existing.status === 'VOID') {
+      throw new BadRequestException('Cannot mark a voided expense as paid');
+    }
+    if (existing.status === 'PAID' && existing.paidAt) {
+      return existing; // idempotent
+    }
+
+    const paidAt = input.paidAt ? new Date(input.paidAt) : new Date();
+    const paymentMethod = input.paymentMethod ?? existing.paymentMethod;
+
+    return this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as import('@prisma/client').Prisma.TransactionClient;
+      const updated = await tx.expense.update({
+        where: { id: input.expenseId },
+        data: { status: 'PAID', paidAt, paymentMethod },
+        include: { category: true },
+      });
+      await this.posting.onBillPaid(
+        {
+          id: updated.id,
+          businessId: updated.businessId,
+          amount: updated.amount,
+          currency: updated.currency,
+          paidAt,
+          paymentMethod: paymentMethod ?? null,
+          description: updated.description,
+          contactId: updated.contactId,
+          vendor: updated.vendor,
+        },
+        tx,
+      );
+      this.events.emit('bill.paid', { bill: updated, businessId: input.businessId });
+      return updated;
+    });
+  }
+
+  /**
+   * Soft-void an expense by reversing its postings. Hard delete on a
+   * posted Expense is forbidden — use this method instead.
+   */
+  async voidExpense(input: { businessId: string; expenseId: string; reason?: string }) {
+    const existing = await this.prisma.client.expense.findFirst({
+      where: { id: input.expenseId, businessId: input.businessId, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Expense not found');
+    if (existing.status === 'VOID') return existing;
+
+    return this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as import('@prisma/client').Prisma.TransactionClient;
+      // Reverse every posted financial transaction for this Expense.
+      const txs = await tx.financialTransaction.findMany({
+        where: { businessId: input.businessId, sourceType: 'Expense', sourceId: existing.id },
+        include: { entries: true },
+      });
+      for (const ft of txs) {
+        // Skip if already reversed.
+        const already = await tx.financialTransaction.findFirst({
+          where: { businessId: input.businessId, reversalOfId: ft.id },
+          select: { id: true },
+        });
+        if (already) continue;
+        const reversal = await tx.financialTransaction.create({
+          data: {
+            businessId: ft.businessId,
+            type: 'REVERSAL',
+            status: 'POSTED',
+            date: new Date(),
+            amount: ft.amount,
+            currency: ft.currency,
+            description: `VOID: ${ft.description ?? existing.description}`,
+            contactId: ft.contactId,
+            sourceType: ft.sourceType,
+            sourceId: ft.sourceId,
+            reversalOfId: ft.id,
+            reference: ft.reference,
+            notes: input.reason ?? `Voided expense ${existing.id}`,
+            postedAt: new Date(),
+          },
+        });
+        for (const e of ft.entries) {
+          await tx.ledgerEntry.create({
+            data: {
+              businessId: e.businessId,
+              transactionId: reversal.id,
+              accountId: e.accountId,
+              debit: e.credit,
+              credit: e.debit,
+              currency: e.currency,
+              date: reversal.date,
+            },
+          });
+        }
+      }
+      return tx.expense.update({
+        where: { id: existing.id },
+        data: { status: 'VOID', deletedAt: new Date() },
+        include: { category: true },
+      });
+    });
+  }
+
+  /**
+   * Payables aging: bucket all unpaid BILLs by days-past-due.
+   * Buckets: current (not yet due), 1-30, 31-60, 61-90, >90.
+   */
+  async getPayablesAging(businessId: string) {
+    const now = new Date();
+    const bills = await this.prisma.client.expense.findMany({
+      where: { businessId, status: 'BILL', deletedAt: null },
+      orderBy: { dueDate: 'asc' },
+    });
+    const buckets = {
+      current: { total: 0, count: 0 },
+      d_1_30: { total: 0, count: 0 },
+      d_31_60: { total: 0, count: 0 },
+      d_61_90: { total: 0, count: 0 },
+      d_over_90: { total: 0, count: 0 },
+    };
+    let total = 0;
+    for (const b of bills) {
+      total += b.amount;
+      if (!b.dueDate || b.dueDate >= now) {
+        buckets.current.total += b.amount;
+        buckets.current.count += 1;
+        continue;
+      }
+      const days = Math.floor((now.getTime() - b.dueDate.getTime()) / 86400000);
+      if (days <= 30) {
+        buckets.d_1_30.total += b.amount;
+        buckets.d_1_30.count += 1;
+      } else if (days <= 60) {
+        buckets.d_31_60.total += b.amount;
+        buckets.d_31_60.count += 1;
+      } else if (days <= 90) {
+        buckets.d_61_90.total += b.amount;
+        buckets.d_61_90.count += 1;
+      } else {
+        buckets.d_over_90.total += b.amount;
+        buckets.d_over_90.count += 1;
+      }
+    }
+    return { total, count: bills.length, buckets, bills };
+  }
+
+  /**
+   * Per-vendor outstanding balance — sum of unpaid BILL.amount grouped by
+   * vendor (string column) and contact, sorted by largest balance first.
+   */
+  async getVendorBalances(businessId: string) {
+    const bills = await this.prisma.client.expense.findMany({
+      where: { businessId, status: 'BILL', deletedAt: null },
+      select: { id: true, vendor: true, contactId: true, amount: true, currency: true, dueDate: true },
+    });
+    const map = new Map<string, { vendor: string | null; contactId: string | null; total: number; count: number; oldestDueDate: Date | null }>();
+    for (const b of bills) {
+      const key = b.contactId ?? b.vendor ?? 'unspecified';
+      const cur = map.get(key) ?? { vendor: b.vendor, contactId: b.contactId, total: 0, count: 0, oldestDueDate: null };
+      cur.total += b.amount;
+      cur.count += 1;
+      if (b.dueDate && (!cur.oldestDueDate || b.dueDate < cur.oldestDueDate)) {
+        cur.oldestDueDate = b.dueDate;
+      }
+      map.set(key, cur);
+    }
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }
+
+  /**
+   * Per-vendor balance breakdown for a single vendor.
+   *
+   * `vendorId` may be either a `Contact.id` (when the vendor is a linked
+   * Contact) or a free-form vendor string (resolved against `Expense.vendor`).
+   * Returns billed (lifetime BILL total), paid (lifetime PAID total for the
+   * same vendor) and outstanding (sum of unpaid bills only) so the UI can
+   * render full vendor history alongside what is currently owed.
+   */
+  async getVendorBalance(businessId: string, vendorId: string) {
+    const byContactWhere = { businessId, contactId: vendorId, deletedAt: null };
+    const byVendorWhere = { businessId, vendor: vendorId, contactId: null, deletedAt: null };
+    // Try contact match first; fall back to vendor-name match if there are
+    // no contact-linked rows. We never mix the two — vendor strings can
+    // collide with contact ids in degenerate cases.
+    const contactRows = await this.prisma.client.expense.findMany({
+      where: byContactWhere,
+      select: { id: true, status: true, amount: true, currency: true, dueDate: true, paidAt: true, vendor: true, contactId: true },
+    });
+    const rows = contactRows.length
+      ? contactRows
+      : await this.prisma.client.expense.findMany({
+          where: byVendorWhere,
+          select: { id: true, status: true, amount: true, currency: true, dueDate: true, paidAt: true, vendor: true, contactId: true },
+        });
+
+    // Build a durable "originated as a bill" marker so paid bills
+    // (status flips BILL → PAID on payment) still contribute to the
+    // lifetime billed total. We prefer the bill_created posting when
+    // available; rows with a dueDate are also treated as bill-originated
+    // since the bills controller always sets dueDate at creation.
+    // PostingService writes externalRef = `${sourceType}:${sourceId}:${kind}`,
+    // so we filter on the deterministic suffix to find bill_created rows.
+    const billCreated = rows.length
+      ? await this.prisma.client.financialTransaction.findMany({
+          where: {
+            businessId,
+            sourceType: 'Expense',
+            sourceId: { in: rows.map((r) => r.id) },
+            externalRef: { endsWith: ':bill_created' },
+          },
+          select: { sourceId: true },
+        })
+      : [];
+    const wasBilled = new Set(billCreated.map((r) => r.sourceId).filter((s): s is string => !!s));
+
+    let billed = 0;
+    let paid = 0;
+    let outstanding = 0;
+    let oldestDueDate: Date | null = null;
+    const openBills: typeof rows = [];
+    for (const r of rows) {
+      if (r.status === 'VOID') continue;
+      const originatedAsBill = wasBilled.has(r.id) || r.dueDate != null;
+      if (r.status === 'BILL') {
+        billed += r.amount;
+        outstanding += r.amount;
+        openBills.push(r);
+        if (r.dueDate && (!oldestDueDate || r.dueDate < oldestDueDate)) {
+          oldestDueDate = r.dueDate;
+        }
+      } else if (r.status === 'PAID') {
+        // Lifetime billed includes paid bills (now PAID but originated
+        // as BILL); pure paid expenses contribute only to `paid`.
+        if (originatedAsBill) billed += r.amount;
+        paid += r.amount;
+      }
+    }
+    const currency = rows[0]?.currency ?? 'TTD';
+    const matchedBy = contactRows.length ? 'contactId' : 'vendor';
+    return {
+      vendorId,
+      matchedBy,
+      currency,
+      billed,
+      paid,
+      outstanding,
+      openBillCount: openBills.length,
+      oldestDueDate,
+      openBills,
+    };
   }
 
   async updateExpense(input: {
@@ -217,6 +540,19 @@ export class ExpensesService {
   }
 
   async deleteExpense(businessId: string, expenseId: string) {
+    // FIN3 — once an expense has been posted to the ledger we MUST NOT
+    // hard/soft-delete it: deletion would leave a balanced ledger entry
+    // referencing a row that no longer exists. Force callers to use
+    // `voidExpense` instead, which posts an explicit reversal.
+    const posted = await this.prisma.client.financialTransaction.findFirst({
+      where: { businessId, sourceType: 'Expense', sourceId: expenseId },
+      select: { id: true },
+    });
+    if (posted) {
+      throw new BadRequestException(
+        'Cannot delete a posted expense — call POST /finance/businesses/:businessId/bills/:expenseId/void to reverse the ledger entries instead.',
+      );
+    }
     return this.prisma.client.expense.update({
       where: { id: expenseId, businessId },
       data: { deletedAt: new Date() },

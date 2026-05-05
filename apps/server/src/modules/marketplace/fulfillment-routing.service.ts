@@ -1,8 +1,10 @@
 import { Injectable, Logger, BadRequestException, Inject } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { InventoryLowPayload, InventoryOutPayload, PurchaseOrderReceivedPayload } from '../../core/event-bus/events.types';
+import { ExpensePostingService } from '../finance/expense-posting.service';
 
 export interface OrderStatusTimelineEntry {
   status: string;
@@ -190,6 +192,7 @@ export class FulfillmentRoutingService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(ExpensePostingService) private readonly expensePosting: ExpensePostingService,
   ) {}
 
   private generatePONumber(): string {
@@ -972,7 +975,8 @@ export class FulfillmentRoutingService {
       });
       const defaultWarehouseId = warehouses[0]?.id;
 
-      updatedPO = await this.prisma.client.$transaction(async (tx) => {
+      updatedPO = await this.prisma.client.$transaction(async (rawTx) => {
+        const tx = rawTx as unknown as Prisma.TransactionClient;
         const updated = await tx.purchaseOrder.update({
           where: { id: poId },
           data: updateData,
@@ -996,9 +1000,26 @@ export class FulfillmentRoutingService {
           });
 
           if (existing) {
+            // FIN3 — Weighted-average cost recompute on receipt:
+            //   newAvg = (oldQty*oldCost + recvQty*recvCost) / (oldQty + recvQty)
+            // Falls back to the existing cost if the PO line carries no
+            // unitCost (treats freight-only or zero-cost receipts as
+            // not-priced rather than blowing away an established cost).
+            let nextCostPerUnit = existing.costPerUnit ?? null;
+            if (item.unitCost != null && item.unitCost > 0) {
+              const oldQty = Math.max(existing.quantity, 0);
+              const oldCost = existing.costPerUnit ?? 0;
+              const denom = oldQty + qty;
+              nextCostPerUnit = denom > 0
+                ? (oldQty * oldCost + qty * Number(item.unitCost)) / denom
+                : Number(item.unitCost);
+            }
             await tx.inventoryStock.update({
               where: { id: existing.id },
-              data: { quantity: existing.quantity + qty },
+              data: {
+                quantity: existing.quantity + qty,
+                ...(nextCostPerUnit != null ? { costPerUnit: nextCostPerUnit } : {}),
+              },
             });
           } else {
             await tx.inventoryStock.create({
@@ -1026,6 +1047,29 @@ export class FulfillmentRoutingService {
               referenceId: poId,
             },
           });
+        }
+
+        // FIN3 — post the inventory leg in the SAME transaction as the
+        // PO update + stock writes. A failed posting must roll back the
+        // PO state change (no half-received PO without a ledger entry).
+        if (Number(updated.total) > 0) {
+          await this.expensePosting.onPurchaseOrderReceived(
+            {
+              id: updated.id,
+              businessId: updated.businessId,
+              total: Number(updated.total),
+              currency: updated.currency,
+              receivedAt: updated.receivedAt ?? new Date(),
+              paymentStatus: (updated as { paymentStatus?: string }).paymentStatus ?? 'UNPAID',
+              paymentMethod:
+                (updated as { paymentStatus?: string }).paymentStatus === 'PAID'
+                  ? 'bank_transfer'
+                  : null,
+              supplierName: updated.supplierName,
+              poNumber: updated.poNumber,
+            },
+            tx,
+          );
         }
 
         return updated;

@@ -43,17 +43,18 @@ import { TimeCostService } from './time-cost.service';
 import { LeverageController } from './leverage.controller';
 import { MarginOnPaymentListener } from './margin-on-payment.listener';
 import { CrmModule } from '../crm/crm.module';
+import { FinanceModule } from '../finance/finance.module';
 import { PublicEventsModule } from '../public-events/public-events.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
 import { CatalogModule } from '../catalog/catalog.module';
-import { FinanceModule } from '../finance/finance.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import type { NotificationsModule as NotificationsModuleType } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     CrmModule,
+    FinanceModule,
     PublicEventsModule,
     SubscriptionsModule,
     AiModule,

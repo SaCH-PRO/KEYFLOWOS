@@ -155,6 +155,7 @@ model Business {
   expenseCategories ExpenseCategory[]
   expenseBudgets   ExpenseBudget[]
   recurringInvoices RecurringInvoice[]
+  recurringExpenses RecurringExpense[]
   emailCampaigns   EmailCampaign[]
   emailContacts    EmailCampaignContact[]
   leadForms        LeadForm[]
@@ -2349,6 +2350,7 @@ model ExpenseCategory {
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   expenses   Expense[]
   budgets    ExpenseBudget[]
+  recurringExpenses RecurringExpense[]
 
   // FIN1: link expense categories to a Chart of Account row so reports can
   // group spend by COA bucket. Nullable until FIN3 backfills the mapping.
@@ -2377,12 +2379,22 @@ model Expense {
   isRecurring Boolean  @default(false) @map("is_recurring")
   recurringFrequency String? @map("recurring_frequency")
 
+  // FIN3 — Bill (unpaid expense) support. Defaults to PAID so existing
+  // rows behave unchanged. Lifecycle: BILL -> PAID (via mark-paid) or
+  // BILL/PAID -> VOID (replaced by a reversal posting).
+  status      String    @default("PAID") // PAID, BILL, VOID
+  dueDate     DateTime? @map("due_date")
+  paidAt      DateTime? @map("paid_at")
+
   categoryId String?          @map("category_id")
   category   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   projectId  String?  @map("project_id")
   contactId  String?  @map("contact_id")
   serviceId  String?  @map("service_id")
+
+  recurringExpenseId String?           @map("recurring_expense_id")
+  recurringExpense   RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -2397,7 +2409,57 @@ model Expense {
   @@index([businessId, projectId])
   @@index([businessId, contactId])
   @@index([businessId, serviceId])
+  @@index([businessId, status, dueDate])
+  @@index([businessId, recurringExpenseId])
   @@map("expenses")
+}
+
+model RecurringExpense {
+  id          String   @id @default(cuid())
+  name        String
+  frequency   String   // WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, YEARLY
+  nextRunDate DateTime @map("next_run_date")
+  lastRunDate DateTime? @map("last_run_date")
+  endDate     DateTime? @map("end_date")
+  isActive    Boolean  @default(true) @map("is_active")
+  runCount    Int      @default(0) @map("run_count")
+  failureCount   Int       @default(0) @map("failure_count")
+  lastFailureAt  DateTime? @map("last_failure_at")
+  lastError      String?   @map("last_error")
+  cancelledAt    DateTime? @map("cancelled_at")
+
+  // Snapshot used by the generator each cycle.
+  description   String
+  amount        Float
+  currency      String   @default("TTD")
+  vendor        String?
+  paymentMethod String?  @map("payment_method")
+  notes         String?
+  // When true the generator emits the Expense as status=BILL (Dr Op Exp /
+  // Cr AP) so the user can mark-paid later. When false it posts as paid.
+  createsBill   Boolean  @default(false) @map("creates_bill")
+  // Default offset for dueDate when createsBill — days from issue date.
+  dueOffsetDays Int?     @map("due_offset_days")
+
+  categoryId String?          @map("category_id")
+  category   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  projectId  String?  @map("project_id")
+  contactId  String?  @map("contact_id")
+  serviceId  String?  @map("service_id")
+
+  generatedExpenses Expense[]
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([businessId, isActive])
+  @@index([businessId, nextRunDate])
+  @@map("recurring_expenses")
 }
 
 model ExpenseBudget {
@@ -3330,6 +3392,10 @@ model PurchaseOrder {
   submittedAt      DateTime? @map("submitted_at")
   acknowledgedAt   DateTime? @map("acknowledged_at")
   shippedAt        DateTime? @map("shipped_at")
+  // FIN3 — payment lifecycle for the supplier-side ledger posting.
+  // UNPAID -> Cr Accounts Payable on receipt; PAID -> Cr Cash/Bank.
+  paymentStatus    String   @default("UNPAID") @map("payment_status")
+  paidAt           DateTime? @map("po_paid_at")
 
   notes       String?
 

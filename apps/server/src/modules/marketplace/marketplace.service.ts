@@ -5,6 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, canTransitionOrder } from './fulfillment-routing.service';
+import { ExpensePostingService } from '../finance/expense-posting.service';
 import {
   PreorderDelayedPayload,
   StoreOrderCreatedPayload,
@@ -25,7 +26,36 @@ export class MarketplaceService {
     private readonly emailService: TransactionalEmailService,
     @Inject(FulfillmentRoutingService) private readonly fulfillmentRoutingService: FulfillmentRoutingService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(ExpensePostingService) private readonly expensePosting: ExpensePostingService,
   ) {}
+
+  /**
+   * FIN3 — post the COGS leg (Dr COGS / Cr Inventory) for a storefront/
+   * marketplace order that just transitioned to PAID. Uses the same
+   * weighted-average-cost recipe as the invoice path. Idempotent on
+   * `MarketplaceOrder:{id}:cogs`. Wrapped in try/catch only because we
+   * fall back to the legacy emit path; the service-internal callers
+   * await this inside their own transaction below.
+   */
+  private async postOrderCogs(order: {
+    id: string;
+    businessId: string;
+    currency: string;
+    items: Array<{ productId: string | null; quantity: number }>;
+  }): Promise<void> {
+    const items = (order.items ?? [])
+      .filter((i) => i.productId && i.quantity > 0)
+      .map((i) => ({ productId: i.productId as string, quantity: i.quantity }));
+    if (items.length === 0) return;
+    await this.expensePosting.onProductSold({
+      businessId: order.businessId,
+      sourceType: 'MarketplaceOrder',
+      sourceId: order.id,
+      date: new Date(),
+      currency: order.currency,
+      items,
+    });
+  }
 
   private generateOrderNumber(): string {
     const prefix = 'MKT';
@@ -351,32 +381,56 @@ export class MarketplaceService {
 
     const initialStatus = data.paymentOnCreation ? 'paid' : 'placed';
 
-    const order = await this.prisma.client.marketplaceOrder.create({
-      data: {
-        businessId,
-        orderNumber,
-        status: initialStatus,
-        type: data.type || 'STANDARD',
-        customerName: data.customerName,
-        customerEmail: data.customerEmail,
-        customerPhone: data.customerPhone,
-        customerCountry: data.customerCountry,
-        shippingAddress: data.shippingAddress,
-        billingAddress: data.billingAddress,
-        subtotal,
-        shippingFee,
-        taxAmount,
-        dutyAmount,
-        discountAmount,
-        total,
-        currency: data.currency || 'TTD',
-        notes: data.notes,
-        items: { create: orderItems },
-        metadata: {
-          statusTimeline: [{ status: initialStatus, timestamp: new Date().toISOString(), note: 'Order placed' }],
+    // FIN3 — order create + (when paid-on-creation) COGS posting share
+    // a single transaction so listeners only ever see the order after
+    // its ledger entries have committed.
+    const order = await this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.marketplaceOrder.create({
+        data: {
+          businessId,
+          orderNumber,
+          status: initialStatus,
+          type: data.type || 'STANDARD',
+          customerName: data.customerName,
+          customerEmail: data.customerEmail,
+          customerPhone: data.customerPhone,
+          customerCountry: data.customerCountry,
+          shippingAddress: data.shippingAddress,
+          billingAddress: data.billingAddress,
+          subtotal,
+          shippingFee,
+          taxAmount,
+          dutyAmount,
+          discountAmount,
+          total,
+          currency: data.currency || 'TTD',
+          notes: data.notes,
+          items: { create: orderItems },
+          metadata: {
+            statusTimeline: [{ status: initialStatus, timestamp: new Date().toISOString(), note: 'Order placed' }],
+          },
         },
-      },
-      include: { items: { include: { product: true } }, shipments: true },
+        include: { items: { include: { product: true } }, shipments: true },
+      });
+      if (initialStatus === 'paid') {
+        const items = created.items
+          .filter((i) => i.productId && i.quantity > 0)
+          .map((i) => ({ productId: i.productId as string, quantity: i.quantity }));
+        if (items.length > 0) {
+          await this.expensePosting.onProductSold(
+            {
+              businessId,
+              sourceType: 'MarketplaceOrder',
+              sourceId: created.id,
+              date: new Date(),
+              currency: created.currency,
+              items,
+            },
+            tx as unknown as import('@prisma/client').Prisma.TransactionClient,
+          );
+        }
+      }
+      return created;
     });
 
     this.sendSellerNewOrderNotification(businessId, order, orderItems).catch((err) =>
@@ -1057,12 +1111,35 @@ export class MarketplaceService {
         updateData.paymentStatus = 'PAID';
         updateData.status = newStatus;
         updateData.metadata = { ...meta, statusTimeline: [...timeline] };
-        await this.prisma.client.marketplaceOrder.update({ where: { id: orderId }, data: updateData });
-        this.autoRouteOrder(businessId, orderId, true);
-        const paidOrder = await this.prisma.client.marketplaceOrder.findFirst({
-          where: { id: orderId },
-          include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+        // FIN3 — order status flip + COGS posting share a single
+        // transaction so a posting failure rolls the PAID write back.
+        const paidOrder = await this.prisma.client.$transaction(async (tx) => {
+          await tx.marketplaceOrder.update({ where: { id: orderId }, data: updateData });
+          const fresh = await tx.marketplaceOrder.findFirst({
+            where: { id: orderId },
+            include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+          });
+          if (fresh) {
+            const items = fresh.items
+              .filter((i) => i.productId && i.quantity > 0)
+              .map((i) => ({ productId: i.productId as string, quantity: i.quantity }));
+            if (items.length > 0) {
+              await this.expensePosting.onProductSold(
+                {
+                  businessId,
+                  sourceType: 'MarketplaceOrder',
+                  sourceId: fresh.id,
+                  date: new Date(),
+                  currency: fresh.currency,
+                  items,
+                },
+                tx as unknown as import('@prisma/client').Prisma.TransactionClient,
+              );
+            }
+          }
+          return fresh;
         });
+        this.autoRouteOrder(businessId, orderId, true);
         if (paidOrder) {
           this.emitOrderLifecycleEvent(businessId, paidOrder, 'paid');
           this.sendFulfillmentNotification(businessId, paidOrder, 'paid', data).catch((err) =>
