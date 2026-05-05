@@ -1,6 +1,11 @@
 import {
-  Body, Controller, Delete, ForbiddenException, Get, Inject, Param, Patch, Post, Query, Req, UseGuards,
+  BadRequestException,
+  Body, Controller, Delete, ForbiddenException, Get, Header, Inject, Param, Patch, Post, Query, Req, Res,
+  UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import type { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -10,6 +15,9 @@ import { FinanceAccountsService, type CreateAccountInput, type UpdateAccountInpu
 import { FinanceCoaService, type CreateCoaInput, type UpdateCoaInput } from './finance-coa.service';
 import { FinanceTaxRateService, type UpsertTaxRateInput } from './finance-tax-rate.service';
 import { FinanceSettingsService, type UpdateFinanceSettingsInput } from './finance-settings.service';
+import { BankImportService } from './bank-import.service';
+import { BankMatchingService } from './bank-matching.service';
+import { ReconciliationService } from './reconciliation.service';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -27,6 +35,9 @@ export class FinanceController {
     @Inject(FinanceCoaService) private readonly coa: FinanceCoaService,
     @Inject(FinanceTaxRateService) private readonly taxRates: FinanceTaxRateService,
     @Inject(FinanceSettingsService) private readonly settings: FinanceSettingsService,
+    @Inject(BankImportService) private readonly bankImport: BankImportService,
+    @Inject(BankMatchingService) private readonly bankMatch: BankMatchingService,
+    @Inject(ReconciliationService) private readonly reconciliation: ReconciliationService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
@@ -188,5 +199,167 @@ export class FinanceController {
   ) {
     await this.ensureAccess(req.user.id, businessId);
     return this.settings.update(businessId, body);
+  }
+
+  // ---------- FIN6: Reconciliation ----------
+
+  /** CSV bank statement import. Multipart upload, field name `file`. */
+  @Post('accounts/:accountId/bank-transactions/import')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+  }))
+  async importBankCsv(
+    @Param('businessId') businessId: string,
+    @Param('accountId') accountId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
+    @Query('autoMatch') autoMatch?: string,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    if (!file || !file.buffer) throw new BadRequestException('CSV file is required');
+    const csv = file.buffer.toString('utf8');
+    const result = await this.bankImport.importCsv(businessId, accountId, csv, { userId: req.user.id });
+    if (autoMatch !== 'false') {
+      const m = await this.bankMatch.autoMatch(businessId, accountId, { userId: req.user.id });
+      return { ...result, autoMatched: m };
+    }
+    return result;
+  }
+
+  /** Split-view payload for the reconciliation UI: bank rows + ledger candidates. */
+  @Get('accounts/:accountId/bank-transactions')
+  async listBankTransactions(
+    @Param('businessId') businessId: string,
+    @Param('accountId') accountId: string,
+    @Req() req: any,
+    @Query('since') since?: string,
+    @Query('until') until?: string,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankMatch.getSplitView(businessId, accountId, {
+      sinceDate: since ? new Date(since) : null,
+      untilDate: until ? new Date(until) : null,
+    });
+  }
+
+  @Post('accounts/:accountId/bank-transactions/auto-match')
+  async runAutoMatch(
+    @Param('businessId') businessId: string,
+    @Param('accountId') accountId: string,
+    @Req() req: any,
+    @Body() body?: { since?: string; until?: string },
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankMatch.autoMatch(businessId, accountId, {
+      sinceDate: body?.since ? new Date(body.since) : null,
+      untilDate: body?.until ? new Date(body.until) : null,
+      userId: req.user.id,
+    });
+  }
+
+  @Post('bank-transactions/:bankTransactionId/match')
+  async manualMatch(
+    @Param('businessId') businessId: string,
+    @Param('bankTransactionId') bankTransactionId: string,
+    @Body() body: { transactionId: string },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    if (!body?.transactionId) throw new BadRequestException('transactionId is required');
+    return this.bankMatch.manualMatch(businessId, bankTransactionId, body.transactionId, req.user.id);
+  }
+
+  @Post('bank-transactions/:bankTransactionId/unmatch')
+  async unmatch(
+    @Param('businessId') businessId: string,
+    @Param('bankTransactionId') bankTransactionId: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankMatch.unmatch(businessId, bankTransactionId, req.user.id);
+  }
+
+  @Post('bank-transactions/:bankTransactionId/ignore')
+  async ignoreBankRow(
+    @Param('businessId') businessId: string,
+    @Param('bankTransactionId') bankTransactionId: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankMatch.ignore(businessId, bankTransactionId, req.user.id);
+  }
+
+  @Get('reconciliations')
+  async listReconciliations(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+    @Query('accountId') accountId?: string,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.reconciliation.list(businessId, accountId ?? null);
+    return { items };
+  }
+
+  @Post('reconciliations')
+  async createReconciliation(
+    @Param('businessId') businessId: string,
+    @Body() body: { accountId: string; periodStart: string; periodEnd: string; statementBalance: number | string; notes?: string | null },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    if (!body?.accountId) throw new BadRequestException('accountId is required');
+    if (!body?.periodStart || !body?.periodEnd) throw new BadRequestException('periodStart and periodEnd are required');
+    return this.reconciliation.create(businessId, {
+      accountId: body.accountId,
+      periodStart: new Date(body.periodStart),
+      periodEnd: new Date(body.periodEnd),
+      statementBalance: body.statementBalance ?? 0,
+      notes: body.notes ?? null,
+    }, req.user.id);
+  }
+
+  @Get('reconciliations/:id')
+  async getReconciliation(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.reconciliation.get(businessId, id);
+  }
+
+  @Post('reconciliations/:id/complete')
+  async completeReconciliation(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.reconciliation.complete(businessId, id, req.user.id);
+  }
+
+  @Get('reconciliations/:id/report')
+  async reconciliationReport(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.reconciliation.getReport(businessId, id);
+  }
+
+  @Get('reconciliations/:id/report.csv')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  async reconciliationReportCsv(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    const csv = await this.reconciliation.exportReportCsv(businessId, id);
+    res.setHeader('Content-Disposition', `attachment; filename="reconciliation-${id}.csv"`);
+    res.send(csv);
   }
 }
