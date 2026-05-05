@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GmailService } from '../commerce/gmail.service';
+import { appUrl } from '../../core/config/runtime-urls';
 import {
   TemplateContext,
   bookingConfirmedTemplate,
@@ -166,6 +167,63 @@ export class TransactionalEmailService implements OnModuleInit {
     return preferences[type] !== false;
   }
 
+  /**
+   * Inject a `referUrl` deep-link into the template data for the first
+   * booking-confirmed / order-confirmed email a customer receives from a
+   * given business. Returns true when the CTA was attached so the caller
+   * can persist an idempotency marker after the send succeeds.
+   *
+   * Idempotency is enforced by looking for a previous `referral_invite`
+   * row in `customer_notification_logs` keyed by businessId + recipient
+   * email (lowercased) — any subsequent purchases will skip the CTA.
+   */
+  private async maybeAttachReferralInvite(
+    businessId: string,
+    recipientEmail: string,
+    templateData: Record<string, any>,
+  ): Promise<boolean> {
+    if (!recipientEmail) return false;
+    if (templateData.referUrl) return false;
+
+    const normalizedEmail = recipientEmail.toLowerCase();
+    const markerKey = `referral-invite-${businessId}-${normalizedEmail}`;
+
+    try {
+      const existingMarker = await this.prisma.client.customerNotificationLog.findFirst({
+        where: { businessId, messageId: markerKey },
+        select: { id: true },
+      });
+      if (existingMarker) return false;
+
+      const existingByType = await this.prisma.client.customerNotificationLog.findFirst({
+        where: {
+          businessId,
+          type: 'referral_invite',
+          recipientEmail: { equals: recipientEmail, mode: 'insensitive' },
+        },
+        select: { id: true },
+      });
+      if (existingByType) return false;
+
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { slug: true },
+      });
+      const slug = business?.slug?.trim();
+      if (!slug) return false;
+
+      const base = appUrl();
+      if (!base) return false;
+
+      const url = `${base}/me/refer?slug=${encodeURIComponent(slug)}&email=${encodeURIComponent(normalizedEmail)}`;
+      templateData.referUrl = url;
+      return true;
+    } catch (err) {
+      this.logger.warn(`Referral CTA injection skipped for ${businessId}/${recipientEmail}: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
   private async logNotification(params: {
     businessId: string;
     contactId?: string;
@@ -259,6 +317,15 @@ export class TransactionalEmailService implements OnModuleInit {
     };
     const data = params.templateData;
 
+    let referralAttached = false;
+    if (params.type === 'booking_confirmed' || params.type === 'order_confirmed') {
+      referralAttached = await this.maybeAttachReferralInvite(
+        params.businessId,
+        params.recipientEmail,
+        data,
+      );
+    }
+
     let rendered: { subject: string; html: string };
     try {
       switch (params.type) {
@@ -273,6 +340,7 @@ export class TransactionalEmailService implements OnModuleInit {
             location: data.location,
             locationPlaceId: data.locationPlaceId,
             locationLatLng: data.locationLatLng,
+            referUrl: data.referUrl,
           });
           break;
         case 'booking_reminder':
@@ -340,6 +408,7 @@ export class TransactionalEmailService implements OnModuleInit {
             currency: data.currency,
             estimatedDelivery: data.estimatedDelivery,
             orderStatusUrl: data.orderStatusUrl,
+            referUrl: data.referUrl,
           });
           break;
         case 'order_shipped':
@@ -529,6 +598,20 @@ export class TransactionalEmailService implements OnModuleInit {
           status: 'SENT',
           messageId: params.dedupeKey ?? result.messageId,
         });
+
+        if (referralAttached) {
+          await this.logNotification({
+            businessId: params.businessId,
+            contactId: params.contactId,
+            type: 'referral_invite' as NotificationType,
+            recipientEmail: params.recipientEmail,
+            recipientName: params.recipientName,
+            subject: `Referral CTA included in ${params.type}`,
+            status: 'SENT',
+            messageId: `referral-invite-${params.businessId}-${params.recipientEmail.toLowerCase()}`,
+            templateData: { sourceType: params.type, referUrl: data.referUrl },
+          });
+        }
 
         this.logger.log(`Sent ${params.type} to ${params.recipientEmail} for business ${params.businessId}`);
         return { status: 'SENT', messageId: result.messageId };
