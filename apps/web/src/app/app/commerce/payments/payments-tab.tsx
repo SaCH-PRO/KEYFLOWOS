@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   DollarSign,
@@ -16,10 +16,22 @@ import {
   X,
   Settings,
   ArrowRight,
+  RefreshCw,
+  Mail,
+  Receipt,
+  Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { Invoice, Contact } from "@/lib/client";
-import { markInvoicePaid, updateInvoiceStatus } from "@/lib/client";
+import type { Invoice, Contact, BusinessPayment, PaymentFilters } from "@/lib/client";
+import {
+  markInvoicePaid,
+  updateInvoiceStatus,
+  fetchBusinessPayments,
+  retryPayment as retryPaymentApi,
+  refundPayment as refundPaymentApi,
+  resendReceipt as resendReceiptApi,
+} from "@/lib/client";
+import { moduleEvents } from "@/lib/module-events";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import { getStatusBadge } from "../components/commerce-types";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -63,7 +75,7 @@ export default function PaymentsTab({
   invoices,
   currency,
   businessId,
-  contacts: _contacts,
+  contacts,
   setInvoices,
   onNavigateToInvoices,
 }: PaymentsTabProps) {
@@ -73,6 +85,174 @@ export default function PaymentsTab({
   const [expandedOverdue, setExpandedOverdue] = useState(true);
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Real Payment-row activity (separate from the invoice-based summary above).
+  const [payments, setPayments] = useState<BusinessPayment[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [paymentFilters, setPaymentFilters] = useState<PaymentFilters>({});
+  const [paymentSelected, setPaymentSelected] = useState<Set<string>>(new Set());
+
+  const reloadPayments = useCallback(async () => {
+    if (!businessId) return;
+    setPaymentsLoading(true);
+    const res = await fetchBusinessPayments(businessId, paymentFilters);
+    setPaymentsLoading(false);
+    if (res.data) setPayments(res.data);
+  }, [businessId, paymentFilters]);
+
+  useEffect(() => {
+    reloadPayments();
+  }, [reloadPayments]);
+
+  // Surface failed-payment events into the canonical taxonomy for #427 listeners.
+  useEffect(() => {
+    for (const p of payments) {
+      if (p.status === "FAILED") {
+        moduleEvents.emit("commerce:payment_failed", "commerce", {
+          paymentId: p.id,
+          invoiceId: p.invoiceId,
+          amount: p.amount,
+          provider: p.provider,
+        });
+      }
+    }
+  }, [payments]);
+
+  const handleRetryPayment = useCallback(async (paymentId: string) => {
+    if (!businessId) return;
+    setActionLoading((prev) => ({ ...prev, [paymentId]: "retry" }));
+    try {
+      const res = await retryPaymentApi(businessId, paymentId);
+      if (res.data) {
+        setPayments((prev) => prev.map((p) => (p.id === paymentId ? { ...p, status: res.data!.status } : p)));
+        moduleEvents.emit("commerce:payment_retry_initiated", "commerce", { paymentId });
+        toast.success("Payment marked for retry");
+      } else {
+        toast.error(res.error || "Retry failed");
+      }
+    } finally {
+      setActionLoading((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
+    }
+  }, [businessId]);
+
+  const handleRefundPayment = useCallback(async (paymentId: string) => {
+    if (!businessId) return;
+    const reason = window.prompt("Reason for refund (optional)?") ?? undefined;
+    setActionLoading((prev) => ({ ...prev, [paymentId]: "refund" }));
+    try {
+      const res = await refundPaymentApi(businessId, paymentId, reason || undefined);
+      if (res.data) {
+        setPayments((prev) => prev.map((p) => (p.id === paymentId ? { ...p, status: res.data!.status } : p)));
+        moduleEvents.emit("commerce:payment_refunded", "commerce", { paymentId, reason });
+        toast.success("Payment refunded");
+      } else {
+        toast.error(res.error || "Refund failed");
+      }
+    } finally {
+      setActionLoading((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
+    }
+  }, [businessId]);
+
+  const handleResendReceipt = useCallback(async (invoiceId: string, paymentId: string) => {
+    if (!businessId || !invoiceId) {
+      toast.error("Receipt requires an invoice");
+      return;
+    }
+    setActionLoading((prev) => ({ ...prev, [paymentId]: "receipt" }));
+    try {
+      const res = await resendReceiptApi(businessId, invoiceId);
+      if (res.data) {
+        setPayments((prev) =>
+          prev.map((p) =>
+            p.invoiceId === invoiceId && p.invoice
+              ? { ...p, invoice: { ...p.invoice, receiptSentAt: res.data!.receiptSentAt } }
+              : p,
+          ),
+        );
+        moduleEvents.emit("commerce:receipt_resent", "commerce", { invoiceId, paymentId });
+        toast.success("Receipt resent");
+      } else {
+        toast.error(res.error || "Failed to resend receipt");
+      }
+    } finally {
+      setActionLoading((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
+    }
+  }, [businessId]);
+
+  const handleNotifyFailedCustomer = useCallback(async (payment: BusinessPayment) => {
+    if (!businessId) return;
+    const contactEmail = payment.invoice?.contact?.email;
+    if (!contactEmail) {
+      toast.error("Customer has no email on file");
+      return;
+    }
+    // Mailto fallback so the user can compose immediately; canonical event still fires.
+    const subject = encodeURIComponent(`Payment issue on invoice ${payment.invoice?.invoiceNumber ?? ""}`);
+    const body = encodeURIComponent(
+      `Hi,\n\nWe noticed your recent payment of ${payment.currency} ${payment.amount} did not go through. Please try again at your convenience.\n\nThank you.`,
+    );
+    window.open(`mailto:${contactEmail}?subject=${subject}&body=${body}`, "_blank");
+    moduleEvents.emit("commerce:payment_failed", "commerce", {
+      paymentId: payment.id,
+      invoiceId: payment.invoiceId,
+      action: "notify_customer",
+    });
+  }, [businessId]);
+
+  const handlePaymentExportCsv = useCallback(() => {
+    const items = payments.filter((p) => paymentSelected.size === 0 || paymentSelected.has(p.id));
+    if (items.length === 0) {
+      toast.info("No payments to export");
+      return;
+    }
+    exportToCsv(
+      items.map((p) => ({
+        id: p.id,
+        invoice: p.invoice?.invoiceNumber ?? "",
+        contact: p.invoice?.contact ? `${p.invoice.contact.firstName ?? ""} ${p.invoice.contact.lastName ?? ""}`.trim() : "",
+        email: p.invoice?.contact?.email ?? "",
+        amount: p.amount,
+        currency: p.currency,
+        status: p.status,
+        method: p.method ?? "",
+        provider: p.provider,
+        reference: p.reference ?? "",
+        createdAt: p.createdAt,
+      })) as unknown as Record<string, unknown>[],
+      [
+        { key: "id", header: "Payment ID" },
+        { key: "invoice", header: "Invoice" },
+        { key: "contact", header: "Customer" },
+        { key: "email", header: "Email" },
+        { key: "amount", header: "Amount", format: (v) => Number(v).toFixed(2) },
+        { key: "currency", header: "Currency" },
+        { key: "status", header: "Status" },
+        { key: "method", header: "Method" },
+        { key: "provider", header: "Provider" },
+        { key: "reference", header: "Reference" },
+        { key: "createdAt", header: "Date", format: (v) => (v ? new Date(v as string).toISOString() : "") },
+      ],
+      `payment-activity-${new Date().toISOString().slice(0, 10)}`,
+    );
+    toast.success(`${items.length} payment(s) exported`);
+  }, [payments, paymentSelected]);
+
+  const filteredPayments = useMemo(() => {
+    if (!searchQuery.trim()) return payments;
+    const q = searchQuery.toLowerCase();
+    return payments.filter((p) => {
+      const contact = p.invoice?.contact;
+      const name = contact ? `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.toLowerCase() : "";
+      return (
+        (p.invoice?.invoiceNumber ?? "").toLowerCase().includes(q) ||
+        (p.reference ?? "").toLowerCase().includes(q) ||
+        (p.providerPaymentId ?? "").toLowerCase().includes(q) ||
+        name.includes(q) ||
+        (contact?.email ?? "").toLowerCase().includes(q) ||
+        String(p.amount).includes(q)
+      );
+    });
+  }, [payments, searchQuery]);
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -716,6 +896,230 @@ export default function PaymentsTab({
         onBulkStatusChange={handleBulkMarkPaid}
         entityLabel="payments"
       />
+
+      <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4" data-testid="payment-activity">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <Receipt className="w-3.5 h-3.5 text-muted-foreground/60" />
+            <span className="text-xs font-semibold">Payment Activity</span>
+            <span className="text-[10px] text-muted-foreground/50">{filteredPayments.length} rows</span>
+          </div>
+          <button
+            onClick={reloadPayments}
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/30 text-muted-foreground/70"
+            title="Refresh"
+            aria-label="Refresh payment activity"
+          >
+            {paymentsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
+          <select
+            data-testid="payment-filter-status"
+            value={paymentFilters.status ?? ""}
+            onChange={(e) => setPaymentFilters((f) => ({ ...f, status: e.target.value || undefined }))}
+            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
+          >
+            <option value="">All statuses</option>
+            <option value="SUCCESSFUL">Successful</option>
+            <option value="PENDING">Pending</option>
+            <option value="FAILED">Failed</option>
+            <option value="REFUNDED">Refunded</option>
+          </select>
+          <select
+            data-testid="payment-filter-method"
+            value={paymentFilters.method ?? ""}
+            onChange={(e) => setPaymentFilters((f) => ({ ...f, method: e.target.value || undefined }))}
+            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
+          >
+            <option value="">All methods</option>
+            <option value="CARD">Card</option>
+            <option value="BANK_TRANSFER">Bank transfer</option>
+            <option value="CASH">Cash</option>
+            <option value="OTHER">Other</option>
+          </select>
+          <input
+            data-testid="payment-filter-provider"
+            placeholder="Provider"
+            value={paymentFilters.provider ?? ""}
+            onChange={(e) => setPaymentFilters((f) => ({ ...f, provider: e.target.value || undefined }))}
+            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
+          />
+          <select
+            data-testid="payment-filter-contact"
+            value={paymentFilters.contactId ?? ""}
+            onChange={(e) => setPaymentFilters((f) => ({ ...f, contactId: e.target.value || undefined }))}
+            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
+          >
+            <option value="">All customers</option>
+            {contacts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.email || c.id.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+          <input
+            data-testid="payment-filter-min-amount"
+            type="number"
+            placeholder="Min amount"
+            value={paymentFilters.minAmount ?? ""}
+            onChange={(e) => setPaymentFilters((f) => ({ ...f, minAmount: e.target.value ? Number(e.target.value) : undefined }))}
+            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
+          />
+          <input
+            data-testid="payment-filter-max-amount"
+            type="number"
+            placeholder="Max amount"
+            value={paymentFilters.maxAmount ?? ""}
+            onChange={(e) => setPaymentFilters((f) => ({ ...f, maxAmount: e.target.value ? Number(e.target.value) : undefined }))}
+            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
+          />
+          <input
+            data-testid="payment-filter-from"
+            type="date"
+            value={paymentFilters.from ?? ""}
+            onChange={(e) => setPaymentFilters((f) => ({ ...f, from: e.target.value || undefined }))}
+            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
+          />
+          <input
+            data-testid="payment-filter-to"
+            type="date"
+            value={paymentFilters.to ?? ""}
+            onChange={(e) => setPaymentFilters((f) => ({ ...f, to: e.target.value || undefined }))}
+            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
+          />
+        </div>
+
+        {filteredPayments.length === 0 ? (
+          <p className="text-xs text-muted-foreground/60 px-1 py-6 text-center">
+            {paymentsLoading ? "Loading payments…" : "No payment activity yet."}
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {filteredPayments.map((p) => {
+              const loading = actionLoading[p.id];
+              const isFailed = p.status === "FAILED";
+              const isSuccess = p.status === "SUCCESSFUL";
+              const isRefunded = p.status === "REFUNDED";
+              const contactName = p.invoice?.contact
+                ? `${p.invoice.contact.firstName ?? ""} ${p.invoice.contact.lastName ?? ""}`.trim() || "—"
+                : "—";
+              return (
+                <div
+                  key={p.id}
+                  data-testid={`payment-row-${p.id}`}
+                  className={`flex items-center gap-2 p-2.5 rounded-lg transition-colors ${
+                    isFailed ? "bg-red-500/[0.05] hover:bg-red-500/[0.08]" : isSuccess ? "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.06]" : isRefunded ? "bg-orange-500/[0.05]" : "bg-white/[0.02] hover:bg-white/[0.04]"
+                  } ${paymentSelected.has(p.id) ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
+                >
+                  <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={paymentSelected.has(p.id)}
+                      onChange={() => setPaymentSelected((prev) => {
+                        const n = new Set(prev);
+                        if (n.has(p.id)) n.delete(p.id); else n.add(p.id);
+                        return n;
+                      })}
+                      className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                    />
+                  </label>
+                  <div
+                    className={`p-1.5 rounded-lg shrink-0 ${
+                      isFailed ? "bg-red-500/15" : isSuccess ? "bg-emerald-500/15" : isRefunded ? "bg-orange-500/15" : "bg-amber-500/15"
+                    }`}
+                  >
+                    <CreditCard className={`w-3.5 h-3.5 ${isFailed ? "text-red-400" : isSuccess ? "text-emerald-400" : isRefunded ? "text-orange-400" : "text-amber-400"}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-medium truncate">
+                        {p.invoice?.invoiceNumber ?? p.providerPaymentId.slice(0, 12)}
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                        isSuccess ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40"
+                        : isFailed ? "bg-red-500/15 text-red-300 border-red-500/40"
+                        : isRefunded ? "bg-orange-500/15 text-orange-300 border-orange-500/40"
+                        : "bg-amber-500/15 text-amber-300 border-amber-500/40"
+                      }`}>{p.status}</span>
+                      <span className="text-[10px] text-muted-foreground/60">{p.provider}{p.method ? ` · ${p.method}` : ""}</span>
+                      {p.invoice?.receiptSentAt && (
+                        <span className="text-[10px] text-muted-foreground/50">receipt sent</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground/60 block mt-0.5 truncate">
+                      {contactName} · {new Date(p.createdAt).toLocaleString()}
+                      {(p.reference || p.providerPaymentId) && (
+                        <span className="ml-1 text-muted-foreground/40">
+                          · ref {p.reference || p.providerPaymentId.slice(0, 12)}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <span className={`text-xs font-bold shrink-0 ${isRefunded ? "line-through text-orange-300" : ""}`}>
+                    {formatCurrency(Number(p.amount), p.currency)}
+                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isFailed && (
+                      <>
+                        <button
+                          onClick={() => handleRetryPayment(p.id)}
+                          disabled={!!loading}
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 disabled:opacity-50"
+                          title="Retry payment"
+                          data-testid={`payment-retry-${p.id}`}
+                        >
+                          {loading === "retry" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          onClick={() => handleNotifyFailedCustomer(p)}
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+                          title="Notify customer"
+                          data-testid={`payment-notify-${p.id}`}
+                        >
+                          <Mail className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
+                    {isSuccess && p.invoiceId && (
+                      <>
+                        <button
+                          onClick={() => handleResendReceipt(p.invoiceId, p.id)}
+                          disabled={!!loading}
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50"
+                          title="Resend receipt"
+                          data-testid={`payment-receipt-${p.id}`}
+                        >
+                          {loading === "receipt" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Receipt className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          onClick={() => handleRefundPayment(p.id)}
+                          disabled={!!loading}
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 disabled:opacity-50"
+                          title="Mark refunded"
+                          data-testid={`payment-refund-${p.id}`}
+                        >
+                          {loading === "refund" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <BulkActionBar
+          selectedCount={paymentSelected.size}
+          totalCount={filteredPayments.length}
+          onSelectAll={() => setPaymentSelected(new Set(filteredPayments.map((p) => p.id)))}
+          onClearSelection={() => setPaymentSelected(new Set())}
+          onExportCsv={handlePaymentExportCsv}
+          entityLabel="payment-rows"
+        />
+      </div>
 
       <button
         onClick={() => { window.location.href = "/app/settings/business?tab=payments"; }}

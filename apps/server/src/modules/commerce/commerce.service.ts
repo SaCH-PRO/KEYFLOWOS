@@ -12,7 +12,7 @@ import {
 } from '../../core/event-bus/events.types';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { Service } from '@keyflow/db';
+import { Service, Prisma } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
@@ -1171,6 +1171,132 @@ export class CommerceService {
       paidAmount: newPaidTotal,
       remaining: Math.max(0, Number(invoice.total) - newPaidTotal),
     };
+  }
+
+  /** List every payment row for a business, with rich filtering. */
+  async listAllPayments(businessId: string, filters: {
+    status?: string;
+    method?: string;
+    provider?: string;
+    contactId?: string;
+    minAmount?: number;
+    maxAmount?: number;
+    from?: string | Date;
+    to?: string | Date;
+  } = {}) {
+    const where: Prisma.PaymentWhereInput = { businessId };
+    if (filters.status) where.status = filters.status;
+    if (filters.method) where.method = filters.method;
+    if (filters.provider) where.provider = filters.provider;
+    if (filters.minAmount != null || filters.maxAmount != null) {
+      const amount: Prisma.FloatFilter = {};
+      if (filters.minAmount != null) amount.gte = filters.minAmount;
+      if (filters.maxAmount != null) amount.lte = filters.maxAmount;
+      where.amount = amount;
+    }
+    if (filters.from || filters.to) {
+      const createdAt: Prisma.DateTimeFilter = {};
+      if (filters.from) createdAt.gte = new Date(filters.from);
+      if (filters.to) createdAt.lte = new Date(filters.to);
+      where.createdAt = createdAt;
+    }
+    if (filters.contactId) {
+      where.invoice = { is: { contactId: filters.contactId } };
+    }
+
+    const payments = await this.prisma.client.payment.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      include: {
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            status: true,
+            currency: true,
+            total: true,
+            dueDate: true,
+            issueDate: true,
+            receiptSentAt: true,
+            contactId: true,
+            contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+    return payments;
+  }
+
+  /** Mark a payment refunded (no provider call — local bookkeeping only). */
+  async markPaymentRefunded(paymentId: string, businessId: string, reason?: string) {
+    const payment = await this.prisma.client.payment.findFirst({
+      where: { id: paymentId, businessId },
+    });
+    if (!payment) throw new NotFoundException('Payment not found');
+    const updated = await this.prisma.client.payment.update({
+      where: { id: paymentId },
+      data: {
+        status: 'REFUNDED',
+        notes: reason ? `${payment.notes ? payment.notes + ' | ' : ''}Refunded: ${reason}` : payment.notes,
+      },
+    });
+    if (payment.invoiceId) {
+      await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId).catch(() => null);
+    }
+    this.statsCache.invalidateCache(businessId);
+    return updated;
+  }
+
+  /** Retry a failed payment by flipping it to PENDING and emitting an event. */
+  async retryPayment(paymentId: string, businessId: string) {
+    const payment = await this.prisma.client.payment.findFirst({
+      where: { id: paymentId, businessId },
+      include: { invoice: { select: { contactId: true } } },
+    });
+    if (!payment) throw new NotFoundException('Payment not found');
+    if (payment.status !== 'FAILED') {
+      throw new BadRequestException('Only failed payments can be retried');
+    }
+    const updated = await this.prisma.client.payment.update({
+      where: { id: paymentId },
+      data: { status: 'PENDING' },
+    });
+    if (payment.invoice?.contactId && payment.invoiceId) {
+      await this.crm.logContactEvent({
+        businessId,
+        contactId: payment.invoice.contactId,
+        type: 'invoice.payment_retry_initiated',
+        data: { paymentId, invoiceId: payment.invoiceId, amount: payment.amount },
+        actorType: 'USER',
+        source: 'commerce',
+      });
+    }
+    return updated;
+  }
+
+  /** Mark that a receipt was (re)sent for an invoice. */
+  async markReceiptSent(invoiceId: string, businessId: string) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    const updated = await this.prisma.client.invoice.update({
+      where: { id: invoiceId },
+      data: { receiptSentAt: new Date() },
+      select: { id: true, receiptSentAt: true },
+    });
+    if (invoice.contactId) {
+      await this.crm.logContactEvent({
+        businessId,
+        contactId: invoice.contactId,
+        type: 'invoice.receipt_resent',
+        data: { invoiceId },
+        actorType: 'USER',
+        source: 'commerce',
+      });
+    }
+    return updated;
   }
 
   async listPayments(invoiceId: string, businessId: string) {

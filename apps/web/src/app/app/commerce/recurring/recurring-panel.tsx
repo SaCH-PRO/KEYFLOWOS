@@ -23,6 +23,9 @@ import {
   AlertTriangle,
   CheckCircle,
   Sparkles,
+  History,
+  Ban,
+  ArrowRight,
 } from "lucide-react";
 import {
   fetchRecurringInvoices,
@@ -30,7 +33,10 @@ import {
   updateRecurringInvoice,
   deleteRecurringInvoice,
   toggleRecurringInvoice,
+  cancelRecurringInvoice,
+  fetchRecurringGenerationHistory,
   RecurringInvoice,
+  RecurringGenerationEntry,
   Product,
   Contact,
 } from "@/lib/client";
@@ -69,6 +75,12 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [historyDrawer, setHistoryDrawer] = useState<{ open: boolean; recurring: RecurringInvoice | null; entries: RecurringGenerationEntry[]; loading: boolean }>({
+    open: false,
+    recurring: null,
+    entries: [],
+    loading: false,
+  });
 
   const [form, setForm] = useState({
     name: "",
@@ -112,7 +124,6 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
 
   useEffect(() => {
     if (triggerNew && triggerNew > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       resetForm();
       setShowBuilder(true);
     }
@@ -263,6 +274,61 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
       emitEvent("billing:schedule_toggled", "commerce", { scheduleId: id, active: res.data.isActive });
     }
   }
+
+  function handleCancel(id: string) {
+    if (!businessId) return;
+    setConfirmState({
+      open: true,
+      action: async () => {
+        const res = await cancelRecurringInvoice(businessId!, id);
+        if (res.data) {
+          setRecurring((prev) => prev.map((r) => (r.id === id ? res.data! : r)));
+          emitEvent("billing:schedule_cancelled", "commerce", { scheduleId: id });
+          toast.success("Schedule cancelled");
+        } else {
+          toast.error(res.error || "Failed to cancel schedule");
+        }
+      },
+    });
+  }
+
+  async function openHistory(rec: RecurringInvoice) {
+    if (!businessId) return;
+    setHistoryDrawer({ open: true, recurring: rec, entries: [], loading: true });
+    const res = await fetchRecurringGenerationHistory(businessId, rec.id);
+    setHistoryDrawer({ open: true, recurring: rec, entries: res.data ?? [], loading: false });
+  }
+
+  function closeHistory() {
+    setHistoryDrawer({ open: false, recurring: null, entries: [], loading: false });
+  }
+
+  // Surface missed-generation events into the canonical event taxonomy so R3 can
+  // pick them up. Run once per render after data settles.
+  useEffect(() => {
+    const now = Date.now();
+    for (const r of recurring) {
+      if (!r.isActive) continue;
+      const due = r.nextRunDate ? new Date(r.nextRunDate).getTime() : 0;
+      const overdueByMs = now - due;
+      const oneDay = 24 * 60 * 60 * 1000;
+      if ((r.failureCount ?? 0) > 0) {
+        emitEvent("billing:schedule_failed", "commerce", {
+          scheduleId: r.id,
+          failureCount: r.failureCount,
+          lastError: r.lastError,
+        });
+      } else if (due > 0 && overdueByMs > oneDay) {
+        emitEvent("billing:schedule_missed", "commerce", {
+          scheduleId: r.id,
+          dueAt: r.nextRunDate,
+          overdueByDays: Math.floor(overdueByMs / oneDay),
+        });
+      }
+    }
+    // we deliberately depend only on recurring identity to avoid re-emitting on every keystroke
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recurring]);
 
   const dateFiltered = useMemo(
     () => filterByDateRange(recurring, (r) => r.nextRunDate, dateRange),
@@ -483,39 +549,63 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
         )}
       </AnimatePresence>
 
-      {recurring.length > 0 && (
-        <div className="flex items-center gap-3 flex-wrap text-[10px] px-1">
-          {(() => {
-            const active = recurring.filter((r) => r.isActive).length;
-            const inactive = recurring.length - active;
-            const projectedMonthly = recurring
-              .filter((r) => r.isActive)
-              .reduce((sum, r) => {
-                const scheduleTotal = Number(r.total ?? 0);
-                const multiplier = r.frequency === "WEEKLY" ? 4 : r.frequency === "BIWEEKLY" ? 2 : r.frequency === "QUARTERLY" ? 0.33 : r.frequency === "YEARLY" ? 0.083 : 1;
-                return sum + scheduleTotal * multiplier;
-              }, 0);
-            const nextRun = recurring
-              .filter((r) => r.isActive && r.nextRunDate)
-              .sort((a, b) => new Date(a.nextRunDate!).getTime() - new Date(b.nextRunDate!).getTime())[0];
-            const nextRunLabel = nextRun?.nextRunDate ? new Date(nextRun.nextRunDate).toLocaleDateString("en-TT", { month: "short", day: "numeric" }) : null;
-            return (
-              <>
-                <span className="text-emerald-400 font-medium">{active} Active</span>
-                {inactive > 0 && <span className="text-muted-foreground/50 font-medium">{inactive} Paused</span>}
-                <span className="text-muted-foreground/30">|</span>
-                <span className="text-amber-400 font-medium">~{currency} {Math.round(projectedMonthly).toLocaleString()}/mo projected</span>
-                {nextRunLabel && (
-                  <>
-                    <span className="text-muted-foreground/30">|</span>
-                    <span className="text-blue-400 font-medium">Next: {nextRunLabel}</span>
-                  </>
-                )}
-              </>
-            );
-          })()}
-        </div>
-      )}
+      {recurring.length > 0 && (() => {
+        const active = recurring.filter((r) => r.isActive);
+        const inactive = recurring.length - active.length;
+        const dailyRate = active.reduce((sum, r) => {
+          const scheduleTotal = Number(r.total ?? 0);
+          const perDay: Record<string, number> = {
+            WEEKLY: 1 / 7,
+            BIWEEKLY: 1 / 14,
+            MONTHLY: 12 / 365,
+            QUARTERLY: 4 / 365,
+            YEARLY: 1 / 365,
+          };
+          return sum + scheduleTotal * (perDay[r.frequency] ?? 12 / 365);
+        }, 0);
+        const expected30 = dailyRate * 30;
+        const missedCount = recurring.filter((r) => r.isActive && (r.failureCount ?? 0) > 0).length;
+        const nextRun = active
+          .filter((r) => r.nextRunDate)
+          .sort((a, b) => new Date(a.nextRunDate!).getTime() - new Date(b.nextRunDate!).getTime())[0];
+        const nextRunLabel = nextRun?.nextRunDate ? new Date(nextRun.nextRunDate).toLocaleDateString("en-TT", { month: "short", day: "numeric" }) : null;
+        return (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <CheckCircle className="w-3 h-3 text-emerald-400" />
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Active</span>
+              </div>
+              <p className="text-lg font-bold text-emerald-400">{active.length}</p>
+              <p className="text-[10px] text-muted-foreground/50">{inactive} paused/cancelled</p>
+            </div>
+            <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <TrendingUp className="w-3 h-3 text-blue-400" />
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Expected MRR (30d)</span>
+              </div>
+              <p className="text-lg font-bold text-blue-400">{currency} {Math.round(expected30).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground/50">based on active schedules</p>
+            </div>
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Calendar className="w-3 h-3 text-amber-400" />
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Next run</span>
+              </div>
+              <p className="text-lg font-bold text-amber-400">{nextRunLabel ?? "—"}</p>
+              <p className="text-[10px] text-muted-foreground/50 truncate">{nextRun?.name ?? "no upcoming runs"}</p>
+            </div>
+            <div className={`rounded-xl border p-3 ${missedCount > 0 ? "border-red-500/30 bg-red-500/5" : "border-border/40 bg-muted/5"}`}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <AlertTriangle className={`w-3 h-3 ${missedCount > 0 ? "text-red-400" : "text-muted-foreground/40"}`} />
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Missed runs</span>
+              </div>
+              <p className={`text-lg font-bold ${missedCount > 0 ? "text-red-400" : "text-muted-foreground/60"}`}>{missedCount}</p>
+              <p className="text-[10px] text-muted-foreground/50">need review</p>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="flex items-center gap-3 flex-wrap">
         <DateRangeFilter value={dateRange} onChange={setDateRange} />
@@ -574,15 +664,35 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                   />
                 </label>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <h3 className="font-semibold text-base truncate">{rec.name}</h3>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${rec.isActive ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" : "bg-slate-500/20 text-slate-400 border-slate-500/40"}`}>
-                      {rec.isActive ? "Active" : "Paused"}
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${rec.isActive ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" : rec.cancelledAt ? "bg-red-500/20 text-red-300 border-red-500/40" : "bg-slate-500/20 text-slate-400 border-slate-500/40"}`}>
+                      {rec.isActive ? "Active" : rec.cancelledAt ? "Cancelled" : "Paused"}
                     </span>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20">
                       <RefreshCw className="w-3 h-3" />
                       {FREQUENCIES.find((f) => f.value === rec.frequency)?.label ?? rec.frequency}
                     </span>
+                    {(rec.failureCount ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => openHistory(rec)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/15 text-red-300 border border-red-500/40 hover:bg-red-500/25 transition-colors"
+                        title={rec.lastError || "Last generation failed"}
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        Missed {rec.failureCount} {rec.failureCount === 1 ? "run" : "runs"}
+                        <ArrowRight className="w-3 h-3 opacity-60" />
+                      </button>
+                    )}
+                    {rec.isActive && (rec.failureCount ?? 0) > 0 && (
+                      <a
+                        href={`/app/inbox?source=recurring&recurringId=${rec.id}`}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/15 text-amber-200 border border-amber-500/40 hover:bg-amber-500/25 transition-colors"
+                      >
+                        Review setup
+                      </a>
+                    )}
                   </div>
                   <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground flex-wrap">
                     <span className="flex items-center gap-1">
@@ -611,6 +721,14 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                     <button onClick={() => openEdit(rec)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Edit">
                       <Pencil className="w-4 h-4" />
                     </button>
+                    <button onClick={() => openHistory(rec)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Generation history">
+                      <History className="w-4 h-4" />
+                    </button>
+                    {!rec.cancelledAt && (
+                      <button onClick={() => handleCancel(rec.id)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-orange-500/20 text-orange-400 transition-colors" title="Cancel schedule">
+                        <Ban className="w-4 h-4" />
+                      </button>
+                    )}
                     <button onClick={() => handleDelete(rec.id)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-red-500/20 text-red-400 transition-colors" title="Delete">
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -712,13 +830,92 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
       />
       <ConfirmDialog
         open={confirmState.open}
-        title="Delete?"
-        message="This cannot be undone."
-        confirmLabel="Delete"
+        title="Confirm action"
+        message="This action will affect the recurring schedule."
+        confirmLabel="Confirm"
         variant="danger"
         onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
         onCancel={() => setConfirmState({open: false, action: () => {}})}
       />
+      <AnimatePresence>
+        {historyDrawer.open && historyDrawer.recurring && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-end"
+            onClick={closeHistory}
+            data-testid="recurring-history-drawer"
+          >
+            <motion.aside
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="w-full max-w-lg h-full bg-card border-l border-border/50 flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <header className="p-4 border-b border-border/40 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60">Generation history</p>
+                  <h3 className="text-base font-semibold truncate">{historyDrawer.recurring.name}</h3>
+                  <p className="text-xs text-muted-foreground/70 mt-1">
+                    {historyDrawer.recurring.runCount} runs · {historyDrawer.recurring.failureCount ?? 0} failures
+                  </p>
+                </div>
+                <button
+                  onClick={closeHistory}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted transition-colors"
+                  aria-label="Close history"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </header>
+              {historyDrawer.recurring.lastError && (
+                <div className="m-4 p-3 rounded-lg border border-red-500/30 bg-red-500/5 text-xs text-red-300">
+                  <div className="flex items-center gap-1.5 mb-1 font-semibold">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Last error
+                  </div>
+                  <p className="break-words">{historyDrawer.recurring.lastError}</p>
+                  {historyDrawer.recurring.lastFailureAt && (
+                    <p className="mt-1 text-[10px] text-red-300/70">
+                      {new Date(historyDrawer.recurring.lastFailureAt).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                {historyDrawer.loading ? (
+                  <p className="text-xs text-muted-foreground">Loading…</p>
+                ) : historyDrawer.entries.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No invoices generated yet.</p>
+                ) : (
+                  historyDrawer.entries.map((entry) => (
+                    <a
+                      key={entry.id}
+                      href={`/app/commerce?tab=invoices&invoice=${entry.id}`}
+                      className="rounded-lg border border-border/40 bg-white/[0.02] p-3 flex items-center justify-between gap-3 hover:bg-white/[0.05] hover:border-border/60 transition-colors"
+                      title="Open generated invoice"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate text-primary underline-offset-2 hover:underline">
+                          {entry.invoiceNumber || entry.id.slice(0, 8)}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground/70">
+                          {new Date(entry.createdAt).toLocaleString()} · {entry.status}
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold text-emerald-400 shrink-0">
+                        {entry.currency} {Number(entry.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </span>
+                    </a>
+                  ))
+                )}
+              </div>
+            </motion.aside>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
