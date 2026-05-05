@@ -6,6 +6,7 @@ import {
   GoogleDriveConnector,
   GoogleFormsConnector,
   GoogleContactsConnector,
+  OutlookContactsConnector,
   GoogleBusinessProfileConnector,
   WhatsAppConnector,
   MetaSocialConnector,
@@ -35,6 +36,7 @@ export class ConnectorInitializerService implements OnModuleInit {
     @Inject(GoogleDriveConnector) private readonly drive: GoogleDriveConnector,
     @Inject(GoogleFormsConnector) private readonly forms: GoogleFormsConnector,
     @Inject(GoogleContactsConnector) private readonly contacts: GoogleContactsConnector,
+    @Inject(OutlookContactsConnector) private readonly outlookContacts: OutlookContactsConnector,
     @Inject(GoogleBusinessProfileConnector)
     private readonly businessProfile: GoogleBusinessProfileConnector,
     @Inject(WhatsAppConnector) private readonly whatsapp: WhatsAppConnector,
@@ -61,6 +63,7 @@ export class ConnectorInitializerService implements OnModuleInit {
       this.drive,
       this.forms,
       this.contacts,
+      this.outlookContacts,
       this.businessProfile,
       this.whatsapp,
       this.meta,

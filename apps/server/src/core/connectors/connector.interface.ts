@@ -4,6 +4,7 @@ export type ConnectorType =
   | 'google_drive'
   | 'google_forms'
   | 'google_contacts'
+  | 'outlook_contacts'
   | 'google_business_profile'
   | 'whatsapp'
   | 'meta_social'

@@ -5,18 +5,27 @@ import { GoogleFormsMappingService } from './google-forms-mapping.service';
 import { GoogleContactsSyncService } from './google-contacts-sync.service';
 import { GoogleBusinessProfileService } from './google-business-profile.service';
 import { ConnectorFormMappingService } from './connector-form-mapping.service';
+import { OutlookContactsSyncService } from './outlook-contacts-sync.service';
+import { ContactSyncService } from './contact-sync.service';
+import { SignatureParserService } from './signature-parser.service';
+import { MicrosoftOAuthService } from './microsoft-oauth.service';
+import { MicrosoftOAuthController } from './microsoft-oauth.controller';
 import { CrmModule } from '../crm/crm.module';
 import { ConnectorModule } from '../../core/connectors/connector.module';
 
 @Module({
   imports: [CrmModule, ConnectorModule],
-  controllers: [ConnectController],
+  controllers: [ConnectController, MicrosoftOAuthController],
   providers: [
     GoogleFormsService,
     GoogleFormsMappingService,
     GoogleContactsSyncService,
     GoogleBusinessProfileService,
     ConnectorFormMappingService,
+    OutlookContactsSyncService,
+    ContactSyncService,
+    SignatureParserService,
+    MicrosoftOAuthService,
   ],
   exports: [
     GoogleFormsService,
@@ -24,6 +33,9 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
     GoogleContactsSyncService,
     GoogleBusinessProfileService,
     ConnectorFormMappingService,
+    OutlookContactsSyncService,
+    ContactSyncService,
+    SignatureParserService,
   ],
 })
 export class ConnectModule {}
