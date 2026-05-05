@@ -7,6 +7,54 @@ import {
 } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
+type CalendarStatus = 'SCHEDULED' | 'TENTATIVE' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'OVERDUE' | 'FAILED';
+
+function mapEventStatusToBooking(status: CalendarStatus): string {
+  switch (status) {
+    case 'TENTATIVE':
+      return 'PENDING';
+    case 'CONFIRMED':
+    case 'IN_PROGRESS':
+      return 'CONFIRMED';
+    case 'COMPLETED':
+      return 'COMPLETED';
+    case 'CANCELLED':
+    case 'FAILED':
+      return 'CANCELLED';
+    default:
+      return 'PENDING';
+  }
+}
+
+function mapEventStatusToTask(status: CalendarStatus): string {
+  switch (status) {
+    case 'IN_PROGRESS':
+      return 'IN_PROGRESS';
+    case 'COMPLETED':
+      return 'COMPLETED';
+    case 'CANCELLED':
+    case 'FAILED':
+      return 'CANCELLED';
+    default:
+      return 'OPEN';
+  }
+}
+
+function mapEventStatusToSocialPost(status: CalendarStatus): string {
+  switch (status) {
+    case 'TENTATIVE':
+      return 'DRAFT';
+    case 'COMPLETED':
+      return 'POSTED';
+    case 'FAILED':
+      return 'FAILED';
+    case 'CANCELLED':
+      return 'DRAFT';
+    default:
+      return 'SCHEDULED';
+  }
+}
+
 /**
  * CalendarProjectionService
  *
@@ -97,6 +145,164 @@ export class CalendarProjectionService {
   }
 
   /**
+   * Patch the originating row for a CalendarEvent and re-project. Used by
+   * the calendar API when a UI surface reschedules / completes / cancels an
+   * event without going to the source module first. Only a small set of
+   * source types (those that own first-class scheduled rows) are supported.
+   * Source modules that don't have a writable schedule (invoice_overdue,
+   * marketplace_order, ...) raise an error so callers can show a clearer
+   * message.
+   */
+  async applyPatchToSource(args: {
+    businessId: string;
+    sourceType: CalendarSourceType;
+    sourceId: string;
+    patch: {
+      startAt?: Date | null;
+      endAt?: Date | null;
+      status?: 'SCHEDULED' | 'TENTATIVE' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'OVERDUE' | 'FAILED';
+      title?: string;
+      description?: string | null;
+    };
+    soft?: boolean;
+  }): Promise<void> {
+    const { businessId, sourceType, sourceId, patch, soft } = args;
+    const client = this.prisma.client;
+    const now = new Date();
+
+    switch (sourceType) {
+      case 'booking': {
+        if (soft) {
+          await client.booking.updateMany({
+            where: { id: sourceId, businessId, deletedAt: null },
+            data: { status: 'CANCELLED', deletedAt: now },
+          });
+          return;
+        }
+        const data: Record<string, unknown> = {};
+        if (patch.startAt) data.startTime = patch.startAt;
+        if (patch.endAt) data.endTime = patch.endAt;
+        if (patch.status) {
+          data.status = mapEventStatusToBooking(patch.status);
+        }
+        if (patch.description !== undefined) data.notes = patch.description;
+        if (Object.keys(data).length) {
+          await client.booking.updateMany({
+            where: { id: sourceId, businessId, deletedAt: null },
+            data,
+          });
+        }
+        return;
+      }
+
+      case 'contact_task': {
+        if (soft) {
+          await client.contactTask.updateMany({
+            where: { id: sourceId, businessId, deletedAt: null },
+            data: { status: 'CANCELLED', deletedAt: now },
+          });
+          return;
+        }
+        const data: Record<string, unknown> = {};
+        if (patch.startAt !== undefined) data.dueDate = patch.startAt;
+        if (patch.title !== undefined) data.title = patch.title;
+        if (patch.status) {
+          const mapped = mapEventStatusToTask(patch.status);
+          data.status = mapped;
+          if (mapped === 'COMPLETED') data.completedAt = now;
+        }
+        if (Object.keys(data).length) {
+          await client.contactTask.updateMany({
+            where: { id: sourceId, businessId, deletedAt: null },
+            data,
+          });
+        }
+        return;
+      }
+
+      case 'project_task': {
+        if (soft) {
+          await client.projectTask.updateMany({
+            where: { id: sourceId, businessId, deletedAt: null },
+            data: { isCompleted: false, deletedAt: now },
+          });
+          return;
+        }
+        const data: Record<string, unknown> = {};
+        if (patch.startAt !== undefined) data.dueDate = patch.startAt;
+        if (patch.title !== undefined) data.title = patch.title;
+        if (patch.description !== undefined) data.description = patch.description;
+        if (patch.status) {
+          data.isCompleted = patch.status === 'COMPLETED';
+        }
+        if (Object.keys(data).length) {
+          await client.projectTask.updateMany({
+            where: { id: sourceId, businessId, deletedAt: null },
+            data,
+          });
+        }
+        return;
+      }
+
+      case 'social_post': {
+        if (soft) {
+          await client.socialPost.updateMany({
+            where: { id: sourceId, businessId, deletedAt: null },
+            data: { status: 'DRAFT', deletedAt: now },
+          });
+          return;
+        }
+        const data: Record<string, unknown> = {};
+        if (patch.startAt !== undefined) data.scheduledAt = patch.startAt;
+        if (patch.description !== undefined && patch.description !== null) {
+          data.content = patch.description;
+        }
+        if (patch.status) {
+          data.status = mapEventStatusToSocialPost(patch.status);
+        }
+        if (Object.keys(data).length) {
+          await client.socialPost.updateMany({
+            where: { id: sourceId, businessId, deletedAt: null },
+            data,
+          });
+        }
+        return;
+      }
+
+      case 'project': {
+        if (soft) return; // projects aren't deleted from the calendar surface
+        const data: Record<string, unknown> = {};
+        if (patch.startAt !== undefined) data.dueDate = patch.startAt;
+        if (patch.title !== undefined) data.name = patch.title;
+        if (patch.description !== undefined) data.description = patch.description;
+        if (patch.status === 'COMPLETED') data.status = 'COMPLETED';
+        if (Object.keys(data).length) {
+          await client.project.updateMany({
+            where: { id: sourceId, businessId, deletedAt: null },
+            data,
+          });
+        }
+        return;
+      }
+
+      case 'google_event':
+      case 'activity':
+      case 'invoice':
+      case 'invoice_overdue':
+      case 'quote':
+      case 'recurring_invoice':
+      case 'marketplace_order':
+      case 'shipment':
+      case 'email_campaign':
+        // Read-only or owned by another sub-system — calendar surface
+        // shouldn't mutate the source row directly.
+        throw new Error(
+          `Source type "${sourceType}" cannot be edited from the calendar surface`,
+        );
+    }
+  }
+
+  /**
    * Remove every projection for a given (businessId, sourceType) whose
    * sourceId is NOT in `keepIds`. Useful for backfill reconciliation.
    */
@@ -113,6 +319,13 @@ export class CalendarProjectionService {
         deletedAt: null,
       },
       data: { deletedAt: new Date() },
+    });
+  }
+
+  /** Look up a CalendarEvent by id (skipping soft-deleted rows). */
+  async findByIdWithBusiness(eventId: string) {
+    return this.prisma.client.calendarEvent.findFirst({
+      where: { id: eventId, deletedAt: null },
     });
   }
 
@@ -142,7 +355,7 @@ export class CalendarProjectionService {
       assigneeId: input.assigneeId ?? null,
       amount: input.amount ?? null,
       currency: input.currency ?? null,
-      meta: (input.meta ?? null) as Prisma.InputJsonValue | null,
+      meta: (input.meta ?? Prisma.JsonNull) as Prisma.InputJsonValue,
       syncStatus: 'LOCAL',
     };
   }
