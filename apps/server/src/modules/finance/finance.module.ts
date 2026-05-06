@@ -1,6 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AuthModule } from '../../core/auth/auth.module';
+import { AiModule } from '../ai/ai.module';
+import { CommerceModule } from '../commerce/commerce.module';
+import { FinanceIntelligenceService } from './finance-intelligence.service';
+import { FinanceIntelligenceSchedulerService } from './finance-intelligence.scheduler';
 import { PostingService } from './posting.service';
 import { LedgerBalanceService } from './ledger-balance.service';
 import { FinanceAuditService } from './finance-audit.service';
@@ -33,7 +37,7 @@ import { FinanceController } from './finance.controller';
  * Settings) plus its sub-services.
  */
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, AiModule, forwardRef(() => CommerceModule)],
   controllers: [FinanceController],
   providers: [
     PostingService,
@@ -55,6 +59,8 @@ import { FinanceController } from './finance.controller';
     TaxLiabilityService,
     TaxLiabilityRollupScheduler,
     AccountantExportService,
+    FinanceIntelligenceService,
+    FinanceIntelligenceSchedulerService,
   ],
   exports: [
     PostingService,
@@ -73,6 +79,7 @@ import { FinanceController } from './finance.controller';
     BankMatchingService,
     ReconciliationService,
     ExpensePostingService,
+    FinanceIntelligenceService,
   ],
 })
 export class FinanceModule {}

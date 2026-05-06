@@ -138,9 +138,27 @@ export function setCachedUser(user: CachedUser) {
   window.localStorage.setItem(USER_CACHE_KEY, JSON.stringify(user));
 }
 
+function writeBusinessIdCookie(id: string) {
+  if (typeof document === "undefined") return;
+  const secure = isHttps() ? "; Secure" : "";
+  document.cookie = `${BUSINESS_ID_KEY}=${encodeURIComponent(id)}; Path=/; Max-Age=${TOKEN_COOKIE_MAX_AGE}; SameSite=Lax${secure}`;
+}
+
+function clearBusinessIdCookie() {
+  if (typeof document === "undefined") return;
+  document.cookie = `${BUSINESS_ID_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
+
+/**
+ * Mirror businessId into BOTH localStorage and a `kf_business_id`
+ * cookie. The cookie is what Server Components (e.g. the FIN8
+ * server-rendered insight strip) read via next/headers — without it
+ * SSR has no way to know which workspace the request belongs to.
+ */
 export function setStoredBusinessId(id: string) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(BUSINESS_ID_KEY, id);
+  writeBusinessIdCookie(id);
 }
 
 /**
@@ -156,6 +174,7 @@ export function clearStoredBusinessId() {
   window.localStorage.removeItem(USER_CACHE_KEY);
   window.localStorage.removeItem(BUSINESS_CACHE_KEY);
   clearTokenCookie();
+  clearBusinessIdCookie();
   userCache = null;
   businessCache = null;
 }

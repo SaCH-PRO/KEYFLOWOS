@@ -20,6 +20,7 @@ import { BankMatchingService } from './bank-matching.service';
 import { ReconciliationService } from './reconciliation.service';
 import { TaxLiabilityService } from './tax-liability.service';
 import { AccountantExportService } from './accountant-export.service';
+import { FinanceIntelligenceService } from './finance-intelligence.service';
 import { ObjectStorageService } from '../../core/object-storage';
 
 /**
@@ -43,6 +44,7 @@ export class FinanceController {
     @Inject(ReconciliationService) private readonly reconciliation: ReconciliationService,
     @Inject(TaxLiabilityService) private readonly taxLiability: TaxLiabilityService,
     @Inject(AccountantExportService) private readonly accountantExport: AccountantExportService,
+    @Inject(FinanceIntelligenceService) private readonly intel: FinanceIntelligenceService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
@@ -80,6 +82,52 @@ export class FinanceController {
   async getOverview(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
     return this.overview.getOverview(businessId);
+  }
+
+  // ---------- FIN8: Finance intelligence / action queue ----------
+  @Get('intelligence/actions')
+  async listIntelActions(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+    @Query('status') status?: string,
+    @Query('kind') kind?: string,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.intel.list(businessId, { status, kind });
+    return { items };
+  }
+
+  @Post('intelligence/scan')
+  async runIntelScan(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.intel.scan(businessId);
+  }
+
+  @Post('intelligence/actions/:id/resolve')
+  async resolveIntelAction(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { resolution?: string | null },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.intel.resolve(businessId, id, req.user.id, body?.resolution ?? null);
+  }
+
+  @Post('intelligence/actions/:id/dismiss')
+  async dismissIntelAction(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.intel.dismiss(businessId, id, req.user.id);
+  }
+
+  @Get('intelligence/insight')
+  async getIntelInsight(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.intel.getInsightStrip(businessId);
   }
 
   // ---------- FinancialAccount ----------

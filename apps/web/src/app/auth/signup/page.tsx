@@ -26,7 +26,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
-import { setStoredToken } from "@/lib/workspace";
+import { setStoredToken, setStoredBusinessId } from "@/lib/workspace";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -159,7 +159,7 @@ export default function AuthSignup() {
           phone: phone.trim(), company: company.trim(),
         });
         if (bootstrap.data?.business?.id) {
-          window.localStorage.setItem("kf_business_id", bootstrap.data.business.id);
+          setStoredBusinessId(bootstrap.data.business.id);
         } else if (bootstrap.error) {
           setError(bootstrap.error);
           setLoading(false);

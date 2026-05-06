@@ -23,7 +23,7 @@ import {
   type LedgerCandidateRow,
   type ReconciliationRow,
 } from "@/lib/client";
-import { SkeletonGrid } from "../page";
+import { SkeletonGrid } from "../_overview-client";
 
 export default function FinanceReconciliationPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
