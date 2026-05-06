@@ -18,6 +18,9 @@ import { FinanceSettingsService, type UpdateFinanceSettingsInput } from './finan
 import { BankImportService } from './bank-import.service';
 import { BankMatchingService } from './bank-matching.service';
 import { ReconciliationService } from './reconciliation.service';
+import { TaxLiabilityService } from './tax-liability.service';
+import { AccountantExportService } from './accountant-export.service';
+import { ObjectStorageService } from '../../core/object-storage';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -38,6 +41,8 @@ export class FinanceController {
     @Inject(BankImportService) private readonly bankImport: BankImportService,
     @Inject(BankMatchingService) private readonly bankMatch: BankMatchingService,
     @Inject(ReconciliationService) private readonly reconciliation: ReconciliationService,
+    @Inject(TaxLiabilityService) private readonly taxLiability: TaxLiabilityService,
+    @Inject(AccountantExportService) private readonly accountantExport: AccountantExportService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
@@ -361,5 +366,206 @@ export class FinanceController {
     const csv = await this.reconciliation.exportReportCsv(businessId, id);
     res.setHeader('Content-Disposition', `attachment; filename="reconciliation-${id}.csv"`);
     res.send(csv);
+  }
+
+  // ---------- FIN7: Tax Liabilities ----------
+  @Get('tax-liabilities')
+  async listTaxLiabilities(
+    @Param('businessId') businessId: string,
+    @Query('status') status: string | undefined,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.taxLiability.list(businessId, status);
+    return { items };
+  }
+
+  @Post('tax-liabilities/recompute')
+  async recomputeTaxLiabilities(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.taxLiability.recompute(businessId);
+  }
+
+  @Get('tax-liabilities/:id')
+  async getTaxLiability(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.taxLiability.get(businessId, id);
+  }
+
+  @Get('tax-liabilities/:id/contributing-invoices')
+  async taxContributingInvoices(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.taxLiability.contributingInvoices(businessId, id);
+  }
+
+  @Post('tax-liabilities/:id/file')
+  async fileTaxLiability(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { dueDate?: string | null; notes?: string | null },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.taxLiability.file(
+      businessId,
+      id,
+      body?.dueDate ? new Date(body.dueDate) : null,
+      body?.notes ?? null,
+    );
+  }
+
+  @Post('tax-liabilities/:id/pay')
+  async payTaxLiability(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { paymentDate?: string; notes?: string | null },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.taxLiability.pay(businessId, id, {
+      paymentDate: body?.paymentDate ? new Date(body.paymentDate) : undefined,
+      notes: body?.notes ?? null,
+      userId: req.user.id,
+    });
+  }
+
+  // ---------- FIN7: Spec-path aliases for /tax/liabilities ----------
+  // The canonical handlers above live under `/tax-liabilities`; the
+  // FIN7 spec uses `/tax/liabilities`. Both paths are first-class and
+  // delegate to the same logic.
+  @Get('tax/liabilities')
+  listTaxLiabilitiesAlias(
+    @Param('businessId') businessId: string,
+    @Query('status') status: string | undefined,
+    @Req() req: any,
+  ) { return this.listTaxLiabilities(businessId, status, req); }
+
+  @Post('tax/liabilities/recompute')
+  recomputeTaxLiabilitiesAlias(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+  ) { return this.recomputeTaxLiabilities(businessId, req); }
+
+  @Get('tax/liabilities/:id')
+  getTaxLiabilityAlias(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) { return this.getTaxLiability(businessId, id, req); }
+
+  @Get('tax/liabilities/:id/contributing-invoices')
+  taxContributingInvoicesAlias(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) { return this.taxContributingInvoices(businessId, id, req); }
+
+  @Post('tax/liabilities/:id/file')
+  fileTaxLiabilityAlias(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { dueDate?: string | null; notes?: string | null },
+    @Req() req: any,
+  ) { return this.fileTaxLiability(businessId, id, body, req); }
+
+  @Post('tax/liabilities/:id/pay')
+  payTaxLiabilityAlias(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { paymentDate?: string; notes?: string | null },
+    @Req() req: any,
+  ) { return this.payTaxLiability(businessId, id, body, req); }
+
+  // ---------- FIN7: Accountant Export ZIP ----------
+  @Get('accountant-export.zip')
+  async accountantExportStream(
+    @Param('businessId') businessId: string,
+    @Query('start') start: string | undefined,
+    @Query('end') end: string | undefined,
+    @Query('basis') basis: 'CASH' | 'ACCRUAL' | undefined,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    if (!start || !end) {
+      throw new BadRequestException('start and end query params are required (YYYY-MM-DD)');
+    }
+    const periodStart = new Date(`${start}T00:00:00.000Z`);
+    const periodEnd = new Date(`${end}T23:59:59.999Z`);
+    const result = await this.accountantExport.build({
+      businessId, periodStart, periodEnd, basis, userId: req.user.id,
+    });
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Length', String(result.bytes));
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    res.send(result.buffer);
+  }
+
+  /**
+   * Spec endpoint: build the ZIP, persist it to object storage, and return
+   * a short-lived signed download URL plus metadata. Lets clients hand the
+   * URL off (email, queue, etc.) without re-streaming through the API.
+   *
+   * Accepts both `(periodStart, periodEnd)` (spec contract) and
+   * `(start, end)` (legacy/short form). Each may be a YYYY-MM-DD string or
+   * a full ISO timestamp.
+   */
+  @Post('accountant-export')
+  async accountantExportSigned(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      periodStart?: string; periodEnd?: string;
+      start?: string; end?: string;
+      basis?: 'CASH' | 'ACCRUAL'; expiresIn?: number;
+    },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    const rawStart = body?.periodStart ?? body?.start;
+    const rawEnd = body?.periodEnd ?? body?.end;
+    if (!rawStart || !rawEnd) {
+      throw new BadRequestException(
+        'periodStart and periodEnd body fields are required (YYYY-MM-DD or ISO timestamp)',
+      );
+    }
+    const periodStart = /T/.test(rawStart) ? new Date(rawStart) : new Date(`${rawStart}T00:00:00.000Z`);
+    const periodEnd = /T/.test(rawEnd) ? new Date(rawEnd) : new Date(`${rawEnd}T23:59:59.999Z`);
+    if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
+      throw new BadRequestException('periodStart / periodEnd are not valid dates');
+    }
+    const result = await this.accountantExport.build({
+      businessId, periodStart, periodEnd, basis: body?.basis, userId: req.user.id,
+    });
+    const storage = new ObjectStorageService();
+    const { objectPath } = await storage.uploadBuffer(result.buffer, {
+      contentType: result.contentType,
+      subdir: `accountant-exports/${businessId}`,
+      filename: result.filename,
+    });
+    const expiresIn = Math.max(60, Math.min(body?.expiresIn ?? 3600, 24 * 3600));
+    const downloadUrl = await storage.getReadSignedUrl(objectPath, {
+      expiresIn,
+      downloadFilename: result.filename,
+    });
+    return {
+      filename: result.filename,
+      contentType: result.contentType,
+      bytes: result.bytes,
+      objectPath,
+      downloadUrl,
+      expiresIn,
+      generatedAt: new Date().toISOString(),
+    };
   }
 }

@@ -31,6 +31,9 @@ import { BookingsView } from "./components/bookings-view";
 import { MarketingView } from "./components/marketing-view";
 import { CashFlowForecastView } from "./components/cash-flow-forecast-view";
 import { exportReportPDF, exportReportCSV } from "./components/export-pdf";
+import { downloadAccountantExport } from "@/lib/client";
+import { Package } from "lucide-react";
+import { toast } from "sonner";
 import { RevenueReportsView } from "./components/revenue-reports-view";
 import type { RevenueReportPreset } from "@/lib/client";
 
@@ -127,6 +130,35 @@ export default function ReportsPage() {
     }
   }, [report]);
 
+  const [exportingZip, setExportingZip] = useState(false);
+  const exportAccountantZip = useCallback(async () => {
+    if (!businessId) return;
+    const range = getDateRange(datePreset);
+    setExportingZip(true);
+    try {
+      const startStr = (datePreset === "custom" && customStart) ? customStart : range.start.slice(0, 10);
+      const endStr = (datePreset === "custom" && customEnd) ? customEnd : range.end.slice(0, 10);
+      const { blob, filename } = await downloadAccountantExport(
+        businessId,
+        startStr,
+        endStr,
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      toast.success("Accountant export ready");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExportingZip(false);
+    }
+  }, [businessId, datePreset, customStart, customEnd]);
+
   const exportCSV = useCallback(() => {
     if (!report) return;
     setExportingCSV(true);
@@ -173,6 +205,15 @@ export default function ReportsPage() {
           >
             {exportingCSV ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
             CSV
+          </button>
+          <button
+            onClick={exportAccountantZip}
+            disabled={!businessId || exportingZip}
+            title="Download a ZIP package for your accountant: P&L, Cashflow, Balance Sheet, A/R & A/P aging, Tax Summary, Trial Balance, GL and Audit Log."
+            className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-primary/15 hover:bg-primary/25 text-primary transition-colors disabled:opacity-50"
+          >
+            {exportingZip ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
+            Accountant ZIP
           </button>
           <button
             onClick={() => setShowContactPicker(true)}

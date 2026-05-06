@@ -1436,6 +1436,10 @@ model Invoice {
   subtotal      Float    @default(0)
   taxRate       Float?   @default(0) @map("tax_rate")
   taxAmount     Float?   @default(0) @map("tax_amount")
+  // FIN7 — Canonical TaxRate FK. Numeric `taxRate` retained as legacy
+  // fallback for older rows that pre-date the picker.
+  taxRateId     String?  @map("tax_rate_id")
+  taxRateRef    TaxRate? @relation("InvoiceTaxRate", fields: [taxRateId], references: [id], onDelete: SetNull)
   discountType  String?  @map("discount_type") // PERCENTAGE or FIXED
   discountValue Float?   @default(0) @map("discount_value")
   discountAmount Float?  @default(0) @map("discount_amount")
@@ -2369,6 +2373,13 @@ model Expense {
   id          String   @id @default(cuid())
   description String
   amount      Float
+  // FIN7 — Tax paid on this purchase (input VAT). Used by
+  // TaxLiabilityService to compute tax recoverable for the period.
+  taxAmount   Float?   @default(0) @map("tax_amount")
+  // FIN7 — Canonical TaxRate FK. `taxAmount` (numeric) is retained as
+  // the legacy fallback for older rows that pre-date the picker.
+  taxRateId   String?  @map("tax_rate_id")
+  taxRateRef  TaxRate? @relation("ExpenseTaxRate", fields: [taxRateId], references: [id], onDelete: SetNull)
   currency    String   @default("TTD")
   date        DateTime @default(now())
   vendor      String?
@@ -6448,12 +6459,21 @@ model TaxLiability {
   status       String   @default("OPEN") // OPEN, FILED, PAID, AMENDED
   notes        String?
 
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt      @map("updated_at")
+  /// Explicit amendment lineage — set on rows produced by recompute()
+  /// against a FILED/PAID period. The original row is never mutated.
+  amendsTaxLiabilityId String? @map("amends_tax_liability_id")
+  amends               TaxLiability?  @relation("TaxLiabilityAmendments", fields: [amendsTaxLiabilityId], references: [id], onDelete: SetNull)
+  amendments           TaxLiability[] @relation("TaxLiabilityAmendments")
+  /// Monotonic version per (businessId, type, period). 1 = original.
+  version              Int     @default(1)
+  isAmendment          Boolean @default(false) @map("is_amendment")
 
-  @@unique([businessId, type, periodStart, periodEnd])
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt      @map("updated_at")
+
   @@index([businessId, status])
   @@index([businessId, type, periodEnd])
+  @@index([amendsTaxLiabilityId])
   @@map("tax_liabilities")
 }
 
@@ -6474,6 +6494,10 @@ model TaxRate {
 
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  // FIN7 — Reverse relations for canonical FK support.
+  invoices    Invoice[] @relation("InvoiceTaxRate")
+  expenses    Expense[] @relation("ExpenseTaxRate")
 
   @@unique([businessId, name])
   @@index([businessId, isActive])

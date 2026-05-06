@@ -17,6 +17,9 @@ import { BankImportService } from './bank-import.service';
 import { BankMatchingService } from './bank-matching.service';
 import { ReconciliationService } from './reconciliation.service';
 import { ExpensePostingService } from './expense-posting.service';
+import { TaxLiabilityService } from './tax-liability.service';
+import { TaxLiabilityRollupScheduler } from './tax-liability-rollup.scheduler';
+import { AccountantExportService } from './accountant-export.service';
 import { FinanceController } from './finance.controller';
 
 /**
@@ -49,6 +52,9 @@ import { FinanceController } from './finance.controller';
     BankMatchingService,
     ReconciliationService,
     ExpensePostingService,
+    TaxLiabilityService,
+    TaxLiabilityRollupScheduler,
+    AccountantExportService,
   ],
   exports: [
     PostingService,
