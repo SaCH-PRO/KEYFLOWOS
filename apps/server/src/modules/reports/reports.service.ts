@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { LedgerReportingService, ReportBasis } from './ledger-reporting.service';
 
 @Injectable()
 export class ReportsService {
@@ -9,7 +10,22 @@ export class ReportsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(LedgerReportingService) private readonly ledger: LedgerReportingService,
   ) {}
+
+  /**
+   * FIN4 — Resolve the configured accounting basis for the business so
+   * AI reports always report ledger figures consistent with whatever
+   * basis Finance settings are running on. Defaults to accrual.
+   */
+  private async resolveBasis(businessId: string): Promise<ReportBasis> {
+    const biz = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { accountingBasis: true },
+    });
+    const v = (biz as unknown as { accountingBasis?: string } | null)?.accountingBasis;
+    return v === 'CASH' ? 'cash' : 'accrual';
+  }
 
   async generateReport(businessId: string, type: string, startDate?: string, endDate?: string, compare = false) {
     const now = new Date();
@@ -85,9 +101,25 @@ export class ReportsService {
       }),
     ]);
 
-    const totalRevenue = Number(paidInvoicesInPeriod._sum.total ?? 0);
-    const totalExpenses = allExpensesInPeriod.reduce((sum, e) => sum + Number(e.amount), 0);
-    const netProfit = totalRevenue - totalExpenses;
+    // FIN4 — Source of truth: derive revenue/expense from the ledger so
+    // these figures match the PnL/Balance Sheet endpoints exactly. Falls
+    // back to source-row sums only if the ledger query fails (e.g. on a
+    // brand-new business before any postings).
+    const basis = await this.resolveBasis(businessId);
+    let totalRevenue = 0;
+    let totalExpenses = 0;
+    let netProfit = 0;
+    try {
+      const pnl = await this.ledger.getPnl(businessId, start, end, basis);
+      totalRevenue = pnl.revenue.total - pnl.discounts.total;
+      totalExpenses = pnl.cogs.total + pnl.operatingExpenses.total;
+      netProfit = pnl.netProfit;
+    } catch (err) {
+      this.logger.warn(`PnL ledger fallback: ${(err as Error).message}`);
+      totalRevenue = Number(paidInvoicesInPeriod._sum.total ?? 0);
+      totalExpenses = allExpensesInPeriod.reduce((sum, e) => sum + Number(e.amount), 0);
+      netProfit = totalRevenue - totalExpenses;
+    }
     const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
     const invoicesByStatus: Record<string, { count: number; total: number }> = {};

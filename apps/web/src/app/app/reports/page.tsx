@@ -23,13 +23,13 @@ import { fetchReport, GeneratedReport } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { ReportType, REPORT_TABS, DATE_PRESETS, getDateRange, formatDate } from "./components/report-types";
 import { ExecutiveView, AiBriefingCard } from "./components/executive-view";
-import { PnlView } from "./components/pnl-view";
 import { RevenueView } from "./components/revenue-view";
 import { ExpensesView } from "./components/expenses-view";
 import { ClientsView } from "./components/clients-view";
 import { BookingsView } from "./components/bookings-view";
 import { MarketingView } from "./components/marketing-view";
 import { CashFlowForecastView } from "./components/cash-flow-forecast-view";
+import { BooksReportView, type BooksReportKind } from "./components/BooksReportView";
 import { exportReportPDF, exportReportCSV } from "./components/export-pdf";
 import { downloadAccountantExport } from "@/lib/client";
 import { Package } from "lucide-react";
@@ -77,7 +77,7 @@ export default function ReportsPage() {
   const generateReport = useCallback(async (overrideTab?: ReportType) => {
     const tab = overrideTab || activeTab;
     if (!businessId) return;
-    if (tab === "cash-flow" || tab === "revenue-detail") {
+    if (tab === "cash-flow" || tab === "revenue-detail" || tab === "pnl") {
       setLoading(false);
       setGenerating(false);
       return;
@@ -310,7 +310,17 @@ export default function ReportsPage() {
             {error}
           </div>
         )}
-        {activeTab === "cash-flow" && !report && !loading ? (
+        {activeTab.startsWith("books-") || activeTab === "pnl" ? (
+          // FIN4: legacy "pnl" tab now reads from the ledger-derived
+          // P&L endpoint via BooksReportView, replacing the prior
+          // AI-generated metrics flow while preserving the URL/tab.
+          <BooksReportView
+            businessId={businessId}
+            kind={(activeTab === "pnl" ? "books-pnl" : (activeTab as BooksReportKind))}
+            startDate={(datePreset === "custom" && customStart) ? new Date(customStart).toISOString() : (datePreset !== "custom" ? getDateRange(datePreset).start : undefined)}
+            endDate={(datePreset === "custom" && customEnd) ? new Date(customEnd).toISOString() : (datePreset !== "custom" ? getDateRange(datePreset).end : undefined)}
+          />
+        ) : activeTab === "cash-flow" && !report && !loading ? (
           <CashFlowForecastView businessId={businessId} />
         ) : activeTab === "revenue-detail" ? (
           <RevenueReportsView
@@ -354,7 +364,7 @@ export default function ReportsPage() {
                 </div>
               )}
               {activeTab === "executive" && <ExecutiveView report={report} />}
-              {activeTab === "pnl" && <PnlView report={report} />}
+              {/* FIN4: legacy "pnl" tab is rendered above via BooksReportView (ledger-derived). */}
               {activeTab === "revenue" && <RevenueView report={report} businessId={businessId} />}
               {activeTab === "cash-flow" && <CashFlowForecastView businessId={businessId} currency={report.metrics.currency} />}
               {activeTab === "expenses" && <ExpensesView report={report} />}

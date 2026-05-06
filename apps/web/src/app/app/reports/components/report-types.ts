@@ -1,6 +1,9 @@
-import { Briefcase, Wallet, TrendingUp, PieChart, Users, Calendar, Megaphone, BarChart3 } from "lucide-react";
+import { Briefcase, Wallet, TrendingUp, PieChart, Users, Calendar, Megaphone, BarChart3, BookOpen, Scale, FileText, Receipt } from "lucide-react";
 
-export type ReportType = "executive" | "pnl" | "revenue" | "revenue-detail" | "cash-flow" | "expenses" | "clients" | "bookings" | "marketing";
+export type ReportType =
+  | "executive" | "pnl" | "revenue" | "revenue-detail" | "cash-flow" | "expenses"
+  | "clients" | "bookings" | "marketing"
+  | "books-pnl" | "books-cashflow" | "books-balance-sheet" | "books-ar-aging" | "books-ap-aging" | "books-tax";
 
 export const REPORT_TABS: Array<{ id: ReportType; label: string; icon: React.ElementType; tooltip?: string }> = [
   { id: "executive", label: "Executive Summary", icon: Briefcase, tooltip: "High-level business health snapshot with key KPIs and trends." },
@@ -12,6 +15,13 @@ export const REPORT_TABS: Array<{ id: ReportType; label: string; icon: React.Ele
   { id: "clients", label: "Client Portfolio", icon: Users, tooltip: "Client lifetime value, retention rates, and revenue concentration." },
   { id: "bookings", label: "Bookings Performance", icon: Calendar, tooltip: "Booking volume, utilization rates, and service popularity." },
   { id: "marketing", label: "Marketing ROI", icon: Megaphone, tooltip: "Campaign spend vs. revenue attributed — calculate your marketing return." },
+  // FIN4: ledger-derived accounting reports
+  { id: "books-pnl", label: "Books · PnL", icon: BookOpen, tooltip: "Profit & Loss derived directly from the ledger. Cash or accrual basis." },
+  { id: "books-cashflow", label: "Books · Cashflow", icon: Wallet, tooltip: "Cash inflow/outflow by account, computed from cash-touching ledger entries." },
+  { id: "books-balance-sheet", label: "Balance Sheet", icon: Scale, tooltip: "Assets, liabilities, and equity (incl. retained earnings) at a point in time." },
+  { id: "books-ar-aging", label: "A/R Aging", icon: FileText, tooltip: "Outstanding customer balances bucketed by days overdue." },
+  { id: "books-ap-aging", label: "A/P Aging", icon: FileText, tooltip: "Unpaid bills grouped by vendor and days overdue." },
+  { id: "books-tax", label: "Tax Summary", icon: Receipt, tooltip: "Taxable sales, tax collected/paid, and recorded tax liabilities." },
 ];
 
 export const DATE_PRESETS = [

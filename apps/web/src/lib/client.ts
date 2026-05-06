@@ -6384,6 +6384,138 @@ export async function fetchReport(businessId: string, type = 'executive', startD
   return apiGetSimple<GeneratedReport>(`/businesses/${encodeURIComponent(businessId)}/reports/generate?${params.toString()}`);
 }
 
+// FIN4 — Ledger-derived report endpoints. Every figure traces back to a
+// LedgerEntry, so PnL/Cashflow/Balance Sheet/AR/AP/Tax always agree.
+export type LedgerReportBasis = 'cash' | 'accrual';
+export interface LedgerPnlAccountLine { accountId: string; systemKey: string | null; name: string; amount: number; }
+export interface LedgerPnlGroup { total: number; accounts: LedgerPnlAccountLine[]; }
+export interface LedgerPnlReport {
+  basis: LedgerReportBasis;
+  currency: string;
+  period: { from: string; to: string };
+  revenue: LedgerPnlGroup;
+  discounts: LedgerPnlGroup;
+  cogs: LedgerPnlGroup;
+  grossProfit: number;
+  operatingExpenses: LedgerPnlGroup;
+  netProfit: number;
+}
+export interface LedgerCashflowReport {
+  basis: LedgerReportBasis;
+  currency: string;
+  period: { from: string; to: string };
+  cashIn: number;
+  cashOut: number;
+  netMovement: number;
+  byAccount: Array<{ accountId: string; systemKey: string | null; name: string; inflow: number; outflow: number; net: number }>;
+  accrualAdjustments: {
+    netIncome: number;
+    arChange: number;
+    apChange: number;
+    taxPayableChange: number;
+    cashFromOperations: number;
+  };
+  upcomingReceivables: { total: number; count: number };
+  upcomingPayables: { total: number; count: number };
+}
+export interface LedgerDimensionRow { key: string; label: string; total: number; count: number }
+export type RevenueDimension = 'customer' | 'product' | 'service' | 'source';
+export type ExpenseDimension = 'vendor' | 'category' | 'project';
+export interface LedgerBalanceSheet {
+  asOf: string;
+  currency: string;
+  assets: { total: number; lines: LedgerPnlAccountLine[]; cashAndBank: number; accountsReceivable: number; inventory: number };
+  liabilities: { total: number; lines: LedgerPnlAccountLine[]; accountsPayable: number; taxPayable: number; loans: number };
+  equity: { total: number; lines: LedgerPnlAccountLine[]; ownerEquity: number; retainedEarnings: number };
+  netEquityFromIncome: number;
+  identityHolds: boolean;
+  identityDelta: number;
+}
+export interface LedgerTaxSummary {
+  currency: string;
+  period: { from: string; to: string };
+  taxableSales: number;
+  taxCollected: number;
+  taxPaidOnPurchases: number;
+  estimatedDue: number;
+  invoiceTaxes: { taxAmount: number; subtotal: number; ledgerToInvoiceDelta: number };
+  liabilities: Array<{ id: string; type: string; periodStart: string; periodEnd: string; taxableSales: number; taxCollected: number; taxPaid: number; amountDue: number; status: string }>;
+}
+export interface LedgerArAging {
+  asOf: string;
+  currency: string;
+  totalOutstanding: number;
+  totalOverdue: number;
+  ledgerArBalance?: number;
+  customers: Array<{ contactId: string | null; contactName: string | null; total: number; current: number; d1to30: number; d31to60: number; d61to90: number; d90plus: number }>;
+}
+export interface LedgerApAging {
+  asOf: string;
+  currency: string;
+  total: number;
+  count: number;
+  vendors: Array<{ key: string; label: string; total: number; current: number; d1to30: number; d31to60: number; d61to90: number; d90plus: number }>;
+}
+
+const range = (startDate?: string, endDate?: string, basis?: LedgerReportBasis) => {
+  const p = new URLSearchParams();
+  if (startDate) p.set('startDate', startDate);
+  if (endDate) p.set('endDate', endDate);
+  if (basis) p.set('basis', basis);
+  return p.toString();
+};
+
+export async function fetchLedgerPnl(businessId: string, startDate?: string, endDate?: string, basis: LedgerReportBasis = 'accrual') {
+  return apiGetSimple<LedgerPnlReport>(`/businesses/${encodeURIComponent(businessId)}/reports/pnl?${range(startDate, endDate, basis)}`);
+}
+export async function fetchLedgerCashflow(businessId: string, startDate?: string, endDate?: string, basis: LedgerReportBasis = 'accrual') {
+  return apiGetSimple<LedgerCashflowReport>(`/businesses/${encodeURIComponent(businessId)}/reports/cashflow?${range(startDate, endDate, basis)}`);
+}
+export async function fetchLedgerBalanceSheet(businessId: string, asOf?: string) {
+  const p = new URLSearchParams();
+  if (asOf) p.set('asOf', asOf);
+  return apiGetSimple<LedgerBalanceSheet>(`/businesses/${encodeURIComponent(businessId)}/reports/balance-sheet?${p.toString()}`);
+}
+export async function fetchLedgerTaxSummary(businessId: string, startDate?: string, endDate?: string) {
+  return apiGetSimple<LedgerTaxSummary>(`/businesses/${encodeURIComponent(businessId)}/reports/tax-summary?${range(startDate, endDate)}`);
+}
+export async function fetchLedgerArAging(businessId: string, asOf?: string) {
+  const p = new URLSearchParams();
+  if (asOf) p.set('asOf', asOf);
+  return apiGetSimple<LedgerArAging>(`/businesses/${encodeURIComponent(businessId)}/reports/ar-aging?${p.toString()}`);
+}
+export async function fetchLedgerApAging(businessId: string, asOf?: string) {
+  const p = new URLSearchParams();
+  if (asOf) p.set('asOf', asOf);
+  return apiGetSimple<LedgerApAging>(`/businesses/${encodeURIComponent(businessId)}/reports/ap-aging?${p.toString()}`);
+}
+export async function fetchLedgerRevenueBy(businessId: string, dimension: RevenueDimension, startDate?: string, endDate?: string) {
+  const p = new URLSearchParams({ dimension });
+  if (startDate) p.set('startDate', startDate);
+  if (endDate) p.set('endDate', endDate);
+  return apiGetSimple<{ dimension: RevenueDimension; rows: LedgerDimensionRow[] }>(`/businesses/${encodeURIComponent(businessId)}/reports/revenue-by?${p.toString()}`);
+}
+export async function fetchLedgerExpenseBy(businessId: string, dimension: ExpenseDimension, startDate?: string, endDate?: string) {
+  const p = new URLSearchParams({ dimension });
+  if (startDate) p.set('startDate', startDate);
+  if (endDate) p.set('endDate', endDate);
+  return apiGetSimple<{ dimension: ExpenseDimension; rows: LedgerDimensionRow[] }>(`/businesses/${encodeURIComponent(businessId)}/reports/expense-by?${p.toString()}`);
+}
+
+export function ledgerReportExportUrl(
+  businessId: string,
+  report: 'pnl' | 'cashflow' | 'balance-sheet' | 'tax-summary' | 'ar-aging' | 'ap-aging',
+  format: 'csv' | 'pdf',
+  params: { startDate?: string; endDate?: string; asOf?: string; basis?: LedgerReportBasis } = {},
+) {
+  const p = new URLSearchParams({ format });
+  if (params.startDate) p.set('startDate', params.startDate);
+  if (params.endDate) p.set('endDate', params.endDate);
+  if (params.asOf) p.set('asOf', params.asOf);
+  if (params.basis) p.set('basis', params.basis);
+  return `${API_BASE}/businesses/${encodeURIComponent(businessId)}/reports/${report}?${p.toString()}`;
+}
+
 // ---
 // EMAIL MARKETING
 // ---
