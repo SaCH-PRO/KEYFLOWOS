@@ -12298,6 +12298,85 @@ export async function deleteTaxRate(businessId: string, id: string) {
 export async function fetchFinanceSettings(businessId: string) {
   return apiGetSimple<FinanceSettings>(`${finBase(businessId)}/settings`);
 }
+
+// FIN7 — Tax liabilities (per-period rollups + filing/payment + accountant export).
+export interface TaxLiabilityRow {
+  id: string;
+  businessId: string;
+  type: string; // VAT | BUSINESS_LEVY | SALES_TAX
+  periodStart: string;
+  periodEnd: string;
+  taxableSales: string | number;
+  taxCollected: string | number;
+  taxPaid: string | number;
+  amountDue: string | number;
+  dueDate: string | null;
+  status: 'OPEN' | 'FILED' | 'PAID' | 'AMENDED';
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface TaxContributingInvoice {
+  id: string;
+  invoiceNumber: string;
+  paidAt: string | null;
+  subtotal: string | number;
+  taxRate: string | number | null;
+  taxAmount: string | number | null;
+  total: string | number;
+  currency: string;
+  contact: { firstName: string | null; lastName: string | null; displayName: string | null; email: string | null } | null;
+}
+export async function fetchTaxLiabilities(businessId: string, status?: string) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+  return apiGetSimple<{ items: TaxLiabilityRow[] }>(`${finBase(businessId)}/tax-liabilities${qs}`);
+}
+export async function recomputeTaxLiabilities(businessId: string) {
+  return apiPost<{ computed: Array<{ id: string; type: string; status: string; amountDue: number }>; computedAt: string }>({
+    path: `${finBase(businessId)}/tax-liabilities/recompute`,
+    body: {},
+  });
+}
+export async function fetchTaxLiability(businessId: string, id: string) {
+  return apiGetSimple<TaxLiabilityRow>(`${finBase(businessId)}/tax-liabilities/${encodeURIComponent(id)}`);
+}
+export async function fetchTaxContributingInvoices(businessId: string, id: string) {
+  return apiGetSimple<{ liability: TaxLiabilityRow; invoices: TaxContributingInvoice[] }>(
+    `${finBase(businessId)}/tax-liabilities/${encodeURIComponent(id)}/contributing-invoices`,
+  );
+}
+export async function fileTaxLiability(businessId: string, id: string, body: { dueDate?: string | null; notes?: string | null } = {}) {
+  return apiPost<TaxLiabilityRow>({
+    path: `${finBase(businessId)}/tax-liabilities/${encodeURIComponent(id)}/file`,
+    body,
+  });
+}
+export async function payTaxLiability(businessId: string, id: string, body: { paymentDate?: string; notes?: string | null } = {}) {
+  return apiPost<TaxLiabilityRow>({
+    path: `${finBase(businessId)}/tax-liabilities/${encodeURIComponent(id)}/pay`,
+    body,
+  });
+}
+export function accountantExportUrl(businessId: string, start: string, end: string, basis?: 'CASH' | 'ACCRUAL'): string {
+  const qs = new URLSearchParams({ start, end });
+  if (basis) qs.set('basis', basis);
+  return `${API_BASE}${finBase(businessId)}/accountant-export.zip?${qs.toString()}`;
+}
+export async function downloadAccountantExport(businessId: string, start: string, end: string, basis?: 'CASH' | 'ACCRUAL') {
+  const url = accountantExportUrl(businessId, start, end, basis);
+  const headers = await getAuthHeaders();
+  const res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
+  if (res.status === 401) emitUnauthorizedEvent(url);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `Failed to download accountant export (${res.status})`);
+  }
+  const blob = await res.blob();
+  const dispo = res.headers.get('content-disposition') || '';
+  const m = /filename="?([^"]+)"?/.exec(dispo);
+  const filename = m?.[1] || `accountant-export-${start}_${end}.zip`;
+  return { blob, filename };
+}
 export async function updateFinanceSettings(businessId: string, body: Partial<FinanceSettings>) {
   return apiPatch<FinanceSettings>(`${finBase(businessId)}/settings`, body);
 }

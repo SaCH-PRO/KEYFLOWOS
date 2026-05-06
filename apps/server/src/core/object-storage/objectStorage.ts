@@ -287,6 +287,65 @@ export class ObjectStorageService {
     );
   }
 
+  /**
+   * Server-side upload of an in-memory buffer to a deterministic key.
+   * Returns the canonical `/objects/<id>` path the rest of the app uses.
+   */
+  async uploadBuffer(
+    buffer: Buffer,
+    opts: { contentType?: string; subdir?: string; filename?: string } = {},
+  ): Promise<{ objectPath: string; key: string }> {
+    const { client, bucket } = getClient();
+    const privateDir = this.getPrivateObjectDir();
+    const subdir = trimSlashes(opts.subdir || "uploads");
+    const objectId = randomUUID();
+    const safeName = (opts.filename || "")
+      .replace(/[^A-Za-z0-9._-]/g, "_")
+      .slice(0, 80);
+    const tail = safeName ? `${objectId}_${safeName}` : objectId;
+    const key = `${privateDir}/${subdir}/${tail}`;
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: opts.contentType || "application/octet-stream",
+      }),
+    );
+    const entityId = `${subdir}/${tail}`;
+    return { objectPath: `/objects/${entityId}`, key };
+  }
+
+  /**
+   * Presigned GET URL for an object previously uploaded via uploadBuffer().
+   * Default TTL = 1 hour.
+   */
+  async getReadSignedUrl(
+    objectPath: string,
+    opts: { expiresIn?: number; downloadFilename?: string } = {},
+  ): Promise<string> {
+    if (!objectPath.startsWith("/objects/")) {
+      throw new ObjectNotFoundError();
+    }
+    const entityId = objectPath.slice("/objects/".length);
+    const { client, bucket } = getClient();
+    const privateDir = this.getPrivateObjectDir();
+    const key = `${privateDir}/${entityId}`;
+    return await getSignedUrl(
+      client,
+      new GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        ...(opts.downloadFilename
+          ? {
+              ResponseContentDisposition: `attachment; filename="${opts.downloadFilename.replace(/"/g, "")}"`,
+            }
+          : {}),
+      }),
+      { expiresIn: opts.expiresIn ?? 3600 },
+    );
+  }
+
   async getObjectEntityFile(objectPath: string): Promise<S3FileRef> {
     if (!objectPath.startsWith("/objects/")) {
       throw new ObjectNotFoundError();
