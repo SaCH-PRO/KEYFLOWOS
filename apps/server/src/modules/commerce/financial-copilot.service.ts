@@ -584,6 +584,33 @@ export class FinancialCopilotService {
     const outstanding = outstandingInvs._sum.total ?? 0;
     const cashPosition = (recentRev._sum.total ?? 0) - (recentExp._sum.amount ?? 0);
 
+    // FIN8 — Pull the open finance action queue + this-week money so the
+    // weekly briefing names what to chase, not just what happened.
+    const [openFinActions, thisWeekPaid, thisWeekExp] = await Promise.all([
+      this.db.financeActionItem.findMany({
+        where: { businessId, status: 'OPEN' },
+        orderBy: [{ severity: 'asc' }, { amount: 'desc' }],
+        take: 5,
+        select: { kind: true, severity: true, title: true, amount: true },
+      }),
+      this.db.invoice.aggregate({
+        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: lastWeekEnd } },
+        _sum: { total: true },
+        _count: true,
+      }),
+      this.db.expense.aggregate({
+        where: { businessId, deletedAt: null, date: { gte: lastWeekEnd } },
+        _sum: { amount: true },
+      }),
+    ]);
+    const thisWeekRev = Number(thisWeekPaid._sum.total ?? 0);
+    const thisWeekExpense = Number(thisWeekExp._sum.amount ?? 0);
+    const finActionLines = openFinActions.length
+      ? openFinActions
+          .map((a, i) => `  ${i + 1}. [${a.severity}] ${a.kind} — ${a.title}${a.amount != null ? ` (${this.formatTTD(Number(a.amount))})` : ''}`)
+          .join('\n')
+      : '  (none — finance is clear)';
+
     const dataContext = `Business: ${business?.name ?? 'Business'}
 Industry: ${business?.industry ?? 'General'}
 Currency: ${business?.currency ?? 'TTD'}
@@ -593,9 +620,16 @@ Last Week Performance:
 - Expenses: ${this.formatTTD(exp)} across ${lastWeekExpenses._count ?? 0} transactions
 - Net Income: ${this.formatTTD(net)}
 
+This Week's Money (so far):
+- Revenue: ${this.formatTTD(thisWeekRev)} from ${thisWeekPaid._count ?? 0} paid invoices
+- Expenses: ${this.formatTTD(thisWeekExpense)}
+
 Current Position:
 - Cash Position (90-day): ${this.formatTTD(cashPosition)}
-- Outstanding Receivables: ${this.formatTTD(outstanding)} across ${outstandingInvs._count ?? 0} invoices`;
+- Outstanding Receivables: ${this.formatTTD(outstanding)} across ${outstandingInvs._count ?? 0} invoices
+
+Open Finance Actions (FIN8 detector queue):
+${finActionLines}`;
 
     try {
       const result = await this.aiUsage.callAi({

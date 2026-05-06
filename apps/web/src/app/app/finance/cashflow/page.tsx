@@ -6,7 +6,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { formatCurrency } from "@/lib/currency";
 import { fetchFinanceOverview, fetchRevenueOverview } from "@/lib/client";
-import { SkeletonGrid } from "../page";
+import { SkeletonGrid } from "../_overview-client";
 
 export default function FinanceCashflowPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);

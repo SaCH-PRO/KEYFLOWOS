@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { formatCurrency } from "@/lib/currency";
 import { fetchFinanceAccounts, createFinanceAccount, type FinancialAccountRow } from "@/lib/client";
-import { SkeletonGrid } from "../page";
+import { SkeletonGrid } from "../_overview-client";
 
 const ACCOUNT_TYPES = ["CASH", "BANK", "PAYMENT_PROCESSOR", "CREDIT_CARD", "LOAN", "EQUITY", "TAX", "OTHER"];
 

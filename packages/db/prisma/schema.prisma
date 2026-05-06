@@ -191,6 +191,7 @@ model Business {
   guidanceProfile      BusinessGuidanceProfile?
   guidanceAssessments  GuidanceAssessment[]
   revenueActions       RevenueAction[]
+  financeActionItems   FinanceActionItem[]
 
   // Finance OS (FIN1)
   financialAccounts     FinancialAccount[]
@@ -4911,6 +4912,59 @@ model RevenueAction {
   @@index([businessId, type, status])
   @@index([businessId, contactId])
   @@map("revenue_actions")
+}
+
+/// FIN8 — Finance intelligence detector output. One row per active
+/// detection. Mirrors into RevenueAction (FIN_*) so the same item also
+/// surfaces in KEYFLOW Today via the existing R3 action queue.
+model FinanceActionItem {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  /// CASHFLOW_RISK | SLOW_PAYER | MARGIN_DECLINE | OVERSPENDING |
+  /// MISSING_RECEIPT | UNCATEGORISED | TAX_RESERVE_GAP | DUPLICATE_EXPENSE
+  kind         String
+  /// INFO | WARNING | CRITICAL
+  severity     String   @default("WARNING")
+  title        String
+  body         String
+
+  /// Polymorphic backref to the source object the detection is about.
+  /// Defaults to '' (not null) so the (businessId, kind, entityType,
+  /// entityId) unique key works without Postgres NULL semantics tripping
+  /// idempotent re-detection.
+  entityType   String   @default("") @map("entity_type")
+  entityId     String   @default("") @map("entity_id")
+
+  /// Recommended next action — usually a deep link e.g.
+  /// "/app/expenses/<id>" or "/app/finance/reconciliation". Used by the
+  /// Overview one-click resolvers.
+  recommendedAction String? @map("recommended_action")
+
+  /// Structured datapoints used to compute the detection — exposed by
+  /// the API so every action is explainable. Schema varies per kind.
+  evidence     Json?
+  amount       Float?
+
+  /// OPEN | RESOLVED | DISMISSED | SUPERSEDED
+  status       String   @default("OPEN")
+  resolvedAt   DateTime? @map("resolved_at")
+  resolvedBy   String?   @map("resolved_by")
+  resolution   String?
+
+  /// Mirror handle into RevenueAction (R3). Set when a FIN_* twin row is
+  /// created so that resolving on either side can be reflected.
+  mirroredActionId String? @map("mirrored_action_id")
+
+  detectedAt   DateTime @default(now()) @map("detected_at")
+  lastSeenAt   DateTime @default(now()) @map("last_seen_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, kind, entityType, entityId])
+  @@index([businessId, status, severity])
+  @@index([businessId, kind, status])
+  @@map("finance_action_items")
 }
 
 model KeyflowNote {

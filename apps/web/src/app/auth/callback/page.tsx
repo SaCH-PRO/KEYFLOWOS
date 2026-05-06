@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
-import { setStoredToken } from "@/lib/workspace";
+import { setStoredToken, setStoredBusinessId } from "@/lib/workspace";
 
 /**
  * Derive (firstName, lastName) from a Supabase OAuth user_metadata payload.
@@ -105,7 +105,7 @@ function AuthCallbackInner() {
         });
         
         if (bootstrap.data?.business?.id) {
-          window.localStorage.setItem("kf_business_id", bootstrap.data.business.id);
+          setStoredBusinessId(bootstrap.data.business.id);
           if (bootstrap.data.user) {
             window.localStorage.setItem("kf_user_cache", JSON.stringify(bootstrap.data.user));
           }

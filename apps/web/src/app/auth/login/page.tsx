@@ -21,7 +21,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { bootstrapIdentity, identityLogin, identityResendVerification } from "@/lib/client";
-import { setStoredToken } from "@/lib/workspace";
+import { setStoredToken, setStoredBusinessId } from "@/lib/workspace";
 
 const SAFE_REDIRECT_PREFIX = "/app";
 
@@ -117,7 +117,7 @@ function AuthLoginInner() {
         phone: draft.phone, company: draft.company, username: draft.username,
       });
       if (bootstrap.data?.business?.id) {
-        window.localStorage.setItem("kf_business_id", bootstrap.data.business.id);
+        setStoredBusinessId(bootstrap.data.business.id);
       } else if (bootstrap.error) { throw new Error(bootstrap.error); }
       else { throw new Error("Could not create workspace. Please try again."); }
       router.push(fromPath);

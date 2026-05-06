@@ -23,7 +23,16 @@ export type RevenueActionType =
   | 'ACCEPTED_QUOTE_NO_INVOICE'
   | 'PAID_INVOICE_NO_RECEIPT'
   | 'RECURRING_FAILURE'
-  | 'DORMANT_HIGH_VALUE';
+  | 'DORMANT_HIGH_VALUE'
+  // FIN8 — finance intelligence detectors mirrored into the same queue.
+  | 'FIN_CASHFLOW_RISK'
+  | 'FIN_SLOW_PAYER'
+  | 'FIN_MARGIN_DECLINE'
+  | 'FIN_OVERSPENDING'
+  | 'FIN_MISSING_RECEIPT'
+  | 'FIN_UNCATEGORISED'
+  | 'FIN_TAX_RESERVE_GAP'
+  | 'FIN_DUPLICATE_EXPENSE';
 
 export interface RevenueActionRecommendation {
   explanation: string;
@@ -531,6 +540,35 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ---------- Persistence ----------
+
+  /**
+   * Public surface so other modules (e.g. FIN8 finance intelligence)
+   * can mirror their detections into the same RevenueAction queue —
+   * preserving idempotency and the "never resurrect a COMPLETED /
+   * DISMISSED row" guarantee that the private `upsertAction` enforces.
+   *
+   * Returns `{ created, actionId }` so the caller can persist a foreign
+   * key back to the mirrored row.
+   */
+  async upsertExternal(
+    input: UpsertInput,
+  ): Promise<{ created: boolean; actionId: string | null }> {
+    const created = await this.upsertAction(input);
+    const row = await this.prisma.client.revenueAction
+      .findUnique({
+        where: {
+          businessId_type_relatedType_relatedId: {
+            businessId: input.businessId,
+            type: input.type,
+            relatedType: input.relatedType ?? '',
+            relatedId: input.relatedId ?? '',
+          },
+        },
+        select: { id: true },
+      })
+      .catch(() => null);
+    return { created, actionId: row?.id ?? null };
+  }
 
   private async upsertAction(input: UpsertInput): Promise<boolean> {
     try {

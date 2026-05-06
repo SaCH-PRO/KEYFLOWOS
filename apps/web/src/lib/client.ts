@@ -12388,6 +12388,63 @@ export async function fetchFinanceOverview(businessId: string) {
   return apiGetSimple<FinanceOverview>(`${finBase(businessId)}/overview`);
 }
 
+// FIN8 — Finance intelligence (action queue + insight strip).
+export interface FinanceIntelActionItem {
+  id: string;
+  kind: string;
+  severity: 'CRITICAL' | 'WARNING' | 'INFO' | string;
+  title: string;
+  body: string;
+  entityType: string;
+  entityId: string;
+  recommendedAction: string | null;
+  amount: number | null;
+  evidence: unknown;
+  status: string;
+  detectedAt: string;
+  resolvedAt: string | null;
+}
+export interface FinanceInsightStrip {
+  headline: string;
+  body: string;
+  source: 'ai' | 'deterministic';
+  generatedAt: string;
+  cacheKey: string;
+}
+export async function fetchFinanceIntelActions(
+  businessId: string,
+  opts: { status?: string; kind?: string } = {},
+) {
+  const qs = new URLSearchParams();
+  if (opts.status) qs.set('status', opts.status);
+  if (opts.kind) qs.set('kind', opts.kind);
+  const q = qs.toString();
+  return apiGetSimple<{ items: FinanceIntelActionItem[] }>(
+    `${finBase(businessId)}/intelligence/actions${q ? `?${q}` : ''}`,
+  );
+}
+export async function runFinanceIntelScan(businessId: string) {
+  return apiPostSimple<{ created: number; refreshed: number; superseded: number }>(
+    `${finBase(businessId)}/intelligence/scan`,
+    {},
+  );
+}
+export async function resolveFinanceIntelAction(businessId: string, id: string, resolution?: string | null) {
+  return apiPostSimple<FinanceIntelActionItem>(
+    `${finBase(businessId)}/intelligence/actions/${encodeURIComponent(id)}/resolve`,
+    { resolution: resolution ?? null },
+  );
+}
+export async function dismissFinanceIntelAction(businessId: string, id: string) {
+  return apiPostSimple<FinanceIntelActionItem>(
+    `${finBase(businessId)}/intelligence/actions/${encodeURIComponent(id)}/dismiss`,
+    {},
+  );
+}
+export async function fetchFinanceInsightStrip(businessId: string) {
+  return apiGetSimple<FinanceInsightStrip>(`${finBase(businessId)}/intelligence/insight`);
+}
+
 export async function fetchFinanceAccounts(businessId: string) {
   return apiGetSimple<{ items: FinancialAccountRow[] }>(`${finBase(businessId)}/accounts`);
 }

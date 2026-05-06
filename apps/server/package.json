@@ -22,7 +22,6 @@
     "@prisma/client": "^6.19.0",
     "@supabase/supabase-js": "^2.86.0",
     "@trpc/server": "^10.45.2",
-    "@types/pdfkit": "^0.17.6",
     "@types/sanitize-html": "^2.16.1",
     "@vercel/node": "^5.3.24",
     "class-transformer": "^0.5.1",
@@ -50,6 +49,7 @@
     "@nestjs/testing": "^11.1.19",
     "@types/express": "^5.0.5",
     "@types/multer": "^2.0.0",
+    "@types/pdfkit": "^0.17.6",
     "@types/supertest": "^2.0.16",
     "supertest": "^7.0.0",
     "vitest": "^2.1.1"
