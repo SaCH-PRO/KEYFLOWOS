@@ -89,6 +89,11 @@ model Business {
   /// for the per-event posting recipes that branch on this flag.
   accountingBasis String @default("CASH") @map("accounting_basis")
 
+  /// Optional default recipient for the "Send to accountant" action on
+  /// Reports / Tax. When set, the Accountant Export ZIP can be emailed
+  /// directly via Resend without re-typing the address each time.
+  accountantEmail String? @map("accountant_email")
+
   // Business Autopilot Settings
   businessIntent   String?  @map("business_intent")    // Free-text description of business idea
   archetype        String?  @map("archetype")          // LOCAL_SERVICE, DIGITAL_PRODUCT, AGENCY, CLINIC, ECOMMERCE

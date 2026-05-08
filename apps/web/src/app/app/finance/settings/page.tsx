@@ -145,6 +145,24 @@ function GeneralSection({ businessId }: { businessId: string }) {
       </div>
 
       <div className="rounded-xl border border-border/40 bg-card/40 p-4 space-y-3">
+        <h2 className="text-sm font-semibold">Accountant</h2>
+        <p className="text-xs text-muted-foreground">
+          Default recipient for the &ldquo;Send to accountant&rdquo; action on Reports and Tax.
+          When set, the export package can be emailed in one click without re-typing the address.
+        </p>
+        <label className="flex items-center gap-3 text-sm">
+          <span className="min-w-[160px]">Accountant email</span>
+          <input
+            type="email"
+            value={settings.accountantEmail ?? ""}
+            onChange={(e) => update({ accountantEmail: e.target.value || null })}
+            placeholder="accountant@firm.com"
+            className="flex-1 rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm"
+          />
+        </label>
+      </div>
+
+      <div className="rounded-xl border border-border/40 bg-card/40 p-4 space-y-3">
         <h2 className="text-sm font-semibold">Default accounts</h2>
         <p className="text-xs text-muted-foreground">Used when posting to the ledger if no account is specified.</p>
         <DefaultAccountSelect label="Cash / Bank" value={settings.defaultCashAccountId} options={accountOptions} onChange={(v) => update({ defaultCashAccountId: v })} />

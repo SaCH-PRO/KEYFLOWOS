@@ -24,6 +24,8 @@ import { ExpensePostingService } from './expense-posting.service';
 import { TaxLiabilityService } from './tax-liability.service';
 import { TaxLiabilityRollupScheduler } from './tax-liability-rollup.scheduler';
 import { AccountantExportService } from './accountant-export.service';
+import { AccountantExportEmailService } from './accountant-export-email.service';
+import { SystemEmailService } from '../notifications/system-email.service';
 import { FinanceController } from './finance.controller';
 
 /**
@@ -61,6 +63,8 @@ import { FinanceController } from './finance.controller';
     AccountantExportService,
     FinanceIntelligenceService,
     FinanceIntelligenceSchedulerService,
+    AccountantExportEmailService,
+    SystemEmailService,
   ],
   exports: [
     PostingService,

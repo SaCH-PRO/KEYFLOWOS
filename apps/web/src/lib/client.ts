@@ -12380,6 +12380,40 @@ export interface FinanceSettings {
   defaultApAccountId: string | null;
   defaultTaxAccountId: string | null;
   currency: string;
+  accountantEmail: string | null;
+}
+
+export interface SendAccountantExportResult {
+  to: string;
+  filename: string;
+  bytes: number;
+  messageId: string;
+  generatedAt: string;
+  savedAsDefault: boolean;
+}
+
+export async function sendAccountantExportEmail(
+  businessId: string,
+  body: {
+    start: string;
+    end: string;
+    basis?: 'CASH' | 'ACCRUAL';
+    to?: string | null;
+    message?: string | null;
+    saveRecipient?: boolean;
+  },
+) {
+  return apiPost<SendAccountantExportResult>({
+    path: `${finBase(businessId)}/accountant-export/email`,
+    body: {
+      periodStart: body.start,
+      periodEnd: body.end,
+      basis: body.basis,
+      to: body.to ?? null,
+      message: body.message ?? null,
+      saveRecipient: Boolean(body.saveRecipient),
+    },
+  });
 }
 
 const finBase = (businessId: string) => `/finance/businesses/${encodeURIComponent(businessId)}`;

@@ -21,6 +21,7 @@ import { ReconciliationService } from './reconciliation.service';
 import { TaxLiabilityService } from './tax-liability.service';
 import { AccountantExportService } from './accountant-export.service';
 import { FinanceIntelligenceService } from './finance-intelligence.service';
+import { AccountantExportEmailService } from './accountant-export-email.service';
 import { ObjectStorageService } from '../../core/object-storage';
 
 /**
@@ -45,6 +46,7 @@ export class FinanceController {
     @Inject(TaxLiabilityService) private readonly taxLiability: TaxLiabilityService,
     @Inject(AccountantExportService) private readonly accountantExport: AccountantExportService,
     @Inject(FinanceIntelligenceService) private readonly intel: FinanceIntelligenceService,
+    @Inject(AccountantExportEmailService) private readonly accountantExportEmail: AccountantExportEmailService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
@@ -615,5 +617,48 @@ export class FinanceController {
       expiresIn,
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Email the Accountant Export ZIP directly to a recipient. Uses the
+   * business's configured `accountantEmail` when `to` is omitted; pass
+   * `saveRecipient: true` to persist a new address as the new default.
+   */
+  @Post('accountant-export/email')
+  async accountantExportEmailSend(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      periodStart?: string; periodEnd?: string;
+      start?: string; end?: string;
+      basis?: 'CASH' | 'ACCRUAL';
+      to?: string | null;
+      message?: string | null;
+      saveRecipient?: boolean;
+    },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    const rawStart = body?.periodStart ?? body?.start;
+    const rawEnd = body?.periodEnd ?? body?.end;
+    if (!rawStart || !rawEnd) {
+      throw new BadRequestException(
+        'periodStart and periodEnd body fields are required (YYYY-MM-DD or ISO timestamp)',
+      );
+    }
+    const periodStart = /T/.test(rawStart) ? new Date(rawStart) : new Date(`${rawStart}T00:00:00.000Z`);
+    const periodEnd = /T/.test(rawEnd) ? new Date(rawEnd) : new Date(`${rawEnd}T23:59:59.999Z`);
+    if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
+      throw new BadRequestException('periodStart / periodEnd are not valid dates');
+    }
+    return this.accountantExportEmail.send({
+      businessId,
+      periodStart,
+      periodEnd,
+      basis: body?.basis,
+      to: body?.to ?? null,
+      message: body?.message ?? null,
+      saveRecipient: Boolean(body?.saveRecipient),
+      userId: req.user.id,
+    });
   }
 }

@@ -85,6 +85,7 @@ export class SystemEmailService {
     html: string;
     text?: string;
     replyTo?: string;
+    attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }>;
   }): Promise<{ id: string }> {
     if (!args.to || !args.subject || !args.html) {
       throw new Error('sendTransactional requires to, subject and html');
@@ -104,6 +105,11 @@ export class SystemEmailService {
         html: args.html,
         text: args.text,
         replyTo: args.replyTo,
+        attachments: args.attachments?.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType,
+        })),
       });
       if (result.error) {
         throw new Error(result.error.message || 'Resend send failed');
