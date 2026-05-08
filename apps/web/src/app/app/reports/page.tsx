@@ -31,7 +31,7 @@ import { MarketingView } from "./components/marketing-view";
 import { CashFlowForecastView } from "./components/cash-flow-forecast-view";
 import { BooksReportView, type BooksReportKind } from "./components/BooksReportView";
 import { exportReportPDF, exportReportCSV } from "./components/export-pdf";
-import { downloadAccountantExport } from "@/lib/client";
+import { downloadAccountantExport, fetchFinanceSettings, sendAccountantExportEmail } from "@/lib/client";
 import { Package } from "lucide-react";
 import { toast } from "sonner";
 import { RevenueReportsView } from "./components/revenue-reports-view";
@@ -131,6 +131,25 @@ export default function ReportsPage() {
   }, [report]);
 
   const [exportingZip, setExportingZip] = useState(false);
+  const [emailModal, setEmailModal] = useState<{ start: string; end: string } | null>(null);
+  const [defaultAccountantEmail, setDefaultAccountantEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!businessId) return;
+    void (async () => {
+      const r = await fetchFinanceSettings(businessId);
+      if (r.data) setDefaultAccountantEmail(r.data.accountantEmail ?? null);
+    })();
+  }, [businessId]);
+
+  const openEmailModal = useCallback(() => {
+    if (!businessId) return;
+    const range = getDateRange(datePreset);
+    const startStr = (datePreset === "custom" && customStart) ? customStart : range.start.slice(0, 10);
+    const endStr = (datePreset === "custom" && customEnd) ? customEnd : range.end.slice(0, 10);
+    setEmailModal({ start: startStr, end: endStr });
+  }, [businessId, datePreset, customStart, customEnd]);
+
   const exportAccountantZip = useCallback(async () => {
     if (!businessId) return;
     const range = getDateRange(datePreset);
@@ -214,6 +233,15 @@ export default function ReportsPage() {
           >
             {exportingZip ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
             Accountant ZIP
+          </button>
+          <button
+            onClick={openEmailModal}
+            disabled={!businessId}
+            title="Email the accountant export ZIP directly to your accountant"
+            className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl border border-primary/40 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+          >
+            <Send className="w-4 h-4" />
+            Send to accountant
           </button>
           <button
             onClick={() => setShowContactPicker(true)}
@@ -396,6 +424,123 @@ export default function ReportsPage() {
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
 
+      {emailModal && businessId && (
+        <SendAccountantEmailModal
+          businessId={businessId}
+          start={emailModal.start}
+          end={emailModal.end}
+          defaultEmail={defaultAccountantEmail}
+          onClose={() => setEmailModal(null)}
+          onSavedDefault={(v) => setDefaultAccountantEmail(v)}
+        />
+      )}
+
     </WorkspaceShell>
+  );
+}
+
+function SendAccountantEmailModal({
+  businessId, start, end, defaultEmail, onClose, onSavedDefault,
+}: {
+  businessId: string;
+  start: string;
+  end: string;
+  defaultEmail: string | null;
+  onClose: () => void;
+  onSavedDefault: (v: string | null) => void;
+}) {
+  const [to, setTo] = useState(defaultEmail ?? "");
+  const [message, setMessage] = useState("");
+  const [saveDefault, setSaveDefault] = useState(!defaultEmail);
+  const [sending, setSending] = useState(false);
+
+  const submit = async () => {
+    if (!to.trim()) {
+      toast.error("Recipient email is required");
+      return;
+    }
+    setSending(true);
+    const r = await sendAccountantExportEmail(businessId, {
+      start, end,
+      to: to.trim(),
+      message: message.trim() || null,
+      saveRecipient: saveDefault,
+    });
+    setSending(false);
+    if (r.error) {
+      toast.error(r.error);
+      return;
+    }
+    toast.success(`Sent to ${r.data?.to ?? to.trim()}`);
+    if (r.data?.savedAsDefault) onSavedDefault(r.data.to);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-background border border-border rounded-xl shadow-xl">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Send accountant export</h3>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-card text-muted-foreground">
+            ×
+          </button>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Sends the accountant export ZIP for <strong>{start}</strong> to <strong>{end}</strong> as an email
+            attachment via Keyflow&apos;s mailer.
+          </p>
+          <label className="block">
+            <span className="text-xs font-medium">Recipient email</span>
+            <input
+              type="email"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="accountant@firm.com"
+              className="mt-1 w-full rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-sm"
+              autoFocus
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium">Cover note (optional)</span>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={4}
+              placeholder="Hi — attached is the latest export for your review."
+              className="mt-1 w-full rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-sm resize-none"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={saveDefault}
+              onChange={(e) => setSaveDefault(e.target.checked)}
+              className="rounded border-border"
+            />
+            Remember this as the default recipient
+          </label>
+        </div>
+        <div className="px-4 py-3 border-t border-border flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-card"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={sending || !to.trim()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            Send email
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

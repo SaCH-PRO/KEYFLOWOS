@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calculator, RefreshCw, FileCheck2, Banknote, Loader2, ChevronRight, Download, X } from "lucide-react";
+import { Calculator, RefreshCw, FileCheck2, Banknote, Loader2, ChevronRight, Download, X, Mail, Send } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchTaxLiabilities, recomputeTaxLiabilities,
   fileTaxLiability, payTaxLiability,
   fetchTaxContributingInvoices, downloadAccountantExport,
+  fetchFinanceSettings, sendAccountantExportEmail,
   type TaxLiabilityRow, type TaxContributingInvoice,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
@@ -49,6 +50,16 @@ export default function FinanceTaxPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<Liab | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [emailModal, setEmailModal] = useState<{ start: string; end: string } | null>(null);
+  const [defaultAccountantEmail, setDefaultAccountantEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!businessId) return;
+    void (async () => {
+      const r = await fetchFinanceSettings(businessId);
+      if (r.data) setDefaultAccountantEmail(r.data.accountantEmail ?? null);
+    })();
+  }, [businessId]);
 
   useEffect(() => {
     setBusinessId(getStoredBusinessId());
@@ -179,6 +190,19 @@ export default function FinanceTaxPage() {
             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             Accountant export (YTD)
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              const today = new Date();
+              const start = new Date(Date.UTC(today.getUTCFullYear(), 0, 1)).toISOString().slice(0, 10);
+              const end = new Date(Date.UTC(today.getUTCFullYear(), 11, 31)).toISOString().slice(0, 10);
+              setEmailModal({ start, end });
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-primary/40 text-primary px-2.5 py-1.5 text-xs font-medium hover:bg-primary/10 transition-colors"
+          >
+            <Mail className="w-3.5 h-3.5" />
+            Send to accountant
+          </button>
         </div>
       </div>
 
@@ -205,8 +229,130 @@ export default function FinanceTaxPage() {
           businessId={businessId}
           liability={drawer}
           onClose={() => setDrawer(null)}
+          defaultAccountantEmail={defaultAccountantEmail}
+          onSavedDefault={(v) => setDefaultAccountantEmail(v)}
         />
       )}
+
+      {emailModal && businessId && (
+        <SendToAccountantModal
+          businessId={businessId}
+          start={emailModal.start}
+          end={emailModal.end}
+          defaultEmail={defaultAccountantEmail}
+          onClose={() => setEmailModal(null)}
+          onSavedDefault={(v) => setDefaultAccountantEmail(v)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SendToAccountantModal({
+  businessId, start, end, defaultEmail, onClose, onSavedDefault,
+}: {
+  businessId: string;
+  start: string;
+  end: string;
+  defaultEmail: string | null;
+  onClose: () => void;
+  onSavedDefault: (v: string | null) => void;
+}) {
+  const [to, setTo] = useState(defaultEmail ?? "");
+  const [message, setMessage] = useState("");
+  const [saveDefault, setSaveDefault] = useState(!defaultEmail);
+  const [sending, setSending] = useState(false);
+
+  const submit = async () => {
+    if (!to.trim()) {
+      toast.error("Recipient email is required");
+      return;
+    }
+    setSending(true);
+    const r = await sendAccountantExportEmail(businessId, {
+      start, end,
+      to: to.trim(),
+      message: message.trim() || null,
+      saveRecipient: saveDefault,
+    });
+    setSending(false);
+    if (r.error) {
+      toast.error(r.error);
+      return;
+    }
+    toast.success(`Sent to ${r.data?.to ?? to.trim()}`);
+    if (r.data?.savedAsDefault) onSavedDefault(r.data.to);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-background border border-border rounded-xl shadow-xl">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Mail className="w-4 h-4 text-primary" />
+            <h3 className="text-sm font-semibold">Send accountant export</h3>
+          </div>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-card">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Sends the accountant export ZIP for <strong>{start}</strong> to <strong>{end}</strong> as an
+            email attachment via Keyflow&apos;s mailer.
+          </p>
+          <label className="block">
+            <span className="text-xs font-medium">Recipient email</span>
+            <input
+              type="email"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="accountant@firm.com"
+              className="mt-1 w-full rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-sm"
+              autoFocus
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium">Cover note (optional)</span>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={4}
+              placeholder="Hi — attached is the latest export for your review."
+              className="mt-1 w-full rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-sm resize-none"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={saveDefault}
+              onChange={(e) => setSaveDefault(e.target.checked)}
+              className="rounded border-border"
+            />
+            Remember this as the default recipient
+          </label>
+        </div>
+        <div className="px-4 py-3 border-t border-border flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-card"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={sending || !to.trim()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            Send email
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -329,15 +475,20 @@ async function exportLiability(businessId: string, liab: Liab) {
 }
 
 function ContributingDrawer({
-  businessId, liability, onClose,
+  businessId, liability, onClose, defaultAccountantEmail, onSavedDefault,
 }: {
   businessId: string;
   liability: Liab;
   onClose: () => void;
+  defaultAccountantEmail: string | null;
+  onSavedDefault: (v: string | null) => void;
 }) {
   const [invoices, setInvoices] = useState<TaxContributingInvoice[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [showSend, setShowSend] = useState(false);
+  const periodStart = new Date(liability.periodStart).toISOString().slice(0, 10);
+  const periodEnd = new Date(liability.periodEnd).toISOString().slice(0, 10);
 
   useEffect(() => {
     let cancelled = false;
@@ -385,10 +536,29 @@ function ContributingDrawer({
               {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               Export for Accountant
             </button>
+            <button
+              type="button"
+              onClick={() => setShowSend(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-primary/40 text-primary hover:bg-primary/10"
+              title="Email the accountant export ZIP for this period"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              Send to accountant
+            </button>
             <button type="button" onClick={onClose} className="p-1 rounded hover:bg-card">
               <X className="w-4 h-4" />
             </button>
           </div>
+          {showSend && (
+            <SendToAccountantModal
+              businessId={businessId}
+              start={periodStart}
+              end={periodEnd}
+              defaultEmail={defaultAccountantEmail}
+              onClose={() => setShowSend(false)}
+              onSavedDefault={onSavedDefault}
+            />
+          )}
         </div>
         <div className="p-4 space-y-3">
           <div className="grid grid-cols-2 gap-2 text-xs">

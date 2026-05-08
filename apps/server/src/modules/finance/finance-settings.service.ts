@@ -10,6 +10,7 @@ export interface FinanceSettings {
   defaultApAccountId: string | null;
   defaultTaxAccountId: string | null;
   currency: string;
+  accountantEmail: string | null;
 }
 
 export interface UpdateFinanceSettingsInput {
@@ -20,7 +21,10 @@ export interface UpdateFinanceSettingsInput {
   defaultArAccountId?: string | null;
   defaultApAccountId?: string | null;
   defaultTaxAccountId?: string | null;
+  accountantEmail?: string | null;
 }
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * FIN5 — Single read/write surface over the seven business-level finance
@@ -42,6 +46,7 @@ export class FinanceSettingsService {
         defaultApAccountId: true,
         defaultTaxAccountId: true,
         currency: true,
+        accountantEmail: true,
       },
     });
     if (!biz) throw new NotFoundException('Business not found');
@@ -54,6 +59,7 @@ export class FinanceSettingsService {
       defaultApAccountId: biz.defaultApAccountId ?? null,
       defaultTaxAccountId: biz.defaultTaxAccountId ?? null,
       currency: biz.currency ?? 'TTD',
+      accountantEmail: biz.accountantEmail ?? null,
     };
   }
 
@@ -87,6 +93,12 @@ export class FinanceSettingsService {
       }
     }
 
+    if (input.accountantEmail != null && input.accountantEmail !== '') {
+      if (!EMAIL_RE.test(input.accountantEmail.trim())) {
+        throw new BadRequestException('Accountant email is not a valid email address');
+      }
+    }
+
     const data: Record<string, unknown> = {};
     if (input.accountingBasis != null) data.accountingBasis = input.accountingBasis;
     if (input.fiscalYearStartMonth != null) data.fiscalYearStartMonth = input.fiscalYearStartMonth;
@@ -95,6 +107,10 @@ export class FinanceSettingsService {
     if (input.defaultArAccountId !== undefined) data.defaultArAccountId = input.defaultArAccountId;
     if (input.defaultApAccountId !== undefined) data.defaultApAccountId = input.defaultApAccountId;
     if (input.defaultTaxAccountId !== undefined) data.defaultTaxAccountId = input.defaultTaxAccountId;
+    if (input.accountantEmail !== undefined) {
+      const v = input.accountantEmail == null ? null : input.accountantEmail.trim();
+      data.accountantEmail = v && v.length > 0 ? v : null;
+    }
 
     if (Object.keys(data).length > 0) {
       await this.prisma.client.business.update({ where: { id: businessId }, data });
