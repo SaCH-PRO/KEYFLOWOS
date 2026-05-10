@@ -135,8 +135,12 @@ export class SocialController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/connections/:platform')
-  deleteConnection(@Param('businessId') businessId: string, @Param('platform') platform: string) {
-    return this.connections.deleteConnection(businessId, platform);
+  deleteConnection(
+    @Param('businessId') businessId: string,
+    @Param('platform') platform: string,
+    @Query('platformId') platformId?: string,
+  ) {
+    return this.connections.deleteConnection(businessId, platform, platformId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -231,50 +235,67 @@ export class SocialController {
           }
 
           if (platformUpper === 'FACEBOOK') {
-            const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${tokenData.access_token}`);
+            const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?fields=id,name,access_token,tasks,picture&access_token=${tokenData.access_token}`);
             const pagesData = await pagesRes.json() as any;
-            const page = pagesData?.data?.[0];
+            const pages: any[] = Array.isArray(pagesData?.data) ? pagesData.data : [];
 
-            if (page) {
+            if (pages.length === 0) {
+              throw new Error('No Facebook Pages found for this account. Make sure you are a Page admin and granted "Show a list of the Pages you manage".');
+            }
+
+            const saved = [];
+            for (const page of pages) {
+              if (Array.isArray(page.tasks) && !page.tasks.includes('CREATE_CONTENT')) continue;
               const connection = await this.connections.upsertConnection(businessId, {
                 platform: 'FACEBOOK',
                 platformId: page.id,
                 accountName: page.name,
+                profilePicture: page.picture?.data?.url,
                 token: page.access_token,
                 scopes: 'pages_manage_posts,pages_read_engagement',
               });
-              return { success: true, connection };
+              saved.push(connection);
             }
+
+            if (saved.length === 0) {
+              throw new Error('You are not an admin on any of the returned Pages. Add yourself as a Page admin in Meta Business Suite, then reconnect.');
+            }
+            return { success: true, connection: saved[0], connections: saved };
           }
 
           const profileRes = await fetch(`https://graph.facebook.com/v19.0/me?access_token=${tokenData.access_token}&fields=id,name,picture`);
           const profile = await profileRes.json() as any;
 
           if (platformUpper === 'INSTAGRAM') {
-            const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${tokenData.access_token}`);
+            const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?fields=id,name,access_token&access_token=${tokenData.access_token}`);
             const pagesData = await pagesRes.json() as any;
-            const page = pagesData?.data?.[0];
+            const pages: any[] = Array.isArray(pagesData?.data) ? pagesData.data : [];
 
-            if (page) {
+            const saved = [];
+            for (const page of pages) {
               const igRes = await fetch(`https://graph.facebook.com/v19.0/${page.id}?fields=instagram_business_account&access_token=${page.access_token}`);
               const igData = await igRes.json() as any;
               const igAccountId = igData?.instagram_business_account?.id;
+              if (!igAccountId) continue;
 
-              if (igAccountId) {
-                const igProfileRes = await fetch(`https://graph.facebook.com/v19.0/${igAccountId}?fields=id,name,username,profile_picture_url&access_token=${page.access_token}`);
-                const igProfile = await igProfileRes.json() as any;
+              const igProfileRes = await fetch(`https://graph.facebook.com/v19.0/${igAccountId}?fields=id,name,username,profile_picture_url&access_token=${page.access_token}`);
+              const igProfile = await igProfileRes.json() as any;
 
-                const connection = await this.connections.upsertConnection(businessId, {
-                  platform: 'INSTAGRAM',
-                  platformId: igAccountId,
-                  accountName: igProfile.username ? `@${igProfile.username}` : igProfile.name || page.name,
-                  profilePicture: igProfile.profile_picture_url,
-                  token: page.access_token,
-                  scopes: 'instagram_basic,instagram_content_publish',
-                });
-                return { success: true, connection };
-              }
+              const connection = await this.connections.upsertConnection(businessId, {
+                platform: 'INSTAGRAM',
+                platformId: igAccountId,
+                accountName: igProfile.username ? `@${igProfile.username}` : igProfile.name || page.name,
+                profilePicture: igProfile.profile_picture_url,
+                token: page.access_token,
+                scopes: 'instagram_basic,instagram_content_publish',
+              });
+              saved.push(connection);
             }
+
+            if (saved.length === 0) {
+              throw new Error('No Instagram Business accounts found. Link your IG account to a Facebook Page in Meta Business Suite, then reconnect.');
+            }
+            return { success: true, connection: saved[0], connections: saved };
           }
 
           const connection = await this.connections.upsertConnection(businessId, {

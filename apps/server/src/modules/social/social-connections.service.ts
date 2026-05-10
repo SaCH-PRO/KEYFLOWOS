@@ -64,7 +64,11 @@ export class SocialConnectionsService {
   ) {
     const platform = data.platform.toUpperCase();
     const existing = await this.prisma.client.socialConnection.findFirst({
-      where: { businessId, platform },
+      where: {
+        businessId,
+        platform,
+        ...(data.platformId ? { platformId: data.platformId } : {}),
+      },
     });
 
     if (existing) {
@@ -99,20 +103,15 @@ export class SocialConnectionsService {
     });
   }
 
-  async deleteConnection(businessId: string, platform: string) {
-    const existing = await this.prisma.client.socialConnection.findFirst({
-      where: { businessId, platform: platform.toUpperCase() },
+  async deleteConnection(businessId: string, platform: string, platformId?: string) {
+    const result = await this.prisma.client.socialConnection.deleteMany({
+      where: {
+        businessId,
+        platform: platform.toUpperCase(),
+        ...(platformId ? { platformId } : {}),
+      },
     });
-
-    if (!existing) {
-      return { deleted: false };
-    }
-
-    await this.prisma.client.socialConnection.delete({
-      where: { id: existing.id },
-    });
-
-    return { deleted: true };
+    return { deleted: result.count > 0, count: result.count };
   }
 
   async getPlatformCredentials(
