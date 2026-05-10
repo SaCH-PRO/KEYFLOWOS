@@ -7,6 +7,9 @@ import {
   ChevronDown,
   Facebook,
   Instagram,
+  Linkedin,
+  Twitter,
+  Music2,
   Mail,
   MessageCircle,
   Globe,
@@ -21,6 +24,7 @@ import {
   FileText,
   MessageSquare,
 } from "lucide-react";
+import Link from "next/link";
 import { listChannelConnections, listChannelDestinations } from "@/lib/client";
 import type { ChannelConnection, ChannelDestination } from "@/lib/client";
 import type { ChannelHealthData } from "@/hooks/use-channel-health";
@@ -36,6 +40,10 @@ interface ChannelSelectorProps {
 const PLATFORM_ICONS: Record<string, { icon: React.ElementType; color: string; label: string; capabilities: string[] }> = {
   FACEBOOK: { icon: Facebook, color: "#1877F2", label: "Facebook", capabilities: ["text", "image", "video", "link"] },
   INSTAGRAM: { icon: Instagram, color: "#E4405F", label: "Instagram", capabilities: ["image", "video", "carousel"] },
+  LINKEDIN: { icon: Linkedin, color: "#0A66C2", label: "LinkedIn", capabilities: ["text", "image", "video", "link"] },
+  TWITTER: { icon: Twitter, color: "#1DA1F2", label: "X (Twitter)", capabilities: ["text", "image", "video"] },
+  X: { icon: Twitter, color: "#1DA1F2", label: "X (Twitter)", capabilities: ["text", "image", "video"] },
+  TIKTOK: { icon: Music2, color: "#FF0050", label: "TikTok", capabilities: ["video", "image"] },
   GOOGLE: { icon: Mail, color: "#F97316", label: "Email (Gmail)", capabilities: ["text", "html", "attachments"] },
   EMAIL: { icon: Mail, color: "#F97316", label: "Email", capabilities: ["text", "html", "attachments"] },
   WHATSAPP: { icon: MessageCircle, color: "#25D366", label: "WhatsApp", capabilities: ["text", "image", "template"] },
@@ -248,9 +256,18 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                           </div>
                         </div>
                         {disabledReason && (
-                          <p className="text-[9px] text-red-400/70 px-1 flex items-center gap-1">
-                            <AlertCircle className="w-2.5 h-2.5" /> {disabledReason}
-                          </p>
+                          <div className="px-1 flex items-center justify-between gap-2">
+                            <p className="text-[9px] text-red-400/70 flex items-center gap-1 min-w-0">
+                              <AlertCircle className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">{disabledReason}</span>
+                            </p>
+                            <Link
+                              href="/app/connect"
+                              className="text-[9px] font-medium text-[hsl(var(--kf-accent1))] hover:underline whitespace-nowrap"
+                            >
+                              Reconnect →
+                            </Link>
+                          </div>
                         )}
                         {dests.map((dest) => {
                           const isActive = activeIds.has(dest.id);
@@ -330,15 +347,19 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                       {notConnectedPlatforms.map((platform) => {
                         const Icon = platform.icon;
                         return (
-                          <div key={platform.key} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg opacity-30 cursor-not-allowed">
-                            <div className="w-4 h-4 rounded border border-border/30 shrink-0" />
+                          <Link
+                            key={platform.key}
+                            href="/app/connect"
+                            className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-muted/15 border border-transparent hover:border-border/30 transition-all group"
+                          >
+                            <div className="w-4 h-4 rounded border border-border/40 shrink-0" />
                             <Icon className="w-3.5 h-3.5" style={{ color: platform.color }} />
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-medium">{platform.label}</p>
-                              <p className="text-[10px] text-muted-foreground">Not connected — go to Settings to connect</p>
+                              <p className="text-[10px] text-muted-foreground">Click to connect</p>
                             </div>
-                            <Plus className="w-3 h-3 text-muted-foreground/40" />
-                          </div>
+                            <Plus className="w-3 h-3 text-muted-foreground/60 group-hover:text-[hsl(var(--kf-accent1))]" />
+                          </Link>
                         );
                       })}
                     </div>
