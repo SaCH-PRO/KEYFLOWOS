@@ -26,7 +26,9 @@ export class AdapterRegistryService {
 
   resolveByPlatform(platform: string): ChannelAdapter | null {
     const providerMap: Record<string, string> = {
+      FACEBOOK: 'META',
       FACEBOOK_PAGE: 'META',
+      INSTAGRAM: 'META',
       INSTAGRAM_BUSINESS: 'META',
       EMAIL: 'GOOGLE',
       GOOGLE: 'GOOGLE',

@@ -19,9 +19,9 @@ export class MetaAdapter implements ChannelAdapter {
     }
 
     try {
-      if (platform === 'FACEBOOK_PAGE') {
+      if (platform === 'FACEBOOK_PAGE' || platform === 'FACEBOOK') {
         return await this.publishToFacebook(pageId, accessToken, payload);
-      } else if (platform === 'INSTAGRAM_BUSINESS') {
+      } else if (platform === 'INSTAGRAM_BUSINESS' || platform === 'INSTAGRAM') {
         return await this.publishToInstagram(pageId, accessToken, payload);
       }
       return { success: false, errorCode: 'UNSUPPORTED_PLATFORM', errorMessage: `Unsupported Meta platform: ${platform}`, isTransient: false };
@@ -124,7 +124,7 @@ export class MetaAdapter implements ChannelAdapter {
   }
 
   getCapabilities(platform: string): AdapterCapabilities {
-    if (platform === 'INSTAGRAM_BUSINESS') {
+    if (platform === 'INSTAGRAM_BUSINESS' || platform === 'INSTAGRAM') {
       return { supports_text_post: false, supports_image_post: true, supports_video_post: true, supports_scheduled_post: false, supports_campaign_email: false, supports_template_message: false };
     }
     return { supports_text_post: true, supports_image_post: true, supports_video_post: true, supports_scheduled_post: false, supports_campaign_email: false, supports_template_message: false };
