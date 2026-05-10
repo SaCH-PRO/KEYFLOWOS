@@ -163,6 +163,7 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
     if (ok) await loadData();
   }, [businessId, loadData]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- loadData hydrates local state from API on mount/businessId change
   useEffect(() => { void loadData(); }, [loadData]);
 
   const connections = healthData ? healthData.connections : localConnections;
