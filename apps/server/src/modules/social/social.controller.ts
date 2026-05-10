@@ -154,11 +154,11 @@ export class SocialController {
 
     switch (platformUpper) {
       case 'FACEBOOK':
-        authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_manage_posts,pages_read_engagement&response_type=code&state=${stateToken}`;
+        authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_show_list,pages_manage_posts,pages_read_engagement,pages_manage_metadata,business_management&response_type=code&auth_type=rerequest&state=${stateToken}`;
         this.connections.storeOAuthSession(stateToken, { platform: platformUpper, businessId });
         break;
       case 'INSTAGRAM':
-        authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=instagram_basic,instagram_content_publish,pages_show_list&response_type=code&state=${stateToken}`;
+        authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,business_management&response_type=code&auth_type=rerequest&state=${stateToken}`;
         this.connections.storeOAuthSession(stateToken, { platform: platformUpper, businessId });
         break;
       case 'LINKEDIN':
