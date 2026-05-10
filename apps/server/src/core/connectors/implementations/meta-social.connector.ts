@@ -32,7 +32,10 @@ export class MetaSocialConnector implements IConnector {
     if (connected) {
       return { connected: true };
     }
-    return { connected: false, authUrl: `/social/businesses/${businessId}/connect` };
+    return {
+      connected: false,
+      authUrl: `/social/businesses/${businessId}/connections/FACEBOOK/oauth/start`,
+    };
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {

@@ -24,10 +24,56 @@ import {
   FileText,
   MessageSquare,
 } from "lucide-react";
-import Link from "next/link";
+import { toast } from "sonner";
 import { listChannelConnections, listChannelDestinations } from "@/lib/client";
+import { apiPostSimple } from "@/lib/api";
 import type { ChannelConnection, ChannelDestination } from "@/lib/client";
 import type { ChannelHealthData } from "@/hooks/use-channel-health";
+
+const OAUTH_PLATFORMS = new Set(["FACEBOOK", "INSTAGRAM", "LINKEDIN", "TWITTER", "X", "TIKTOK"]);
+
+async function startOAuthPopup(businessId: string, platform: string): Promise<boolean> {
+  const platformUpper = platform.toUpperCase() === "X" ? "TWITTER" : platform.toUpperCase();
+  const res = await apiPostSimple<{ authUrl?: string; error?: string }>(
+    `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platformUpper)}/oauth/start`,
+    {},
+  );
+  if (res.error || !res.data?.authUrl) {
+    toast.error(res.error || `Could not start ${platformUpper} connection. Check provider credentials in Settings.`);
+    return false;
+  }
+  const w = 600, h = 700;
+  const left = window.screenX + (window.outerWidth - w) / 2;
+  const top = window.screenY + (window.outerHeight - h) / 2;
+  const popup = window.open(res.data.authUrl, "kf-social-oauth", `width=${w},height=${h},left=${left},top=${top}`);
+  if (!popup) {
+    toast.error("Popup blocked. Please allow popups for this site.");
+    return false;
+  }
+  return new Promise<boolean>((resolve) => {
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { type?: string; platform?: string; error?: string } | null;
+      if (!data || (data.type !== "social-oauth-success" && data.type !== "social-oauth-error")) return;
+      window.removeEventListener("message", handler);
+      if (data.type === "social-oauth-success") {
+        toast.success(`${platformUpper} connected`);
+        resolve(true);
+      } else {
+        toast.error(data.error || `${platformUpper} connection failed`);
+        resolve(false);
+      }
+    };
+    window.addEventListener("message", handler);
+    const poll = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(poll);
+        window.removeEventListener("message", handler);
+        resolve(false);
+      }
+    }, 700);
+  });
+}
 
 interface ChannelSelectorProps {
   businessId: string;
@@ -81,6 +127,27 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
   const [localAllDestinations, setLocalAllDestinations] = useState<ChannelDestination[]>([]);
   const [localLoading, setLocalLoading] = useState(!healthData);
   const [open, setOpen] = useState(false);
+  const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
+
+  const handleConnectClick = useCallback(async (platform: string) => {
+    const upper = platform.toUpperCase();
+    if (upper === "WHATSAPP") {
+      window.location.href = "/app/whatsapp";
+      return;
+    }
+    if (upper === "GOOGLE" || upper === "EMAIL") {
+      window.location.href = "/app/connect";
+      return;
+    }
+    if (!OAUTH_PLATFORMS.has(upper)) {
+      window.location.href = "/app/connect";
+      return;
+    }
+    setConnectingPlatform(upper);
+    const ok = await startOAuthPopup(businessId, upper);
+    setConnectingPlatform(null);
+    if (ok) await loadData();
+  }, [businessId]);
 
   const loadData = useCallback(async () => {
     if (healthData) return;
@@ -261,12 +328,17 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                               <AlertCircle className="w-2.5 h-2.5 shrink-0" />
                               <span className="truncate">{disabledReason}</span>
                             </p>
-                            <Link
-                              href="/app/connect"
-                              className="text-[9px] font-medium text-[hsl(var(--kf-accent1))] hover:underline whitespace-nowrap"
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleConnectClick(connection.provider || connection.platform || connection.providerType || "");
+                              }}
+                              disabled={connectingPlatform === (connection.provider || connection.platform || connection.providerType || "").toUpperCase()}
+                              className="text-[9px] font-medium text-[hsl(var(--kf-accent1))] hover:underline whitespace-nowrap disabled:opacity-50"
                             >
-                              Reconnect →
-                            </Link>
+                              {connectingPlatform === (connection.provider || connection.platform || connection.providerType || "").toUpperCase() ? "Connecting…" : "Reconnect →"}
+                            </button>
                           </div>
                         )}
                         {dests.map((dest) => {
@@ -346,20 +418,23 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                       <span className="text-[9px] font-medium text-muted-foreground/50 uppercase tracking-wider px-1">Not Connected</span>
                       {notConnectedPlatforms.map((platform) => {
                         const Icon = platform.icon;
+                        const busy = connectingPlatform === platform.key;
                         return (
-                          <Link
+                          <button
                             key={platform.key}
-                            href="/app/connect"
-                            className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-muted/15 border border-transparent hover:border-border/30 transition-all group"
+                            type="button"
+                            onClick={() => void handleConnectClick(platform.key)}
+                            disabled={busy}
+                            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-muted/15 border border-transparent hover:border-border/30 transition-all group disabled:opacity-50 text-left"
                           >
                             <div className="w-4 h-4 rounded border border-border/40 shrink-0" />
                             <Icon className="w-3.5 h-3.5" style={{ color: platform.color }} />
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-medium">{platform.label}</p>
-                              <p className="text-[10px] text-muted-foreground">Click to connect</p>
+                              <p className="text-[10px] text-muted-foreground">{busy ? "Opening…" : "Click to connect"}</p>
                             </div>
-                            <Plus className="w-3 h-3 text-muted-foreground/60 group-hover:text-[hsl(var(--kf-accent1))]" />
-                          </Link>
+                            {busy ? <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" /> : <Plus className="w-3 h-3 text-muted-foreground/60 group-hover:text-[hsl(var(--kf-accent1))]" />}
+                          </button>
                         );
                       })}
                     </div>
