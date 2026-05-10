@@ -129,6 +129,20 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
   const [open, setOpen] = useState(false);
   const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
 
+  const loadData = useCallback(async () => {
+    if (healthData) return;
+    setLocalLoading(true);
+    const [connRes, activeDestRes, allDestRes] = await Promise.all([
+      listChannelConnections(businessId),
+      listChannelDestinations(businessId, { activeOnly: true }),
+      listChannelDestinations(businessId, {}),
+    ]);
+    if (connRes.data) setLocalConnections(connRes.data);
+    if (activeDestRes.data) setLocalActiveDestinations(activeDestRes.data);
+    if (allDestRes.data) setLocalAllDestinations(allDestRes.data);
+    setLocalLoading(false);
+  }, [businessId, healthData]);
+
   const handleConnectClick = useCallback(async (platform: string) => {
     const upper = platform.toUpperCase();
     if (upper === "WHATSAPP") {
@@ -147,23 +161,8 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
     const ok = await startOAuthPopup(businessId, upper);
     setConnectingPlatform(null);
     if (ok) await loadData();
-  }, [businessId]);
+  }, [businessId, loadData]);
 
-  const loadData = useCallback(async () => {
-    if (healthData) return;
-    setLocalLoading(true);
-    const [connRes, activeDestRes, allDestRes] = await Promise.all([
-      listChannelConnections(businessId),
-      listChannelDestinations(businessId, { activeOnly: true }),
-      listChannelDestinations(businessId, {}),
-    ]);
-    if (connRes.data) setLocalConnections(connRes.data);
-    if (activeDestRes.data) setLocalActiveDestinations(activeDestRes.data);
-    if (allDestRes.data) setLocalAllDestinations(allDestRes.data);
-    setLocalLoading(false);
-  }, [businessId, healthData]);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
 
   const connections = healthData ? healthData.connections : localConnections;
