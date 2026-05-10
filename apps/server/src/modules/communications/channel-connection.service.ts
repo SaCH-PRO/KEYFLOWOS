@@ -308,6 +308,7 @@ export class ChannelConnectionService {
           displayName: sc.accountName || 'Facebook Page',
           avatarUrl: sc.profilePicture || undefined,
           capabilities: ['text', 'image', 'video', 'link'],
+          destinationMeta: { accessToken: sc.token },
         });
         destCount++;
       }
@@ -319,6 +320,7 @@ export class ChannelConnectionService {
           displayName: sc.accountName || 'Instagram',
           avatarUrl: sc.profilePicture || undefined,
           capabilities: ['image', 'video', 'carousel'],
+          destinationMeta: { accessToken: sc.token },
         });
         destCount++;
       }

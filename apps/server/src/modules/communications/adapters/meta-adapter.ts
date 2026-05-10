@@ -11,7 +11,8 @@ export class MetaAdapter implements ChannelAdapter {
 
   async publish(connection: any, destination: any, payload: PublishPayload): Promise<PublishResponse> {
     const platform = destination.platform;
-    const accessToken = connection.token;
+    const meta = (destination?.destinationMeta ?? {}) as { accessToken?: string };
+    const accessToken = meta.accessToken || connection.token;
     const pageId = destination.platformId;
 
     if (!accessToken || !pageId) {
