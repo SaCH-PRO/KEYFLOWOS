@@ -1,0 +1,959 @@
+Below is an implementation-grade overhaul document for KeyflowOS, grounded in the repo structure and current product direction. I have written it so both you and an AI coder can use it as a working specification.
+KEYFLOWOS OVERHAUL MASTER DOCUMENT
+Building an AI-Native Business Operating Intelligence System
+0. Executive Summary
+KeyflowOS should evolve from a broad business-management platform into a focused, AI-native Business Operating Intelligence System for service-led businesses.
+The app’s mission should be:
+Help business owners leverage time, money, people, and customer relationships through unified operational intelligence.
+KeyflowOS should not try to be another CRM, invoice tool, booking app, content scheduler, or generic AI assistant. Its best-market position is as an integrated system where every customer, transaction, booking, payment, quote, calendar event, store interaction, and AI conversation improves the business’s operating intelligence.
+The existing repo already supports this direction structurally. It is a pnpm monorepo with apps/web for the Next.js frontend, apps/server for the NestJS backend, packages/db for Prisma/Postgres, packages/api for shared tRPC/API contract, and packages/ui for shared UI primitives and Storybook. The previous repo audit confirms this architecture and identifies the major current surfaces: Cockpit, CRM, bookings, commerce, automations, projects, expenses, reports, documents, marketing/social, community, learning, marketplace, settings, auth, public booking, public payment, and order routes. 
+The app also already has a large backend module system: identity, CRM, commerce, bookings, social, automation, site, AI, flow, gamification, webhooks, API keys, uploads, autopilot, notifications, payments, subscriptions, projects, expenses, reports, email marketing, lead forms, templates, education, community, marketplace, supplier, documents, Google Drive, diagnostics, and communications. 
+The strategic issue is not lack of features.
+The issue is feature entropy.
+The overhaul must compress the product around a smaller number of powerful, interconnected systems:
+• Business Blueprint Engine
+• Storefront, Catalog, Quotes, Invoices, Payments, Inventory, Accounting Lite
+• Relationship Intelligence / Advanced Contacts
+• Timeline Calendar / Business Event Ledger
+• KEY AI Native Orchestrator
+• KeyflowOS Intelligent Store / Procurement Engine
+• Clean Frontend-to-Backend Architecture and Code Health
+Everything else should either be removed from MVP or placed under “Coming Later.”
+1. Product Philosophy
+1.1 Core Principle
+Every module must answer this question:
+Does this feature help the user leverage time, money, people, or relationships?
+If not, it should be removed, hidden, or deferred.
+1.2 System Principle
+Every meaningful user action should produce structured operational intelligence.
+Examples:
+• A contact inquiry updates lead intelligence.
+• A quote view updates conversion intelligence.
+• An invoice payment updates financial intelligence.
+• A missed booking updates reliability intelligence.
+• A repeat customer updates relationship intelligence.
+• A product purchase updates catalog and inventory intelligence.
+• A calendar event updates temporal intelligence.
+• An AI interaction updates blueprint intelligence.
+1.3 UX Principle
+KeyflowOS should feel like:
+“My business knows what is happening and tells me what to do next.”
+The user should not feel like they are “using software.”
+They should feel like they are operating from a command center.
+2. Current Repo Validation
+2.1 Architecture Already Supports the Vision
+The repo’s backend AppModule imports the right categories of modules: core infrastructure, identity, CRM, commerce, bookings, social, automation, site, AI, flow, notifications, payments, subscriptions, projects, expenses, reports, templates, marketplace, documents, diagnostics, and communications. 
+It also globally applies correlation ID and auth middleware. 
+The Nest app bootstrap already includes validation, exception filtering, Helmet, rate limiting, and CORS controls. 
+The database package already centralizes Prisma access and applies soft-delete extension behavior to key business models such as Contact, Product, Quote, Invoice, StaffMember, Service, Booking, SocialPost, Automation, Project, ProjectTask, and Site. 
+This means the app has a credible foundation.
+2.2 Existing Storefront Direction Is Strong
+The public storefront/booking route at apps/web/src/app/book/[slug]/page.tsx already loads business data, storefront configuration, shipping zones, services, staff, products, promo codes, review aggregates, cart state, themes, section ordering, wishlist, checkout flow, structured data, testimonials, FAQ, contact, policies, guided selector, and asset intake. 
+It also already supports:
+• business-specific primary/secondary/accent colors,
+• storefront theme selection,
+• section ordering,
+• font pairing,
+• custom catalog ordering,
+• product overrides,
+• shipping zones,
+• promo validation,
+• checkout,
+• service bookings,
+• payment redirection,
+• order confirmation,
+• SEO metadata. 
+This is one of the strongest existing product areas. It should be elevated into a first-class commercial engine.
+2.3 Existing Database Direction Is Broad But Useful
+The Prisma schema already includes rich Business profile data, brand settings, transactional presence, business intent, archetype, industry, revenue model, budget range, time commitment, team size, autopilot settings, compliance, store settings, booking reminders, business hours, contact relationships, invoices, quotes, products, bookings, inventory, AI logs, and many other relationships. 
+The Contact model is already moving toward relationship intelligence with normalized email/phone, status, source, tags, custom fields, preferred channel, address, company, lifecycle stage, owner, segment, marketing opt-in, notes, lead score, and last interaction timestamp. 
+The commerce schema already supports products, quotes, invoice line items, invoice totals, taxes, discounts, status, payment links, booking links, and campaign relationships. 
+This is good, but the database should be rationalized around the new core architecture.
+3. Strategic Product Scope
+3.1 Keep and Make Best-in-Market
+These are core.
+A. Intelligent Business Blueprint
+Keep and expand.
+This becomes the user’s business operating DNA.
+B. Storefront + Catalog + Payment + Quote + Invoice + Inventory + Accounting Lite
+Keep and elevate.
+This is one of the strongest monetizable modules.
+C. Advanced Contacts / Relationship Intelligence
+Keep and elevate.
+This should become a living contact intelligence system, not a static CRM.
+D. Timeline Calendar / Event Ledger
+Keep and elevate.
+This should become the central time-based memory system of the business.
+E. KEY AI Native Orchestrator
+Keep and elevate.
+This should be app-native operational intelligence, not a generic chatbot.
+F. KeyflowOS Store / Intelligent Procurement Engine
+Keep but redesign.
+It should not be a browsing marketplace first. It should be an AI-guided request and package generation engine.
+G. Reports, Audits, Projections
+Keep but tie directly to real data.
+Reports should be generated from business events, contacts, commerce, calendar, and blueprint data.
+3.2 Remove From MVP / Move to “Coming Later”
+A. Content Scheduling Calendar
+Move to future.
+Rationale:
+• crowded market,
+• weak differentiation,
+• high maintenance,
+• platform API dependency,
+• distracts from the core operational OS.
+Keep only:
+• social links,
+• basic profile links,
+• future marketing analytics hooks.
+B. Generic Document Generation
+Move to future.
+Rationale:
+• documents can become a large unrelated product,
+• not central to the core revenue/time/personnel loop,
+• risks bloating the app.
+Keep only:
+• quotes,
+• invoices,
+• receipts,
+• operational reports,
+• AI-generated briefs,
+• procurement briefs,
+• business audits.
+C. Community
+Move to future.
+Rationale: community requires network effects and moderation. Not core to immediate business leverage.
+D. Learning / Education
+Move to future.
+Rationale: education content may help retention, but it weakens the operating-system focus at MVP stage.
+E. Supplier Module
+Move to future unless directly needed for inventory/procurement.
+F. Full Marketplace Browsing
+Replace with intelligent store/procurement flow.
+Users should ask for what they need, and KeyflowOS should generate the best-fit option.
+G. Heavy Gamification
+Reduce.
+Keep:
+• momentum,
+• health score,
+• operational completeness,
+• progress indicators.
+Remove:
+• badge-heavy or superficial gamification.
+4. New Core Architecture
+4.1 The Seven Core Systems
+The AI coder should refactor the app mentally and technically around these seven systems:
+• identity
+• blueprint
+• relationship-intelligence
+• commerce-engine
+• timeline
+• key-ai
+• procurement-store
+Existing modules can remain physically for now, but routing, UI, API, and data flows should be reorganized around these domains.
+5. Business Blueprint Engine
+5.1 Goal
+Create a continuously updated intelligent profile that governs the entire user experience.
+The Business Blueprint should not be a static onboarding form. It should be a living model of the business.
+5.2 Required Data Categories
+Business Identity
+• business name
+• industry
+• archetype
+• location
+• timezone
+• currency
+• stage
+• team size
+• capacity
+• working hours
+• communication channels
+• business model
+Operating Model
+• service-based, product-based, hybrid
+• appointment-based, project-based, retainer-based, walk-in, ecommerce, custom inquiry
+• solo, team, multi-staff
+• high-volume vs high-touch
+• urgent vs scheduled
+• physical vs digital delivery
+Goals
+• increase bookings
+• increase average order value
+• reduce admin time
+• improve conversion
+• reduce missed follow-ups
+• improve payment collection
+• increase repeat customers
+• improve inventory control
+• increase premium-package sales
+• reduce owner workload
+Constraints
+• budget range
+• staffing constraints
+• available hours
+• fulfillment limits
+• inventory limits
+• customer volume
+• payment methods
+• local market constraints
+Brand and Experience
+• tone
+• colors
+• logo
+• design style
+• customer promise
+• trust signals
+• policies
+• invoice style
+• storefront layout preference
+Intelligence Fields
+• inferred bottlenecks
+• priority recommendations
+• conversion weaknesses
+• pricing confidence
+• operational maturity
+• automation readiness
+• risk level
+• next best actions
+5.3 Database Recommendation
+Create a first-class BusinessBlueprint model rather than overloading Business.metaData.
+Suggested model:
+model BusinessBlueprint { id String @id @default(cuid()) businessId String @unique @map("business_id") business Business @relation(fields: [businessId], references: [id], onDelete: Cascade) schemaVersion String @default("1.0") @map("schema_version") identity Json @default("{}") operatingModel Json @default("{}") @map("operating_model") goals Json @default("{}") constraints Json @default("{}") brand Json @default("{}") customerModel Json @default("{}") @map("customer_model") financialModel Json @default("{}") @map("financial_model") workflowModel Json @default("{}") @map("workflow_model") aiPreferences Json @default("{}") @map("ai_preferences") inferredInsights Json @default("{}") @map("inferred_insights") confidenceScores Json @default("{}") @map("confidence_scores") lastAnalyzedAt DateTime? @map("last_analyzed_at") createdAt DateTime @default(now()) @map("created_at") updatedAt DateTime @updatedAt @map("updated_at") @@index([businessId]) @@map("business_blueprints") } 
+5.4 Backend Requirements
+Create:
+apps/server/src/modules/blueprint/ blueprint.module.ts blueprint.controller.ts blueprint.service.ts dto/ update-blueprint.dto.ts infer-blueprint.dto.ts blueprint-goal.dto.ts 
+Service methods:
+getBlueprint(businessId) updateBlueprint(businessId, patch) inferFromOnboarding(businessId, onboardingAnswers) inferFromEvents(businessId) calculateBlueprintCompleteness(businessId) getRecommendedSetupSteps(businessId) 
+5.5 Frontend Requirements
+Create:
+apps/web/src/app/app/blueprint/page.tsx apps/web/src/components/blueprint/ blueprint-summary-card.tsx business-dna-form.tsx operating-model-form.tsx goal-selector.tsx intelligence-summary.tsx blueprint-progress.tsx 
+UX should feel like:
+“Set up your business brain.”
+Not:
+“Fill out profile settings.”
+5.6 Blueprint Success Metrics
+• user completes 80% of blueprint within first session,
+• AI recommendations become more specific after blueprint completion,
+• setup recommendations map directly to modules,
+• storefront, invoice style, calendar logic, and AI tone adapt based on blueprint.
+6. Commerce Engine: Storefront, Catalog, Quotes, Invoices, Payments, Inventory, Accounting Lite
+6.1 Goal
+Make commerce the strongest monetization engine in the app.
+The user should be able to:
+• create a branded storefront,
+• list services/products/packages,
+• accept bookings/orders,
+• send quotes,
+• convert quotes to invoices,
+• receive payments,
+• track records,
+• see revenue insights,
+• track inventory where relevant,
+• customize quote/invoice/storefront design,
+• receive AI pricing/catalog/accounting recommendations.
+6.2 Current Strength
+The public storefront route already has a strong foundation: cart, checkout, shipping, promo codes, service booking, product catalog, theme styles, font pairing, section ordering, item overrides, SEO, review aggregates, wishlist, guided selector, asset intake, and structured data. 
+The Business model already has brand settings including primary color, secondary color, default tax rate, and invoice template. 
+The schema already includes Product, Quote, Invoice, InvoiceItem, Payment, inventory-related relationships, and commerce fields. 
+6.3 Storefront Customization Requirements
+Create a dedicated storefront builder with:
+Brand controls
+• logo
+• colors
+• fonts
+• button style
+• page density
+• theme
+• hero layout
+• section order
+• trust badges
+• testimonials
+• FAQ
+• policies
+• social links
+• contact section
+• SEO metadata
+Catalog controls
+• product/service visibility
+• display order
+• featured items
+• categories
+• item descriptions
+• pricing display
+• package bundling
+• upsell suggestions
+• inventory visibility
+• booking-required vs buy-now
+Conversion controls
+• announcement banner
+• urgency badge
+• limited capacity badge
+• reviews
+• trust bar
+• payment method badges
+• refund/cancellation policy
+• “best for you” guided selector
+AI controls
+KEY should recommend:
+• storefront layout,
+• best-selling item placement,
+• missing trust signals,
+• price adjustments,
+• package creation,
+• checkout friction reduction,
+• copy improvements,
+• item bundling.
+6.4 Invoice and Quote Customization Requirements
+Create an invoice/quote design system.
+User-customizable fields
+• logo
+• colors
+• template style
+• layout density
+• header style
+• footer text
+• payment instructions
+• tax display
+• discount display
+• item grouping
+• terms and conditions
+• signature field
+• bank transfer instructions
+• payment buttons
+• thank-you message
+• brand tone
+• optional QR payment code
+• optional “Powered by KeyflowOS”
+Templates
+Start with 4 templates:
+• Classic Professional
+• Premium Minimal
+• Clinic/Service Formal
+• Bold Modern
+Database Model
+Add:
+model CommercialDocumentTemplate { id String @id @default(cuid()) businessId String @map("business_id") business Business @relation(fields: [businessId], references: [id], onDelete: Cascade) type String // INVOICE | QUOTE | RECEIPT name String isDefault Boolean @default(false) @map("is_default") config Json @default("{}") previewData Json? @map("preview_data") createdAt DateTime @default(now()) @map("created_at") updatedAt DateTime @updatedAt @map("updated_at") @@index([businessId, type]) @@map("commercial_document_templates") } 
+Frontend Components
+apps/web/src/app/app/commerce/templates/page.tsx apps/web/src/components/commerce/document-builder/ document-template-gallery.tsx document-preview.tsx document-style-panel.tsx document-field-controls.tsx invoice-preview.tsx quote-preview.tsx 
+Backend APIs
+GET /commerce/document-templates POST /commerce/document-templates PATCH /commerce/document-templates/:id POST /commerce/document-templates/:id/set-default POST /commerce/invoices/:id/render-preview POST /commerce/quotes/:id/render-preview 
+6.5 Accounting Lite
+Do not build full accounting yet.
+Build “Accounting Lite”:
+• revenue summary,
+• unpaid invoices,
+• paid invoices,
+• overdue invoices,
+• expenses,
+• gross margin,
+• tax estimate,
+• product/service revenue split,
+• customer lifetime value,
+• inventory value,
+• payment method breakdown.
+Move full double-entry accounting to future.
+6.6 Inventory
+Keep inventory if connected to storefront/catalog.
+Required MVP inventory:
+• stock quantity,
+• low-stock threshold,
+• inventory mode: tracked/untracked/virtual,
+• stock movement log,
+• basic cost per item,
+• gross margin estimate.
+6.7 Commerce Success Metrics
+• time to publish branded storefront under 15 minutes,
+• time to create quote under 2 minutes,
+• quote-to-invoice conversion in one click,
+• invoice-to-payment link in one click,
+• AI suggests at least 3 practical catalog or pricing improvements,
+• all commerce events appear in timeline.
+7. Advanced Contacts: Relationship Intelligence Engine
+7.1 Goal
+Contacts should become one of the most valuable parts of the product.
+Not a list.
+Not just CRM.
+A live relationship intelligence engine.
+7.2 Current Strength
+The current Contact model already supports normalized identifiers, lifecycle/status data, source, tags, preferred channel, company details, owner, segment, opt-in, notes, lead score, last interaction, events, notes, tasks, imports, media, playbooks, momentum, recommendations, and external mappings. 
+This is a strong base.
+7.3 Required Contact Intelligence Fields
+Each contact should have:
+• relationship stage,
+• lead score,
+• conversion probability,
+• lifetime value,
+• average spend,
+• payment reliability,
+• booking frequency,
+• cancellation risk,
+• responsiveness,
+• preferred channel,
+• preferred services/products,
+• sentiment,
+• referral likelihood,
+• follow-up priority,
+• last meaningful interaction,
+• next best action,
+• notes summary,
+• risk flags,
+• opportunities.
+7.4 Contact Event System
+Every action linked to a contact should write a ContactEvent.
+Examples:
+• contact created,
+• quote sent,
+• quote viewed,
+• invoice sent,
+• invoice paid,
+• booking created,
+• booking completed,
+• message sent,
+• message received,
+• store order placed,
+• support issue,
+• AI recommendation,
+• task created,
+• task completed.
+7.5 Contact Intelligence Scoring
+Create a deterministic scoring engine first, AI second.
+Example:
+type ContactScoreInput = { totalPaid: number; invoiceCount: number; unpaidInvoiceCount: number; bookingCount: number; cancelledBookingCount: number; daysSinceLastInteraction: number; quoteSentCount: number; quoteAcceptedCount: number; messageResponseRate?: number; }; export function calculateLeadScore(input: ContactScoreInput): number { let score = 50; score += Math.min(input.totalPaid / 100, 20); score += Math.min(input.bookingCount * 3, 15); score += Math.min(input.quoteAcceptedCount * 5, 15); if (input.unpaidInvoiceCount > 0) score -= 10; if (input.cancelledBookingCount > 0) score -= Math.min(input.cancelledBookingCount * 5, 20); if (input.daysSinceLastInteraction > 30) score -= 10; if (input.daysSinceLastInteraction > 90) score -= 20; const quoteConversion = input.quoteSentCount > 0 ? input.quoteAcceptedCount / input.quoteSentCount : 0; score += quoteConversion * 15; return Math.max(0, Math.min(100, Math.round(score))); } 
+AI should interpret the score and generate recommendations, not be the only scoring engine.
+7.6 Contact UI
+Each contact profile should have:
+• Overview
+• Timeline
+• Money
+• Bookings
+• Quotes/Invoices
+• Tasks
+• Notes
+• AI Insights
+• Recommendations
+The contact page should answer:
+• Who is this person?
+• What have they done?
+• What are they worth?
+• What do they need?
+• What should I do next?
+• Are they at risk?
+• Can they be converted, retained, or upsold?
+7.7 Contact Success Metrics
+• every quote/invoice/booking/order links to contact,
+• every contact has a timeline,
+• every contact has a next best action,
+• AI can answer “which leads should I follow up today?” with evidence,
+• users can filter contacts by revenue, risk, stage, activity, and opportunity.
+8. Timeline Calendar / Business Event Ledger
+8.1 Goal
+Build a centralized interactive calendar that records past, live, and future business activity.
+This should not just be a booking calendar.
+It should become the Temporal Operating System of the business.
+8.2 Core Concept
+Every meaningful app action creates a timestamped event.
+This event should be filterable by:
+• contact,
+• module,
+• event type,
+• actor,
+• status,
+• date range,
+• revenue impact,
+• urgency,
+• AI recommendation,
+• business process.
+8.3 Database Model
+Create a central BusinessEvent or TimelineEvent.
+model BusinessEvent { id String @id @default(cuid()) businessId String @map("business_id") business Business @relation(fields: [businessId], references: [id], onDelete: Cascade) type String category String // CONTACT | COMMERCE | BOOKING | PAYMENT | AI | SYSTEM | STORE | TASK title String description String? occurredAt DateTime @map("occurred_at") startsAt DateTime? @map("starts_at") endsAt DateTime? @map("ends_at") actorType String? @map("actor_type") // USER | AI | CUSTOMER | SYSTEM actorId String? @map("actor_id") entityType String? @map("entity_type") entityId String? @map("entity_id") contactId String? @map("contact_id") status String? // SCHEDULED | COMPLETED | CANCELLED | FAILED | PENDING priority String? // LOW | NORMAL | HIGH | URGENT revenueImpact Float? @map("revenue_impact") metadata Json @default("{}") createdAt DateTime @default(now()) @map("created_at") updatedAt DateTime @updatedAt @map("updated_at") @@index([businessId, occurredAt]) @@index([businessId, category, occurredAt]) @@index([businessId, entityType, entityId]) @@index([businessId, contactId]) @@map("business_events") } 
+8.4 Backend Event Service
+Create:
+apps/server/src/modules/timeline/ timeline.module.ts timeline.controller.ts timeline.service.ts business-event.service.ts 
+Methods:
+recordEvent(input) recordContactEvent(input) recordCommerceEvent(input) recordBookingEvent(input) recordAiEvent(input) queryTimeline(filters) getCalendarEvents(filters) getBusinessDaySummary(businessId, date) getUpcomingActions(businessId) 
+8.5 Calendar UI
+The calendar should support:
+• day view,
+• week view,
+• month view,
+• timeline feed,
+• contact filter,
+• module filter,
+• revenue filter,
+• urgency filter,
+• AI recommendations overlay,
+• drag-to-schedule,
+• click event to see full context,
+• “create sequence” from event,
+• “ask KEY about this day/week/month.”
+8.6 Complex Scheduling
+User should be able to schedule:
+• appointments,
+• reminders,
+• follow-ups,
+• quote expiry reminders,
+• invoice payment reminders,
+• internal tasks,
+• recurring workflows,
+• customer sequences,
+• AI checks,
+• inventory checks,
+• monthly reports.
+Each scheduled item should be able to trigger:
+• notification,
+• task,
+• email,
+• WhatsApp later,
+• invoice reminder,
+• AI-generated report,
+• owner approval,
+• customer follow-up.
+8.7 Timeline Success Metrics
+• every important action appears in timeline,
+• timeline can reconstruct a customer/business history,
+• calendar is filterable and useful beyond bookings,
+• AI can summarize any time period,
+• user can schedule future operational actions from one place.
+9. KEY: Native AI Orchestrator
+9.1 Goal
+KEY should be the native intelligence layer of KeyflowOS.
+Not chatbot.
+Not gimmick.
+Not generic content generator.
+KEY should understand and act across:
+• blueprint,
+• contacts,
+• storefront,
+• catalog,
+• quotes,
+• invoices,
+• payments,
+• bookings,
+• calendar,
+• inventory,
+• reports,
+• procurement store.
+9.2 Current AI Foundation
+The repo already identifies frontend AI/Copilot components and hooks, including a global copilot panel, module AI suggestions/tools state, app layout integration, commerce-specific copilot hook, and contact-specific AI UI. Backend AI includes services for advisor, model gateway, intent parser, planner, memory, flow orchestrator, business graph, governance, and related pieces. 
+That direction is strong.
+9.3 KEY Capability Model
+KEY needs four modes.
+Mode 1: Answer
+Examples:
+• “How many invoices are overdue?”
+• “Who are my best customers?”
+• “What happened this week?”
+• “Which services make the most money?”
+Mode 2: Analyze
+Examples:
+• “Why are bookings down?”
+• “Which contacts should I follow up?”
+• “Which products should I feature?”
+• “How can I increase revenue this month?”
+Mode 3: Plan
+Examples:
+• “Create a plan to get 10 more bookings.”
+• “Build a follow-up system for unpaid invoices.”
+• “Improve my storefront conversion.”
+• “Prepare a package for high-value clients.”
+Mode 4: Execute With Approval
+Examples:
+• draft invoice,
+• create quote,
+• schedule follow-up,
+• update storefront text,
+• create task,
+• generate report,
+• prepare procurement request,
+• send email only after approval.
+9.4 AI Safety Execution Model
+Never allow vague user instructions to directly trigger irreversible actions.
+Use this pipeline:
+Step 1: Interpret
+Convert vague user input into structured intent.
+Step 2: Ground
+Fetch relevant business data.
+Step 3: Plan
+Generate action plan.
+Step 4: Risk Classify
+Classify action risk:
+• low risk: read, summarize, recommend,
+• medium risk: draft, create internal task, prepare quote draft,
+• high risk: send message, charge payment, cancel booking, delete/archive records,
+• critical risk: financial, legal, customer-facing irreversible actions.
+Step 5: Preview
+Show what KEY is about to do.
+Step 6: Execute
+Only execute according to permission tier.
+Step 7: Log
+Record AI action in event ledger and AI execution log.
+9.5 AI Tool Registry
+Create an explicit registry:
+export const keyToolRegistry = { contacts: { searchContacts, summarizeContact, recommendFollowUps, createContactTask, }, commerce: { summarizeRevenue, draftQuote, draftInvoice, recommendPricing, analyzeCatalog, }, bookings: { findAvailability, createBookingDraft, summarizeSchedule, }, timeline: { summarizePeriod, createReminder, createScheduledAction, }, storefront: { auditStorefront, recommendLayout, draftCopy, }, procurement: { generateBrief, recommendPackage, notifyOwner, }, }; 
+9.6 KEY UI
+KEY should be available:
+• globally in Cockpit,
+• inside contact pages,
+• inside commerce,
+• inside storefront builder,
+• inside calendar,
+• inside reports,
+• inside procurement store.
+But the interface should adapt to context.
+Examples:
+On contact page:
+“What should I do with this contact?”
+On storefront:
+“How can I improve this page?”
+On calendar:
+“What is my highest-value day this week?”
+On commerce:
+“What pricing changes should I consider?”
+9.7 KEY Success Metrics
+• KEY can answer business questions with citations to app data,
+• KEY can generate useful next actions,
+• KEY logs all actions,
+• KEY does not perform high-risk actions without approval,
+• KEY improves recommendations as blueprint/contact/timeline data grows.
+10. KeyflowOS Store / Intelligent Procurement Engine
+10.1 Goal
+The KeyflowOS Store should help users get what they need by turning vague needs into structured service packages and internal briefs.
+This should not be a typical marketplace.
+It should be:
+“Tell KEY what you need. KEY understands your business and generates the best-fit package.”
+10.2 User Flow
+User says:
+“I need help getting more clients.”
+KEY asks 2–5 targeted questions if needed, then generates:
+• diagnosis,
+• recommended package options,
+• expected outcome,
+• cost range,
+• required assets,
+• timeline,
+• risk,
+• internal brief,
+• next step.
+Then the system sends owner/manager a structured email or internal notification.
+10.3 Store Package Types
+Examples:
+• Branding package
+• Storefront setup package
+• Sales funnel package
+• CRM cleanup package
+• Booking automation setup
+• Invoice/payment setup
+• AI business audit
+• Pricing review
+• Customer follow-up system
+• Inventory setup
+• Monthly operations support
+10.4 Procurement Brief Model
+Create:
+model ProcurementRequest { id String @id @default(cuid()) businessId String @map("business_id") business Business @relation(fields: [businessId], references: [id], onDelete: Cascade) requestedByUserId String? @map("requested_by_user_id") status String @default("DRAFT") // DRAFT | SUBMITTED | REVIEWING | QUOTED | ACCEPTED | DECLINED | COMPLETED userPrompt String @map("user_prompt") interpretedNeed Json @default("{}") @map("interpreted_need") recommendedPackages Json @default("{}") @map("recommended_packages") brief Json @default("{}") estimatedBudget Json? @map("estimated_budget") priority String? internalNotes String? @map("internal_notes") submittedAt DateTime? @map("submitted_at") createdAt DateTime @default(now()) @map("created_at") updatedAt DateTime @updatedAt @map("updated_at") @@index([businessId, status]) @@map("procurement_requests") } 
+10.5 Internal Email Template
+The generated brief should include:
+• business name,
+• user goal,
+• business blueprint summary,
+• current bottleneck,
+• requested outcome,
+• recommended service package,
+• budget range,
+• urgency,
+• relevant screenshots/data if available,
+• suggested next step,
+• AI confidence score,
+• missing information.
+10.6 Procurement Store Success Metrics
+• user can request help in plain English,
+• KEY generates relevant packages,
+• owner receives complete brief,
+• store recommendations use actual business data,
+• user does not need to browse a confusing marketplace.
+11. UI/UX Design System
+11.1 Desired Feeling
+The app should feel:
+• intelligent,
+• calm,
+• premium,
+• operational,
+• easy to adapt to,
+• hard to stop using.
+Avoid:
+• clutter,
+• toy-like gamification,
+• too many nav items,
+• too many dashboards,
+• confusing module names,
+• generic SaaS visuals.
+11.2 Main Navigation Recommendation
+Simplify primary app nav to:
+• Cockpit
+• Contacts
+• Commerce
+• Calendar
+• Storefront
+• KEY
+• Settings
+Secondary / hidden:
+• Reports
+• Automations
+• Inventory
+• Team
+• Developer/API
+• Admin
+Coming later:
+• Community
+• Learning
+• Content Scheduler
+• Documents
+• Marketplace browsing
+• Supplier
+11.3 Cockpit Design
+Cockpit should show:
+• today’s business pulse,
+• urgent actions,
+• revenue status,
+• upcoming schedule,
+• lead opportunities,
+• unpaid invoices,
+• KEY recommendations,
+• recent timeline events.
+The Cockpit should not be a generic analytics dashboard.
+It should answer:
+“What matters now?”
+11.4 Storefront Builder UX
+Storefront builder should have 3 modes:
+Quick Setup
+AI generates layout from business blueprint.
+Customize
+User adjusts sections, colors, products, policies, hero, and trust signals.
+Preview & Publish
+Preview desktop/mobile and publish.
+11.5 Invoice/Quote Builder UX
+The quote/invoice builder should have:
+• left: form inputs,
+• center: live document preview,
+• right: style/customization controls,
+• top: status/actions,
+• bottom: KEY suggestions.
+Actions:
+• save draft,
+• send,
+• copy link,
+• convert quote to invoice,
+• record payment,
+• preview as customer.
+12. Backend-to-Frontend Clean Architecture
+12.1 Required Standards
+The codebase should enforce:
+• domain-based modules,
+• typed DTOs,
+• shared API contracts,
+• schema/API/frontend alignment,
+• no hidden business logic in UI components,
+• no direct cross-module coupling where event bus should be used,
+• no unlogged business-critical actions,
+• no unguarded tenant access.
+12.2 Domain Boundaries
+Use these primary domains:
+identity blueprint contacts commerce calendar/timeline storefront key-ai procurement notifications settings 
+12.3 Frontend Structure
+Recommended:
+apps/web/src/ app/ app/ cockpit/ contacts/ commerce/ calendar/ storefront/ key/ settings/ components/ cockpit/ contacts/ commerce/ calendar/ storefront/ key/ shared/ lib/ api/ client.ts contacts.ts commerce.ts calendar.ts blueprint.ts key.ts storefront.ts procurement.ts hooks/ schemas/ 
+Break up the large apps/web/src/lib/client.ts noted in the audit as a future cleanup candidate. 
+12.4 Backend Structure
+Recommended:
+apps/server/src/modules/ blueprint/ contacts-intelligence/ commerce/ timeline/ storefront/ key-ai/ procurement/ reports/ 
+Existing modules do not need to be deleted immediately. Instead, consolidate user-facing flows around the new core domains.
+12.5 API Health Rules
+Every endpoint must:
+• require business context unless public,
+• validate DTO,
+• verify membership,
+• write timeline event if business-relevant,
+• return typed response,
+• avoid leaking cross-business data,
+• include correlation ID in logs,
+• avoid silent failures.
+12.6 Event Logging Rule
+Any of these actions must write to BusinessEvent:
+• contact create/update,
+• quote create/send/accept/reject,
+• invoice create/send/pay/overdue,
+• payment attempt/success/failure,
+• booking create/update/cancel/complete,
+• storefront publish/update/order,
+• inventory movement,
+• AI recommendation/action,
+• procurement request,
+• calendar scheduled action.
+13. AI Coder Implementation Roadmap
+Phase 1: Product De-Scope and Navigation Clean-Up
+Goals
+• reduce UI surface area,
+• hide future modules,
+• focus on core OS experience.
+Actions
+• Update app navigation.
+• Move Community, Learning, Documents, Supplier, Content Scheduler to “Coming Soon.”
+• Create new primary nav: Cockpit, Contacts, Commerce, Calendar, Storefront, KEY, Settings.
+• Ensure hidden routes do not break existing code.
+• Add feature flags.
+Acceptance Criteria
+• user sees fewer, clearer options,
+• no removed feature blocks core app,
+• routes remain accessible only if enabled,
+• UI feels more focused.
+Phase 2: Business Blueprint Engine
+Actions
+• Add BusinessBlueprint model.
+• Create migration.
+• Build backend blueprint module.
+• Build frontend blueprint setup.
+• Connect onboarding to blueprint.
+• Add blueprint completeness score.
+• KEY uses blueprint for recommendations.
+Acceptance Criteria
+• every business has blueprint,
+• onboarding writes blueprint data,
+• blueprint updates from user edits,
+• dashboard shows blueprint progress,
+• KEY references blueprint in recommendations.
+Phase 3: Business Event Ledger / Timeline
+Actions
+• Add BusinessEvent model.
+• Create timeline service.
+• Integrate commerce events.
+• Integrate contact events.
+• Integrate booking events.
+• Integrate AI events.
+• Build calendar/timeline UI.
+Acceptance Criteria
+• major actions are logged,
+• user can filter timeline,
+• contact page shows related events,
+• calendar shows historical/live/future events,
+• KEY can summarize events.
+Phase 4: Commerce Customization
+Actions
+• Add CommercialDocumentTemplate.
+• Build invoice/quote template backend.
+• Build document preview components.
+• Create template gallery.
+• Add style editor.
+• Add quote/invoice render preview.
+• Connect templates to sending and public views.
+Acceptance Criteria
+• user can customize invoice/quote branding,
+• user can preview before sending,
+• selected template persists,
+• quote/invoice layout reflects business brand,
+• KEY can suggest improvements.
+Phase 5: Storefront Builder Upgrade
+Actions
+• Audit current storefront config.
+• Build storefront builder UI.
+• Add AI-generated layout suggestions.
+• Improve product/category/section ordering UI.
+• Add mobile preview.
+• Add trust/conversion checklist.
+• Add publish status.
+Acceptance Criteria
+• user can customize storefront without code,
+• storefront reflects brand,
+• preview matches public page,
+• KEY suggests layout/copy improvements,
+• publishing is clear and safe.
+Phase 6: Contact Intelligence
+Actions
+• Add contact intelligence service.
+• Calculate lead score deterministically.
+• Generate next best action.
+• Add contact timeline.
+• Add revenue/contact value summary.
+• Add filters by score/stage/risk.
+• Add KEY contact insights.
+Acceptance Criteria
+• every contact has score and next action,
+• contact timeline is complete,
+• user can identify best leads,
+• user can identify neglected contacts,
+• KEY recommendations are grounded.
+Phase 7: KEY Orchestrator
+Actions
+• Define tool registry.
+• Implement intent parser.
+• Implement grounding layer.
+• Implement action risk classification.
+• Implement approval flow.
+• Implement AI execution logs.
+• Connect KEY to blueprint, contacts, commerce, calendar, storefront, procurement.
+Acceptance Criteria
+• KEY answers app/business questions,
+• KEY creates drafts safely,
+• KEY logs all actions,
+• KEY asks for approval for high-risk operations,
+• KEY can produce reports and recommendations.
+Phase 8: Intelligent Procurement Store
+Actions
+• Add ProcurementRequest.
+• Build store prompt interface.
+• Build package recommendation logic.
+• Build brief generator.
+• Build internal email/notification.
+• Build admin/owner review view.
+Acceptance Criteria
+• user can ask for help in natural language,
+• system generates package options,
+• system creates comprehensive internal brief,
+• owner/manager receives brief,
+• request is tracked.
+14. Code Quality Requirements
+14.1 Build and Test
+The previous audit reports passing install, Prisma generation, server build, web build, lint with warnings, and full build. 
+The overhaul should preserve this baseline.
+Required commands after each major phase:
+pnpm install pnpm --filter db run db:generate pnpm --filter server build pnpm --filter web build pnpm lint pnpm build 
+14.2 Lint Warning Reduction
+The previous audit notes many warnings, mostly any, unused variables, and React hooks compiler warnings. 
+Goal:
+• no new warnings,
+• reduce any,
+• remove unused variables,
+• fix hooks warnings,
+• split large client components.
+14.3 Environment Documentation
+The previous audit states .env.example is minimal and does not document all auth, AI, payment, storage, email, or connector variables implied by modules. 
+Update .env.example and create docs/ENVIRONMENT.md.
+Include:
+• database,
+• Supabase,
+• OpenAI,
+• payment gateways,
+• email,
+• Google integrations,
+• frontend URL,
+• backend URL,
+• webhook secrets,
+• feature flags.
+14.4 Security Requirements
+• encrypt provider tokens,
+• never expose access/refresh tokens to frontend,
+• require business guard on all private endpoints,
+• public endpoints must return public-safe fields only,
+• validate all DTOs,
+• rate-limit public checkout and booking endpoints,
+• log payment attempts,
+• verify payment webhooks,
+• avoid destructive deletes,
+• maintain audit trail.
+15. Self-Audit Checklist for AI Coder
+Before completing any feature, the AI coder must answer:
+• Does this improve time, money, people, or relationship leverage?
+• Is this linked to business blueprint?
+• Does it write timeline events?
+• Is it tenant-safe?
+• Is it typed frontend-to-backend?
+• Does i
