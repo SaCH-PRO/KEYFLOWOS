@@ -6,6 +6,7 @@ import { BusinessGraphService } from './business-graph.service';
 import { GovernanceService } from './governance.service';
 import { AiMemoryService } from './ai-memory.service';
 import { ParsedIntent } from './intent-parser.service';
+import { BlueprintService } from '../blueprint/blueprint.service';
 
 interface RawAiStep {
   order?: number;
@@ -66,6 +67,7 @@ export class PlannerService {
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(GovernanceService) private readonly governance: GovernanceService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
+    @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}
 
   async createPlan(businessId: string, intent: ParsedIntent, userId?: string): Promise<AiPlanResult> {
@@ -75,10 +77,15 @@ export class PlannerService {
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
+    const blueprintCtx = await this.blueprint.getBlueprintContext(businessId);
+    const blueprintSection = blueprintCtx
+      ? `\n\nBUSINESS BLUEPRINT (operating DNA, completeness ${blueprintCtx.completeness}%):\n${blueprintCtx.summary}`
+      : '';
+
     const systemPrompt = `You are KeyFlow AI's plan decomposition engine. Given a parsed intent and business context, produce an ordered list of concrete steps to accomplish the objective.
 
 BUSINESS CONTEXT:
-${contextString}${memorySection}
+${contextString}${memorySection}${blueprintSection}
 
 INTENT:
 - Objective: ${intent.objective}

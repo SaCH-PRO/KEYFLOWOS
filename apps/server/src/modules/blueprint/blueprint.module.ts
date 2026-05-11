@@ -5,8 +5,8 @@ import { BlueprintService } from './blueprint.service';
 
 @Module({
   imports: [PrismaModule],
-  providers: [BlueprintService],
   controllers: [BlueprintController],
+  providers: [BlueprintService],
   exports: [BlueprintService],
 })
 export class BlueprintModule {}

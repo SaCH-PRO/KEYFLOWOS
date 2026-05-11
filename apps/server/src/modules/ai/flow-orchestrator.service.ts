@@ -10,6 +10,7 @@ import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToo
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { BlueprintService } from '../blueprint/blueprint.service';
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
@@ -187,7 +188,33 @@ export class FlowOrchestratorService {
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}
+
+  /**
+   * Build the "Blueprint" section of the system prompt. Reads from the
+   * BusinessBlueprint so KEY's recommendations are grounded in the operator's
+   * actual identity, goals, constraints, and brand voice.
+   */
+  private async buildBlueprintSection(businessId: string): Promise<string> {
+    const ctx = await this.blueprint.getBlueprintContext(businessId);
+    if (!ctx) return '';
+    const lines: string[] = ['', 'Business Blueprint (operating DNA):'];
+    lines.push(`- Completeness: ${ctx.completeness}%`);
+    if (ctx.summary) lines.push(`- Summary: ${ctx.summary}`);
+    if (ctx.identity.archetype) lines.push(`- Archetype: ${ctx.identity.archetype}`);
+    if (ctx.identity.industry) lines.push(`- Industry: ${ctx.identity.industry}`);
+    if (ctx.operatingModel.revenueModel) lines.push(`- Revenue model: ${ctx.operatingModel.revenueModel}`);
+    if (ctx.operatingModel.deliveryMode) lines.push(`- Delivery mode: ${ctx.operatingModel.deliveryMode}`);
+    if (ctx.goals.northStar) lines.push(`- North star: ${ctx.goals.northStar}`);
+    if (ctx.goals.ninetyDayGoals?.length) lines.push(`- 90-day goals: ${ctx.goals.ninetyDayGoals.join('; ')}`);
+    if (ctx.constraints.budgetRange) lines.push(`- Budget: ${ctx.constraints.budgetRange}`);
+    if (ctx.constraints.timeCommitment) lines.push(`- Time commitment: ${ctx.constraints.timeCommitment}`);
+    if (ctx.brand.voice) lines.push(`- Brand voice: ${ctx.brand.voice}`);
+    if (ctx.customerModel.idealCustomer) lines.push(`- Ideal customer: ${ctx.customerModel.idealCustomer}`);
+    if (ctx.financials.avgTicket) lines.push(`- Avg ticket: ${ctx.financials.avgTicket}`);
+    return '\n' + lines.join('\n');
+  }
 
   async chat(
     businessId: string,
@@ -212,10 +239,11 @@ export class FlowOrchestratorService {
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
     const pageContextSection = formatPageContextSection(pageContext);
+    const blueprintSection = await this.buildBlueprintSection(businessId);
 
     const systemPrompt = FLOW_SYSTEM_PROMPT
       .replace('{{CURRENT_DATE}}', new Date().toISOString())
-      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + pageContextSection);
+      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + pageContextSection + blueprintSection);
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -487,10 +515,11 @@ export class FlowOrchestratorService {
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
     const pageContextSection = formatPageContextSection(pageContext);
+    const blueprintSection = await this.buildBlueprintSection(businessId);
 
     const systemPrompt = FLOW_SYSTEM_PROMPT
       .replace('{{CURRENT_DATE}}', new Date().toISOString())
-      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + pageContextSection);
+      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + pageContextSection + blueprintSection);
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: systemPrompt },

@@ -1,14 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Sparkles, Save, RefreshCw, CheckCircle2, Circle } from "lucide-react";
-import { apiGet, apiPatch, apiPostSimple } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Brain,
+  Building2,
+  Compass,
+  DollarSign,
+  Goal,
+  Palette,
+  Save,
+  ShieldCheck,
+  Sparkles,
+  Users,
+} from "lucide-react";
+import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { ListPageSkeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
 
-interface BlueprintRecord {
-  id: string;
-  businessId: string;
+interface BlueprintData {
   schemaVersion: number;
   identity: Record<string, unknown>;
   operatingModel: Record<string, unknown>;
@@ -19,449 +31,682 @@ interface BlueprintRecord {
   financials: Record<string, unknown>;
   intelligence: Record<string, unknown>;
   completeness: number;
-  createdAt: string;
   updatedAt: string;
 }
 
-interface SetupStep {
+interface RecommendedStep {
   id: string;
-  label: string;
-  blueprintSection: string;
-  weight: number;
-  done: boolean;
-  hint?: string;
+  section: string;
+  title: string;
+  reason: string;
+  href?: string;
 }
 
-type SectionKey =
-  | "identity"
-  | "operatingModel"
-  | "goals"
-  | "constraints"
-  | "brand"
-  | "customerModel"
-  | "financials";
+const SECTION_LABELS: Record<string, string> = {
+  identity: "Identity",
+  operatingModel: "Operating Model",
+  goals: "Goals",
+  constraints: "Constraints",
+  brand: "Brand",
+  customerModel: "Customer Model",
+  financials: "Financials",
+  intelligence: "Intelligence",
+};
 
-interface FieldDef {
-  key: string;
-  label: string;
-  type: "text" | "textarea" | "number" | "tags" | "color";
-  hint?: string;
+function arrToCsv(value: unknown): string {
+  if (Array.isArray(value)) return value.join(", ");
+  if (value == null) return "";
+  return String(value);
 }
 
-const SECTION_DEFS: Array<{ key: SectionKey; title: string; subtitle: string; fields: FieldDef[] }> = [
-  {
-    key: "identity",
-    title: "Identity & story",
-    subtitle: "Who you are and what you stand for. KEY uses this to ground every recommendation.",
-    fields: [
-      { key: "name", label: "Business name", type: "text" },
-      { key: "tagline", label: "Tagline", type: "text" },
-      { key: "missionStatement", label: "Mission", type: "textarea" },
-      { key: "visionStatement", label: "Vision", type: "textarea" },
-      { key: "story", label: "Origin story", type: "textarea" },
-      { key: "archetype", label: "Archetype", type: "text", hint: "e.g. LOCAL_SERVICE, AGENCY, ECOMMERCE" },
-      { key: "industry", label: "Industry", type: "text" },
-      { key: "country", label: "Country", type: "text" },
-      { key: "languagesServed", label: "Languages served", type: "tags" },
-    ],
-  },
-  {
-    key: "operatingModel",
-    title: "Operating model",
-    subtitle: "How you actually deliver and get paid. Used by the storefront builder and pricing AI.",
-    fields: [
-      { key: "revenueModel", label: "Revenue model", type: "text", hint: "SUBSCRIPTION, ONE_TIME, RETAINER, USAGE_BASED" },
-      { key: "deliveryMethod", label: "Delivery method", type: "text", hint: "IN_PERSON, ONLINE, HYBRID" },
-      { key: "fulfillmentStyle", label: "Fulfillment style", type: "text" },
-      { key: "teamSize", label: "Team size", type: "text", hint: "SOLO, SMALL_TEAM, GROWING" },
-      { key: "timeCommitment", label: "Time commitment", type: "text" },
-      { key: "weeklyHours", label: "Weekly hours available", type: "number" },
-      { key: "pricingModel", label: "Pricing model", type: "text" },
-      { key: "paymentTerms", label: "Payment terms", type: "text" },
-      { key: "leadTime", label: "Lead time", type: "text" },
-    ],
-  },
-  {
-    key: "goals",
-    title: "Goals & targets",
-    subtitle: "What success looks like over the next horizon.",
-    fields: [
-      { key: "primaryGoal", label: "Primary goal", type: "text" },
-      { key: "northStarMetric", label: "North star metric", type: "text" },
-      { key: "horizonMonths", label: "Horizon (months)", type: "number" },
-      { key: "revenueTarget", label: "Revenue target (TTD)", type: "number" },
-      { key: "newCustomersTarget", label: "New customers target", type: "number" },
-      { key: "focusAreas", label: "Focus areas", type: "tags" },
-    ],
-  },
-  {
-    key: "customerModel",
-    title: "Customer model",
-    subtitle: "Who you serve and how they find you.",
-    fields: [
-      { key: "targetSegments", label: "Target segments", type: "tags" },
-      { key: "demographics", label: "Demographics", type: "textarea" },
-      { key: "painPoints", label: "Pain points", type: "tags" },
-      { key: "buyingTriggers", label: "Buying triggers", type: "tags" },
-      { key: "acquisitionChannels", label: "Acquisition channels", type: "tags" },
-      { key: "lifetimeValueTtd", label: "Lifetime value (TTD)", type: "number" },
-      { key: "repeatRatePct", label: "Repeat rate (%)", type: "number" },
-      { key: "referralPropensity", label: "Referral propensity", type: "text" },
-    ],
-  },
-  {
-    key: "brand",
-    title: "Brand & voice",
-    subtitle: "How you sound and feel. Used by every AI copy surface.",
-    fields: [
-      { key: "primaryColor", label: "Primary color", type: "color" },
-      { key: "secondaryColor", label: "Secondary color", type: "color" },
-      { key: "accentColor", label: "Accent color", type: "color" },
-      { key: "voice", label: "Brand voice", type: "text", hint: "e.g. friendly, expert, playful" },
-      { key: "tone", label: "Tone", type: "text" },
-      { key: "keywords", label: "Brand keywords", type: "tags" },
-      { key: "positioningStatement", label: "Positioning statement", type: "textarea" },
-      { key: "doNotSay", label: "Do not say", type: "tags" },
-      { key: "referenceBrands", label: "Reference brands", type: "tags" },
-    ],
-  },
-  {
-    key: "financials",
-    title: "Financial shape",
-    subtitle: "The financial reality KEY plans inside.",
-    fields: [
-      { key: "avgMargin", label: "Average margin (%)", type: "number" },
-      { key: "runwayMonths", label: "Runway (months)", type: "number" },
-      { key: "cashPositionTier", label: "Cash position", type: "text", hint: "TIGHT, COMFORTABLE, STRONG" },
-      { key: "costStructure", label: "Cost structure", type: "tags" },
-      { key: "processorMix", label: "Processor mix", type: "tags" },
-    ],
-  },
-  {
-    key: "constraints",
-    title: "Constraints & boundaries",
-    subtitle: "What's off-limits and what KEY should respect.",
-    fields: [
-      { key: "budgetCeiling", label: "Budget ceiling (TTD)", type: "number" },
-      { key: "timeAvailable", label: "Time available", type: "text" },
-      { key: "regulatoryFlags", label: "Regulatory flags", type: "tags" },
-      { key: "geographic", label: "Geographic constraints", type: "tags" },
-      { key: "doNotDoList", label: "Do not do", type: "tags" },
-      { key: "complianceNotes", label: "Compliance notes", type: "textarea" },
-    ],
-  },
-];
+function csvToArr(value: string): string[] {
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function FieldRow({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: React.ReactNode;
+  hint?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="kf-text-caption font-medium" style={{ color: "hsl(var(--kf-foreground))" }}>
+        {label}
+      </label>
+      {children}
+      {hint && (
+        <p className="kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function TextField(props: {
+  value: unknown;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <input
+      type="text"
+      value={typeof props.value === "string" ? props.value : ""}
+      onChange={(e) => props.onChange(e.target.value)}
+      placeholder={props.placeholder}
+      className="kf-input w-full px-3 py-2 kf-radius-md kf-text-body"
+      style={{
+        background: "hsl(var(--kf-card))",
+        border: "1px solid hsl(var(--kf-border))",
+        color: "hsl(var(--kf-foreground))",
+      }}
+    />
+  );
+}
+
+function TextArea(props: {
+  value: unknown;
+  onChange: (v: string) => void;
+  rows?: number;
+  placeholder?: string;
+}) {
+  return (
+    <textarea
+      rows={props.rows || 3}
+      value={typeof props.value === "string" ? props.value : ""}
+      onChange={(e) => props.onChange(e.target.value)}
+      placeholder={props.placeholder}
+      className="w-full px-3 py-2 kf-radius-md kf-text-body"
+      style={{
+        background: "hsl(var(--kf-card))",
+        border: "1px solid hsl(var(--kf-border))",
+        color: "hsl(var(--kf-foreground))",
+      }}
+    />
+  );
+}
+
+function SelectField(props: {
+  value: unknown;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <select
+      value={typeof props.value === "string" ? props.value : ""}
+      onChange={(e) => props.onChange(e.target.value)}
+      className="w-full px-3 py-2 kf-radius-md kf-text-body"
+      style={{
+        background: "hsl(var(--kf-card))",
+        border: "1px solid hsl(var(--kf-border))",
+        color: "hsl(var(--kf-foreground))",
+      }}
+    >
+      <option value="">—</option>
+      {props.options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function NumberField(props: {
+  value: unknown;
+  onChange: (v: number | undefined) => void;
+  placeholder?: string;
+}) {
+  return (
+    <input
+      type="number"
+      value={typeof props.value === "number" ? props.value : ""}
+      onChange={(e) => {
+        const v = e.target.value;
+        props.onChange(v === "" ? undefined : Number(v));
+      }}
+      placeholder={props.placeholder}
+      className="w-full px-3 py-2 kf-radius-md kf-text-body"
+      style={{
+        background: "hsl(var(--kf-card))",
+        border: "1px solid hsl(var(--kf-border))",
+        color: "hsl(var(--kf-foreground))",
+      }}
+    />
+  );
+}
+
+function CompletenessBar({ value }: { value: number }) {
+  const color =
+    value >= 80
+      ? "hsl(var(--kf-success, 160 70% 45%))"
+      : value >= 40
+        ? "hsl(var(--kf-accent1))"
+        : "hsl(var(--kf-warning, 30 90% 50%))";
+  return (
+    <div className="flex flex-col gap-1.5 w-full">
+      <div className="flex items-center justify-between">
+        <span className="kf-text-caption" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          Blueprint completeness
+        </span>
+        <span className="kf-text-body font-semibold">{value}%</span>
+      </div>
+      <div
+        className="w-full h-2 kf-radius-full overflow-hidden"
+        style={{ background: "hsl(var(--kf-border) / 0.5)" }}
+      >
+        <div
+          className="h-full kf-radius-full transition-all"
+          style={{ width: `${value}%`, background: color }}
+        />
+      </div>
+    </div>
+  );
+}
 
 export default function BlueprintPage() {
-  // Initialise from localStorage lazily so we avoid the
-  // react-hooks/set-state-in-effect lint trap.
-  const [businessId] = useState<string | null>(() =>
+  const [businessId, setBusinessId] = useState<string | null>(() =>
     typeof window === "undefined" ? null : getStoredBusinessId(),
   );
-  const [blueprint, setBlueprint] = useState<BlueprintRecord | null>(null);
-  const [steps, setSteps] = useState<SetupStep[]>([]);
+  const [data, setData] = useState<BlueprintData | null>(null);
+  const [draft, setDraft] = useState<BlueprintData | null>(null);
+  const [recs, setRecs] = useState<RecommendedStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Partial<Record<SectionKey, Record<string, unknown>>>>({});
 
   useEffect(() => {
-    if (!businessId) return;
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      const [bpRes, stepsRes] = await Promise.all([
-        apiGet<{ blueprint: BlueprintRecord }>(`/blueprint/businesses/${businessId}`),
-        apiGet<{ steps: SetupStep[] }>(`/blueprint/businesses/${businessId}/setup-steps`),
-      ]);
-      if (cancelled) return;
-      if (bpRes.data?.blueprint) {
-        setBlueprint(bpRes.data.blueprint);
-        setDraft({});
-      }
-      if (stepsRes.data?.steps) setSteps(stepsRes.data.steps);
-      setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
+    if (businessId === null && typeof window !== "undefined") {
+      const stored = getStoredBusinessId();
+      // Hydrate businessId from localStorage after SSR; runs once.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (stored) setBusinessId(stored);
+    }
   }, [businessId]);
 
-  const merged = useMemo(() => {
-    if (!blueprint) return null;
-    const out: Record<SectionKey, Record<string, unknown>> = {
-      identity: { ...blueprint.identity, ...(draft.identity ?? {}) },
-      operatingModel: { ...blueprint.operatingModel, ...(draft.operatingModel ?? {}) },
-      goals: { ...blueprint.goals, ...(draft.goals ?? {}) },
-      constraints: { ...blueprint.constraints, ...(draft.constraints ?? {}) },
-      brand: { ...blueprint.brand, ...(draft.brand ?? {}) },
-      customerModel: { ...blueprint.customerModel, ...(draft.customerModel ?? {}) },
-      financials: { ...blueprint.financials, ...(draft.financials ?? {}) },
-    };
-    return out;
-  }, [blueprint, draft]);
-
-  const isDirty = useMemo(
-    () => Object.values(draft).some((s) => s && Object.keys(s).length > 0),
-    [draft],
-  );
-
-  function setField(section: SectionKey, key: string, value: unknown) {
-    setDraft((prev) => ({
-      ...prev,
-      [section]: { ...(prev[section] ?? {}), [key]: value },
-    }));
-  }
-
-  async function save() {
-    if (!businessId || !isDirty) return;
-    setSaving(true);
-    // JSON.stringify drops `undefined` but keeps `null` — we rely on this
-    // so the backend treats null as "clear this field" and undefined as
-    // "leave alone". Stringify with a replacer that hands through nulls.
-    const payload = JSON.parse(JSON.stringify(draft));
-    const res = await apiPatch<{ blueprint: BlueprintRecord }>(
-      `/blueprint/businesses/${businessId}`,
-      payload,
-    );
-    if (res.data?.blueprint) {
-      setBlueprint(res.data.blueprint);
-      setDraft({});
-      setSavedAt(new Date().toISOString());
-      // Refresh steps after save
-      const stepsRes = await apiGet<{ steps: SetupStep[] }>(
-        `/blueprint/businesses/${businessId}/setup-steps`,
-      );
-      if (stepsRes.data?.steps) setSteps(stepsRes.data.steps);
-    }
-    setSaving(false);
-  }
-
-  async function refresh() {
+  const load = useCallback(async () => {
     if (!businessId) return;
-    setSaving(true);
-    await apiPostSimple(`/blueprint/businesses/${businessId}/infer-from-events`, {});
-    const bpRes = await apiGet<{ blueprint: BlueprintRecord }>(`/blueprint/businesses/${businessId}`);
-    if (bpRes.data?.blueprint) setBlueprint(bpRes.data.blueprint);
-    setSaving(false);
-  }
+    setLoading(true);
+    const [bp, recs] = await Promise.all([
+      apiGet<BlueprintData>(`/blueprint/businesses/${businessId}`),
+      apiGet<{ steps: RecommendedStep[] }>(`/blueprint/businesses/${businessId}/recommendations`),
+    ]);
+    if (bp.data) {
+      setData(bp.data);
+      setDraft(bp.data);
+    }
+    if (recs.data) setRecs(recs.data.steps || []);
+    setLoading(false);
+  }, [businessId]);
 
-  if (loading || !blueprint || !merged) {
+  useEffect(() => {
+    // Mount-time data fetch; setState inside load() is the intended effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load]);
+
+  const dirty = useMemo(
+    () => JSON.stringify(data) !== JSON.stringify(draft),
+    [data, draft],
+  );
+
+  const updateSection = (section: keyof BlueprintData, patch: Record<string, unknown>) => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        [section]: { ...(prev[section] as Record<string, unknown>), ...patch },
+      } as BlueprintData;
+    });
+  };
+
+  const handleSave = async () => {
+    if (!businessId || !draft) return;
+    setSaving(true);
+    const patch = {
+      identity: draft.identity,
+      operatingModel: draft.operatingModel,
+      goals: draft.goals,
+      constraints: draft.constraints,
+      brand: draft.brand,
+      customerModel: draft.customerModel,
+      financials: draft.financials,
+    };
+    const res = await apiPatch<BlueprintData>(`/blueprint/businesses/${businessId}`, patch);
+    setSaving(false);
+    if (res.error) {
+      toast.error(`Could not save blueprint: ${res.error}`);
+      return;
+    }
+    if (res.data) {
+      setData(res.data);
+      setDraft(res.data);
+      toast.success(`Blueprint saved (${res.data.completeness}% complete)`);
+      load();
+    }
+  };
+
+  if (loading || !draft) {
     return (
-      <WorkspaceShell icon={Sparkles} iconColor="#F97316" title="Business Blueprint" subtitle="Your operating DNA">
-        <div className="min-h-[40vh] flex items-center justify-center">
-          <div className="h-6 w-6 rounded-full border-2 border-muted border-t-foreground animate-spin" />
-        </div>
-      </WorkspaceShell>
+      <div className="p-6 max-w-5xl mx-auto">
+        <ListPageSkeleton />
+      </div>
     );
   }
 
+  const id = draft.identity || {};
+  const op = draft.operatingModel || {};
+  const goals = draft.goals || {};
+  const cons = draft.constraints || {};
+  const brand = draft.brand || {};
+  const cust = draft.customerModel || {};
+  const fin = draft.financials || {};
+  const intel = draft.intelligence || {};
+
   return (
-    <WorkspaceShell
-      icon={Sparkles}
-      iconColor="#F97316"
-      title="Business Blueprint"
-      subtitle="Your operating DNA — KEY, the storefront, and every AI surface read from this."
-    >
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr,320px] gap-6">
-        <div className="space-y-6 min-w-0">
-          {SECTION_DEFS.map((section) => (
-            <SectionCard
-              key={section.key}
-              title={section.title}
-              subtitle={section.subtitle}
-              fields={section.fields}
-              values={merged[section.key]}
-              onChange={(k, v) => setField(section.key, k, v)}
-            />
-          ))}
-        </div>
+    <div className="p-6 max-w-5xl mx-auto pb-32">
+      <PageHeader
+        icon={Brain}
+        title="Business Blueprint"
+        subtitle="Your business's living operating DNA — every AI surface reads from this."
+        rightSlot={
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            className="inline-flex items-center gap-2 px-3 py-2 kf-radius-md kf-text-caption font-medium transition-opacity disabled:opacity-50"
+            style={{
+              background: "hsl(var(--kf-accent1))",
+              color: "hsl(var(--kf-accent1-foreground, 0 0% 100%))",
+            }}
+          >
+            <Save className="w-4 h-4" />
+            {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
+          </button>
+        }
+      />
 
-        <div className="space-y-4 lg:sticky lg:top-4 self-start">
-          <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-orange-500" />
-              <h3 className="text-sm font-semibold">Completeness</h3>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-end justify-between">
-                <div className="text-3xl font-bold">{blueprint.completeness}%</div>
-                <div className="text-xs text-muted-foreground">
-                  {steps.filter((s) => s.done).length}/{steps.length} sections complete
-                </div>
-              </div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-500 transition-all"
-                  style={{ width: `${blueprint.completeness}%` }}
-                />
-              </div>
-            </div>
+      <div className="grid gap-4 mb-6 md:grid-cols-3">
+        <SectionCard title="Completeness" icon={Sparkles}>
+          <CompletenessBar value={draft.completeness ?? 0} />
+          <p className="mt-3 kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+            KEY uses every filled field to ground its recommendations. Aim for 80%+.
+          </p>
+        </SectionCard>
 
-            <button
-              onClick={save}
-              disabled={!isDirty || saving}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-foreground text-background disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-            >
-              <Save className="h-4 w-4" />
-              {saving ? "Saving…" : isDirty ? "Save changes" : savedAt ? "Saved" : "No changes"}
-            </button>
-            <button
-              onClick={refresh}
-              disabled={saving}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-medium border border-border hover:bg-muted disabled:opacity-50"
-              title="Re-run AI inference from your business events (timeline ledger)."
-            >
-              <RefreshCw className="h-3 w-3" />
-              Refresh from events
-            </button>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card p-5 space-y-3">
-            <h3 className="text-sm font-semibold">Recommended next steps</h3>
-            <div className="space-y-2">
-              {steps.map((step) => (
-                <div key={step.id} className="flex items-start gap-2 text-xs">
-                  {step.done ? (
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-                  ) : (
-                    <Circle className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-                  )}
-                  <div className="min-w-0">
-                    <div className={step.done ? "text-muted-foreground line-through" : "font-medium"}>
-                      {step.label}
-                    </div>
-                    {step.hint && !step.done && (
-                      <div className="text-muted-foreground mt-0.5 text-[11px]">{step.hint}</div>
-                    )}
+        <SectionCard title="Recommended next steps" icon={Compass} className="md:col-span-2">
+          {recs.length === 0 ? (
+            <p className="kf-text-caption" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+              All sections look healthy. Keep the blueprint fresh as your business evolves.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {recs.slice(0, 4).map((r) => (
+                <li
+                  key={r.id}
+                  className="flex items-start gap-3 px-3 py-2 kf-radius-md"
+                  style={{ background: "hsl(var(--kf-card))" }}
+                >
+                  <div
+                    className="w-7 h-7 kf-radius-md flex items-center justify-center flex-shrink-0 mt-0.5"
+                    style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
+                  >
+                    <Goal className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
                   </div>
-                </div>
+                  <div className="min-w-0">
+                    <a
+                      href={r.href || `#${r.section}`}
+                      className="kf-text-body font-medium block"
+                      style={{ color: "hsl(var(--kf-foreground))" }}
+                    >
+                      {r.title}
+                    </a>
+                    <p className="kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                      {r.reason}
+                    </p>
+                  </div>
+                </li>
               ))}
-            </div>
-          </div>
-
-          {Boolean((blueprint.intelligence as { aiSummary?: string }).aiSummary) && (
-            <div className="rounded-2xl border border-border bg-card p-5 space-y-2">
-              <h3 className="text-sm font-semibold">AI summary</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {(blueprint.intelligence as { aiSummary?: string }).aiSummary}
-              </p>
-            </div>
+            </ul>
           )}
-        </div>
+        </SectionCard>
       </div>
-    </WorkspaceShell>
-  );
-}
 
-function SectionCard({
-  title,
-  subtitle,
-  fields,
-  values,
-  onChange,
-}: {
-  title: string;
-  subtitle: string;
-  fields: FieldDef[];
-  values: Record<string, unknown>;
-  onChange: (key: string, value: unknown) => void;
-}) {
-  return (
-    <section className="rounded-2xl border border-border bg-card p-5 space-y-4">
-      <header className="space-y-1">
-        <h2 className="text-base font-semibold">{title}</h2>
-        <p className="text-xs text-muted-foreground">{subtitle}</p>
-      </header>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {fields.map((f) => (
-          <FieldInput
-            key={f.key}
-            field={f}
-            value={values[f.key]}
-            onChange={(v) => onChange(f.key, v)}
-          />
-        ))}
+      <div className="grid gap-4 md:grid-cols-2">
+        <section id="identity">
+          <SectionCard title={SECTION_LABELS.identity} icon={Building2}>
+            <div className="grid gap-3">
+              <FieldRow label="Business name">
+                <TextField value={id.name} onChange={(v) => updateSection("identity", { name: v })} />
+              </FieldRow>
+              <FieldRow label="One-liner" hint="What you do, in a single sentence.">
+                <TextArea
+                  rows={2}
+                  value={id.oneLiner}
+                  onChange={(v) => updateSection("identity", { oneLiner: v })}
+                />
+              </FieldRow>
+              <FieldRow label="Archetype">
+                <SelectField
+                  value={id.archetype}
+                  onChange={(v) => updateSection("identity", { archetype: v })}
+                  options={[
+                    { value: "LOCAL_SERVICE", label: "Local service" },
+                    { value: "DIGITAL_PRODUCT", label: "Digital product" },
+                    { value: "AGENCY", label: "Agency" },
+                    { value: "CLINIC", label: "Clinic" },
+                    { value: "ECOMMERCE", label: "E-commerce" },
+                    { value: "OTHER", label: "Other" },
+                  ]}
+                />
+              </FieldRow>
+              <FieldRow label="Industry">
+                <TextField
+                  value={id.industry}
+                  onChange={(v) => updateSection("identity", { industry: v })}
+                />
+              </FieldRow>
+              <FieldRow label="Tagline">
+                <TextField
+                  value={id.tagline}
+                  onChange={(v) => updateSection("identity", { tagline: v })}
+                />
+              </FieldRow>
+              <FieldRow label="Mission">
+                <TextArea
+                  value={id.mission}
+                  onChange={(v) => updateSection("identity", { mission: v })}
+                />
+              </FieldRow>
+            </div>
+          </SectionCard>
+        </section>
+
+        <section id="operatingModel">
+          <SectionCard title={SECTION_LABELS.operatingModel} icon={Compass}>
+            <div className="grid gap-3">
+              <FieldRow label="Revenue model">
+                <SelectField
+                  value={op.revenueModel}
+                  onChange={(v) => updateSection("operatingModel", { revenueModel: v })}
+                  options={[
+                    { value: "SUBSCRIPTION", label: "Subscription" },
+                    { value: "ONE_TIME", label: "One-time" },
+                    { value: "RETAINER", label: "Retainer" },
+                    { value: "USAGE_BASED", label: "Usage-based" },
+                    { value: "MIXED", label: "Mixed" },
+                  ]}
+                />
+              </FieldRow>
+              <FieldRow label="Delivery mode">
+                <SelectField
+                  value={op.deliveryMode}
+                  onChange={(v) => updateSection("operatingModel", { deliveryMode: v })}
+                  options={[
+                    { value: "IN_PERSON", label: "In person" },
+                    { value: "REMOTE", label: "Remote" },
+                    { value: "HYBRID", label: "Hybrid" },
+                    { value: "DIGITAL", label: "Digital" },
+                  ]}
+                />
+              </FieldRow>
+              <FieldRow label="Service area">
+                <TextField
+                  value={op.serviceArea}
+                  onChange={(v) => updateSection("operatingModel", { serviceArea: v })}
+                  placeholder="e.g. Trinidad & Tobago"
+                />
+              </FieldRow>
+              <FieldRow label="Channels" hint="Comma-separated: STOREFRONT, INSTAGRAM, WHATSAPP…">
+                <TextField
+                  value={arrToCsv(op.channels)}
+                  onChange={(v) => updateSection("operatingModel", { channels: csvToArr(v) })}
+                />
+              </FieldRow>
+              <FieldRow label="Team size">
+                <SelectField
+                  value={op.teamSize}
+                  onChange={(v) => updateSection("operatingModel", { teamSize: v })}
+                  options={[
+                    { value: "SOLO", label: "Solo" },
+                    { value: "SMALL_TEAM", label: "Small team" },
+                    { value: "GROWING", label: "Growing" },
+                  ]}
+                />
+              </FieldRow>
+            </div>
+          </SectionCard>
+        </section>
+
+        <section id="goals">
+          <SectionCard title={SECTION_LABELS.goals} icon={Goal}>
+            <div className="grid gap-3">
+              <FieldRow label="North star" hint="The single most important outcome.">
+                <TextField
+                  value={goals.northStar}
+                  onChange={(v) => updateSection("goals", { northStar: v })}
+                />
+              </FieldRow>
+              <FieldRow label="90-day goals" hint="One per line, comma-separated.">
+                <TextArea
+                  value={arrToCsv(goals.ninetyDayGoals)}
+                  onChange={(v) => updateSection("goals", { ninetyDayGoals: csvToArr(v) })}
+                />
+              </FieldRow>
+              <FieldRow label="12-month goals">
+                <TextArea
+                  value={arrToCsv(goals.twelveMonthGoals)}
+                  onChange={(v) => updateSection("goals", { twelveMonthGoals: csvToArr(v) })}
+                />
+              </FieldRow>
+            </div>
+          </SectionCard>
+        </section>
+
+        <section id="constraints">
+          <SectionCard title={SECTION_LABELS.constraints} icon={ShieldCheck}>
+            <div className="grid gap-3">
+              <FieldRow label="Budget range">
+                <SelectField
+                  value={cons.budgetRange}
+                  onChange={(v) => updateSection("constraints", { budgetRange: v })}
+                  options={[
+                    { value: "LOW", label: "Low" },
+                    { value: "MEDIUM", label: "Medium" },
+                    { value: "HIGH", label: "High" },
+                  ]}
+                />
+              </FieldRow>
+              <FieldRow label="Time commitment">
+                <SelectField
+                  value={cons.timeCommitment}
+                  onChange={(v) => updateSection("constraints", { timeCommitment: v })}
+                  options={[
+                    { value: "MINIMAL", label: "Minimal" },
+                    { value: "PART_TIME", label: "Part-time" },
+                    { value: "FULL_TIME", label: "Full-time" },
+                  ]}
+                />
+              </FieldRow>
+              <FieldRow label="Risk tolerance">
+                <SelectField
+                  value={cons.riskTolerance}
+                  onChange={(v) => updateSection("constraints", { riskTolerance: v })}
+                  options={[
+                    { value: "LOW", label: "Low" },
+                    { value: "MEDIUM", label: "Medium" },
+                    { value: "HIGH", label: "High" },
+                  ]}
+                />
+              </FieldRow>
+              <FieldRow label="Dealbreakers" hint="What you will not do, comma-separated.">
+                <TextField
+                  value={arrToCsv(cons.dealbreakers)}
+                  onChange={(v) => updateSection("constraints", { dealbreakers: csvToArr(v) })}
+                />
+              </FieldRow>
+            </div>
+          </SectionCard>
+        </section>
+
+        <section id="brand">
+          <SectionCard title={SECTION_LABELS.brand} icon={Palette}>
+            <div className="grid gap-3">
+              <FieldRow label="Voice" hint="e.g. warm, expert, playful">
+                <TextField value={brand.voice} onChange={(v) => updateSection("brand", { voice: v })} />
+              </FieldRow>
+              <FieldRow label="Tone">
+                <TextField value={brand.tone} onChange={(v) => updateSection("brand", { tone: v })} />
+              </FieldRow>
+              <div className="grid grid-cols-2 gap-3">
+                <FieldRow label="Primary color">
+                  <TextField
+                    value={brand.primaryColor}
+                    onChange={(v) => updateSection("brand", { primaryColor: v })}
+                    placeholder="#F97316"
+                  />
+                </FieldRow>
+                <FieldRow label="Secondary color">
+                  <TextField
+                    value={brand.secondaryColor}
+                    onChange={(v) => updateSection("brand", { secondaryColor: v })}
+                    placeholder="#14B8A6"
+                  />
+                </FieldRow>
+              </div>
+              <FieldRow label="Value props" hint="Comma-separated.">
+                <TextArea
+                  value={arrToCsv(brand.valueProps)}
+                  onChange={(v) => updateSection("brand", { valueProps: csvToArr(v) })}
+                />
+              </FieldRow>
+            </div>
+          </SectionCard>
+        </section>
+
+        <section id="customerModel">
+          <SectionCard title={SECTION_LABELS.customerModel} icon={Users}>
+            <div className="grid gap-3">
+              <FieldRow label="Ideal customer">
+                <TextArea
+                  value={cust.idealCustomer}
+                  onChange={(v) => updateSection("customerModel", { idealCustomer: v })}
+                />
+              </FieldRow>
+              <FieldRow label="Segments">
+                <TextField
+                  value={arrToCsv(cust.segments)}
+                  onChange={(v) => updateSection("customerModel", { segments: csvToArr(v) })}
+                />
+              </FieldRow>
+              <FieldRow label="Pain points">
+                <TextArea
+                  value={arrToCsv(cust.painPoints)}
+                  onChange={(v) => updateSection("customerModel", { painPoints: csvToArr(v) })}
+                />
+              </FieldRow>
+              <FieldRow label="Jobs to be done">
+                <TextArea
+                  value={arrToCsv(cust.jobsToBeDone)}
+                  onChange={(v) => updateSection("customerModel", { jobsToBeDone: csvToArr(v) })}
+                />
+              </FieldRow>
+            </div>
+          </SectionCard>
+        </section>
+
+        <section id="financials">
+          <SectionCard title={SECTION_LABELS.financials} icon={DollarSign}>
+            <div className="grid gap-3">
+              <FieldRow label="Currency">
+                <TextField
+                  value={fin.currency}
+                  onChange={(v) => updateSection("financials", { currency: v })}
+                  placeholder="TTD"
+                />
+              </FieldRow>
+              <FieldRow label="Pricing model">
+                <SelectField
+                  value={fin.pricingModel}
+                  onChange={(v) => updateSection("financials", { pricingModel: v })}
+                  options={[
+                    { value: "FLAT", label: "Flat" },
+                    { value: "TIERED", label: "Tiered" },
+                    { value: "HOURLY", label: "Hourly" },
+                    { value: "CUSTOM", label: "Custom" },
+                  ]}
+                />
+              </FieldRow>
+              <div className="grid grid-cols-2 gap-3">
+                <FieldRow label="Avg ticket">
+                  <NumberField
+                    value={fin.avgTicket}
+                    onChange={(v) => updateSection("financials", { avgTicket: v })}
+                  />
+                </FieldRow>
+                <FieldRow label="Monthly target">
+                  <NumberField
+                    value={fin.monthlyTarget}
+                    onChange={(v) => updateSection("financials", { monthlyTarget: v })}
+                  />
+                </FieldRow>
+              </div>
+              <FieldRow label="Cost structure">
+                <TextArea
+                  value={fin.costStructure}
+                  onChange={(v) => updateSection("financials", { costStructure: v })}
+                />
+              </FieldRow>
+            </div>
+          </SectionCard>
+        </section>
+
+        <section id="intelligence">
+          <SectionCard title={SECTION_LABELS.intelligence} icon={Brain}>
+            <p className="kf-text-caption mb-3" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+              Auto-derived from your business activity. Will deepen once the event timeline ledger
+              lands.
+            </p>
+            <ul className="flex flex-col gap-1.5 kf-text-caption">
+              <li>
+                Top product categories:{" "}
+                <span style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                  {arrToCsv(intel.topProductCategories) || "—"}
+                </span>
+              </li>
+              <li>
+                Top channels:{" "}
+                <span style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                  {arrToCsv(intel.topChannels) || "—"}
+                </span>
+              </li>
+              <li>
+                Recent momentum score:{" "}
+                <span style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                  {typeof intel.recentMomentumScore === "number" ||
+                  typeof intel.recentMomentumScore === "string"
+                    ? intel.recentMomentumScore
+                    : "—"}
+                </span>
+              </li>
+              <li>
+                Last inferred:{" "}
+                <span style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                  {typeof intel.inferredAt === "string" || typeof intel.inferredAt === "number"
+                    ? new Date(intel.inferredAt).toLocaleString()
+                    : "—"}
+                </span>
+              </li>
+            </ul>
+          </SectionCard>
+        </section>
       </div>
-    </section>
-  );
-}
-
-function FieldInput({
-  field,
-  value,
-  onChange,
-}: {
-  field: FieldDef;
-  value: unknown;
-  onChange: (value: unknown) => void;
-}) {
-  const baseClass =
-    "w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/30";
-  const wide = field.type === "textarea" || field.type === "tags";
-
-  return (
-    <div className={wide ? "md:col-span-2 space-y-1.5" : "space-y-1.5"}>
-      <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
-      {field.type === "text" && (
-        <input
-          type="text"
-          className={baseClass}
-          value={(value as string) ?? ""}
-          onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
-        />
-      )}
-      {field.type === "textarea" && (
-        <textarea
-          className={baseClass}
-          rows={3}
-          value={(value as string) ?? ""}
-          onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
-        />
-      )}
-      {field.type === "number" && (
-        <input
-          type="number"
-          className={baseClass}
-          value={value === undefined || value === null ? "" : String(value)}
-          onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-        />
-      )}
-      {field.type === "color" && (
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            className="h-9 w-12 rounded border border-border bg-transparent cursor-pointer"
-            value={(value as string) ?? "#000000"}
-            onChange={(e) => onChange(e.target.value)}
-          />
-          <input
-            type="text"
-            className={baseClass}
-            value={(value as string) ?? ""}
-            onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
-            placeholder="#F97316"
-          />
-        </div>
-      )}
-      {field.type === "tags" && (
-        <input
-          type="text"
-          className={baseClass}
-          value={Array.isArray(value) ? (value as string[]).join(", ") : ""}
-          onChange={(e) => {
-            const parts = e.target.value
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean);
-            // Send explicit null when the operator clears the field so
-            // the backend knows to delete it rather than ignore it.
-            onChange(parts.length > 0 ? parts : null);
-          }}
-          placeholder="comma, separated"
-        />
-      )}
-      {field.hint && <p className="text-[10px] text-muted-foreground/70">{field.hint}</p>}
     </div>
   );
 }
