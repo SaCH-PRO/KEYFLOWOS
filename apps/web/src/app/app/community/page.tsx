@@ -1,6 +1,10 @@
+// @keyflow:dormant — Community module hidden behind nav.public.community
+// feature flag during the seven-system overhaul (KEY-0). Code preserved
+// for potential future revival; deleted in KEY-9 cleanup if still unused.
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { DormantRoute } from "@/components/dormant-route";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users,
@@ -60,7 +64,7 @@ const COMMUNITY_TABS = [
 ];
 const _TAB_KEYS = COMMUNITY_TABS.map((t) => t.key);
 
-export default function CommunityPage() {
+function CommunityPageInner() {
   const communityRouter = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [tab, setTab] = useState("feed");
@@ -493,5 +497,13 @@ export default function CommunityPage() {
         />
       )}
     </WorkspaceShell>
+  );
+}
+
+export default function CommunityPage() {
+  return (
+    <DormantRoute featureKey="nav.public.community" title="Community">
+      <CommunityPageInner />
+    </DormantRoute>
   );
 }

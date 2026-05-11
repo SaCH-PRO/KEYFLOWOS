@@ -1,6 +1,11 @@
+// @keyflow:dormant — Marketplace browsing hidden behind nav.public.marketplace
+// feature flag during the seven-system overhaul (KEY-0). The new procurement
+// experience replacing it lives at /app/store (KEY-8). Code preserved for
+// potential future revival; deleted in KEY-9 cleanup if still unused.
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { DormantRoute } from "@/components/dormant-route";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ShoppingBag,
@@ -60,7 +65,7 @@ function unwrapList<T>(data: T[] | ApiListResponse<T> | undefined): T[] {
   return data.data ?? [];
 }
 
-export default function MarketplacePage() {
+function MarketplacePageInner() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("catalog");
 
@@ -897,5 +902,13 @@ export default function MarketplacePage() {
         </div>
       </Modal>
     </WorkspaceShell>
+  );
+}
+
+export default function MarketplacePage() {
+  return (
+    <DormantRoute featureKey="nav.public.marketplace" title="Marketplace">
+      <MarketplacePageInner />
+    </DormantRoute>
   );
 }

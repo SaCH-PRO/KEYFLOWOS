@@ -47,6 +47,39 @@ const KNOWN_FLAGS: KnownFlag[] = [
     defaultComingSoon: true,
     defaultBypassEmails: ['keyflowos.tt@gmail.com'],
   },
+  // ---
+  // KEY-0 dormant modules — kept in-tree but hidden from operators while
+  // the seven-system overhaul lands. Items here are reachable only by
+  // bypass emails. Removed entirely in KEY-9 cleanup if still untouched.
+  // ---
+  {
+    key: 'nav.workspaces.documents',
+    label: 'Documents',
+    category: 'Workspaces',
+    defaultComingSoon: true,
+    defaultBypassEmails: ['keyflowos.tt@gmail.com'],
+  },
+  {
+    key: 'nav.public.community',
+    label: 'Community',
+    category: 'Public',
+    defaultComingSoon: true,
+    defaultBypassEmails: ['keyflowos.tt@gmail.com'],
+  },
+  {
+    key: 'nav.public.learn',
+    label: 'Learn',
+    category: 'Public',
+    defaultComingSoon: true,
+    defaultBypassEmails: ['keyflowos.tt@gmail.com'],
+  },
+  {
+    key: 'nav.public.marketplace',
+    label: 'Marketplace',
+    category: 'Public',
+    defaultComingSoon: true,
+    defaultBypassEmails: ['keyflowos.tt@gmail.com'],
+  },
 ];
 
 @Injectable()
