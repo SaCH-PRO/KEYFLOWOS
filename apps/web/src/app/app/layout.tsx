@@ -39,7 +39,6 @@ import {
   LayoutGrid,
   Wrench,
   Globe,
-  Building2,
   Package,
   Palette,
   Plug,
@@ -72,6 +71,7 @@ import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 import { RequireAuth } from "@/components/require-auth";
+import { featureFlags as dormantFeatureFlags, type DormantFeatureFlagKey } from "@/lib/feature-flags";
 import { NotesProvider } from "@/components/keyflow/notes-context";
 import { KeyflowNotesDrawer } from "@/components/keyflow/keyflow-notes-drawer";
 import { NotesQueryParamTrigger } from "@/components/keyflow/notes-query-param-trigger";
@@ -230,8 +230,17 @@ interface NavItem {
    * its bypass list. See `/admin/feature-flags`.
    */
   featureKey?: string;
+  /**
+   * Optional dormant feature flag key. When set and the corresponding
+   * static `featureFlags` entry is `false`, the nav item is hidden
+   * entirely. See `lib/feature-flags.ts` (KEY-9 cleanup target).
+   */
+  dormantFlag?: DormantFeatureFlagKey;
 }
 
+// Legacy section ids preserved on PrimaryNavItem so older nav data and any
+// downstream consumers that still grep on these tokens keep working even
+// though the rail no longer renders Workspaces / Studio / Public groups.
 type PrimarySectionId = "cockpit" | "tower" | "store" | "workspaces" | "studio" | "public";
 
 interface PrimaryNavItem {
@@ -241,19 +250,22 @@ interface PrimaryNavItem {
   href?: string;
 }
 
+// Seven approved primary modules (Task #605). The orange Zap logo at the
+// top of the rail is "Cockpit" (KEYFLOW home). KEY (the AI agent) lives
+// at the bottom of the rail. The remaining five are direct links here.
 const primaryNav: PrimaryNavItem[] = [
-  // KEYFLOW (id "tower") intentionally NOT in this list — the orange
-  // Zap logo button at the top of the rail IS the home/KEYFLOW button.
-  // Adding KEYFLOW here too duplicates the affordance and confuses users.
-  // The "tower" section ID is still used elsewhere (routeToSurface,
-  // detectPrimarySection, mobile bottom nav) — see comments around line 337.
-  { id: "store", label: "Store", icon: Store, href: "/app/store" },
-  { id: "workspaces", label: "Workspaces", icon: LayoutGrid },
-  { id: "studio", label: "Studio", icon: Wrench },
-  { id: "public", label: "Public", icon: Globe },
+  { id: "workspaces", label: "Contacts", icon: Users, href: "/app/crm/pipeline" },
+  { id: "workspaces", label: "Commerce", icon: CreditCard, href: "/app/commerce" },
+  { id: "workspaces", label: "Calendar", icon: Calendar, href: "/app/calendar" },
+  { id: "store", label: "Storefront", icon: Store, href: "/app/store" },
+  { id: "studio", label: "Settings", icon: Settings, href: "/app/settings" },
 ];
 
-const secondaryNav: Record<string, NavItem[]> = {
+// Legacy section-based secondary nav retained for compatibility with
+// any consumers (mobile copilot context, etc.) that still inspect the
+// Workspaces / Studio / Public groupings. The new rail no longer renders
+// these directly — see moreNav / comingSoonNav below.
+const _legacySecondaryNav: Record<string, NavItem[]> = {
   workspaces: [
     { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
     { label: "Inbox", href: "/app/inbox", icon: Mail },
@@ -288,55 +300,39 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Marketplace", href: "/app/marketplace", icon: Globe, featureKey: "nav.public.marketplace" },
   ],
 };
+void _legacySecondaryNav;
 
-const routeToSurface: [string, PrimarySectionId][] = [
-  ["/app/keyflow-command", "tower"],
-  ["/app/control-tower", "tower"],
-  ["/app/settings", "studio"],
-  ["/app/connect", "studio"],
-  ["/app/profile", "studio"],
-  ["/app/store", "store"],
-  ["/app/presence", "public"],
-  ["/app/community", "public"],
-  ["/app/learn", "public"],
-  ["/app/marketplace", "public"],
-  ["/app/social", "workspaces"],
-  ["/app/crm", "workspaces"],
-  ["/app/commerce", "workspaces"],
-  ["/app/accounting", "workspaces"],
-  ["/app/whatsapp", "workspaces"],
-  ["/app/payments", "workspaces"],
-  ["/app/bookings", "workspaces"],
-  ["/app/calendar", "workspaces"],
-  ["/app/marketing", "workspaces"],
-  ["/app/automations", "workspaces"],
-  ["/app/projects", "workspaces"],
-  ["/app/expenses", "workspaces"],
-  ["/app/finance", "workspaces"],
-  ["/app/finance/revenue", "workspaces"],
-  ["/app/finance/expenses", "workspaces"],
-  ["/app/finance/cashflow", "workspaces"],
-  ["/app/finance/accounts", "workspaces"],
-  ["/app/finance/reconciliation", "workspaces"],
-  ["/app/finance/reports", "workspaces"],
-  ["/app/finance/tax", "workspaces"],
-  ["/app/finance/actions", "workspaces"],
-  ["/app/reports", "workspaces"],
-  ["/app/documents", "workspaces"],
-  ["/app/seo", "workspaces"],
-  ["/app/inbox", "workspaces"],
-  ["/app/onboarding", "tower"],
+// Secondary/utility surfaces: still reachable via the "More" expander,
+// but visually demoted out of the primary rail.
+const moreNav: NavItem[] = [
+  { label: "Inbox", href: "/app/inbox", icon: Mail },
+  { label: "Bookings", href: "/app/bookings", icon: Calendar },
+  { label: "Finance", href: "/app/finance", icon: Landmark },
+  { label: "Accounting", href: "/app/accounting", icon: Calculator },
+  { label: "Payments", href: "/app/payments", icon: CreditCard },
+  { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle },
+  { label: "Content", href: "/app/marketing", icon: Megaphone },
+  { label: "Automations", href: "/app/automations", icon: Zap },
+  { label: "Projects", href: "/app/projects", icon: FolderKanban },
+  { label: "Expenses", href: "/app/expenses", icon: Receipt },
+  { label: "Reports", href: "/app/reports", icon: BarChart3 },
+  { label: "Inventory", href: "/app/commerce?tab=inventory", icon: Package },
+  { label: "Team", href: "/app/settings/team", icon: Users2 },
+  { label: "Connect", href: "/app/connect", icon: Plug },
+  { label: "Branding", href: "/app/profile", icon: Palette },
+  { label: "Site editor", href: "/app/presence", icon: Globe },
+  { label: "SEO", href: "/app/seo", icon: SearchIcon2, featureKey: "nav.workspaces.seo" },
+  { label: "Developer", href: "/app/settings/developers", icon: Wrench },
 ];
 
-function detectPrimarySection(pathname: string): PrimarySectionId {
-  if (pathname === "/app") return "tower";
-  for (const [prefix, section] of routeToSurface) {
-    if (pathname === prefix || pathname.startsWith(prefix + "/")) {
-      return section;
-    }
-  }
-  return "workspaces";
-}
+// Dormant modules — only rendered in the "Coming soon" section when their
+// static featureFlag is enabled (dev defaults on, prod off).
+const comingSoonNav: NavItem[] = [
+  { label: "Documents", href: "/app/documents", icon: FileText, dormantFlag: "documents" },
+  { label: "Community", href: "/app/community", icon: MessageCircle, dormantFlag: "community" },
+  { label: "Learn", href: "/app/learn", icon: BookOpen, dormantFlag: "learning" },
+  { label: "Marketplace", href: "/app/marketplace", icon: Globe, dormantFlag: "marketplaceBrowsing" },
+];
 
 const mobileBottomNav = [
   { label: "KEYFLOW", href: "/app/keyflow-command", icon: Radar },
@@ -370,7 +366,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   useNavigationContext();
 
-  const activePrimary = useMemo(() => detectPrimarySection(pathname), [pathname]);
   const copilotModule = useMemo((): CopilotModule => {
     if (pathname === "/app") return "cockpit";
     if (pathname.startsWith("/app/crm")) return "crm";
@@ -386,11 +381,10 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     if (pathname.startsWith("/app/profile")) return "profile";
     return "cockpit";
   }, [pathname]);
-  const [expandedSection, setExpandedSection] = useState<PrimarySectionId | null>(null);
-  const secondaryVisible = expandedSection ?? (activePrimary !== "cockpit" && activePrimary !== "tower" ? activePrimary : null);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
-    setExpandedSection(null);
+    setMoreOpen(false);
   }, [pathname]);
 
   const isSecondaryActive = useCallback((item: NavItem) => {
@@ -430,6 +424,22 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     },
     [featureFlags],
   );
+  const isItemHiddenByDormantFlag = useCallback(
+    (item: NavItem) => {
+      if (!item.dormantFlag) return false;
+      return !dormantFeatureFlags[item.dormantFlag];
+    },
+    [],
+  );
+  const visibleMoreNav = useMemo(
+    () => moreNav.filter((i) => !isItemHiddenByDormantFlag(i)),
+    [isItemHiddenByDormantFlag],
+  );
+  const visibleComingSoonNav = useMemo(
+    () => comingSoonNav.filter((i) => !isItemHiddenByDormantFlag(i)),
+    [isItemHiddenByDormantFlag],
+  );
+  const showGamificationBadges = dormantFeatureFlags.gamificationBadges;
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
 
@@ -590,17 +600,14 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const handlePrimaryClick = (item: PrimaryNavItem) => {
-    if (item.href) {
-      router.push(item.href);
-      setExpandedSection(null);
-    } else {
-      setExpandedSection((prev) => (prev === item.id ? null : item.id));
-    }
-  };
-
-  const currentSecondary = secondaryVisible ? secondaryNav[secondaryVisible] : null;
-  const currentSectionLabel = primaryNav.find((p) => p.id === secondaryVisible)?.label;
+  const isPrimaryActive = useCallback(
+    (item: PrimaryNavItem) => {
+      if (!item.href) return false;
+      const basePath = item.href.split("?")[0];
+      return pathname === basePath || pathname.startsWith(basePath + "/");
+    },
+    [pathname],
+  );
 
   return (
     <div className="h-dvh bg-background text-foreground overflow-hidden">
@@ -625,21 +632,20 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
             {primaryNav.map((item) => {
               const Icon = item.icon;
-              const isActive = activePrimary === item.id;
-              const isExpanded = expandedSection === item.id;
+              const isActive = isPrimaryActive(item);
               return (
-                <button
-                  key={item.id}
-                  onClick={() => handlePrimaryClick(item)}
+                <Link
+                  key={item.label}
+                  href={item.href ?? "#"}
                   className={cn(
                     "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group",
                     isActive
                       ? "text-foreground"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
-                    isExpanded && "bg-muted/50"
                   )}
                   title={item.label}
                   aria-label={item.label}
+                  onClick={() => setMoreOpen(false)}
                 >
                   {isActive && (
                     <div
@@ -648,9 +654,25 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                     />
                   )}
                   <Icon className="w-[18px] h-[18px]" />
-                </button>
+                </Link>
               );
             })}
+
+            <button
+              key="more"
+              onClick={() => setMoreOpen((v) => !v)}
+              className={cn(
+                "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group",
+                moreOpen
+                  ? "text-foreground bg-muted/50"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+              )}
+              title="More"
+              aria-label="More"
+              aria-expanded={moreOpen}
+            >
+              <MoreHorizontal className="w-[18px] h-[18px]" />
+            </button>
 
             <div className="mt-auto flex flex-col items-center gap-1">
               <button
@@ -694,19 +716,26 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             </div>
           </div>
 
-          {currentSecondary && (
+          {moreOpen && (
             <div
-              className="w-[192px] border-r border-border h-full flex flex-col overflow-hidden"
+              className="w-[208px] border-r border-border h-full flex flex-col overflow-hidden"
               style={{ background: "hsl(var(--kf-sidebar-bg) / 0.7)" }}
             >
-              <div className="px-3 py-3 border-b border-border/50">
+              <div className="px-3 py-3 border-b border-border/50 flex items-center justify-between">
                 <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {currentSectionLabel}
+                  More
                 </h2>
+                <button
+                  onClick={() => setMoreOpen(false)}
+                  className="p-0.5 rounded text-muted-foreground hover:text-foreground"
+                  aria-label="Close more menu"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
               <div className="flex-1 overflow-y-auto py-1.5 px-1.5">
                 <div className="flex flex-col gap-px">
-                  {currentSecondary.map((item) => {
+                  {visibleMoreNav.map((item) => {
                     const Icon = item.icon;
                     const active = isSecondaryActive(item);
                     const showConnectorBadge =
@@ -758,6 +787,34 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                     );
                   })}
                 </div>
+                {visibleComingSoonNav.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-border/40">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 mb-1">
+                      Coming soon
+                    </div>
+                    <div className="flex flex-col gap-px">
+                      {visibleComingSoonNav.map((item) => {
+                        const Icon = item.icon;
+                        const active = isSecondaryActive(item);
+                        return (
+                          <Link
+                            key={item.href + item.label}
+                            href={item.href}
+                            className={cn(
+                              "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all opacity-70",
+                              active
+                                ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
+                                : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                            )}
+                          >
+                            <Icon className="w-4 h-4 flex-shrink-0" />
+                            <span>{item.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -829,7 +886,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 )}
               </div>
 
-              <MissionsButton />
+              {showGamificationBadges && <MissionsButton />}
 
               <div className="relative" ref={notifRef}>
                 <button
@@ -1069,67 +1126,107 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 <span>KEYFLOW</span>
               </Link>
 
-              {(["workspaces", "studio", "public"] as const).map((sectionId) => {
-                const section = primaryNav.find((p) => p.id === sectionId)!;
-                const items = secondaryNav[sectionId] || [];
-                const SectionIcon = section.icon;
-                return (
-                  <div key={sectionId} className="mt-2">
-                    <div className="kf-section-label flex items-center gap-1.5">
-                      <SectionIcon className="w-3 h-3" />
-                      {section.label}
-                    </div>
-                    <div className="flex flex-col gap-px">
-                      {items.map((item) => {
-                        const Icon = item.icon;
-                        const active = isSecondaryActive(item);
-                        const showConnectorBadge =
-                          item.href === "/app/connect" && connectorAlertCount > 0;
-                        const isLocked = isFeatureLocked(item);
-                        if (isLocked) {
-                          return (
-                            <button
-                              key={item.href + item.label}
-                              type="button"
-                              aria-disabled="true"
-                              title="future keyflow"
-                              onClick={(e) => e.preventDefault()}
-                              className="kf-nav-item py-2.5 w-full text-left opacity-60 cursor-not-allowed"
-                            >
-                              <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                              <span>{item.label}</span>
-                              <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
-                            </button>
-                          );
-                        }
-                        return (
-                          <Link
-                            key={item.href + item.label}
-                            href={item.href}
-                            onClick={() => setMobileDrawerOpen(false)}
-                            className={cn(
-                              "kf-nav-item py-2.5 active:scale-[0.98]",
-                              active && "active"
-                            )}
+              <div className="mt-2">
+                <div className="kf-section-label flex items-center gap-1.5">
+                  <LayoutGrid className="w-3 h-3" />
+                  Primary
+                </div>
+                <div className="flex flex-col gap-px">
+                  {primaryNav.map((item) => {
+                    const Icon = item.icon;
+                    const active = isPrimaryActive(item);
+                    return (
+                      <Link
+                        key={item.label}
+                        href={item.href ?? "#"}
+                        onClick={() => setMobileDrawerOpen(false)}
+                        className={cn("kf-nav-item py-2.5 active:scale-[0.98]", active && "active")}
+                      >
+                        <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                        <span>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-2">
+                <div className="kf-section-label flex items-center gap-1.5">
+                  <MoreHorizontal className="w-3 h-3" />
+                  More
+                </div>
+                <div className="flex flex-col gap-px">
+                  {visibleMoreNav.map((item) => {
+                    const Icon = item.icon;
+                    const active = isSecondaryActive(item);
+                    const showConnectorBadge =
+                      item.href === "/app/connect" && connectorAlertCount > 0;
+                    const isLocked = isFeatureLocked(item);
+                    if (isLocked) {
+                      return (
+                        <button
+                          key={item.href + item.label}
+                          type="button"
+                          aria-disabled="true"
+                          title="future keyflow"
+                          onClick={(e) => e.preventDefault()}
+                          className="kf-nav-item py-2.5 w-full text-left opacity-60 cursor-not-allowed"
+                        >
+                          <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                          <span>{item.label}</span>
+                          <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
+                        </button>
+                      );
+                    }
+                    return (
+                      <Link
+                        key={item.href + item.label}
+                        href={item.href}
+                        onClick={() => setMobileDrawerOpen(false)}
+                        className={cn("kf-nav-item py-2.5 active:scale-[0.98]", active && "active")}
+                      >
+                        <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                        <span>{item.label}</span>
+                        {showConnectorBadge && (
+                          <span
+                            className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
+                            style={{ background: "hsl(var(--kf-accent1))" }}
+                            aria-label={`${connectorAlertCount} connectors need attention`}
                           >
-                            <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                            <span>{item.label}</span>
-                            {showConnectorBadge && (
-                              <span
-                                className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
-                                style={{ background: "hsl(var(--kf-accent1))" }}
-                                aria-label={`${connectorAlertCount} connectors need attention`}
-                              >
-                                {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
-                              </span>
-                            )}
-                          </Link>
-                        );
-                      })}
-                    </div>
+                            {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {visibleComingSoonNav.length > 0 && (
+                <div className="mt-2">
+                  <div className="kf-section-label flex items-center gap-1.5">
+                    <Lock className="w-3 h-3" />
+                    Coming soon
                   </div>
-                );
-              })}
+                  <div className="flex flex-col gap-px">
+                    {visibleComingSoonNav.map((item) => {
+                      const Icon = item.icon;
+                      const active = isSecondaryActive(item);
+                      return (
+                        <Link
+                          key={item.href + item.label}
+                          href={item.href}
+                          onClick={() => setMobileDrawerOpen(false)}
+                          className={cn("kf-nav-item py-2.5 active:scale-[0.98] opacity-70", active && "active")}
+                        >
+                          <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                          <span>{item.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="kf-divider my-2" />
 

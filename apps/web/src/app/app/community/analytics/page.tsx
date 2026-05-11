@@ -1,3 +1,4 @@
+// @keyflow:dormant
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
@@ -178,4 +179,3 @@ function Stat({ icon: Icon, label, value, sub, delta }: { icon: React.ComponentT
     </motion.div>
   );
 }
-
