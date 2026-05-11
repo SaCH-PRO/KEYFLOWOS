@@ -1,9 +1,15 @@
+// @keyflow:dormant — Documents module hidden behind nav.workspaces.documents
+// feature flag during the seven-system overhaul (KEY-0). Quotes, invoices,
+// receipts, and AI briefs continue to live in their own surfaces.
+// Code preserved for potential future revival; deleted in KEY-9 cleanup
+// if still unused.
 "use client";
 
 import Link from "next/link";
 import { ArrowRight, FileText, HardDrive, FolderOpen } from "lucide-react";
+import { DormantRoute } from "@/components/dormant-route";
 
-export default function DocumentsPage() {
+function DocumentsPageInner() {
   return (
     <div className="space-y-6 max-w-5xl mx-auto p-4">
       <div className="flex items-center gap-3">
@@ -53,5 +59,13 @@ export default function DocumentsPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function DocumentsPage() {
+  return (
+    <DormantRoute featureKey="nav.workspaces.documents" title="Documents">
+      <DocumentsPageInner />
+    </DormantRoute>
   );
 }

@@ -53,6 +53,7 @@ import { ConnectModule } from './modules/connect/connect.module';
 import { SeoModule } from './modules/seo/seo.module';
 import { GrowthIntelligenceModule } from './modules/growth-intelligence/growth-intelligence.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
+import { BlueprintModule } from './modules/blueprint/blueprint.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { PublicEventsModule } from './modules/public-events/public-events.module';
 
@@ -109,6 +110,7 @@ import { PublicEventsModule } from './modules/public-events/public-events.module
     SeoModule,
     GrowthIntelligenceModule,
     FeatureFlagsModule,
+    BlueprintModule,
     CalendarModule,
     PublicEventsModule,
   ],

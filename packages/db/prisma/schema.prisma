@@ -231,6 +231,9 @@ model Business {
   orgStandards         OrgStandard[]
   reviewTasks          ReviewTask[]
 
+  // KEY-1: Business Blueprint (operating DNA)
+  blueprint            BusinessBlueprint?
+
   // AI Output Templates
   outputTemplates      OutputTemplate[]
 
@@ -5818,6 +5821,81 @@ model AuthRateLimit {
 /// currently in a "coming soon" state plus a list of user emails that
 /// bypass the lock. Rows are seeded lazily by the API the first time the
 /// owner console reads them; missing rows behave as "not coming soon".
+// ---
+// KEY-1: BUSINESS BLUEPRINT — operating DNA
+// ---
+//
+// One row per Business. Acts as the canonical, mutable description of the
+// business that every later system (KEY orchestrator, storefront builder,
+// contact intelligence, procurement) reads from. Replaces the scattered
+// data living across Business.metaData, BusinessGuidanceProfile, and the
+// onboarding-concierge JSON blobs.
+//
+// Sections are JSON columns so the shape can iterate without migrations
+// while we settle on the right ontology. `schemaVersion` lets us migrate
+// in code when a section's shape stabilises. `completeness` is the
+// server-side weighted score surfaced to operators.
+//
+// Source-of-truth precedence when computing recommendations:
+//   1. BusinessBlueprint (this table) — operator-confirmed truth
+//   2. BusinessGuidanceProfile sub-profiles — legacy, sunset in KEY-9
+//   3. Business profile fields — legacy, sunset in KEY-9
+//
+model BusinessBlueprint {
+  id            String   @id @default(cuid())
+  businessId    String   @unique @map("business_id")
+  schemaVersion Int      @default(1) @map("schema_version")
+
+  /// { name, tagline, missionStatement, visionStatement, story,
+  ///   archetype, industry, foundedAt, country, languagesServed[] }
+  identity       Json     @default("{}")
+
+  /// { revenueModel, deliveryMethod, fulfillmentStyle, teamSize,
+  ///   timeCommitment, capacity: { mode, slotsPerWeek }, weeklyHours,
+  ///   pricingModel, paymentTerms, leadTime }
+  operatingModel Json     @default("{}") @map("operating_model")
+
+  /// { primaryGoal, northStarMetric, horizonMonths, revenueTarget,
+  ///   newCustomersTarget, focusAreas[] }
+  goals          Json     @default("{}")
+
+  /// { budgetCeiling, timeAvailable, regulatoryFlags[], geographic[],
+  ///   doNotDoList[], complianceNotes }
+  constraints    Json     @default("{}")
+
+  /// { primaryColor, secondaryColor, accentColor, voice, tone, keywords[],
+  ///   positioningStatement, doNotSay[], referenceBrands[] }
+  brand          Json     @default("{}")
+
+  /// { targetSegments[], demographics, painPoints[], buyingTriggers[],
+  ///   acquisitionChannels[], lifetimeValueTtd, repeatRatePct,
+  ///   referralPropensity }
+  customerModel  Json     @default("{}") @map("customer_model")
+
+  /// { priceRange: { low, high }, avgMargin, costStructure[], runwayMonths,
+  ///   cashPositionTier, processorMix[] }
+  financials     Json     @default("{}")
+
+  /// AI-inferred patterns + provenance. Mostly written by the KEY
+  /// orchestrator and the timeline ledger. Operators do NOT edit this
+  /// directly — they edit upstream sections and the AI reconciles.
+  /// { lastInferenceAt, eventCount, inferredPatterns[], aiSummary,
+  ///   confidence, provenance: { source, lastSyncAt }[] }
+  intelligence   Json     @default("{}")
+
+  /// 0–100 weighted completeness score. Identity 25, operatingModel 20,
+  /// goals 15, customerModel 15, brand 10, financials 10, constraints 5.
+  completeness  Int      @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  business  Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([completeness])
+  @@map("business_blueprints")
+}
+
 model FeatureFlag {
   id           String   @id @default(cuid())
   /// Stable key used in code (e.g. "nav.workspaces.seo").

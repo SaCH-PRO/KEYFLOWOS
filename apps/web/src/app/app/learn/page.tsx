@@ -1,6 +1,10 @@
+// @keyflow:dormant — Learn/education module hidden behind nav.public.learn
+// feature flag during the seven-system overhaul (KEY-0). Code preserved
+// for potential future revival; deleted in KEY-9 cleanup if still unused.
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { DormantRoute } from "@/components/dormant-route";
 import {
   GraduationCap,
   BookOpen,
@@ -31,7 +35,7 @@ const LEARN_TABS = [
 
 const _LEARN_TAB_KEYS = LEARN_TABS.map((t) => t.key);
 
-export default function LearnPage() {
+function LearnPageInner() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [courses, setCourses] = useState<Course[]>([]);
   const [enrollments, setEnrollments] = useState<CourseEnrollment[]>([]);
@@ -192,5 +196,13 @@ export default function LearnPage() {
       )}
 
     </WorkspaceShell>
+  );
+}
+
+export default function LearnPage() {
+  return (
+    <DormantRoute featureKey="nav.public.learn" title="Learn">
+      <LearnPageInner />
+    </DormantRoute>
   );
 }

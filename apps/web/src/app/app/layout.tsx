@@ -269,7 +269,7 @@ const secondaryNav: Record<string, NavItem[]> = {
     { label: "Projects", href: "/app/projects", icon: FolderKanban },
     { label: "Expenses", href: "/app/expenses", icon: Receipt },
     { label: "Reports", href: "/app/reports", icon: BarChart3 },
-    { label: "Documents", href: "/app/documents", icon: FileText },
+    { label: "Documents", href: "/app/documents", icon: FileText, featureKey: "nav.workspaces.documents" },
     { label: "SEO", href: "/app/seo", icon: SearchIcon2, featureKey: "nav.workspaces.seo" },
   ],
   studio: [
@@ -283,9 +283,9 @@ const secondaryNav: Record<string, NavItem[]> = {
   ],
   public: [
     { label: "Site editor", href: "/app/presence", icon: Globe },
-    { label: "Community", href: "/app/community", icon: MessageCircle },
-    { label: "Learn", href: "/app/learn", icon: BookOpen },
-    { label: "Marketplace", href: "/app/marketplace", icon: Globe },
+    { label: "Community", href: "/app/community", icon: MessageCircle, featureKey: "nav.public.community" },
+    { label: "Learn", href: "/app/learn", icon: BookOpen, featureKey: "nav.public.learn" },
+    { label: "Marketplace", href: "/app/marketplace", icon: Globe, featureKey: "nav.public.marketplace" },
   ],
 };
 
