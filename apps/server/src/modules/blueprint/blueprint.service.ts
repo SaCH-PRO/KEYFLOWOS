@@ -210,14 +210,14 @@ export class BlueprintService {
    * existing data so downstream consumers can already rely on the shape.
    */
   async inferFromEvents(businessId: string): Promise<BlueprintData> {
-    const [productCategories, monthlyRevenue] = await Promise.all([
+    const [productCategories, monthlyRevenue] = (await Promise.all([
       this.prisma.client.product.groupBy({
         by: ['category'],
-        where: { businessId, deletedAt: null, category: { not: null } },
+        where: { businessId, deletedAt: null, category: { not: null } } as unknown as Prisma.ProductWhereInput,
         _count: { _all: true },
         orderBy: { _count: { category: 'desc' } },
         take: 3,
-      }),
+      }) as Promise<Array<{ category: string | null }>>,
       this.prisma.client.invoice
         .aggregate({
           where: {
@@ -229,7 +229,7 @@ export class BlueprintService {
           _sum: { total: true },
         })
         .catch(() => null),
-    ]);
+    ])) as [Array<{ category: string | null }>, { _sum: { total: number | null } } | null];
 
     const intelligence: Partial<BlueprintIntelligence> = {
       topProductCategories: productCategories
