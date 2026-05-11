@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { BlueprintService } from '../blueprint/blueprint.service';
 import { matchIndustryTemplate, getTemplateById, IndustryTemplate, INDUSTRY_TEMPLATES } from './industry-templates';
 
 export interface SetupStatus {
@@ -79,6 +80,7 @@ export class OnboardingConciergeService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}
 
   async getSetupStatus(businessId: string): Promise<SetupStatus> {
@@ -241,6 +243,18 @@ export class OnboardingConciergeService {
     });
 
     await this.awardSetupMilestone(businessId, 'conciergeSetupComplete');
+
+    // Mirror the auto-configured choices into the BusinessBlueprint so KEY
+    // and downstream surfaces immediately reflect the new operating DNA.
+    try {
+      await this.blueprint.inferFromOnboarding(businessId, {
+        archetype: template.id,
+        industry: template.label,
+        channels: ['STOREFRONT'],
+      });
+    } catch (err) {
+      this.logger.debug(`Blueprint inference failed: ${(err as Error).message}`);
+    }
 
     return {
       templateId: template.id,

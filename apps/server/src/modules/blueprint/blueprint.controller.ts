@@ -1,43 +1,43 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { BlueprintPatch, BlueprintService } from './blueprint.service';
-
-// KEY-1 BusinessBlueprint REST surface. All endpoints are scoped to a
-// businessId path param + protected by membership via BusinessGuard.
+import { BlueprintService } from './blueprint.service';
+import { BlueprintPatch } from './blueprint.types';
 
 @Controller('blueprint/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class BlueprintController {
-  constructor(@Inject(BlueprintService) private readonly service: BlueprintService) {}
+  constructor(@Inject(BlueprintService) private readonly blueprint: BlueprintService) {}
 
   @Get()
   async get(@Param('businessId') businessId: string) {
-    const blueprint = await this.service.getBlueprint(businessId);
-    return { blueprint };
+    return this.blueprint.getBlueprint(businessId);
   }
 
   @Patch()
-  async update(@Param('businessId') businessId: string, @Body() body: BlueprintPatch) {
-    const blueprint = await this.service.updateBlueprint(businessId, body ?? {});
-    return { blueprint };
+  async update(
+    @Param('businessId') businessId: string,
+    @Body() body: BlueprintPatch,
+  ) {
+    return this.blueprint.updateBlueprint(businessId, body);
   }
 
-  @Get('setup-steps')
-  async setupSteps(@Param('businessId') businessId: string) {
-    const steps = await this.service.getRecommendedSetupSteps(businessId);
-    return { steps };
+  @Post('infer/onboarding')
+  async inferFromOnboarding(
+    @Param('businessId') businessId: string,
+    @Body() body: { answers: Record<string, unknown> },
+  ) {
+    return this.blueprint.inferFromOnboarding(businessId, body.answers || {});
   }
 
-  @Get('context')
-  async context(@Param('businessId') businessId: string) {
-    const context = await this.service.getBlueprintContext(businessId);
-    return { context };
-  }
-
-  @Post('infer-from-events')
+  @Post('infer/events')
   async inferFromEvents(@Param('businessId') businessId: string) {
-    const blueprint = await this.service.inferFromEvents(businessId);
-    return { blueprint };
+    return this.blueprint.inferFromEvents(businessId);
+  }
+
+  @Get('recommendations')
+  async recommendations(@Param('businessId') businessId: string) {
+    const steps = await this.blueprint.getRecommendedSetupSteps(businessId);
+    return { steps };
   }
 }

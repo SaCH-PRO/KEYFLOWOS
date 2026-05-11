@@ -231,9 +231,6 @@ model Business {
   orgStandards         OrgStandard[]
   reviewTasks          ReviewTask[]
 
-  // KEY-1: Business Blueprint (operating DNA)
-  blueprint            BusinessBlueprint?
-
   // AI Output Templates
   outputTemplates      OutputTemplate[]
 
@@ -439,6 +436,9 @@ model Business {
   journeyTouchpoints   JourneyTouchpoint[]
   attributionResults   AttributionResult[]
   growthInsights       GrowthInsight[]
+
+  // KEY-1: Business Blueprint (operating DNA)
+  blueprint            BusinessBlueprint?
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
