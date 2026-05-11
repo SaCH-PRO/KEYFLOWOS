@@ -54,6 +54,7 @@ import {
   Search as SearchIcon2,
   Landmark,
   Calculator,
+  Building2,
 } from "lucide-react";
 
 interface ResolvedFeatureFlag {
