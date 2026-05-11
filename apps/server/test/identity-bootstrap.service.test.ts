@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { IdentityService } from '../src/modules/identity/identity.service';
+import type { BlueprintService } from '../src/modules/blueprint/blueprint.service';
+
+const blueprintMock = {
+  inferFromOnboarding: async () => ({}),
+} as unknown as BlueprintService;
 import { PrismaService } from '../src/core/prisma/prisma.service';
 
 /**
@@ -186,7 +191,7 @@ describe('IdentityService.bootstrapUser', () => {
     state.memberships.push({ userId: 'old-local-id', businessId: 'biz_pre', role: 'OWNER' });
     state.sessions.push({ id: 'sess_1', userId: 'old-local-id' });
 
-    const service = new IdentityService(prisma);
+    const service = new IdentityService(prisma, blueprintMock);
 
     const result = await service.bootstrapUser({
       userId: 'new-supabase-id',
@@ -211,7 +216,7 @@ describe('IdentityService.bootstrapUser', () => {
 
   it('creates a fresh User and Business for a brand-new Supabase user (no regression)', async () => {
     const { prisma, state } = makePrismaMock();
-    const service = new IdentityService(prisma);
+    const service = new IdentityService(prisma, blueprintMock);
 
     const result = await service.bootstrapUser({
       userId: 'brand-new-id',

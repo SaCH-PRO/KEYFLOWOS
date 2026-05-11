@@ -1,11 +1,34 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { BlueprintService } from '../blueprint/blueprint.service';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
+
+/**
+ * Map a Business profile field to the onboarding-answer key that
+ * `BlueprintService.inferFromOnboarding` understands. Only fields that have
+ * a direct equivalent in an existing blueprint section are listed; the rest
+ * are intentionally ignored so the bridge stays lossless.
+ */
+const BUSINESS_FIELD_TO_BLUEPRINT_ANSWER: Record<string, string> = {
+  name: 'businessName',
+  businessIntent: 'businessIntent',
+  industry: 'industry',
+  tagline: 'tagline',
+  country: 'country',
+  primaryColor: 'primaryColor',
+  secondaryColor: 'secondaryColor',
+  logoUrl: 'logoUrl',
+  currency: 'currency',
+  teamSize: 'teamSize',
+};
 
 @Injectable()
 export class IdentityService {
   private readonly logger = new Logger(IdentityService.name);
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(BlueprintService) private readonly blueprint: BlueprintService,
+  ) {}
 
   listBusinesses(userId: string) {
     if (!userId) throw new UnauthorizedException('User ID is required to list businesses');
@@ -277,6 +300,23 @@ export class IdentityService {
       this.detectDocumentImpact(businessId, changedFields, oldBusiness.name).catch((err) =>
         this.logger.warn(`Document impact detection failed for business "${oldBusiness.name}" (${businessId}): ${err?.message ?? err}`),
       );
+
+      // Mirror the changed Business fields into the BusinessBlueprint so KEY's
+      // grounding (and every AI surface that pulls blueprint context) stays in
+      // sync with day-to-day profile edits. Best-effort, non-blocking — a
+      // failed mirror must never break the underlying business update.
+      const mirrored: Record<string, unknown> = {};
+      for (const field of changedFields) {
+        const answerKey = BUSINESS_FIELD_TO_BLUEPRINT_ANSWER[field];
+        if (!answerKey) continue;
+        const value = (rest as Record<string, unknown>)[field];
+        if (value !== undefined) mirrored[answerKey] = value;
+      }
+      if (Object.keys(mirrored).length > 0) {
+        this.blueprint.inferFromOnboarding(businessId, mirrored).catch((err) =>
+          this.logger.warn(`Blueprint mirror failed for business ${businessId}: ${(err as Error)?.message ?? err}`),
+        );
+      }
     }
 
     return result;

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { IdentityService } from '../src/modules/identity/identity.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
+import { BlueprintService } from '../src/modules/blueprint/blueprint.service';
 
 class PrismaMock implements Partial<PrismaService> {
   private businesses: any[] = [];
@@ -21,10 +22,14 @@ class PrismaMock implements Partial<PrismaService> {
   };
 }
 
+const blueprintMock = {
+  inferFromOnboarding: vi.fn(async () => ({})),
+} as unknown as BlueprintService;
+
 describe('IdentityService', () => {
   it('creates and lists businesses scoped by owner', async () => {
     const prisma = new PrismaMock() as unknown as PrismaService;
-    const service = new IdentityService(prisma);
+    const service = new IdentityService(prisma, blueprintMock);
 
     await service.createBusiness({ name: 'Acme', ownerId: 'user_1' });
     await service.createBusiness({ name: 'Beta', ownerId: 'user_2' });

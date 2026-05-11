@@ -7,10 +7,11 @@ import { AuthSecurityService } from './auth-security.service';
 import { PasswordPolicyService } from './password-policy.service';
 import { AiModule } from '../ai/ai.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { BlueprintModule } from '../blueprint/blueprint.module';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 
 @Module({
-  imports: [AiModule, NotificationsModule, PrismaModule],
+  imports: [AiModule, NotificationsModule, BlueprintModule, PrismaModule],
   controllers: [IdentityController],
   providers: [IdentityService, IdentitySignupService, BusinessContextService, AuthSecurityService, PasswordPolicyService],
   exports: [IdentityService, IdentitySignupService, BusinessContextService, AuthSecurityService, PasswordPolicyService],

@@ -19,20 +19,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-
-interface BlueprintData {
-  schemaVersion: number;
-  identity: Record<string, unknown>;
-  operatingModel: Record<string, unknown>;
-  goals: Record<string, unknown>;
-  constraints: Record<string, unknown>;
-  brand: Record<string, unknown>;
-  customerModel: Record<string, unknown>;
-  financials: Record<string, unknown>;
-  intelligence: Record<string, unknown>;
-  completeness: number;
-  updatedAt: string;
-}
+import type {
+  BlueprintData,
+  BlueprintSectionDataMap,
+  BlueprintSectionKey,
+} from "@/lib/blueprint-types";
 
 interface RecommendedStep {
   id: string;
@@ -42,7 +33,7 @@ interface RecommendedStep {
   href?: string;
 }
 
-const SECTION_LABELS: Record<string, string> = {
+const SECTION_LABELS: Record<BlueprintSectionKey, string> = {
   identity: "Identity",
   operatingModel: "Operating Model",
   goals: "Goals",
@@ -53,10 +44,9 @@ const SECTION_LABELS: Record<string, string> = {
   intelligence: "Intelligence",
 };
 
-function arrToCsv(value: unknown): string {
-  if (Array.isArray(value)) return value.join(", ");
-  if (value == null) return "";
-  return String(value);
+function arrToCsv(value: string[] | undefined): string {
+  if (!value) return "";
+  return value.join(", ");
 }
 
 function csvToArr(value: string): string[] {
@@ -91,14 +81,14 @@ function FieldRow({
 }
 
 function TextField(props: {
-  value: unknown;
+  value: string | undefined;
   onChange: (v: string) => void;
   placeholder?: string;
 }) {
   return (
     <input
       type="text"
-      value={typeof props.value === "string" ? props.value : ""}
+      value={props.value ?? ""}
       onChange={(e) => props.onChange(e.target.value)}
       placeholder={props.placeholder}
       className="kf-input w-full px-3 py-2 kf-radius-md kf-text-body"
@@ -112,7 +102,7 @@ function TextField(props: {
 }
 
 function TextArea(props: {
-  value: unknown;
+  value: string | undefined;
   onChange: (v: string) => void;
   rows?: number;
   placeholder?: string;
@@ -120,7 +110,7 @@ function TextArea(props: {
   return (
     <textarea
       rows={props.rows || 3}
-      value={typeof props.value === "string" ? props.value : ""}
+      value={props.value ?? ""}
       onChange={(e) => props.onChange(e.target.value)}
       placeholder={props.placeholder}
       className="w-full px-3 py-2 kf-radius-md kf-text-body"
@@ -134,13 +124,13 @@ function TextArea(props: {
 }
 
 function SelectField(props: {
-  value: unknown;
+  value: string | undefined;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
 }) {
   return (
     <select
-      value={typeof props.value === "string" ? props.value : ""}
+      value={props.value ?? ""}
       onChange={(e) => props.onChange(e.target.value)}
       className="w-full px-3 py-2 kf-radius-md kf-text-body"
       style={{
@@ -160,7 +150,7 @@ function SelectField(props: {
 }
 
 function NumberField(props: {
-  value: unknown;
+  value: number | undefined;
   onChange: (v: number | undefined) => void;
   placeholder?: string;
 }) {
@@ -212,7 +202,10 @@ function CompletenessBar({ value }: { value: number }) {
 }
 
 export default function BlueprintPage() {
-  const [businessId, setBusinessId] = useState<string | null>(() =>
+  // Lazy initializer hydrates the businessId synchronously from localStorage on
+  // first client render so we no longer need a follow-up effect to set it
+  // (which previously required a `react-hooks/set-state-in-effect` disable).
+  const [businessId] = useState<string | null>(() =>
     typeof window === "undefined" ? null : getStoredBusinessId(),
   );
   const [data, setData] = useState<BlueprintData | null>(null);
@@ -221,19 +214,13 @@ export default function BlueprintPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (businessId === null && typeof window !== "undefined") {
-      const stored = getStoredBusinessId();
-      // Hydrate businessId from localStorage after SSR; runs once.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (stored) setBusinessId(stored);
-    }
-  }, [businessId]);
-
   const load = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    const [bp, recs] = await Promise.all([
+    const [bp, recsResp] = await Promise.all([
       apiGet<BlueprintData>(`/blueprint/businesses/${businessId}`),
       apiGet<{ steps: RecommendedStep[] }>(`/blueprint/businesses/${businessId}/recommendations`),
     ]);
@@ -241,7 +228,7 @@ export default function BlueprintPage() {
       setData(bp.data);
       setDraft(bp.data);
     }
-    if (recs.data) setRecs(recs.data.steps || []);
+    if (recsResp.data) setRecs(recsResp.data.steps || []);
     setLoading(false);
   }, [businessId]);
 
@@ -256,15 +243,19 @@ export default function BlueprintPage() {
     [data, draft],
   );
 
-  const updateSection = (section: keyof BlueprintData, patch: Record<string, unknown>) => {
+  function updateSection<K extends BlueprintSectionKey>(
+    section: K,
+    patch: Partial<BlueprintSectionDataMap[K]>,
+  ) {
     setDraft((prev) => {
       if (!prev) return prev;
+      const current = prev[section];
       return {
         ...prev,
-        [section]: { ...(prev[section] as Record<string, unknown>), ...patch },
-      } as BlueprintData;
+        [section]: { ...current, ...patch },
+      };
     });
-  };
+  }
 
   const handleSave = async () => {
     if (!businessId || !draft) return;
@@ -300,14 +291,14 @@ export default function BlueprintPage() {
     );
   }
 
-  const id = draft.identity || {};
-  const op = draft.operatingModel || {};
-  const goals = draft.goals || {};
-  const cons = draft.constraints || {};
-  const brand = draft.brand || {};
-  const cust = draft.customerModel || {};
-  const fin = draft.financials || {};
-  const intel = draft.intelligence || {};
+  const id = draft.identity;
+  const op = draft.operatingModel;
+  const goals = draft.goals;
+  const cons = draft.constraints;
+  const brand = draft.brand;
+  const cust = draft.customerModel;
+  const fin = draft.financials;
+  const intel = draft.intelligence;
 
   return (
     <div className="p-6 max-w-5xl mx-auto pb-32">
@@ -689,8 +680,7 @@ export default function BlueprintPage() {
               <li>
                 Recent momentum score:{" "}
                 <span style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-                  {typeof intel.recentMomentumScore === "number" ||
-                  typeof intel.recentMomentumScore === "string"
+                  {typeof intel.recentMomentumScore === "number"
                     ? intel.recentMomentumScore
                     : "—"}
                 </span>
@@ -698,9 +688,7 @@ export default function BlueprintPage() {
               <li>
                 Last inferred:{" "}
                 <span style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-                  {typeof intel.inferredAt === "string" || typeof intel.inferredAt === "number"
-                    ? new Date(intel.inferredAt).toLocaleString()
-                    : "—"}
+                  {intel.inferredAt ? new Date(intel.inferredAt).toLocaleString() : "—"}
                 </span>
               </li>
             </ul>
