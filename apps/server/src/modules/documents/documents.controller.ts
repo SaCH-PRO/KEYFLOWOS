@@ -1,3 +1,4 @@
+// @keyflow:dormant — UI surface gated by featureFlags (KEY-9 cleanup target).
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Inject, Req } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';

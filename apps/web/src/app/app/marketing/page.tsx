@@ -49,6 +49,7 @@ import { LeadFormsPanel } from "./components/lead-forms-panel";
 import { CampaignActionQueue } from "./components/campaign-action-queue";
 import { FormOptimizationQueue } from "./components/form-optimization-queue";
 import { SocialTabContent } from "./components/social-tab-content";
+import { featureFlags } from "@/lib/feature-flags";
 import { MasterCalendar } from "../calendar/master-calendar";
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
@@ -933,7 +934,13 @@ export default function ContentPage() {
                         })()}
                       </div>
                     )}
-                    <SocialTabContent businessId={mk.businessId} onPostsLoaded={mk.handleSocialPostsLoaded} />
+                    {featureFlags.contentScheduler ? (
+                      <SocialTabContent businessId={mk.businessId} onPostsLoaded={mk.handleSocialPostsLoaded} />
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                        The standalone content scheduler is paused. Use the campaign tools above to send outbound updates in the meantime.
+                      </div>
+                    )}
                   </div>
                 )}
 

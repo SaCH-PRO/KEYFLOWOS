@@ -1,7 +1,4 @@
-// @keyflow:dormant — Marketplace browsing hidden behind nav.public.marketplace
-// feature flag during the seven-system overhaul (KEY-0). The new procurement
-// experience replacing it lives at /app/store (KEY-8). Code preserved for
-// potential future revival; deleted in KEY-9 cleanup if still unused.
+// @keyflow:dormant — marketplace browsing, gated by featureFlags.marketplaceBrowsing (KEY-9 cleanup target).
 "use client";
 
 import { useEffect, useState, useCallback } from "react";

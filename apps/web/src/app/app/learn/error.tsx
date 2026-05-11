@@ -1,3 +1,4 @@
+// @keyflow:dormant
 "use client";
 
 import { ModuleErrorBoundary } from "@/components/ui/module-error-boundary";

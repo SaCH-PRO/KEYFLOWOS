@@ -1,8 +1,4 @@
-// @keyflow:dormant — Documents module hidden behind nav.workspaces.documents
-// feature flag during the seven-system overhaul (KEY-0). Quotes, invoices,
-// receipts, and AI briefs continue to live in their own surfaces.
-// Code preserved for potential future revival; deleted in KEY-9 cleanup
-// if still unused.
+// @keyflow:dormant — documents module, gated by featureFlags.documents (KEY-9 cleanup target).
 "use client";
 
 import Link from "next/link";

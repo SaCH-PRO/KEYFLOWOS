@@ -1,6 +1,4 @@
-// @keyflow:dormant — Learn/education module hidden behind nav.public.learn
-// feature flag during the seven-system overhaul (KEY-0). Code preserved
-// for potential future revival; deleted in KEY-9 cleanup if still unused.
+// @keyflow:dormant — learn module, gated by featureFlags.learning (KEY-9 cleanup target).
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";

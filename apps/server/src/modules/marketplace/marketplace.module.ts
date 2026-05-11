@@ -1,3 +1,4 @@
+// @keyflow:dormant — UI surface gated by featureFlags (KEY-9 cleanup target).
 import { Module, forwardRef } from '@nestjs/common';
 import { MarketplaceController } from './marketplace.controller';
 import { MarketplacePublicController } from './marketplace-public.controller';

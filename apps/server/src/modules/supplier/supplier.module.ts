@@ -1,3 +1,4 @@
+// @keyflow:dormant — UI surface gated by featureFlags (KEY-9 cleanup target).
 import { Module } from '@nestjs/common';
 import { SupplierController } from './supplier.controller';
 import { SupplierService } from './supplier.service';
