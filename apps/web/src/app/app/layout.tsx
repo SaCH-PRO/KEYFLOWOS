@@ -251,7 +251,7 @@ interface NavItem {
 // Legacy section ids preserved on PrimaryNavItem so older nav data and any
 // downstream consumers that still grep on these tokens keep working even
 // though the rail no longer renders Workspaces / Studio / Public groups.
-type PrimarySectionId = "cockpit" | "tower" | "store" | "workspaces" | "studio" | "public";
+type PrimarySectionId = "cockpit" | "tower" | "store" | "workspaces" | "studio" | "public" | "key";
 
 interface PrimaryNavItem {
   id: PrimarySectionId;
@@ -264,10 +264,12 @@ interface PrimaryNavItem {
 // top of the rail is "Cockpit" (KEYFLOW home). KEY (the AI agent) lives
 // at the bottom of the rail. The remaining five are direct links here.
 const primaryNav: PrimaryNavItem[] = [
+  { id: "cockpit", label: "Cockpit", icon: Zap, href: "/app/keyflow-command" },
   { id: "workspaces", label: "Contacts", icon: Users, href: "/app/crm/pipeline" },
   { id: "workspaces", label: "Commerce", icon: CreditCard, href: "/app/commerce" },
   { id: "workspaces", label: "Calendar", icon: Calendar, href: "/app/calendar" },
   { id: "store", label: "Storefront", icon: Store, href: "/app/store" },
+  { id: "key", label: "KEY", icon: Sparkles, href: "/app/keyflow-command?mode=key" },
   { id: "studio", label: "Settings", icon: Settings, href: "/app/settings" },
 ];
 
