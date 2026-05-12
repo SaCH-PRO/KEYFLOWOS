@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TimelineModule } from '../timeline/timeline.module';
 import { CrmController } from './crm.controller';
 import { CrmAiController } from './crm-ai.controller';
 import { CrmGoogleController } from './crm-google.controller';
@@ -59,7 +60,7 @@ import { ConnectorModule } from '../../core/connectors/connector.module';
 import { CommunityModule } from '../community/community.module';
 
 @Module({
-  imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule, CommunityModule, forwardRef(() => AutopilotModule)],
+  imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule, CommunityModule, TimelineModule, forwardRef(() => AutopilotModule)],
   controllers: [
     CrmController,
     CrmAiController,

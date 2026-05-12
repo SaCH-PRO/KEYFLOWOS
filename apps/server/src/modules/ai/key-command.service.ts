@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { TimelineService } from '../timeline/timeline.service';
 import { keyToolRegistry, ToolResult } from './key-tool.registry';
 
 export enum KeyAutonomyLevel {
@@ -25,7 +26,10 @@ export interface KeyCommandPlan {
 export class KeyCommandService {
   private readonly logger = new Logger(KeyCommandService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TimelineService) private readonly timeline: TimelineService,
+  ) {}
 
   async receiveCommand(businessId: string, userId: string | undefined, rawInput: string, inputMode: 'TEXT' | 'VOICE' = 'TEXT') {
     return (this.prisma.client as any).keyCommand.create({
@@ -142,6 +146,24 @@ export class KeyCommandService {
         status: allSuccess ? 'EXECUTED' : 'FAILED',
         executionResult: { success: allSuccess, outputs: results } as any,
       },
+    });
+
+    // Write to unified Activity ledger (Wave 1)
+    this.timeline.recordEvent({
+      businessId,
+      module: 'key-ai',
+      action: allSuccess ? 'command.executed' : 'command.failed',
+      entityType: 'key_command',
+      entityId: commandId,
+      title: allSuccess ? 'KEY command executed' : 'KEY command failed',
+      detail: `${plan.steps.length} steps, ${results.filter((r) => r.success).length} succeeded`,
+      category: 'AI',
+      actorType: 'AI',
+      status: allSuccess ? 'COMPLETED' : 'FAILED',
+      data: { planSummary: plan.summary, results: results.map((r) => ({ success: r.success, error: r.error })) },
+      occurredAt: new Date(),
+    }).catch((err) => {
+      this.logger.warn(`[UnifiedLedger] failed to record key command activity: ${(err as Error).message}`);
     });
 
     return results;

@@ -90,6 +90,7 @@ function makeService(prisma: PrismaService, opts: { findOrCreateContact?: any; c
     { checkAndEnforceLimit: vi.fn() } as any,
     { sendTransactionalEmail: vi.fn() } as any,
     { track: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn() } as any,
+    { recordEvent: vi.fn().mockResolvedValue(undefined) } as any,
   );
 }
 
@@ -113,6 +114,7 @@ describe('BookingsService', () => {
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
       { track: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn() } as any,
+      { recordEvent: vi.fn().mockResolvedValue(undefined) } as any,
     );
 
     const booking = await service.createBooking({
@@ -146,6 +148,7 @@ describe('BookingsService', () => {
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
       { track: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn() } as any,
+      { recordEvent: vi.fn().mockResolvedValue(undefined) } as any,
     );
 
     await service.createBooking({
@@ -186,6 +189,7 @@ describe('BookingsService', () => {
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
       { track: vi.fn(), backstitchVisitor: vi.fn(), logStorefrontEvent: vi.fn() } as any,
+      { recordEvent: vi.fn().mockResolvedValue(undefined) } as any,
     );
 
     const result = await service.publicCreateBooking({

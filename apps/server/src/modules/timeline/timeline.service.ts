@@ -14,6 +14,7 @@ export interface RecordEventInput {
   data?: Record<string, unknown>;
   contactId?: string;
   category?: 'CONTACT' | 'COMMERCE' | 'BOOKING' | 'PAYMENT' | 'AI' | 'SYSTEM' | 'STORE' | 'TASK';
+  type?: string;
   actorType?: 'USER' | 'AI' | 'CUSTOMER' | 'SYSTEM';
   actorId?: string;
   status?: 'SCHEDULED' | 'COMPLETED' | 'CANCELLED' | 'FAILED' | 'PENDING';
@@ -61,6 +62,7 @@ export class TimelineService {
           data: input.data as any,
           contactId: input.contactId,
           category: input.category,
+          type: input.type,
           actorType: input.actorType,
           actorId: input.actorId,
           status: input.status,

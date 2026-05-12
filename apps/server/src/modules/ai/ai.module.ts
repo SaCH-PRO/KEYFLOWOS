@@ -24,11 +24,12 @@ import { MatchRefreshSchedulerService } from './match-refresh-scheduler.service'
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
+import { TimelineModule } from '../timeline/timeline.module';
 import { KeyCommandService } from './key-command.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
 
 @Module({
-  imports: [PrismaModule, SubscriptionsModule, BlueprintModule],
+  imports: [PrismaModule, SubscriptionsModule, BlueprintModule, TimelineModule],
   controllers: [AiController, OutputTemplateController, FlowController, GraphActionsController],
   providers: [
     AiListener,
