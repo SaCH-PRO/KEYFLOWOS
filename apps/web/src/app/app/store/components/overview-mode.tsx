@@ -38,6 +38,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { AiRecommendationCard } from "@/components/ui/ai-recommendation-card";
 import type { StoreAnalytics, Product, Service, StorefrontConfig, StorefrontPolicies, StoreGraph, StoreReadinessResult } from "@/lib/client";
 import Image from "next/image";
+import { AiLayoutSuggestions } from "./ai-layout-suggestions";
 
 type SocialProofSection = { testimonials?: unknown[] };
 type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string };
@@ -68,6 +69,8 @@ type Props = {
   storeGraph: StoreGraph | null;
   readiness: StoreReadinessResult | null;
   onCopilotAction?: (prompt: string) => void;
+  hasHeroImage?: boolean;
+  hasHeroHeadline?: boolean;
 };
 
 function ScoreRing({ score, label, color, size = 72 }: { score: number; label: string; color: string; size?: number }) {
@@ -662,11 +665,28 @@ export function OverviewMode({
         </motion.div>
       )}
 
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        <AiLayoutSuggestions
+          hasPremiumService={commerceProducts.some((p) => {
+            const margin = (p as unknown as { margin?: number }).margin;
+            return typeof margin === "number" && margin > 50;
+          })}
+          hasTestimonials={!!((storefrontConfig.socialProof as SocialProofSection | undefined)?.testimonials?.length)}
+          hasHeroImage={!!(hasHeroImage)}
+          heroHeadlineLength={((storefrontConfig.hero as HeroSection | undefined)?.headline ?? "").length}
+          onModeChange={onModeChange}
+        />
+      </motion.div>
+
       {aiRecommendations.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
+          transition={{ delay: 0.12 }}
           className="space-y-2"
         >
           <div className="flex items-center gap-2 px-1">

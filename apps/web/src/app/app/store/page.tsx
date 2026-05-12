@@ -270,6 +270,8 @@ export default function StorePage() {
                 onCopilotAction={(prompt) => {
                   window.dispatchEvent(new CustomEvent("kf:open-copilot", { detail: { prompt } }));
                 }}
+                hasHeroImage={!!((cfg.hero as { imageUrl?: string; coverImageUrl?: string } | undefined)?.imageUrl || (cfg.hero as { imageUrl?: string; coverImageUrl?: string } | undefined)?.coverImageUrl)}
+                hasHeroHeadline={!!((cfg.hero as { headline?: string } | undefined)?.headline?.trim().length)}
               />
             )}
             {activeTab === "design" && (
@@ -357,6 +359,9 @@ export default function StorePage() {
                 hasHeroImage={hasHeroImage}
                 hoursConfigured={hoursConfigured}
                 hasTestimonials={hasTestimonials}
+                hasFaq={Array.isArray(cfg.faqEntries) && cfg.faqEntries.length > 0}
+                hasPolicies={Object.values(cfg.policies ?? {}).some((p) => (p as { enabled?: boolean } | null | undefined)?.enabled)}
+                hasBookingCta={!!((cfg.hero as { ctaLabel?: string } | undefined)?.ctaLabel?.trim().length)}
                 activeDeliveryMethodsCount={s.activeDeliveryMethodsCount}
                 onModeChange={handleTabChange}
                 readiness={s.readiness}
