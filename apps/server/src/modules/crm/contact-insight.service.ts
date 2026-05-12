@@ -265,6 +265,112 @@ export class ContactInsightService {
     };
   }
 
+  /**
+   * Compute and persist new contact intelligence fields (Phase 4 MD).
+   * Called by the lead-scoring scheduler or on-demand.
+   */
+  async computeContactIntelligenceFields(businessId: string, contactId: string) {
+    const contact = await this.db.contact.findFirst({
+      where: contactWhereWithId(businessId, contactId),
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        leadScore: true,
+        lastInteractionAt: true,
+        lastContactedAt: true,
+      },
+    });
+    if (!contact) return;
+
+    const daysSinceLastInteraction = contact.lastInteractionAt
+      ? Math.floor((Date.now() - contact.lastInteractionAt.getTime()) / 86400000)
+      : 999;
+
+    const [invoiceAgg, bookingAgg, quoteAgg] = await Promise.all([
+      this.db.invoice.aggregate({
+        where: { businessId, contactId, deletedAt: null },
+        _sum: { total: true },
+        _count: { _all: true },
+      }),
+      this.db.invoice.aggregate({
+        where: { businessId, contactId, deletedAt: null, status: 'PAID' },
+        _sum: { total: true },
+        _count: { _all: true },
+      }),
+      this.db.booking.aggregate({
+        where: { businessId, contactId, deletedAt: null },
+        _count: { _all: true },
+      }),
+      this.db.booking.aggregate({
+        where: { businessId, contactId, deletedAt: null, status: 'CANCELLED' },
+        _count: { _all: true },
+      }),
+      this.db.quote.aggregate({
+        where: { businessId, contactId, deletedAt: null },
+        _count: { _all: true },
+      }),
+      this.db.quote.aggregate({
+        where: { businessId, contactId, deletedAt: null, status: 'ACCEPTED' },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const totalInvoices = invoiceAgg._count._all ?? 0;
+    const paidInvoices = (bookingAgg as any)?._count?._all ?? 0;
+    const totalPaid = Number((bookingAgg as any)?._sum?.total ?? 0);
+    const totalBookings = (bookingAgg as any)?._count?._all ?? 0;
+    const cancelledBookings = (quoteAgg as any)?._count?._all ?? 0;
+    const quoteSentCount = totalInvoices; // reuse variable names from aggregate order
+    const quoteAcceptedCount = paidInvoices;
+    const unpaidInvoiceCount = totalInvoices - paidInvoices;
+
+    const { calculateLeadScore, calculatePaymentReliability, calculateCancellationRisk, calculateFollowUpPriority, generateNextBestAction } =
+      await import('./contact-scoring.engine');
+
+    const leadScore = calculateLeadScore({
+      totalPaid,
+      invoiceCount: totalInvoices,
+      unpaidInvoiceCount,
+      bookingCount: totalBookings,
+      cancelledBookingCount: cancelledBookings,
+      daysSinceLastInteraction,
+      quoteSentCount,
+      quoteAcceptedCount,
+    });
+
+    const paymentReliability = calculatePaymentReliability(paidInvoices, totalInvoices, 14);
+    const cancellationRate = calculateCancellationRisk(cancelledBookings, totalBookings);
+    const followUpPriority = calculateFollowUpPriority({
+      leadScore,
+      daysSinceLastInteraction,
+      unpaidInvoiceCount,
+      quotePendingCount: quoteSentCount - quoteAcceptedCount,
+    });
+    const nextBestAction = generateNextBestAction({
+      leadScore,
+      daysSinceLastInteraction,
+      unpaidInvoiceCount,
+      quotePendingCount: quoteSentCount - quoteAcceptedCount,
+      bookingCount: totalBookings,
+    });
+
+    await this.db.contact.update({
+      where: { id: contactId },
+      data: {
+        leadScore,
+        lifetimeValue: totalPaid,
+        averageSpend: totalInvoices > 0 ? totalPaid / totalInvoices : 0,
+        paymentReliability,
+        bookingFrequency: totalBookings,
+        cancellationRate,
+        followUpPriority,
+        nextBestAction,
+        conversionProbability: leadScore,
+      },
+    });
+  }
+
   // -----------------------------------------------------------------
 
   private async aggregate(businessId: string, contactId: string): Promise<ContactInsightPayload> {
