@@ -441,6 +441,15 @@ model Business {
   // KEY-1: Business Blueprint (operating DNA)
   blueprint            BusinessBlueprint?
 
+  // Phase 1 MD: Commercial Document Templates
+  commercialDocumentTemplates CommercialDocumentTemplate[]
+
+  // Phase 1 MD: Procurement Requests
+  procurementRequests ProcurementRequest[]
+
+  // Phase 1 MD: KEY Commands
+  keyCommands          KeyCommand[]
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -599,6 +608,22 @@ model Contact {
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
   lastInteractionAt DateTime? @map("last_interaction_at")
+
+  // Contact Intelligence Engine (Phase 1 MD)
+  conversionProbability Float? @map("conversion_probability")
+  lifetimeValue    Float?    @map("lifetime_value")
+  averageSpend     Float?    @map("average_spend")
+  paymentReliability Int?    @map("payment_reliability")
+  bookingFrequency Int?      @map("booking_frequency")
+  cancellationRate Float?    @map("cancellation_rate")
+  responsivenessScore Int?   @map("responsiveness_score")
+  preferredServices Json?    @map("preferred_services")
+  sentimentScore   Float?    @map("sentiment_score")
+  referralLikelihood Int?    @map("referral_likelihood")
+  followUpPriority String?   @map("follow_up_priority")
+  nextBestAction   String?   @map("next_best_action")
+  riskFlags        Json?     @map("risk_flags")
+  opportunities    Json?     @map("opportunities")
 
   // Data Quality (M6)
   dataQualityScore   Int?      @map("data_quality_score")
@@ -2033,10 +2058,23 @@ model Activity {
   data       Json?
   contactId  String?  @map("contact_id")
 
+  // Business Event Ledger extensions (Phase 1 MD)
+  category   String?  // CONTACT | COMMERCE | BOOKING | PAYMENT | AI | SYSTEM | STORE | TASK
+  actorType  String?  @map("actor_type") // USER | AI | CUSTOMER | SYSTEM
+  actorId    String?  @map("actor_id")
+  status     String?  // SCHEDULED | COMPLETED | CANCELLED | FAILED | PENDING
+  priority   String?  // LOW | NORMAL | HIGH | URGENT
+  revenueImpact Float? @map("revenue_impact")
+  startsAt   DateTime? @map("starts_at")
+  endsAt     DateTime? @map("ends_at")
+  occurredAt DateTime @default(now()) @map("occurred_at")
+
   createdAt  DateTime @default(now()) @map("created_at")
 
-  @@index([businessId, createdAt])
-  @@index([businessId, module])
+  @@index([businessId, occurredAt])
+  @@index([businessId, category, occurredAt])
+  @@index([businessId, entityType, entityId])
+  @@index([businessId, contactId, occurredAt])
   @@map("activities")
 }
 
@@ -5885,9 +5923,27 @@ model BusinessBlueprint {
   ///   confidence, provenance: { source, lastSyncAt }[] }
   intelligence   Json     @default("{}")
 
+  /// Workflow model: service-based, project-based, retainer-based,
+  /// walk-in, ecommerce, custom-inquiry delivery workflows.
+  /// { primaryWorkflow, appointmentBooking, projectManagement,
+  ///   retainerCycle, walkInQueue, ecommerceFulfillment, customInquiryFlow }
+  workflowModel  Json?    @map("workflow_model")
+
+  /// AI preferences: autonomy level, tone, notification settings,
+  /// approved actions, voice input enabled.
+  /// { autonomyLevel, tone, notifyOnRecommendations, notifyOnAlerts,
+  ///   approvedActions[], voiceEnabled }
+  aiPreferences  Json?    @map("ai_preferences")
+
+  /// Per-section confidence scores { identity, operatingModel, goals,
+  ///   customerModel, brand, financials, constraints, workflowModel }
+  confidenceScores Json?  @default("{}") @map("confidence_scores")
+
   /// 0–100 weighted completeness score. Identity 25, operatingModel 20,
   /// goals 15, customerModel 15, brand 10, financials 10, constraints 5.
   completeness  Int      @default(0)
+
+  lastAnalyzedAt DateTime? @map("last_analyzed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt      @map("updated_at")
@@ -6642,4 +6698,93 @@ model TaxRate {
   @@unique([businessId, name])
   @@index([businessId, isActive])
   @@map("tax_rates")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 1 MD: Master Document Missing 60% — New Models
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Commercial Document Templates (INVOICE | QUOTE | RECEIPT)
+/// Full branding customization with live preview support.
+model CommercialDocumentTemplate {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  type        String   // INVOICE | QUOTE | RECEIPT
+  name        String
+  isDefault   Boolean  @default(false) @map("is_default")
+  /// { layout, colors, fonts, logo, header, footer, items, meta }
+  config      Json     @default("{}")
+  previewData Json?    @map("preview_data")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, type, name])
+  @@index([businessId, type])
+  @@map("commercial_document_templates")
+}
+
+/// KEY Command — every user interaction with the AI orchestrator.
+/// Tracks intent, grounding, planning, risk, approval, and execution.
+model KeyCommand {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId      String?  @map("user_id")
+
+  rawInput    String   @map("raw_input")
+  inputMode   String   @default("TEXT") @map("input_mode") // TEXT | VOICE
+  /// { domain, action, entities, filters, timeframe, modifiers }
+  intent      Json     @default("{}")
+  /// Relevant business data fetched during grounding step
+  groundedData Json?   @map("grounded_data")
+  planSummary String?  @map("plan_summary")
+
+  status      String   @default("RECEIVED") // RECEIVED | PLANNED | APPROVED | EXECUTED | FAILED | REJECTED
+  riskLevel   String   @default("LOW") @map("risk_level") // LOW | MEDIUM | HIGH | CRITICAL
+  autonomyLevel Int    @default(0) @map("autonomy_level") // 0-4
+
+  /// { success, outputs, errors, durationMs }
+  executionResult Json? @map("execution_result")
+  /// Step-by-step execution trace
+  executionLogs Json?   @map("execution_logs")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status, createdAt])
+  @@index([businessId, userId, createdAt])
+  @@map("key_commands")
+}
+
+/// Procurement Request — AI-guided service package generation.
+/// User describes a need in plain language; KEY generates packages and a brief.
+model ProcurementRequest {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  requestedByUserId String? @map("requested_by_user_id")
+
+  status      String   @default("DRAFT") // DRAFT | SUBMITTED | REVIEWING | QUOTED | ACCEPTED | DECLINED | COMPLETED
+  userPrompt  String   @map("user_prompt")
+  /// AI-extracted structured need { category, urgency, scope, constraints }
+  interpretedNeed Json  @default("{}") @map("interpreted_need")
+  /// Generated package options [{ name, description, estimatedCost, timeline, deliverables }]
+  recommendedPackages Json @default("{}") @map("recommended_packages")
+  /// Compiled internal brief for owner review
+  brief       Json     @default("{}")
+  estimatedBudget Json? @map("estimated_budget")
+  priority    String?
+  internalNotes String? @map("internal_notes")
+
+  submittedAt DateTime? @map("submitted_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("procurement_requests")
 }
