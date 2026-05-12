@@ -6746,6 +6746,7 @@ model KeyCommand {
   status      String   @default("RECEIVED") // RECEIVED | PLANNED | APPROVED | EXECUTED | FAILED | REJECTED
   riskLevel   String   @default("LOW") @map("risk_level") // LOW | MEDIUM | HIGH | CRITICAL
   autonomyLevel Int    @default(0) @map("autonomy_level") // 0-4
+  mode        String   @default("do") @map("mode") // ask | do | plan | auto
 
   /// { success, outputs, errors, durationMs }
   executionResult Json? @map("execution_result")
