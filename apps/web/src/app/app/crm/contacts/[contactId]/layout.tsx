@@ -13,6 +13,7 @@ import {
   Sparkles,
   Lightbulb,
 } from "lucide-react";
+import ContactHeader from "./contact-header";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: User },
@@ -34,6 +35,7 @@ export default function ContactDetailLayout({ children }: { children: React.Reac
 
   return (
     <div className="space-y-4">
+      <ContactHeader />
       <nav className="flex gap-1 overflow-x-auto border-b pb-1">
         {TABS.map((tab) => {
           const href = `${base}/${tab.id}`;
