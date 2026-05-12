@@ -16,6 +16,9 @@ import {
   Sparkles,
   FileText,
   X,
+  Truck,
+  Check,
+  Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -24,6 +27,12 @@ import {
   submitProcurementRequest,
   approveProcurementRequest,
   rejectProcurementRequest,
+  fetchProcurementSuppliers,
+  selectProcurementVendor,
+  issueProcurementPO,
+  acknowledgeProcurementVendor,
+  fulfillProcurementRequest,
+  invoiceProcurementRequest,
   type ProcurementRequest,
 } from "@/lib/client";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
@@ -34,6 +43,11 @@ function statusBadge(status: string) {
     SUBMITTED: "bg-amber-500/10 text-amber-500",
     APPROVED: "bg-emerald-500/10 text-emerald-500",
     COMPLETED: "bg-blue-500/10 text-blue-500",
+    REJECTED: "bg-red-500/10 text-red-500",
+    PO_ISSUED: "bg-blue-500/10 text-blue-500",
+    VENDOR_ACKNOWLEDGED: "bg-indigo-500/10 text-indigo-500",
+    FULFILLED: "bg-teal-500/10 text-teal-500",
+    INVOICED: "bg-cyan-500/10 text-cyan-500",
   };
   return (
     <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${styles[status] || styles.DRAFT}`}>
@@ -51,6 +65,8 @@ export default function ProcurementDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
+  const [suppliers, setSuppliers] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [selectedVendor, setSelectedVendor] = useState<string>("");
 
   const load = useCallback(async () => {
     const biz = getStoredBusinessId();
@@ -126,6 +142,86 @@ export default function ProcurementDetailPage() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const loadSuppliers = useCallback(async () => {
+    const biz = getStoredBusinessId();
+    if (!biz) return;
+    const res = await fetchProcurementSuppliers(biz);
+    if (res.data) setSuppliers(res.data);
+  }, []);
+
+  useEffect(() => { loadSuppliers(); }, [loadSuppliers]);
+
+  const handleSelectVendor = async () => {
+    const biz = getStoredBusinessId();
+    if (!biz || !requestId || !selectedVendor) return;
+    setSubmitting(true);
+    try {
+      const res = await selectProcurementVendor(biz, requestId, selectedVendor);
+      if (res.data) {
+        toast.success("Vendor selected");
+        setReq(res.data);
+      } else {
+        toast.error("Failed to select vendor");
+      }
+    } catch {
+      toast.error("Failed to select vendor");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleIssuePO = async () => {
+    const biz = getStoredBusinessId();
+    if (!biz || !requestId) return;
+    setSubmitting(true);
+    try {
+      const res = await issueProcurementPO(biz, requestId);
+      if (res.data) {
+        toast.success(`PO ${res.data.purchaseOrder?.poNumber} issued`);
+        setReq(res.data);
+      } else {
+        toast.error("Failed to issue PO");
+      }
+    } catch {
+      toast.error("Failed to issue PO");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAcknowledge = async () => {
+    const biz = getStoredBusinessId();
+    if (!biz || !requestId) return;
+    setSubmitting(true);
+    try {
+      const res = await acknowledgeProcurementVendor(biz, requestId);
+      if (res.data) { toast.success("Vendor acknowledged"); setReq(res.data); }
+    } catch { toast.error("Failed"); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleFulfill = async () => {
+    const biz = getStoredBusinessId();
+    if (!biz || !requestId) return;
+    setSubmitting(true);
+    try {
+      const res = await fulfillProcurementRequest(biz, requestId);
+      if (res.data) { toast.success("Marked as fulfilled"); setReq(res.data); }
+    } catch { toast.error("Failed"); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleInvoice = async () => {
+    const biz = getStoredBusinessId();
+    if (!biz || !requestId) return;
+    setSubmitting(true);
+    try {
+      const res = await invoiceProcurementRequest(biz, requestId);
+      if (res.data) { toast.success("Marked as invoiced"); setReq(res.data); }
+    } catch { toast.error("Failed"); }
+    finally { setSubmitting(false); }
   };
 
   if (loading) {
@@ -245,6 +341,71 @@ export default function ProcurementDetailPage() {
                   </div>
                 )}
               </div>
+            )}
+            {req.status === "APPROVED" && (
+              <div className="flex items-center gap-2">
+                {req.supplierConnectionId ? (
+                  <button
+                    onClick={handleIssuePO}
+                    disabled={submitting}
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-[11px] font-medium bg-blue-500/10 text-blue-600 hover:bg-blue-500/20"
+                  >
+                    {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Truck className="w-3 h-3" />}
+                    Issue PO
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={selectedVendor}
+                      onChange={(e) => setSelectedVendor(e.target.value)}
+                      className="h-8 px-2 rounded-lg border border-border/50 bg-background text-[11px]"
+                    >
+                      <option value="">Select vendor...</option>
+                      {suppliers.map((s) => (
+                        <option key={s.id} value={s.id}>{s.displayName}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleSelectVendor}
+                      disabled={submitting || !selectedVendor}
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-[11px] font-medium bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 disabled:opacity-50"
+                    >
+                      {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                      Set Vendor
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {req.status === "PO_ISSUED" && (
+              <button
+                onClick={handleAcknowledge}
+                disabled={submitting}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-[11px] font-medium bg-indigo-500/10 text-indigo-600 hover:bg-indigo-500/20"
+              >
+                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                Vendor Acknowledged
+              </button>
+            )}
+            {req.status === "VENDOR_ACKNOWLEDGED" && (
+              <button
+                onClick={handleFulfill}
+                disabled={submitting}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-[11px] font-medium bg-teal-500/10 text-teal-600 hover:bg-teal-500/20"
+              >
+                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Package className="w-3 h-3" />}
+                Mark Fulfilled
+              </button>
+            )}
+            {req.status === "FULFILLED" && (
+              <button
+                onClick={handleInvoice}
+                disabled={submitting}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-[11px] font-medium bg-cyan-500/10 text-cyan-600 hover:bg-cyan-500/20"
+              >
+                {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Receipt className="w-3 h-3" />}
+                Mark Invoiced
+              </button>
             )}
           </div>
           <p className="text-sm font-medium text-foreground/90">{req.userPrompt}</p>

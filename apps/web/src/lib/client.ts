@@ -12803,6 +12803,12 @@ export interface ProcurementRequest {
   status: string;
   priority: string | null;
   internalNotes: string | null;
+  supplierConnectionId: string | null;
+  purchaseOrderId: string | null;
+  poIssuedAt: string | null;
+  vendorAcknowledgedAt: string | null;
+  fulfilledAt: string | null;
+  invoicedAt: string | null;
   submittedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -12972,4 +12978,45 @@ export async function fetchProcurementStats(businessId: string) {
     totalBudget: number;
     pendingApprovals: number;
   }>(`/procurement/businesses/${encodeURIComponent(businessId)}/stats`);
+}
+
+export async function fetchProcurementSuppliers(businessId: string) {
+  return apiGetSimple<Array<{ id: string; displayName: string; providerType: string; connectionHealth: string; lastSyncAt: string | null }>>(
+    `/procurement/businesses/${encodeURIComponent(businessId)}/suppliers`,
+  );
+}
+
+export async function selectProcurementVendor(businessId: string, requestId: string, supplierConnectionId: string | null) {
+  return apiPostSimple<ProcurementRequest>(
+    `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(requestId)}/vendor`,
+    { supplierConnectionId },
+  );
+}
+
+export async function issueProcurementPO(businessId: string, requestId: string) {
+  return apiPostSimple<ProcurementRequest & { purchaseOrder?: { id: string; poNumber: string } }>(
+    `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(requestId)}/issue-po`,
+    {},
+  );
+}
+
+export async function acknowledgeProcurementVendor(businessId: string, requestId: string) {
+  return apiPostSimple<ProcurementRequest>(
+    `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(requestId)}/acknowledge`,
+    {},
+  );
+}
+
+export async function fulfillProcurementRequest(businessId: string, requestId: string) {
+  return apiPostSimple<ProcurementRequest>(
+    `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(requestId)}/fulfill`,
+    {},
+  );
+}
+
+export async function invoiceProcurementRequest(businessId: string, requestId: string) {
+  return apiPostSimple<ProcurementRequest>(
+    `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(requestId)}/invoice`,
+    {},
+  );
 }

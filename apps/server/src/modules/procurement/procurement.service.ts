@@ -154,6 +154,116 @@ export class ProcurementService {
     return updated;
   }
 
+  async listSuppliers(businessId: string) {
+    return this.prisma.client.supplierConnection.findMany({
+      where: { businessId, isActive: true },
+      orderBy: { displayName: 'asc' },
+      select: { id: true, displayName: true, providerType: true, connectionHealth: true, lastSyncAt: true },
+    });
+  }
+
+  async selectVendor(businessId: string, id: string, supplierConnectionId: string | null) {
+    await this.get(businessId, id);
+    return (this.prisma.client as any).procurementRequest.update({
+      where: { id },
+      data: { supplierConnectionId },
+    });
+  }
+
+  async issuePO(businessId: string, id: string, userId?: string) {
+    const req = await this.get(businessId, id);
+    if (!req.supplierConnectionId) throw new NotFoundException('No vendor selected');
+    const supplier = await this.prisma.client.supplierConnection.findFirst({
+      where: { id: req.supplierConnectionId, businessId },
+    });
+    if (!supplier) throw new NotFoundException('Supplier not found');
+
+    const po = await this.prisma.client.purchaseOrder.create({
+      data: {
+        businessId,
+        poNumber: `PO-${Date.now()}`,
+        status: 'DRAFT',
+        supplierName: supplier.displayName,
+        supplierConnectionId: supplier.id,
+        items: (req.recommendedPackages as any[]) ?? [],
+        subtotal: req.estimatedBudget?.max ?? req.estimatedBudget?.min ?? 0,
+        total: req.estimatedBudget?.max ?? req.estimatedBudget?.min ?? 0,
+        currency: 'TTD',
+      },
+    });
+
+    const updated = await (this.prisma.client as any).procurementRequest.update({
+      where: { id },
+      data: { status: 'PO_ISSUED', purchaseOrderId: po.id, poIssuedAt: new Date() },
+    });
+
+    this.timeline.recordEvent({
+      businessId,
+      module: 'procurement',
+      action: 'request.po_issued',
+      entityType: 'procurement_request',
+      entityId: id,
+      title: 'Purchase order issued',
+      detail: `PO ${po.poNumber} to ${supplier.displayName}`,
+      actorType: 'USER',
+      actorId: userId,
+      occurredAt: new Date(),
+    }).catch(() => {});
+
+    return { ...updated, purchaseOrder: po };
+  }
+
+  async acknowledgeVendor(businessId: string, id: string) {
+    const updated = await (this.prisma.client as any).procurementRequest.update({
+      where: { id },
+      data: { status: 'VENDOR_ACKNOWLEDGED', vendorAcknowledgedAt: new Date() },
+    });
+    this.timeline.recordEvent({
+      businessId,
+      module: 'procurement',
+      action: 'request.vendor_acknowledged',
+      entityType: 'procurement_request',
+      entityId: id,
+      title: 'Vendor acknowledged PO',
+      occurredAt: new Date(),
+    }).catch(() => {});
+    return updated;
+  }
+
+  async markFulfilled(businessId: string, id: string) {
+    const updated = await (this.prisma.client as any).procurementRequest.update({
+      where: { id },
+      data: { status: 'FULFILLED', fulfilledAt: new Date() },
+    });
+    this.timeline.recordEvent({
+      businessId,
+      module: 'procurement',
+      action: 'request.fulfilled',
+      entityType: 'procurement_request',
+      entityId: id,
+      title: 'Order fulfilled',
+      occurredAt: new Date(),
+    }).catch(() => {});
+    return updated;
+  }
+
+  async markInvoiced(businessId: string, id: string) {
+    const updated = await (this.prisma.client as any).procurementRequest.update({
+      where: { id },
+      data: { status: 'INVOICED', invoicedAt: new Date() },
+    });
+    this.timeline.recordEvent({
+      businessId,
+      module: 'procurement',
+      action: 'request.invoiced',
+      entityType: 'procurement_request',
+      entityId: id,
+      title: 'Supplier invoice received',
+      occurredAt: new Date(),
+    }).catch(() => {});
+    return updated;
+  }
+
   async getStats(businessId: string) {
     const all = await (this.prisma.client as any).procurementRequest.findMany({
       where: { businessId },

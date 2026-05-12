@@ -93,7 +93,8 @@ describe('RevenuePostingService recipe semantics', () => {
         id: ACCOUNTS[key],
       })),
     };
-    const svc = new RevenuePostingService(prisma as any, posting as any, coa as any);
+    const timeline = { recordEvent: vi.fn() };
+    const svc = new RevenuePostingService(prisma as any, posting as any, coa as any, timeline as any);
     return { svc, posted, reversed, posting };
   }
 

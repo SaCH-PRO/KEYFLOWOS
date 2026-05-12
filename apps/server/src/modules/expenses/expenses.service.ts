@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpenseCreatedPayload } from '../../core/event-bus/events.types';
 import { ExpensePostingService } from '../finance/expense-posting.service';
+import { TimelineService } from '../timeline/timeline.service';
 
 @Injectable()
 export class ExpensesService {
@@ -10,6 +11,7 @@ export class ExpensesService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(ExpensePostingService) private readonly posting: ExpensePostingService,
+    @Inject(TimelineService) private readonly timeline: TimelineService,
   ) {}
 
   async listExpenses(
@@ -202,6 +204,17 @@ export class ExpensesService {
         businessId: input.businessId,
       });
     }
+    await this.timeline.recordEvent({
+      businessId: input.businessId,
+      module: 'EXPENSE',
+      action: 'created',
+      entityType: 'expense',
+      entityId: expense.id,
+      title: `${status === 'BILL' ? 'Bill' : 'Expense'} created: ${expense.description}`,
+      detail: `${expense.currency} ${expense.amount}`,
+      data: { amount: expense.amount, currency: expense.currency, status, vendor: expense.vendor },
+      occurredAt: new Date(),
+    });
 
     return expense;
   }
@@ -231,30 +244,42 @@ export class ExpensesService {
     const paidAt = input.paidAt ? new Date(input.paidAt) : new Date();
     const paymentMethod = input.paymentMethod ?? existing.paymentMethod;
 
-    return this.prisma.client.$transaction(async (rawTx) => {
+    const updated = await this.prisma.client.$transaction(async (rawTx) => {
       const tx = rawTx as unknown as import('@prisma/client').Prisma.TransactionClient;
-      const updated = await tx.expense.update({
+      const u = await tx.expense.update({
         where: { id: input.expenseId },
         data: { status: 'PAID', paidAt, paymentMethod },
         include: { category: true },
       });
       await this.posting.onBillPaid(
         {
-          id: updated.id,
-          businessId: updated.businessId,
-          amount: updated.amount,
-          currency: updated.currency,
+          id: u.id,
+          businessId: u.businessId,
+          amount: u.amount,
+          currency: u.currency,
           paidAt,
           paymentMethod: paymentMethod ?? null,
-          description: updated.description,
-          contactId: updated.contactId,
-          vendor: updated.vendor,
+          description: u.description,
+          contactId: u.contactId,
+          vendor: u.vendor,
         },
         tx,
       );
-      this.events.emit('bill.paid', { bill: updated, businessId: input.businessId });
-      return updated;
+      this.events.emit('bill.paid', { bill: u, businessId: input.businessId });
+      return u;
     });
+    await this.timeline.recordEvent({
+      businessId: input.businessId,
+      module: 'EXPENSE',
+      action: 'paid',
+      entityType: 'expense',
+      entityId: input.expenseId,
+      title: 'Bill marked as paid',
+      detail: existing.description,
+      data: { amount: existing.amount, currency: existing.currency },
+      occurredAt: new Date(),
+    });
+    return updated;
   }
 
   /**
@@ -553,10 +578,22 @@ export class ExpensesService {
         'Cannot delete a posted expense — call POST /finance/businesses/:businessId/bills/:expenseId/void to reverse the ledger entries instead.',
       );
     }
-    return this.prisma.client.expense.update({
+    const deleted = await this.prisma.client.expense.update({
       where: { id: expenseId, businessId },
       data: { deletedAt: new Date() },
     });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'EXPENSE',
+      action: 'deleted',
+      entityType: 'expense',
+      entityId: expenseId,
+      title: 'Expense deleted',
+      detail: deleted.description,
+      data: { amount: deleted.amount, currency: deleted.currency },
+      occurredAt: new Date(),
+    });
+    return deleted;
   }
 
   async listCategories(businessId: string) {

@@ -85,6 +85,12 @@ export interface BlueprintIntelligence {
   topProductCategories?: string[];
   topChannels?: string[];
   recentMomentumScore?: number;
+  quoteConversionRate?: number;
+  noShowRate?: number;
+  expenseRatio?: number;
+  seasonalPattern?: string;
+  campaignOpenRate?: number;
+  campaignClickRate?: number;
   inferredAt?: string;
 }
 
@@ -96,6 +102,9 @@ export interface BlueprintWorkflowModel {
   walkInQueue?: boolean;
   ecommerceFulfillment?: boolean;
   customInquiryFlow?: boolean;
+  quoteDrivenSales?: boolean;
+  highNoShowRate?: boolean;
+  seasonalBusiness?: boolean;
 }
 
 export interface BlueprintAiPreferences {

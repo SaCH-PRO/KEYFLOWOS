@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Clock, Package, Layers, Zap, Sparkles, AlertTriangle } from "lucide-react";
 import type { Product } from "@/lib/client";
+import { fetchProductCostProfile } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { PRODUCT_CATEGORY_CONFIG } from "../components/commerce-types";
 import Image from "next/image";
@@ -30,11 +31,20 @@ export const ProductCard = React.memo(function ProductCard({
   quoteCount = 0,
 }: ProductCardProps) {
   const [imgError, setImgError] = useState(false);
+  const [margin, setMargin] = useState<{ grossMargin: number | null; marginBand: string | null } | null>(null);
   const config = PRODUCT_CATEGORY_CONFIG[product.category as keyof typeof PRODUCT_CATEGORY_CONFIG] ?? PRODUCT_CATEGORY_CONFIG.SERVICE;
   const CategoryIcon = CATEGORY_ICONS[product.category as keyof typeof CATEGORY_ICONS] ?? Zap;
   const isInactive = product.isActive === false;
   const displayImage = cachedImage || product.imageUrl;
   const displayCurrency = product.currency ?? currency;
+
+  useEffect(() => {
+    fetchProductCostProfile(product.id).then((res) => {
+      if (res.data && res.data.grossMargin != null) {
+        setMargin({ grossMargin: res.data.grossMargin, marginBand: res.data.marginBand });
+      }
+    });
+  }, [product.id]);
 
   return (
     <motion.div
@@ -117,6 +127,20 @@ export const ProductCard = React.memo(function ProductCard({
             <span className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground/60">
               <Clock className="w-2 h-2" />
               {product.duration}m
+            </span>
+          )}
+          {margin?.grossMargin != null && (
+            <span className={`inline-flex items-center gap-0.5 text-[9px] font-medium ${
+              margin.marginBand === "premium" ? "text-emerald-400" :
+              margin.marginBand === "high" ? "text-blue-400" :
+              margin.marginBand === "medium" ? "text-amber-400" : "text-red-400"
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                margin.marginBand === "premium" ? "bg-emerald-400" :
+                margin.marginBand === "high" ? "bg-blue-400" :
+                margin.marginBand === "medium" ? "bg-amber-400" : "bg-red-400"
+              }`} />
+              {margin.grossMargin}%
             </span>
           )}
         </div>
