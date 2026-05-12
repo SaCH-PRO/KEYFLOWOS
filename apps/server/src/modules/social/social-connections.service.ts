@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 const ENV_CREDENTIAL_MAP: Record<string, { idKey: string; secretKey: string }> = {
@@ -10,11 +10,20 @@ const ENV_CREDENTIAL_MAP: Record<string, { idKey: string; secretKey: string }> =
 };
 
 @Injectable()
-export class SocialConnectionsService {
+export class SocialConnectionsService implements OnModuleDestroy {
   private oauthSessions = new Map<string, { state: string; codeVerifier?: string; platform: string; businessId: string; createdAt: number }>();
 
+  private sessionCleanupInterval: ReturnType<typeof setInterval> | null = null;
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {
-    setInterval(() => this.cleanExpiredSessions(), 5 * 60 * 1000);
+    this.sessionCleanupInterval = setInterval(() => this.cleanExpiredSessions(), 5 * 60 * 1000);
+  }
+
+  onModuleDestroy() {
+    if (this.sessionCleanupInterval) {
+      clearInterval(this.sessionCleanupInterval);
+      this.sessionCleanupInterval = null;
+    }
   }
 
   private cleanExpiredSessions() {

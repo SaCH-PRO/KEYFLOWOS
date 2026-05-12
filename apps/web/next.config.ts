@@ -117,6 +117,13 @@ const nextConfig: NextConfig = {
     ];
   },
   async headers() {
+    const securityHeaders = [
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+    ];
+
     // Production: long-cache /_next/static so repeat-visit performance
     // doesn't regress (ported from develop 1c7e6f93).
     if (isProd) {
@@ -130,15 +137,16 @@ const nextConfig: NextConfig = {
             },
           ],
         },
+        {
+          source: "/(.*)",
+          headers: securityHeaders,
+        },
       ];
     }
 
     // Dev: do NOT override Cache-Control on /_next/static — Next.js owns
     // those headers for HMR module identity, and overriding them prints
-    // "Custom Cache-Control headers detected" and destabilizes Turbopack
-    // (workspace-root inference fails on the next config-change restart).
-    // Apply no-cache only to non-static routes so iframe previews see
-    // fresh code without breaking the dev pipeline.
+    // "Custom Cache-Control headers detected" and destabilizes Turbopack.
     return [
       {
         source: "/((?!_next/static).*)",
@@ -147,6 +155,7 @@ const nextConfig: NextConfig = {
             key: "Cache-Control",
             value: "no-cache, no-store, must-revalidate",
           },
+          ...securityHeaders,
         ],
       },
     ];

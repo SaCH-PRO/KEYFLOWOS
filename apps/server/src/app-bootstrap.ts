@@ -26,7 +26,19 @@ export function configureNestApp(app: INestApplication): void {
 
   app.use(
     helmet({
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "blob:", "https:"],
+          connectSrc: ["'self'", "https://*.supabase.co", "https://api.openai.com", "https://api.stripe.com"],
+          frameSrc: ["'self'", "https://*.stripe.com"],
+          objectSrc: ["'none'"],
+          upgradeInsecureRequests: [],
+        },
+      },
       crossOriginEmbedderPolicy: false,
     }),
   );

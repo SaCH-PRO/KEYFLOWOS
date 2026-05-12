@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback } from "react";
+import DOMPurify from "isomorphic-dompurify";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
@@ -212,7 +213,7 @@ export const EmailEditor = React.memo(function EmailEditor({
 
         {showPreview ? (
           <div className="p-4 min-h-[200px] bg-white text-black rounded-b-lg">
-            <div dangerouslySetInnerHTML={{ __html: editor.getHTML() }} className="prose prose-sm max-w-none" />
+            <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(editor.getHTML()) }} className="prose prose-sm max-w-none" />
           </div>
         ) : (
           <EditorContent editor={editor} className="text-sm" />

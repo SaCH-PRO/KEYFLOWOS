@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
   BookingCreatedPayload,
@@ -23,7 +23,7 @@ import { FinancialCopilotService } from '../commerce/financial-copilot.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 
 @Injectable()
-export class FlowListener implements OnModuleInit {
+export class FlowListener implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FlowListener.name);
   private reminderInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -42,6 +42,13 @@ export class FlowListener implements OnModuleInit {
         this.logger.error(`Booking reminder cron failed: ${(e as Error).message}`),
       );
     }, 60 * 60 * 1000);
+  }
+
+  onModuleDestroy() {
+    if (this.reminderInterval) {
+      clearInterval(this.reminderInterval);
+      this.reminderInterval = null;
+    }
   }
 
   private async createNotification(input: {

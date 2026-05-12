@@ -324,7 +324,47 @@ export class CrmImportService {
     }
   }
 
+  private validateImportUrl(url: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new BadRequestException('Invalid URL');
+    }
+
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new BadRequestException('URL must use http or https');
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Block private IP ranges and localhost
+    const blocked = [
+      'localhost',
+      '127.0.0.1',
+      '0.0.0.0',
+      '::1',
+      '[::1]',
+    ];
+    if (blocked.includes(hostname)) {
+      throw new BadRequestException('Private addresses are not allowed');
+    }
+
+    // Block IPv4 private ranges
+    const ipv4Private = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.)/;
+    if (ipv4Private.test(hostname)) {
+      throw new BadRequestException('Private IP ranges are not allowed');
+    }
+
+    // Block IPv6 loopback / link-local
+    if (hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:')) {
+      throw new BadRequestException('Private IP ranges are not allowed');
+    }
+  }
+
   async createLinkImport(params: { businessId: string; sourceUrl: string }) {
+    this.validateImportUrl(params.sourceUrl);
+
     const importRecord = await this.prisma.client.contactImport.create({
       data: {
         businessId: params.businessId,
