@@ -83,6 +83,7 @@ model Business {
   secondaryColor String?  @default("#14B8A6") @map("secondary_color")
   defaultTaxRate Float?   @default(0) @map("default_tax_rate")
   invoiceTemplate String? @default("classic") @map("invoice_template")
+  quoteTemplate   String? @default("classic") @map("quote_template")
 
   /// FIN2: cash- vs accrual-basis accounting. MVP defaults to CASH per
   /// audit Phase 1; FIN5 settings UI flips this. See RevenuePostingService

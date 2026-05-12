@@ -148,17 +148,24 @@ function NewEntityMenu({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const menuRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(-1);
-  const items = useMemo(() => [
-    { label: "Contact", icon: Users, href: "/app/crm/pipeline", shortcut: "⌘⇧C" },
-    { label: "Invoice", icon: Receipt, href: "/app/commerce", shortcut: "⌘⇧I" },
-    { label: "Quote", icon: FileText, href: "/app/commerce?tab=quotes" },
-    { label: "Booking", icon: Calendar, href: "/app/bookings", shortcut: "⌘⇧B" },
-    { label: "Expense", icon: Receipt, href: "/app/expenses" },
-    { label: "Project", icon: FolderKanban, href: "/app/projects" },
-    { label: "Campaign", icon: Megaphone, href: "/app/marketing" },
-    { label: "Post", icon: MessageCircle, href: "/app/marketing?tab=social" },
-    { label: "Flow", icon: Zap, href: "/app/automations" },
-  ], []);
+  const items = useMemo(() => {
+    const base = [
+      { label: "Contact", icon: Users, href: "/app/crm/pipeline", shortcut: "⌘⇧C" },
+      { label: "Invoice", icon: Receipt, href: "/app/commerce", shortcut: "⌘⇧I" },
+      { label: "Quote", icon: FileText, href: "/app/commerce?tab=quotes" },
+      { label: "Booking", icon: Calendar, href: "/app/bookings", shortcut: "⌘⇧B" },
+      { label: "Expense", icon: Receipt, href: "/app/expenses" },
+      { label: "Project", icon: FolderKanban, href: "/app/projects" },
+      { label: "Flow", icon: Zap, href: "/app/automations" },
+    ];
+    if (dormantFeatureFlags.contentScheduler) {
+      base.splice(6, 0,
+        { label: "Campaign", icon: Megaphone, href: "/app/marketing" },
+        { label: "Post", icon: MessageCircle, href: "/app/marketing?tab=social" },
+      );
+    }
+    return base;
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -312,7 +319,6 @@ const moreNav: NavItem[] = [
   { label: "Accounting", href: "/app/accounting", icon: Calculator },
   { label: "Payments", href: "/app/payments", icon: CreditCard },
   { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle },
-  { label: "Content", href: "/app/marketing", icon: Megaphone },
   { label: "Automations", href: "/app/automations", icon: Zap },
   { label: "Projects", href: "/app/projects", icon: FolderKanban },
   { label: "Expenses", href: "/app/expenses", icon: Receipt },
@@ -330,6 +336,7 @@ const moreNav: NavItem[] = [
 // static featureFlag is enabled (dev defaults on, prod off).
 const comingSoonNav: NavItem[] = [
   { label: "Documents", href: "/app/documents", icon: FileText, dormantFlag: "documents" },
+  { label: "Content", href: "/app/marketing", icon: Megaphone, dormantFlag: "contentScheduler" },
   { label: "Community", href: "/app/community", icon: MessageCircle, dormantFlag: "community" },
   { label: "Learn", href: "/app/learn", icon: BookOpen, dormantFlag: "learning" },
   { label: "Marketplace", href: "/app/marketplace", icon: Globe, dormantFlag: "marketplaceBrowsing" },

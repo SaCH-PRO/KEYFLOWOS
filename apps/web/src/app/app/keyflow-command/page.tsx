@@ -40,6 +40,7 @@ import {
   type KeyflowNotesTarget,
 } from "@/components/keyflow/keyflow-notes-drawer";
 import { BlueprintCompletenessWidget } from "@/components/keyflow/blueprint-completeness-widget";
+import { BusinessTimeline } from "@/components/timeline/business-timeline";
 
 function formatTTD(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -328,6 +329,12 @@ export default function KeyflowCommandPage() {
             <TodaysPlanCard businessId={d.businessId} />
 
             <BlueprintCompletenessWidget businessId={d.businessId} />
+
+            {d.businessId && (
+              <div className="rounded-xl border border-border/50 bg-card/50 p-4">
+                <BusinessTimeline businessId={d.businessId} compact limit={30} />
+              </div>
+            )}
 
             <div id="keyflow-calendar">
               <UnifiedCalendar

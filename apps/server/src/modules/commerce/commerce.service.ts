@@ -363,6 +363,7 @@ export class CommerceService {
             primaryColor: true,
             secondaryColor: true,
             invoiceTemplate: true,
+            quoteTemplate: true,
             facebook: true,
             instagram: true,
             twitter: true,
