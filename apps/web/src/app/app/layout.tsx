@@ -55,6 +55,7 @@ import {
   Landmark,
   Calculator,
   Building2,
+  Truck,
 } from "lucide-react";
 
 interface ResolvedFeatureFlag {
@@ -340,6 +341,7 @@ const comingSoonNav: NavItem[] = [
   { label: "Community", href: "/app/community", icon: MessageCircle, dormantFlag: "community" },
   { label: "Learn", href: "/app/learn", icon: BookOpen, dormantFlag: "learning" },
   { label: "Marketplace", href: "/app/marketplace", icon: Globe, dormantFlag: "marketplaceBrowsing" },
+  { label: "Supplier", href: "/app/marketplace?tab=suppliers", icon: Truck, dormantFlag: "supplier" },
 ];
 
 const mobileBottomNav = [

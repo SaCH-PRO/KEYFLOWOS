@@ -192,6 +192,81 @@ export class ContactInsightService {
   // Aggregation
   // -----------------------------------------------------------------
 
+  /**
+   * Dashboard-level intelligence aggregates for a business.
+   * Returns at-risk counts, high-value counts, neglected counts,
+   * and a lead-score distribution histogram.
+   */
+  async getIntelligenceSummary(businessId: string) {
+    const [
+      atRisk,
+      highValue,
+      neglected,
+      scoreDistribution,
+    ] = await Promise.all([
+      this.db.contact.count({
+        where: {
+          businessId,
+          deletedAt: null,
+          OR: [
+            { relationshipHealth: 'AT_RISK' },
+            { relationshipHealth: 'DORMANT' },
+          ],
+        },
+      }),
+      this.db.contact.count({
+        where: {
+          businessId,
+          deletedAt: null,
+          leadScore: { gte: 80 },
+        },
+      }),
+      this.db.contact.count({
+        where: {
+          businessId,
+          deletedAt: null,
+          OR: [
+            { lastContactedAt: { lte: new Date(Date.now() - 30 * 86400000) } },
+            { lastContactedAt: null },
+          ],
+        },
+      }),
+      this.db.contact.groupBy({
+        by: ['leadScore'],
+        where: { businessId, deletedAt: null, leadScore: { not: null } },
+        _count: { leadScore: true },
+      }),
+    ]);
+
+    const buckets = [
+      { label: 'Hot (80-100)', min: 80, max: 100 },
+      { label: 'Warm (60-79)', min: 60, max: 79 },
+      { label: 'Neutral (40-59)', min: 40, max: 59 },
+      { label: 'Cool (20-39)', min: 20, max: 39 },
+      { label: 'Cold (0-19)', min: 0, max: 19 },
+    ];
+
+    const histogram = buckets.map((b) => ({
+      ...b,
+      count: scoreDistribution
+        .filter((s) => {
+          const score = s.leadScore ?? 0;
+          return score >= b.min && score <= b.max;
+        })
+        .reduce((sum, s) => sum + s._count.leadScore, 0),
+    }));
+
+    return {
+      atRisk,
+      highValue,
+      neglected,
+      totalAnalyzed: await this.db.contact.count({ where: { businessId, deletedAt: null } }),
+      scoreDistribution: histogram,
+    };
+  }
+
+  // -----------------------------------------------------------------
+
   private async aggregate(businessId: string, contactId: string): Promise<ContactInsightPayload> {
     const [contact, deals, invoices, openTasks, conversationInsights, channelExplanation, lastEvent] =
       await Promise.all([

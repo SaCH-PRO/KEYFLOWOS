@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
-import { FinancialCopilotService } from './financial-copilot.service';
+import { FinancialCopilotService, FinancialPulse, FinancialAlert, WeeklyBriefing } from './financial-copilot.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from '../crm/guards/rate-limit.guard';
@@ -14,14 +14,14 @@ export class FinancialCopilotController {
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/financial-pulse')
-  getFinancialPulse(@Param('businessId') businessId: string) {
+  getFinancialPulse(@Param('businessId') businessId: string): Promise<FinancialPulse> {
     return this.copilot.getFinancialPulse(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Get('businesses/:businessId/financial-alerts')
-  async getFinancialAlerts(@Param('businessId') businessId: string) {
+  async getFinancialAlerts(@Param('businessId') businessId: string): Promise<{ alerts: FinancialAlert[] }> {
     const pulse = await this.copilot.getFinancialPulse(businessId);
     return { alerts: pulse.alerts };
   }
@@ -36,7 +36,7 @@ export class FinancialCopilotController {
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/weekly-briefing')
-  generateWeeklyBriefing(@Param('businessId') businessId: string) {
+  generateWeeklyBriefing(@Param('businessId') businessId: string): Promise<WeeklyBriefing> {
     return this.copilot.generateWeeklyBriefing(businessId);
   }
 }

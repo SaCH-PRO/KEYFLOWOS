@@ -1035,6 +1035,12 @@ function templateRecommendation(ctx: {
         },
         source: 'template',
       };
+    default:
+      return {
+        explanation: `Revenue action needed for ${ctx.contactName} (${amt}).`,
+        suggestedAction: 'Review the account',
+        source: 'template',
+      };
   }
 }
 

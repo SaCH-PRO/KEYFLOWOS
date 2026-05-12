@@ -233,7 +233,7 @@ export class PresenceOverviewService {
       }),
       this.prisma.client.service.findMany({
         where: { businessId, deletedAt: null },
-        select: { id: true, name: true, price: true, duration: true, depositAmount: true },
+        select: { id: true, name: true, price: true, duration: true },
         take: 200,
       }),
       this.prisma.client.product.findMany({
@@ -290,7 +290,7 @@ export class PresenceOverviewService {
     for (const [id, count] of canonicalServiceBookings.entries()) {
       const svc = serviceById.get(id);
       if (!svc) continue;
-      if (count >= 3 && (!svc.depositAmount || Number(svc.depositAmount) === 0)) {
+      if (count >= 3) {
         popularNoDeposit.push({ id, name: svc.name, bookings: count });
       }
     }

@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
@@ -43,6 +44,7 @@ function safeInt(val: string | undefined, fallback: number): number {
 }
 
 @Controller('ai')
+@UseGuards(CrmRateLimitGuard)
 export class AiController {
   constructor(
     @Inject(AiAdvisorService) private readonly advisor: AiAdvisorService,
@@ -67,6 +69,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/ai/chat')
   async chat(
     @Param('businessId') businessId: string,
@@ -76,6 +79,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai/briefing')
   async briefing(@Param('businessId') businessId: string) {
     return this.advisor.generateDailyBriefing(businessId);
@@ -91,6 +95,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai/simulate')
   async simulate(
     @Param('businessId') businessId: string,
@@ -100,6 +105,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/ai/business-model')
   async generateBusinessModel(
     @Param('businessId') businessId: string,
@@ -192,6 +198,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai/seo-score')
   async seoScore(
     @Param('businessId') businessId: string,
@@ -239,6 +246,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/ai/intent')
   async parseIntent(
     @Param('businessId') businessId: string,
@@ -248,6 +256,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai/plan')
   async createPlan(
     @Param('businessId') businessId: string,
@@ -433,6 +442,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/ai/memory/summarize-patterns')
   async summarizePatterns(@Param('businessId') businessId: string) {
     const patterns = await this.memory.summarizePatterns(businessId);
@@ -440,6 +450,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai/strategic/dashboard')
   async strategicDashboard(@Param('businessId') businessId: string) {
     return this.strategic.getStrategicDashboard(businessId);
@@ -487,6 +498,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(5, 60_000)
   @Get('businesses/:businessId/ai/strategic/weekly-plan')
   async weeklyPlan(@Param('businessId') businessId: string) {
     return this.strategic.generateWeeklyPlan(businessId);
@@ -788,6 +800,7 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/ai/profile/chat')
   async profileChat(
     @Param('businessId') businessId: string,

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CatalogService } from './catalog.service';
-import type { PrismaService } from '../prisma/prisma.service';
+import type { PrismaService } from '../../core/prisma/prisma.service';
 
 /**
  * Task #584 (INV1) — verifies the public storefront stock projection

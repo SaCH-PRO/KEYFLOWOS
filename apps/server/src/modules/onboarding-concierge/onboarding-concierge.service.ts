@@ -53,7 +53,7 @@ interface BusinessContext {
   metaData: Prisma.JsonValue;
 }
 
-interface AutoConfigureResult {
+export interface AutoConfigureResult {
   templateId: string;
   templateLabel: string;
   productsCreated?: number;

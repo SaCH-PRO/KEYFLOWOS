@@ -280,20 +280,23 @@ export class FinanceIntelligenceService {
    */
   private async detectSlowPayer(businessId: string, now: Date): Promise<Detection[]> {
     const thirtyAgo = new Date(now.getTime() - 30 * MS_DAY);
-    const grouped = await this.prisma.client.invoice.groupBy({
+    const grouped = await (this.prisma.client.invoice.groupBy as any)({
       by: ['contactId'],
       where: {
         businessId,
         deletedAt: null,
         status: 'OVERDUE',
-        contactId: { not: null },
         dueDate: { lt: thirtyAgo },
       },
       _count: { _all: true },
       _sum: { total: true },
       having: { _count: { _all: { gt: 2 } } },
       take: 10,
-    });
+    }) as Array<{
+      contactId: string;
+      _count: { _all: number };
+      _sum: { total: number | null };
+    }>;
     const out: Detection[] = [];
     for (const g of grouped) {
       if (!g.contactId) continue;

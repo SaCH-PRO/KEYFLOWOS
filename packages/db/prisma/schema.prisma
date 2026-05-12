@@ -2869,6 +2869,7 @@ model CommunityComment {
   likes      Int      @default(0)
 
   createdAt DateTime @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
 
   @@index([postId])
   @@map("community_comments")
