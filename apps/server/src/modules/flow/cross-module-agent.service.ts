@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, Optional, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, NotFoundException, BadRequestException, OnModuleDestroy } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ActivityService } from './activity.service';
@@ -208,7 +208,7 @@ export const WORKFLOW_DEFINITIONS: WorkflowDefinition[] = [
 ];
 
 @Injectable()
-export class CrossModuleAgentService {
+export class CrossModuleAgentService implements OnModuleDestroy {
   private readonly logger = new Logger(CrossModuleAgentService.name);
   private jobPollerInterval: NodeJS.Timeout | null = null;
 

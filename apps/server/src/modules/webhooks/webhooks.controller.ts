@@ -1,23 +1,30 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Query, UseGuards, Optional, Logger } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Inject, Param, Post, Query, Req, UseGuards, Optional, Logger, BadRequestException } from '@nestjs/common';
+import { Request } from 'express';
+import Stripe from 'stripe';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CommerceService } from '../commerce/commerce.service';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
-import { StripeWebhookDto } from './dto/stripe-webhook.dto';
 import { randomBytes } from 'crypto';
 
 @Controller('webhooks')
 export class WebhooksController {
   private readonly logger = new Logger(WebhooksController.name);
+  private readonly stripe: Stripe | null = null;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommerceService) private readonly commerce: CommerceService,
     @Inject(WebhookDispatcherService) private readonly dispatcher: WebhookDispatcherService,
     @Optional() @Inject(StripeConnector) private readonly stripeConnector?: StripeConnector,
-  ) {}
+  ) {
+    const secretKey = process.env.STRIPE_SECRET_KEY;
+    if (secretKey) {
+      this.stripe = new Stripe(secretKey, { apiVersion: '2025-06-30.basil' });
+    }
+  }
 
   @Get('health')
   health() {
@@ -25,24 +32,65 @@ export class WebhooksController {
   }
 
   @Post('stripe')
-  async handleStripeWebhook(@Body() body: StripeWebhookDto) {
-    const result = await this.commerce.markInvoicePaid(body.invoiceId);
-
-    const invoice = await this.prisma.client.invoice.findUnique({
-      where: { id: body.invoiceId },
-      select: { businessId: true, total: true, currency: true },
-    });
-
-    if (invoice) {
-      this.stripeConnector?.emitPaymentReceived(invoice.businessId, {
-        amount: Number(invoice.total),
-        currency: invoice.currency,
-        invoiceId: body.invoiceId,
-        externalId: body.invoiceId,
-      }).catch((e) => this.logger.warn(`Stripe connector event emission failed: ${e.message}`));
+  async handleStripeWebhook(
+    @Req() req: Request,
+    @Headers('stripe-signature') signature: string,
+  ) {
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      this.logger.error('STRIPE_WEBHOOK_SECRET is not configured');
+      throw new BadRequestException('Webhook secret not configured');
     }
 
-    return result;
+    if (!signature) {
+      this.logger.warn('Stripe webhook received without signature header');
+      throw new BadRequestException('Missing stripe-signature header');
+    }
+
+    const rawBody = (req as any).rawBody;
+    if (!rawBody) {
+      this.logger.error('Stripe webhook called but rawBody is not available');
+      throw new BadRequestException('Webhook payload unreadable');
+    }
+
+    let event: Stripe.Event;
+    try {
+      event = this.stripe!.webhooks.constructEvent(rawBody, signature, webhookSecret);
+    } catch (err: any) {
+      this.logger.warn(`Stripe webhook signature verification failed: ${err.message}`);
+      throw new BadRequestException(`Webhook signature verification failed: ${err.message}`);
+    }
+
+    this.logger.debug(`Stripe webhook received: ${event.type}`);
+
+    // Handle supported event types
+    if (event.type === 'invoice.payment_succeeded' || event.type === 'checkout.session.completed') {
+      const session = event.data.object as Stripe.Checkout.Session;
+      const invoiceId = session.metadata?.invoiceId || session.client_reference_id;
+
+      if (invoiceId) {
+        const result = await this.commerce.markInvoicePaid(invoiceId);
+
+        const invoice = await this.prisma.client.invoice.findUnique({
+          where: { id: invoiceId },
+          select: { businessId: true, total: true, currency: true },
+        });
+
+        if (invoice) {
+          this.stripeConnector?.emitPaymentReceived(invoice.businessId, {
+            amount: Number(invoice.total),
+            currency: invoice.currency,
+            invoiceId,
+            externalId: session.id,
+          }).catch((e) => this.logger.warn(`Stripe connector event emission failed: ${e.message}`));
+        }
+
+        return result;
+      }
+    }
+
+    // Acknowledge all other events
+    return { received: true, type: event.type };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

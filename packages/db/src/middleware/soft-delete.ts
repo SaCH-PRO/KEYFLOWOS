@@ -46,7 +46,31 @@ export function softDelete(models: Prisma.ModelName[]) {
             }
             return query(newArgs);
           },
+          async findUniqueOrThrow({ model, args, query }) {
+            if (!model || !models.includes(model as Prisma.ModelName)) {
+              return query(args);
+            }
+            const newArgs = { ...args } as any;
+            if (newArgs.where) {
+              newArgs.where.deletedAt = null;
+            } else {
+              newArgs.where = { deletedAt: null };
+            }
+            return query(newArgs);
+          },
           async findFirst({ model, args, query }) {
+            if (!model || !models.includes(model as Prisma.ModelName)) {
+              return query(args);
+            }
+            const newArgs = { ...args } as any;
+            if (newArgs.where) {
+              newArgs.where.deletedAt = null;
+            } else {
+              newArgs.where = { deletedAt: null };
+            }
+            return query(newArgs);
+          },
+          async findFirstOrThrow({ model, args, query }) {
             if (!model || !models.includes(model as Prisma.ModelName)) {
               return query(args);
             }

@@ -5,6 +5,7 @@ import { softDelete } from "./middleware/soft-delete";
 
 // Enable soft delete for all models that include a deletedAt column
 const softDeleteExtension = softDelete([
+  "Business",
   "Contact",
   "Product",
   "Quote",
@@ -26,7 +27,12 @@ const connectionString = process.env.DATABASE_URL;
 // Create pool and adapter - adapter must be null (not undefined) if no connection string
 let adapter: PrismaPg | null = null;
 if (connectionString) {
-  const pool = new Pool({ connectionString });
+  const pool = new Pool({
+    connectionString,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
   adapter = new PrismaPg(pool);
 }
 

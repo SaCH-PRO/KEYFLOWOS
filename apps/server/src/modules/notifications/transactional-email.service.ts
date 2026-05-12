@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GmailService } from '../commerce/gmail.service';
@@ -108,7 +108,7 @@ const QUEUE_DRAIN_BATCH_SIZE = 20;
 const QUEUE_MAX_AGE_HOURS = 48;
 
 @Injectable()
-export class TransactionalEmailService implements OnModuleInit {
+export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TransactionalEmailService.name);
   private drainInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -124,6 +124,13 @@ export class TransactionalEmailService implements OnModuleInit {
       );
     }, QUEUE_DRAIN_INTERVAL_MS);
     this.logger.log('Notification queue drain scheduler started (5min interval)');
+  }
+
+  onModuleDestroy() {
+    if (this.drainInterval) {
+      clearInterval(this.drainInterval);
+      this.drainInterval = null;
+    }
   }
 
   private async getBusinessContext(businessId: string): Promise<TemplateContext & { id: string; preferences: NotificationPreferences } | null> {

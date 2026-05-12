@@ -439,7 +439,7 @@ export class CrmStatsService {
       };
     });
     if (updates.length > 0) {
-      void this.prisma.client.$transaction(
+      this.prisma.client.$transaction(
         updates.map((u) =>
           this.prisma.client.contact.update({
             where: { id: u.id },
