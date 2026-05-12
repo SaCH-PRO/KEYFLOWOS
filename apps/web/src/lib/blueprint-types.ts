@@ -14,7 +14,9 @@ export type BlueprintSectionKey =
   | "brand"
   | "customerModel"
   | "financials"
-  | "intelligence";
+  | "intelligence"
+  | "workflowModel"
+  | "aiPreferences";
 
 export interface BlueprintIdentity {
   name?: string;
@@ -79,6 +81,25 @@ export interface BlueprintIntelligence {
   inferredAt?: string;
 }
 
+export interface BlueprintWorkflowModel {
+  primaryWorkflow?: string;
+  appointmentBooking?: boolean;
+  projectManagement?: boolean;
+  retainerCycle?: boolean;
+  walkInQueue?: boolean;
+  ecommerceFulfillment?: boolean;
+  customInquiryFlow?: boolean;
+}
+
+export interface BlueprintAiPreferences {
+  autonomyLevel?: number;
+  tone?: string;
+  notifyOnRecommendations?: boolean;
+  notifyOnAlerts?: boolean;
+  approvedActions?: string[];
+  voiceEnabled?: boolean;
+}
+
 export interface BlueprintData {
   schemaVersion: number;
   identity: BlueprintIdentity;
@@ -89,6 +110,8 @@ export interface BlueprintData {
   customerModel: BlueprintCustomerModel;
   financials: BlueprintFinancials;
   intelligence: BlueprintIntelligence;
+  workflowModel: BlueprintWorkflowModel;
+  aiPreferences: BlueprintAiPreferences;
   completeness: number;
   updatedAt: string;
 }
@@ -102,4 +125,6 @@ export type BlueprintSectionDataMap = {
   customerModel: BlueprintCustomerModel;
   financials: BlueprintFinancials;
   intelligence: BlueprintIntelligence;
+  workflowModel: BlueprintWorkflowModel;
+  aiPreferences: BlueprintAiPreferences;
 };
