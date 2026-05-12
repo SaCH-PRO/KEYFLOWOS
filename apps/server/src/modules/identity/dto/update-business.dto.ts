@@ -249,4 +249,14 @@ export class UpdateBusinessDto {
   @IsOptional()
   @MaxLength(1000)
   positioningStatement?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  invoiceTemplate?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  quoteTemplate?: string;
 }

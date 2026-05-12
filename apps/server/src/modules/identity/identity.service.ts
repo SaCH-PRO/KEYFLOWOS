@@ -69,6 +69,7 @@ export class IdentityService {
     secondaryColor: true,
     defaultTaxRate: true,
     invoiceTemplate: true,
+    quoteTemplate: true,
     timezone: true,
     currency: true,
     storeEnabled: true,

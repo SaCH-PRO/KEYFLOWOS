@@ -55,6 +55,7 @@ export interface BusinessDataForPreview {
   primaryColor: string;
   secondaryColor: string;
   invoiceTemplate?: string | null;
+  quoteTemplate?: string | null;
 }
 
 interface BillingDetailModalProps {
@@ -264,7 +265,11 @@ export function BillingDetailModal({
     printFromRef(printTemplateRef, docType, number);
   }, [type, number]);
 
-  const templateId: TemplateId = (businessData?.invoiceTemplate as TemplateId) || "classic";
+  const templateId: TemplateId = (
+    type === "quote"
+      ? (businessData?.quoteTemplate as TemplateId)
+      : (businessData?.invoiceTemplate as TemplateId)
+  ) || "classic";
 
   const subtotal = items.reduce(
     (sum, item) => sum + Number(item.total || 0),
@@ -1122,7 +1127,7 @@ export function BillingDetailModal({
         <TemplateCustomizer
           open={showTemplatePreview}
           onClose={() => setShowTemplatePreview(false)}
-          activeTemplate={(businessData.invoiceTemplate as TemplateId) || "classic"}
+          activeTemplate={templateId}
           onSaveBranding={onSaveBranding}
           savingBranding={savingBranding}
           data={{

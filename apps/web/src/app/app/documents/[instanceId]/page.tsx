@@ -45,7 +45,7 @@ import {
   X,
 } from "lucide-react";
 import GoogleDriveBrowser from "@/app/app/profile/components/google-drive-browser";
-import DOMPurify from "isomorphic-dompurify";
+import sanitizeHtml from "sanitize-html";
 import { RichSectionEditor } from "./rich-section-editor";
 
 interface DocumentSection {
@@ -64,7 +64,7 @@ interface DocumentSection {
 }
 
 const SANITIZE_CONFIG = {
-  ALLOWED_TAGS: [
+  allowedTags: [
     "h1", "h2", "h3", "h4", "h5", "h6",
     "p", "br", "hr",
     "strong", "b", "em", "i", "u", "s", "sub", "sup",
@@ -75,14 +75,21 @@ const SANITIZE_CONFIG = {
     "span", "div",
     "img",
   ],
-  ALLOWED_ATTR: ["href", "target", "rel", "src", "alt", "title", "colspan", "rowspan", "style"],
+  allowedAttributes: {
+    a: ["href", "target", "rel", "title"],
+    img: ["src", "alt", "title"],
+    th: ["colspan", "rowspan", "style"],
+    td: ["colspan", "rowspan", "style"],
+    span: ["style"],
+    div: ["style"],
+  },
 };
 
 function sanitizeImportedHtml(html: string): string {
   // Google Docs export wraps content in <html><body>… — keep just the body.
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   const inner = bodyMatch ? bodyMatch[1] : html;
-  return DOMPurify.sanitize(inner, SANITIZE_CONFIG);
+  return sanitizeHtml(inner, SANITIZE_CONFIG);
 }
 
 interface DocumentVersion {
@@ -832,10 +839,10 @@ export default function DocumentDetailPage() {
       payload,
     );
     if (res.data?.html) {
-      const safeHtml = DOMPurify.sanitize(res.data.html, {
+      const safeHtml = sanitizeHtml(res.data.html, {
         ...SANITIZE_CONFIG,
-        WHOLE_DOCUMENT: true,
-        ALLOWED_TAGS: [...SANITIZE_CONFIG.ALLOWED_TAGS, "html", "head", "body", "title", "meta"],
+        enforceHtmlBoundary: false,
+        allowedTags: [...SANITIZE_CONFIG.allowedTags, "html", "head", "body", "title", "meta"],
       });
       const printWindow = window.open("", "_blank", "width=800,height=600");
       if (printWindow) {
@@ -1293,7 +1300,7 @@ export default function DocumentDetailPage() {
               ) : section.contentFormat === "HTML" ? (
                 <div
                   className="prose prose-sm max-w-none text-sm text-[hsl(var(--foreground))] leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.content, SANITIZE_CONFIG) }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(section.content, SANITIZE_CONFIG) }}
                 />
               ) : (
                 <div className="text-sm text-[hsl(var(--foreground))] whitespace-pre-wrap leading-relaxed">

@@ -19,7 +19,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
-import DOMPurify from "isomorphic-dompurify";
+import sanitizeHtml from "sanitize-html";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { apiGet, apiPostSimple } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -576,10 +576,25 @@ export default function InboxPage() {
                           <div
                             className="prose prose-invert prose-sm max-w-none text-sm"
                             dangerouslySetInnerHTML={{
-                              __html: DOMPurify.sanitize(html, {
-                                FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "input", "link", "meta"],
-                                FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "onfocus", "onblur", "onchange", "onsubmit"],
-                                ALLOW_DATA_ATTR: false,
+                              __html: sanitizeHtml(html, {
+                                allowedTags: sanitizeHtml.defaults.allowedTags.concat(["style", "iframe", "form", "input", "link", "meta", "img", "table", "thead", "tbody", "tr", "th", "td", "div", "span", "h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr", "strong", "b", "em", "i", "u", "s", "sub", "sup", "ul", "ol", "li", "blockquote", "pre", "code", "a"]),
+                                allowedAttributes: {
+                                  ...sanitizeHtml.defaults.allowedAttributes,
+                                  img: ["src", "alt", "title", "width", "height"],
+                                  a: ["href", "target", "rel", "title"],
+                                  table: ["width", "border", "cellpadding", "cellspacing"],
+                                  th: ["colspan", "rowspan", "width", "align", "valign"],
+                                  td: ["colspan", "rowspan", "width", "align", "valign"],
+                                  div: ["style", "class"],
+                                  span: ["style", "class"],
+                                  p: ["style", "class"],
+                                  h1: ["style", "class"],
+                                  h2: ["style", "class"],
+                                  h3: ["style", "class"],
+                                  h4: ["style", "class"],
+                                  h5: ["style", "class"],
+                                  h6: ["style", "class"],
+                                },
                               }),
                             }}
                           />

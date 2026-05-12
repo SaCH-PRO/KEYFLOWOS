@@ -28,6 +28,7 @@ export function useBusinessPreview() {
           primaryColor?: string | null;
           secondaryColor?: string | null;
           invoiceTemplate?: string | null;
+          quoteTemplate?: string | null;
         }>(`/identity/businesses/${id}`);
         if (res.data) {
           setBusinessData({
@@ -43,6 +44,7 @@ export function useBusinessPreview() {
             primaryColor: res.data.primaryColor || "#F97316",
             secondaryColor: res.data.secondaryColor || "#14B8A6",
             invoiceTemplate: res.data.invoiceTemplate || "classic",
+            quoteTemplate: res.data.quoteTemplate || "classic",
           });
         }
       } catch {
