@@ -42,6 +42,7 @@ export function CommandEntry({
   const [executing, setExecuting] = useState(false);
   const [preview, setPreview] = useState<PlanPreview | null>(null);
   const [showSteps, setShowSteps] = useState(false);
+  const [showFindings, setShowFindings] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handlePlan = useCallback(async () => {
@@ -193,6 +194,46 @@ export function CommandEntry({
                   <span className="text-[11px]" style={{ color: "hsl(var(--kf-warning))" }}>
                     Needs clarification — try being more specific
                   </span>
+                </div>
+              )}
+
+              {preview.goal && (
+                <div className="text-xs font-medium" style={{ color: "hsl(var(--kf-foreground))" }}>
+                  Goal: <span className="text-muted-foreground font-normal">{preview.goal}</span>
+                </div>
+              )}
+
+              {preview.findings && preview.findings.length > 0 && (
+                <div>
+                  <button
+                    onClick={() => setShowFindings((v) => !v)}
+                    className="text-[10px] flex items-center gap-1 mb-1"
+                    style={{ color: "hsl(var(--kf-muted-foreground))" }}
+                  >
+                    {showFindings ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    Findings ({preview.findings.length})
+                  </button>
+                  <AnimatePresence>
+                    {showFindings && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="space-y-1 overflow-hidden"
+                      >
+                        {preview.findings.map((finding, i) => (
+                          <div
+                            key={i}
+                            className="flex items-start gap-2 rounded-lg px-2.5 py-1.5"
+                            style={{ background: "hsl(var(--kf-muted) / 0.06)" }}
+                          >
+                            <span className="text-[9px] font-bold mt-0.5" style={{ color: "hsl(var(--kf-accent1))" }}>•</span>
+                            <span className="text-[10px]" style={{ color: "hsl(var(--kf-foreground))" }}>{finding}</span>
+                          </div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               )}
 

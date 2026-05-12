@@ -17,11 +17,14 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchAiGovernance,
   updateAiGovernance,
+  fetchAutopilotRules,
+  updateAutopilotRule,
   type AiAutonomySettings,
 } from "@/lib/client";
 import { ExecutionHistory } from "@/components/ai/execution-history";
 import { ActionQueue } from "@/components/ai/action-queue";
 import { AiPreferencesPanel } from "@/components/ai/ai-preferences-panel";
+import { AutopilotRulesSettings } from "@/components/ai/autopilot-rules-settings";
 
 const MODES: Array<{
   id: AiAutonomySettings["mode"];
@@ -70,7 +73,7 @@ const MODES: Array<{
   },
 ];
 
-type SectionTab = "governance" | "preferences" | "queue" | "history";
+type SectionTab = "governance" | "preferences" | "autopilot" | "queue" | "history";
 
 export default function AiControlCenterPage() {
   const [settings, setSettings] = useState<AiAutonomySettings | null>(null);
@@ -173,6 +176,7 @@ export default function AiControlCenterPage() {
         {([
           { id: "governance" as SectionTab, label: "Governance", icon: Shield },
           { id: "preferences" as SectionTab, label: "AI Preferences", icon: Sparkles },
+          { id: "autopilot" as SectionTab, label: "Autopilot Rules", icon: Zap },
           { id: "queue" as SectionTab, label: `Action Queue${pendingCount > 0 ? ` (${pendingCount})` : ""}`, icon: AlertTriangle },
           { id: "history" as SectionTab, label: "Execution History", icon: Activity },
         ]).map(t => (
@@ -356,6 +360,12 @@ export default function AiControlCenterPage() {
       {activeTab === "preferences" && (
         <div role="tabpanel" id="panel-preferences" aria-label="AI Preferences">
           <AiPreferencesPanel />
+        </div>
+      )}
+
+      {activeTab === "autopilot" && (
+        <div role="tabpanel" id="panel-autopilot" aria-label="Autopilot rules">
+          <AutopilotRulesSettings />
         </div>
       )}
 

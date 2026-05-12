@@ -35,6 +35,10 @@ import { TodaysPlanCard } from "./components/todays-plan-card";
 import { NextActionsWidget } from "../crm/dashboard/next-actions-widget";
 import { NextBestActionWidget } from "@/components/ai/next-best-action-widget";
 import { AskKeyButton, KeyNoticedStream } from "@/components/key";
+import { MorningBriefing } from "../control-tower/components/morning-briefing";
+import { EndOfDayReport } from "../control-tower/components/end-of-day-report";
+import { DoItForMePanel } from "../control-tower/components/do-it-for-me-panel";
+import { AutopilotRulesWidget } from "../control-tower/components/autopilot-rules-widget";
 import {
   KeyflowNotesDrawer,
   type KeyflowNotesTarget,
@@ -278,6 +282,7 @@ export default function KeyflowCommandPage() {
                 </span>
               )}
             </button>
+            <EndOfDayReport businessId={d.businessId} />
             <button
               onClick={d.refresh}
               className="flex items-center justify-center w-9 h-9 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-w-[36px] min-h-[36px]"
@@ -303,8 +308,11 @@ export default function KeyflowCommandPage() {
 
         {d.data && (
           <div className="space-y-4">
+            {d.businessId && <MorningBriefing businessId={d.businessId} />}
             {d.businessId && <KeyNoticedStream businessId={d.businessId} />}
             {d.businessId && <ServiceLinkWidget compact />}
+
+            <DoItForMePanel businessId={d.businessId} />
 
             <CommandEntry
               businessId={d.businessId}
@@ -364,6 +372,8 @@ export default function KeyflowCommandPage() {
               storefront={d.data.modules.storefront}
               monthlyRevenue={d.data.dashboard.monthlyRevenue}
             />
+
+            <AutopilotRulesWidget businessId={d.businessId} />
 
             <GrowthOpsPanel
               businessId={d.businessId}
