@@ -21,7 +21,9 @@ export type BlueprintSectionKey =
   | 'brand'
   | 'customerModel'
   | 'financials'
-  | 'intelligence';
+  | 'intelligence'
+  | 'workflowModel'
+  | 'aiPreferences';
 
 export interface BlueprintIdentity {
   name?: string;
@@ -86,6 +88,37 @@ export interface BlueprintIntelligence {
   inferredAt?: string;
 }
 
+export interface BlueprintWorkflowModel {
+  primaryWorkflow?: string;
+  appointmentBooking?: boolean;
+  projectManagement?: boolean;
+  retainerCycle?: boolean;
+  walkInQueue?: boolean;
+  ecommerceFulfillment?: boolean;
+  customInquiryFlow?: boolean;
+}
+
+export interface BlueprintAiPreferences {
+  autonomyLevel?: number;
+  tone?: string;
+  notifyOnRecommendations?: boolean;
+  notifyOnAlerts?: boolean;
+  approvedActions?: string[];
+  voiceEnabled?: boolean;
+}
+
+export interface BlueprintConfidenceScores {
+  identity?: number;
+  operatingModel?: number;
+  goals?: number;
+  constraints?: number;
+  brand?: number;
+  customerModel?: number;
+  financials?: number;
+  workflowModel?: number;
+  aiPreferences?: number;
+}
+
 export interface BlueprintData {
   schemaVersion: number;
   identity: BlueprintIdentity;
@@ -96,7 +129,11 @@ export interface BlueprintData {
   customerModel: BlueprintCustomerModel;
   financials: BlueprintFinancials;
   intelligence: BlueprintIntelligence;
+  workflowModel: BlueprintWorkflowModel;
+  aiPreferences: BlueprintAiPreferences;
+  confidenceScores: BlueprintConfidenceScores;
   completeness: number;
+  lastAnalyzedAt?: string;
   updatedAt: string;
 }
 
@@ -114,6 +151,10 @@ export interface BlueprintPatch {
   customerModel?: Partial<BlueprintCustomerModel>;
   financials?: Partial<BlueprintFinancials>;
   intelligence?: Partial<BlueprintIntelligence>;
+  workflowModel?: Partial<BlueprintWorkflowModel>;
+  aiPreferences?: Partial<BlueprintAiPreferences>;
+  confidenceScores?: Partial<BlueprintConfidenceScores>;
+  lastAnalyzedAt?: string;
 }
 
 export interface RecommendedSetupStep {

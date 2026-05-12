@@ -27,6 +27,8 @@ const SECTION_KEYS: BlueprintSectionKey[] = [
   'customerModel',
   'financials',
   'intelligence',
+  'workflowModel',
+  'aiPreferences',
 ];
 
 /**
@@ -44,6 +46,8 @@ const COMPLETENESS_FIELDS: Record<BlueprintSectionKey, string[]> = {
   customerModel: ['idealCustomer', 'segments', 'painPoints'],
   financials: ['currency', 'pricingModel', 'avgTicket', 'monthlyTarget'],
   intelligence: ['topChannels', 'recentMomentumScore'],
+  workflowModel: ['primaryWorkflow'],
+  aiPreferences: ['autonomyLevel', 'tone'],
 };
 
 function isPopulated(value: unknown): boolean {
@@ -99,6 +103,8 @@ export class BlueprintService {
       customerModel: readObject(current.customerModel),
       financials: readObject(current.financials),
       intelligence: readObject(current.intelligence),
+      workflowModel: readObject(current.workflowModel),
+      aiPreferences: readObject(current.aiPreferences),
     };
 
     for (const key of SECTION_KEYS) {
@@ -327,6 +333,14 @@ export class BlueprintService {
         title: 'Connect data sources',
         reason: 'Inferred signals come from events; the more we see, the smarter KEY gets.',
       },
+      workflowModel: {
+        title: 'Define your workflow model',
+        reason: 'Appointment, project, retainer, or ecommerce — KEY needs to know how you deliver.',
+      },
+      aiPreferences: {
+        title: 'Set your AI preferences',
+        reason: 'Autonomy level, tone, and notifications let KEY work the way you want.',
+      },
     };
 
     for (const key of SECTION_KEYS) {
@@ -409,6 +423,8 @@ export class BlueprintService {
 
     const goals: BlueprintGoals = {};
     const intelligence: BlueprintIntelligence = {};
+    const workflowModel: any = {};
+    const aiPreferences: any = {};
 
     const seed = {
       identity,
@@ -419,9 +435,12 @@ export class BlueprintService {
       customerModel,
       financials,
       intelligence,
+      workflowModel,
+      aiPreferences,
     };
 
     const completeness = this.calculateCompleteness(seed as any);
+    const confidenceScores = this.calculateConfidenceScores(seed as any);
 
     return this.prisma.client.businessBlueprint.upsert({
       where: { businessId },
@@ -436,6 +455,9 @@ export class BlueprintService {
         customerModel: customerModel as unknown as Prisma.InputJsonValue,
         financials: financials as unknown as Prisma.InputJsonValue,
         intelligence: intelligence as unknown as Prisma.InputJsonValue,
+        workflowModel: workflowModel as unknown as Prisma.InputJsonValue,
+        aiPreferences: aiPreferences as unknown as Prisma.InputJsonValue,
+        confidenceScores: confidenceScores as unknown as Prisma.InputJsonValue,
         completeness,
       },
       update: {},
@@ -456,6 +478,18 @@ export class BlueprintService {
     return Math.round(avg * 100);
   }
 
+  private calculateConfidenceScores(sections: Record<BlueprintSectionKey, Record<string, unknown>>): Record<string, number> {
+    const scores: Record<string, number> = {};
+    for (const key of SECTION_KEYS) {
+      const fields = COMPLETENESS_FIELDS[key];
+      if (!fields.length) { scores[key] = 0; continue; }
+      const section = sections[key] || {};
+      const filled = fields.filter((f) => isPopulated(section[f])).length;
+      scores[key] = Math.round((filled / fields.length) * 100);
+    }
+    return scores;
+  }
+
   private serialize(row: {
     schemaVersion: number;
     identity: Prisma.JsonValue;
@@ -466,7 +500,11 @@ export class BlueprintService {
     customerModel: Prisma.JsonValue;
     financials: Prisma.JsonValue;
     intelligence: Prisma.JsonValue;
+    workflowModel: Prisma.JsonValue;
+    aiPreferences: Prisma.JsonValue;
+    confidenceScores: Prisma.JsonValue;
     completeness: number;
+    lastAnalyzedAt: Date | null;
     updatedAt: Date;
   }): BlueprintData {
     return {
@@ -479,7 +517,11 @@ export class BlueprintService {
       customerModel: readObject(row.customerModel) as BlueprintCustomerModel,
       financials: readObject(row.financials) as BlueprintFinancials,
       intelligence: readObject(row.intelligence) as BlueprintIntelligence,
+      workflowModel: readObject(row.workflowModel) as any,
+      aiPreferences: readObject(row.aiPreferences) as any,
+      confidenceScores: readObject(row.confidenceScores) as any,
       completeness: row.completeness,
+      lastAnalyzedAt: row.lastAnalyzedAt?.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
   }
