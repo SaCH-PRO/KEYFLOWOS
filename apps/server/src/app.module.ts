@@ -16,6 +16,7 @@ import { AutomationModule } from './modules/automation/automation.module';
 import { SiteModule } from './modules/site/site.module';
 import { AiModule } from './modules/ai/ai.module';
 import { FlowModule } from './modules/flow/flow.module';
+import { TimelineModule } from './modules/timeline/timeline.module';
 import { GamificationModule } from './modules/gamification/gamification.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
@@ -77,6 +78,7 @@ import { PublicEventsModule } from './modules/public-events/public-events.module
     SiteModule,
     AiModule,
     FlowModule,
+    TimelineModule,
     GamificationModule,
     WebhooksModule,
     ApiKeysModule,

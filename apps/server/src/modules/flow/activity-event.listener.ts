@@ -50,6 +50,8 @@ export class ActivityEventListener {
       tone: 'info',
       data: { invoiceId: inv.id, total: inv.total, currency: inv.currency, source: payload.source },
       contactId: inv.contactId || undefined,
+      category: 'COMMERCE',
+      revenueImpact: inv.total ? Number(inv.total) : undefined,
     });
   }
 
@@ -68,6 +70,9 @@ export class ActivityEventListener {
       tone: 'success',
       data: { invoiceId: inv.id, total: inv.total, currency: inv.currency },
       contactId: inv.contactId || undefined,
+      category: 'PAYMENT',
+      status: 'COMPLETED',
+      revenueImpact: inv.total ? Number(inv.total) : undefined,
     });
   }
 
@@ -124,6 +129,8 @@ export class ActivityEventListener {
       tone: 'info',
       data: { quoteId: q.id, total: q.total, currency: q.currency },
       contactId: q.contactId || undefined,
+      category: 'COMMERCE',
+      revenueImpact: q.total ? Number(q.total) : undefined,
     });
   }
 
@@ -160,6 +167,9 @@ export class ActivityEventListener {
       tone: 'success',
       data: { quoteId: q.id },
       contactId: q.contactId || undefined,
+      category: 'COMMERCE',
+      status: 'COMPLETED',
+      revenueImpact: q.total ? Number(q.total) : undefined,
     });
   }
 

@@ -13,6 +13,16 @@ export interface CreateActivityInput {
   tone?: string;
   data?: Record<string, unknown>;
   contactId?: string;
+  // Business Event Ledger extensions
+  category?: 'CONTACT' | 'COMMERCE' | 'BOOKING' | 'PAYMENT' | 'AI' | 'SYSTEM' | 'STORE' | 'TASK';
+  actorType?: 'USER' | 'AI' | 'CUSTOMER' | 'SYSTEM';
+  actorId?: string;
+  status?: 'SCHEDULED' | 'COMPLETED' | 'CANCELLED' | 'FAILED' | 'PENDING';
+  priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+  revenueImpact?: number;
+  startsAt?: Date;
+  endsAt?: Date;
+  occurredAt?: Date;
 }
 
 @Injectable()
@@ -36,6 +46,15 @@ export class ActivityService {
           tone: input.tone,
           data: input.data as any,
           contactId: input.contactId,
+          category: input.category,
+          actorType: input.actorType ?? 'SYSTEM',
+          actorId: input.actorId,
+          status: input.status ?? 'COMPLETED',
+          priority: input.priority,
+          revenueImpact: input.revenueImpact,
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+          occurredAt: input.occurredAt ?? new Date(),
         },
       });
     } catch (e) {
