@@ -12944,3 +12944,32 @@ export async function setDocumentTemplate(
     body,
   });
 }
+
+
+// ── Procurement ────────────────────────────────────────────────────────────
+
+export async function approveProcurementRequest(businessId: string, requestId: string) {
+  return apiPostSimple<ProcurementRequest>(
+    `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(requestId)}/approve`,
+    {},
+  );
+}
+
+export async function rejectProcurementRequest(businessId: string, requestId: string, reason?: string) {
+  return apiPostSimple<ProcurementRequest>(
+    `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(requestId)}/reject`,
+    { reason },
+  );
+}
+
+export async function fetchProcurementStats(businessId: string) {
+  return apiGetSimple<{
+    total: number;
+    byStatus: Record<string, number>;
+    byPriority: Record<string, number>;
+    byCategory: Record<string, number>;
+    averageBudget: number;
+    totalBudget: number;
+    pendingApprovals: number;
+  }>(`/procurement/businesses/${encodeURIComponent(businessId)}/stats`);
+}

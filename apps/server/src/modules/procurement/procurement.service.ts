@@ -118,6 +118,75 @@ export class ProcurementService {
     return updated;
   }
 
+  async updateStatus(businessId: string, id: string, status: string, userId?: string, reason?: string) {
+    const req = await this.get(businessId, id);
+    const updated = await (this.prisma.client as any).procurementRequest.update({
+      where: { id },
+      data: {
+        status,
+        approvedAt: status === 'APPROVED' ? new Date() : undefined,
+        approvedByUserId: status === 'APPROVED' ? (userId ?? null) : undefined,
+        rejectedAt: status === 'REJECTED' ? new Date() : undefined,
+        rejectedByUserId: status === 'REJECTED' ? (userId ?? null) : undefined,
+        rejectionReason: status === 'REJECTED' ? (reason ?? null) : undefined,
+        internalNotes: reason && status !== 'REJECTED' ? req.internalNotes : req.internalNotes,
+      },
+    });
+
+    this.timeline.recordEvent({
+      businessId,
+      module: 'procurement',
+      action: `request.${status.toLowerCase()}`,
+      entityType: 'procurement_request',
+      entityId: id,
+      title: `Procurement request ${status.toLowerCase()}`,
+      detail: reason ? `${reason.slice(0, 200)}` : `Status changed to ${status}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+      actorId: userId,
+      status: status === 'APPROVED' ? 'COMPLETED' : 'CANCELLED',
+      data: { status, reason },
+      occurredAt: new Date(),
+    }).catch((err) => {
+      this.logger.warn(`[UnifiedLedger] failed to record procurement activity: ${(err as Error).message}`);
+    });
+
+    return updated;
+  }
+
+  async getStats(businessId: string) {
+    const all = await (this.prisma.client as any).procurementRequest.findMany({
+      where: { businessId },
+      select: { status: true, priority: true, estimatedBudget: true, interpretedNeed: true },
+    });
+
+    const total = all.length;
+    const byStatus: Record<string, number> = {};
+    const byPriority: Record<string, number> = {};
+    const byCategory: Record<string, number> = {};
+    let totalBudget = 0;
+    let budgetCount = 0;
+
+    for (const r of all) {
+      byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+      byPriority[r.priority] = (byPriority[r.priority] ?? 0) + 1;
+      const cat = (r.interpretedNeed as any)?.category ?? 'unknown';
+      byCategory[cat] = (byCategory[cat] ?? 0) + 1;
+      const budget = r.estimatedBudget?.max ?? r.estimatedBudget?.min ?? 0;
+      if (budget > 0) { totalBudget += budget; budgetCount++; }
+    }
+
+    return {
+      total,
+      byStatus,
+      byPriority,
+      byCategory,
+      averageBudget: budgetCount > 0 ? Math.round(totalBudget / budgetCount) : 0,
+      totalBudget,
+      pendingApprovals: (byStatus.SUBMITTED ?? 0),
+    };
+  }
+
   private inferCategory(prompt: string): string {
     const p = prompt.toLowerCase();
     if (p.includes('brand')) return 'branding';
