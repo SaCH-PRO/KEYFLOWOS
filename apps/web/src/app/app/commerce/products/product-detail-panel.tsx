@@ -33,10 +33,11 @@ import {
   Percent,
 } from "lucide-react";
 import type { Product } from "@/lib/client";
-import { fetchProductCostProfile } from "@/lib/client";
+import { fetchProductCostProfile, updateProductCostProfile } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { PRODUCT_CATEGORY_CONFIG, type ProductForm } from "../components/commerce-types";
 import Image from "next/image";
+import { toast } from "sonner";
 
 const CATEGORY_ICONS = { SERVICE: Zap, PRODUCT: Package, PACKAGE: Layers } as const;
 
@@ -119,6 +120,9 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
   const dragControls = useDragControls();
 
   const [margin, setMargin] = useState<{ grossMargin: number | null; marginBand: string | null; landedCost: number | null } | null>(null);
+  const [editingCost, setEditingCost] = useState(false);
+  const [costForm, setCostForm] = useState({ sourceCost: "", shippingEstimate: "", dutiesEstimate: "", packagingCost: "", transactionCost: "" });
+  const [savingCost, setSavingCost] = useState(false);
 
   useEffect(() => {
     if (product) {
@@ -484,6 +488,85 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
                     />
                   )}
                 </div>
+
+                {/* Cost Profile Editor */}
+                {editingCost ? (
+                  <div className="space-y-2 rounded-xl border border-border/30 bg-white/[0.02] p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Edit Cost Profile</span>
+                      <button onClick={() => setEditingCost(false)} className="text-[10px] text-muted-foreground hover:text-foreground">Cancel</button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { key: "sourceCost" as const, label: "Source Cost" },
+                        { key: "shippingEstimate" as const, label: "Shipping" },
+                        { key: "dutiesEstimate" as const, label: "Duties" },
+                        { key: "packagingCost" as const, label: "Packaging" },
+                        { key: "transactionCost" as const, label: "Transaction" },
+                      ].map((f) => (
+                        <div key={f.key} className="space-y-0.5">
+                          <label className="text-[10px] text-muted-foreground/60">{f.label}</label>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={costForm[f.key]}
+                            onChange={(e) => setCostForm((p) => ({ ...p, [f.key]: e.target.value }))}
+                            className="w-full rounded-lg border border-border/30 bg-background px-2 py-1 text-xs text-foreground outline-none focus:border-[hsl(var(--kf-accent1))]/40"
+                            placeholder="0.00"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (!product) return;
+                        setSavingCost(true);
+                        try {
+                          const res = await updateProductCostProfile(product.id, {
+                            sourceCost: parseFloat(costForm.sourceCost) || 0,
+                            shippingEstimate: parseFloat(costForm.shippingEstimate) || 0,
+                            dutiesEstimate: parseFloat(costForm.dutiesEstimate) || 0,
+                            packagingCost: parseFloat(costForm.packagingCost) || 0,
+                            transactionCost: parseFloat(costForm.transactionCost) || 0,
+                          });
+                          if (res.data) {
+                            setMargin({ grossMargin: res.data.grossMargin, marginBand: res.data.marginBand, landedCost: res.data.landedCost });
+                            setEditingCost(false);
+                            toast.success("Cost profile updated");
+                          } else {
+                            toast.error("Failed to update cost profile");
+                          }
+                        } catch {
+                          toast.error("Failed to update cost profile");
+                        } finally {
+                          setSavingCost(false);
+                        }
+                      }}
+                      disabled={savingCost}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-gradient-to-r from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/30 hover:to-[hsl(var(--kf-accent1))]/15 border border-[hsl(var(--kf-accent1))]/20 transition-all disabled:opacity-50"
+                    >
+                      <Save className="w-3 h-3" />
+                      {savingCost ? "Saving..." : "Save Cost Profile"}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setCostForm({
+                        sourceCost: margin?.landedCost ? String(margin.landedCost) : "",
+                        shippingEstimate: "",
+                        dutiesEstimate: "",
+                        packagingCost: "",
+                        transactionCost: "",
+                      });
+                      setEditingCost(true);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-white/[0.04] hover:bg-white/[0.08] text-muted-foreground hover:text-foreground border border-border/30 transition-all"
+                  >
+                    <Pencil className="w-3 h-3" /> Edit Cost Profile
+                  </button>
+                )}
 
                 <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/20">
                   <StatCard icon={TrendingUp} label="Revenue" value={formatCurrency(totalRevenue, displayCurrency)} accent="text-emerald-400" />

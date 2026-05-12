@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ShoppingCart, Plus, Loader2, ArrowRight, Clock, CheckCircle2, AlertCircle, XCircle, TrendingUp, DollarSign, BarChart3 } from "lucide-react";
+import { ShoppingCart, Plus, Loader2, ArrowRight, Clock, CheckCircle2, AlertCircle, XCircle, TrendingUp, DollarSign, BarChart3, Truck, Package, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchProcurementRequests, fetchProcurementStats, type ProcurementRequest } from "@/lib/client";
@@ -16,6 +16,10 @@ function statusIcon(status: string) {
     case "APPROVED": return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
     case "COMPLETED": return <CheckCircle2 className="w-3.5 h-3.5 text-blue-500" />;
     case "REJECTED": return <XCircle className="w-3.5 h-3.5 text-red-500" />;
+    case "PO_ISSUED": return <Truck className="w-3.5 h-3.5 text-blue-500" />;
+    case "VENDOR_ACKNOWLEDGED": return <CheckCircle2 className="w-3.5 h-3.5 text-indigo-500" />;
+    case "FULFILLED": return <Package className="w-3.5 h-3.5 text-teal-500" />;
+    case "INVOICED": return <FileText className="w-3.5 h-3.5 text-cyan-500" />;
     default: return <Clock className="w-3.5 h-3.5 text-muted-foreground" />;
   }
 }
@@ -27,6 +31,10 @@ function statusLabel(status: string) {
     case "APPROVED": return "Approved";
     case "COMPLETED": return "Completed";
     case "REJECTED": return "Rejected";
+    case "PO_ISSUED": return "PO Issued";
+    case "VENDOR_ACKNOWLEDGED": return "Acknowledged";
+    case "FULFILLED": return "Fulfilled";
+    case "INVOICED": return "Invoiced";
     default: return status;
   }
 }
@@ -70,14 +78,23 @@ export default function ProcurementPage() {
       subtitle="Request services and get AI-recommended packages"
       iconColor="#F97316"
       headerRight={
-        <button
-          onClick={() => router.push("/app/procurement/new")}
-          className="flex items-center gap-1.5 h-9 px-3 kf-radius-md text-xs font-medium"
-          style={{ background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-primary-foreground))" }}
-        >
-          <Plus className="w-3.5 h-3.5" />
-          New Request
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/app/procurement/suppliers")}
+            className="flex items-center gap-1.5 h-9 px-3 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all text-xs font-medium"
+          >
+            <Truck className="w-3.5 h-3.5" />
+            Suppliers
+          </button>
+          <button
+            onClick={() => router.push("/app/procurement/new")}
+            className="flex items-center gap-1.5 h-9 px-3 kf-radius-md text-xs font-medium"
+            style={{ background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-primary-foreground))" }}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New Request
+          </button>
+        </div>
       }
     >
       {loading ? (

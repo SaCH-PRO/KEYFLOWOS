@@ -217,23 +217,28 @@ export class BlueprintService {
   }
 
   /**
-   * Stub for "infer from events" — full inference lands once the timeline
-   * ledger is in place. For now we light up a couple of cheap signals from
-   * existing data so downstream consumers can already rely on the shape.
+   * Infer blueprint signals from business events and data patterns.
    */
   async inferFromEvents(businessId: string): Promise<BlueprintData> {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
     const [
       productCategories,
       monthlyRevenue,
       bookingCount,
+      cancelledBookingCount,
       projectCount,
+      quoteTotal,
+      quoteAccepted,
       ecommerceOrders,
       walkInCount,
       retainerInvoices,
       topChannels,
       activityCount,
+      monthlyExpenses,
+      bookingsByDay,
+      campaignMetrics,
     ] = await Promise.all([
       this.prisma.client.product.groupBy({
         by: ['category'],
@@ -249,7 +254,10 @@ export class BlueprintService {
         })
         .catch(() => null),
       this.prisma.client.booking.count({ where: { businessId, deletedAt: null } }),
-      this.prisma.client.contactTask.count({ where: { businessId, status: 'OPEN' } }),
+      this.prisma.client.booking.count({ where: { businessId, deletedAt: null, status: 'CANCELLED' } }),
+      this.prisma.client.project.count({ where: { businessId, deletedAt: null } }),
+      this.prisma.client.quote.count({ where: { businessId, deletedAt: null, status: { in: ['SENT', 'ACCEPTED', 'REJECTED'] } } }).catch(() => 0),
+      this.prisma.client.quote.count({ where: { businessId, deletedAt: null, status: 'ACCEPTED' } }).catch(() => 0),
       this.prisma.client.invoice.count({
         where: { businessId, deletedAt: null },
       }).catch(() => 0),
@@ -267,7 +275,41 @@ export class BlueprintService {
       this.prisma.client.activity.count({
         where: { businessId, occurredAt: { gte: thirtyDaysAgo } },
       }).catch(() => 0),
+      this.prisma.client.expense.aggregate({
+        where: { businessId, deletedAt: null, date: { gte: thirtyDaysAgo } },
+        _sum: { amount: true },
+      }).catch(() => null),
+      this.prisma.client.booking.findMany({
+        where: { businessId, deletedAt: null, startTime: { gte: ninetyDaysAgo } },
+        select: { startTime: true },
+      }).catch(() => []),
+      this.prisma.client.emailCampaign.aggregate({
+        where: { businessId, deletedAt: null, status: 'SENT' },
+        _sum: { openCount: true, clickCount: true, totalRecipients: true },
+      }).catch(() => null),
     ]);
+
+    const noShowRate = bookingCount > 0 ? Math.round((cancelledBookingCount / bookingCount) * 1000) / 10 : 0;
+    const quoteConversionRate = quoteTotal > 0 ? Math.round((quoteAccepted / quoteTotal) * 1000) / 10 : 0;
+    const expenseRatio = (monthlyRevenue?._sum?.total && monthlyExpenses?._sum?.amount)
+      ? Math.round((Number(monthlyExpenses._sum.amount) / Number(monthlyRevenue._sum.total)) * 1000) / 10
+      : 0;
+
+    // Seasonal pattern: count bookings by day of week
+    const dayCounts = [0, 0, 0, 0, 0, 0, 0];
+    for (const b of bookingsByDay as Array<{ startTime: Date }>) {
+      dayCounts[new Date(b.startTime).getDay()]++;
+    }
+    const peakDayIndex = dayCounts.indexOf(Math.max(...dayCounts));
+    const peakDayLabel = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][peakDayIndex] ?? 'Unknown';
+    const seasonalPattern = peakDayLabel;
+
+    const campaignOpenRate = campaignMetrics?._sum?.totalRecipients
+      ? Math.round((Number(campaignMetrics._sum.openCount) / Number(campaignMetrics._sum.totalRecipients)) * 1000) / 10
+      : 0;
+    const campaignClickRate = campaignMetrics?._sum?.totalRecipients
+      ? Math.round((Number(campaignMetrics._sum.clickCount) / Number(campaignMetrics._sum.totalRecipients)) * 1000) / 10
+      : 0;
 
     const intelligence: Partial<BlueprintIntelligence> = {
       topProductCategories: productCategories
@@ -279,6 +321,12 @@ export class BlueprintService {
       recentMomentumScore: monthlyRevenue?._sum?.total
         ? Math.min(100, Math.round(Number(monthlyRevenue._sum.total) / 100))
         : activityCount > 0 ? Math.min(100, Math.round(activityCount * 2)) : 0,
+      quoteConversionRate,
+      noShowRate,
+      expenseRatio,
+      seasonalPattern,
+      campaignOpenRate,
+      campaignClickRate,
       inferredAt: new Date().toISOString(),
     };
 
@@ -289,6 +337,9 @@ export class BlueprintService {
     if (retainerInvoices > 0) workflowModel.retainerCycle = true;
     if (walkInCount > 0) workflowModel.walkInQueue = true;
     if (ecommerceOrders > 0) workflowModel.ecommerceFulfillment = true;
+    if (quoteTotal > 0) workflowModel.quoteDrivenSales = true;
+    if (noShowRate > 15) workflowModel.highNoShowRate = true;
+    if (seasonalPattern && dayCounts.some((c) => c > 0)) workflowModel.seasonalBusiness = true;
     if (bookingCount === 0 && projectCount === 0 && ecommerceOrders === 0) {
       workflowModel.customInquiryFlow = true;
     }

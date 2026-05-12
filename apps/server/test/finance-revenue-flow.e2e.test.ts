@@ -101,7 +101,8 @@ function makeHarness(opts: {
     getBySystemKey: vi.fn(async (_b: string, key: keyof typeof ACC) => ({ id: ACC[key] })),
   };
 
-  const svc = new RevenuePostingService(prisma as any, posting as any, coa as any);
+  const timeline = { recordEvent: vi.fn() };
+  const svc = new RevenuePostingService(prisma as any, posting as any, coa as any, timeline as any);
   const balance = (accountId: string) => {
     let b = 0;
     for (const t of ledger) {

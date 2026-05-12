@@ -60,6 +60,48 @@ export class ProcurementController {
     return this.service.updateStatus(businessId, id, 'REJECTED', req.user?.id, body.reason);
   }
 
+  @Get('businesses/:businessId/suppliers')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(60, 60_000)
+  async listSuppliers(@Param('businessId') businessId: string) {
+    return this.service.listSuppliers(businessId);
+  }
+
+  @Post('businesses/:businessId/:id/vendor')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(30, 60_000)
+  async selectVendor(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: { supplierConnectionId?: string | null }) {
+    return this.service.selectVendor(businessId, id, body.supplierConnectionId ?? null);
+  }
+
+  @Post('businesses/:businessId/:id/issue-po')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(30, 60_000)
+  async issuePO(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    return this.service.issuePO(businessId, id, req.user?.id);
+  }
+
+  @Post('businesses/:businessId/:id/acknowledge')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(30, 60_000)
+  async acknowledgeVendor(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.service.acknowledgeVendor(businessId, id);
+  }
+
+  @Post('businesses/:businessId/:id/fulfill')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(30, 60_000)
+  async markFulfilled(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.service.markFulfilled(businessId, id);
+  }
+
+  @Post('businesses/:businessId/:id/invoice')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(30, 60_000)
+  async markInvoiced(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.service.markInvoiced(businessId, id);
+  }
+
   @Get('businesses/:businessId/stats')
   @UseGuards(BusinessGuard)
   @CrmRateLimit(60, 60_000)

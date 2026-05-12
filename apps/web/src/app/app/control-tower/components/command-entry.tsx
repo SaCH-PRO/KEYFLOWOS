@@ -23,6 +23,14 @@ import {
 
 type PlanPreview = ActionPlanResponse & { input: string };
 
+type CmdMode = "plan" | "do" | "auto";
+
+const CMD_MODE_META: Record<CmdMode, { label: string; color: string }> = {
+  plan: { label: "Plan", color: "hsl(var(--kf-warning))" },
+  do: { label: "Do", color: "hsl(var(--kf-success))" },
+  auto: { label: "Auto", color: "hsl(var(--kf-accent1))" },
+};
+
 const TIER_LABELS: Record<number, { label: string; color: string }> = {
   1: { label: "Low risk", color: "hsl(var(--kf-success))" },
   2: { label: "Medium risk", color: "hsl(var(--kf-info))" },
@@ -37,6 +45,7 @@ export function CommandEntry({
   businessId: string;
   onActionExecuted?: () => void;
 }) {
+  const [mode, setMode] = useState<CmdMode>("do");
   const [input, setInput] = useState("");
   const [planning, setPlanning] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -45,41 +54,19 @@ export function CommandEntry({
   const [showFindings, setShowFindings] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handlePlan = useCallback(async () => {
-    const text = input.trim();
-    if (!text || !businessId) return;
-
-    setPlanning(true);
-    setPreview(null);
-    try {
-      const res = await planAction(businessId, text);
-      if (res.data) {
-        setPreview({ ...res.data, input: text });
-      } else {
-        toast.error("Could not understand that command");
-      }
-    } catch {
-      toast.error("Failed to plan action");
-    } finally {
-      setPlanning(false);
-    }
-  }, [input, businessId]);
-
-  const handleExecute = useCallback(async () => {
-    if (!preview?.plan || !businessId) return;
-
+  const runExecute = useCallback(async (plan: PlanPreview) => {
+    if (!plan?.plan || !businessId) return;
     setExecuting(true);
     try {
-      const steps = preview.plan.steps ?? [];
+      const steps = plan.plan.steps ?? [];
       let lastResult: ActionExecuteResponse | null = null;
       for (const step of steps) {
         if (!step.toolName) continue;
         const res = await executeAction(
           businessId,
           step.toolName,
-
           (step.inputPayload ?? {}) as Record<string, unknown>,
-          preview.plan.id,
+          plan.plan.id,
           step.id,
         );
         if (res.data) {
@@ -95,7 +82,6 @@ export function CommandEntry({
           break;
         }
       }
-
       if (lastResult?.success) {
         toast.success("Action executed successfully");
         if (lastResult.followOnSuggestions?.length) {
@@ -105,7 +91,6 @@ export function CommandEntry({
       } else if (lastResult?.blocked) {
         window.dispatchEvent(new CustomEvent("kf:action.blocked"));
       }
-
       setPreview(null);
       setInput("");
       onActionExecuted?.();
@@ -114,7 +99,38 @@ export function CommandEntry({
     } finally {
       setExecuting(false);
     }
-  }, [preview, businessId, onActionExecuted]);
+  }, [businessId, onActionExecuted]);
+
+  const handlePlan = useCallback(async () => {
+    const text = input.trim();
+    if (!text || !businessId) return;
+
+    setPlanning(true);
+    setPreview(null);
+    try {
+      const res = await planAction(businessId, text);
+      if (res.data) {
+        const p = { ...res.data, input: text };
+        if (mode === "auto" && p.plan && !p.clarificationNeeded) {
+          setPlanning(false);
+          await runExecute(p);
+          return;
+        }
+        setPreview(p);
+      } else {
+        toast.error("Could not understand that command");
+      }
+    } catch {
+      toast.error("Failed to plan action");
+    } finally {
+      setPlanning(false);
+    }
+  }, [input, businessId, mode, runExecute]);
+
+  const handleExecute = useCallback(async () => {
+    if (!preview?.plan || !businessId) return;
+    await runExecute(preview);
+  }, [preview, businessId, runExecute]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -150,11 +166,27 @@ export function CommandEntry({
           value={input}
           onChange={(e) => { setInput(e.target.value); if (preview) setPreview(null); }}
           onKeyDown={handleKeyDown}
-          placeholder="Tell me what to do... (e.g. &quot;Follow up on overdue invoices&quot;)"
+          placeholder={`${mode === "plan" ? "Plan" : mode === "auto" ? "Auto-execute" : "Do"}: Tell me what to do...`}
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/40 min-h-[36px]"
           style={{ color: "hsl(var(--kf-foreground))" }}
           disabled={planning || executing}
         />
+        <div className="flex items-center gap-0.5">
+          {(Object.keys(CMD_MODE_META) as CmdMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => { setMode(m); if (preview) setPreview(null); }}
+              title={CMD_MODE_META[m].label}
+              className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition-all ${
+                mode === m
+                  ? "bg-white/10 text-foreground border border-white/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]"
+              }`}
+            >
+              {CMD_MODE_META[m].label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={preview ? handleExecute : handlePlan}
           disabled={!input.trim() || planning || executing}
@@ -301,22 +333,24 @@ export function CommandEntry({
                   </AnimatePresence>
 
                   <div className="flex items-center gap-2 pt-1">
-                    <button
-                      onClick={handleExecute}
-                      disabled={executing}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all hover:opacity-80 min-h-[32px]"
-                      style={{ background: "hsl(var(--kf-success) / 0.1)", color: "hsl(var(--kf-success))" }}
-                    >
-                      {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                      {riskInfo?.requiresApproval ? "Submit for Approval" : "Execute"}
-                    </button>
+                    {mode !== "plan" && (
+                      <button
+                        onClick={handleExecute}
+                        disabled={executing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all hover:opacity-80 min-h-[32px]"
+                        style={{ background: "hsl(var(--kf-success) / 0.1)", color: "hsl(var(--kf-success))" }}
+                      >
+                        {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        {riskInfo?.requiresApproval ? "Submit for Approval" : "Execute"}
+                      </button>
+                    )}
                     <button
                       onClick={() => { setPreview(null); setInput(""); }}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all hover:opacity-80 min-h-[32px]"
                       style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}
                     >
                       <X className="w-3 h-3" />
-                      Cancel
+                      {mode === "plan" ? "Done" : "Cancel"}
                     </button>
                   </div>
                 </>

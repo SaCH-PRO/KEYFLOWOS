@@ -39,8 +39,18 @@ interface DoItForMePanelProps {
   businessId: string;
 }
 
+type KeyMode = "ask" | "do" | "plan" | "auto";
+
+const MODE_META: Record<KeyMode, { label: string; desc: string; color: string }> = {
+  ask: { label: "Ask", desc: "Get answers", color: "text-blue-400" },
+  do: { label: "Do", desc: "Suggest actions", color: "text-violet-400" },
+  plan: { label: "Plan", desc: "Show plan only", color: "text-amber-400" },
+  auto: { label: "Auto", desc: "Execute low-risk", color: "text-emerald-400" },
+};
+
 export function DoItForMePanel({ businessId }: DoItForMePanelProps) {
   const router = useRouter();
+  const [mode, setMode] = useState<KeyMode>("do");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DoItForMeResponse | null>(null);
@@ -54,7 +64,7 @@ export function DoItForMePanel({ businessId }: DoItForMePanelProps) {
     try {
       const res = await apiPost<DoItForMeResponse>({
         path: `/ai/businesses/${encodeURIComponent(businessId)}/key/command`,
-        body: { rawInput: input.trim(), inputMode: "TEXT" },
+        body: { rawInput: input.trim(), inputMode: "TEXT", mode },
       });
       if (res.data) {
         setResult(res.data);
@@ -118,6 +128,22 @@ export function DoItForMePanel({ businessId }: DoItForMePanelProps) {
     <div className="rounded-xl border border-border/50 bg-card/50 overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border/30">
         <Wand2 className="w-4 h-4 text-violet-400" />
+        <div className="flex items-center gap-1 ml-auto">
+          {(Object.keys(MODE_META) as KeyMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              title={MODE_META[m].desc}
+              className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition-all ${
+                mode === m
+                  ? "bg-white/10 text-foreground border border-white/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]"
+              }`}
+            >
+              {MODE_META[m].label}
+            </button>
+          ))}
+        </div>
         <h3 className="text-sm font-semibold">Do It For Me</h3>
         <span className="text-[10px] text-muted-foreground">Ask KEY to handle tasks</span>
       </div>

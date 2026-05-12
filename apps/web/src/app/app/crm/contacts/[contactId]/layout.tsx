@@ -36,7 +36,8 @@ export default function ContactDetailLayout({ children }: { children: React.Reac
   return (
     <div className="space-y-4">
       <ContactHeader />
-      <nav className="flex gap-1 overflow-x-auto border-b pb-1">
+      {/* Desktop tabs */}
+      <nav className="hidden md:flex gap-1 overflow-x-auto border-b pb-1">
         {TABS.map((tab) => {
           const href = `${base}/${tab.id}`;
           const isActive = pathname === href || pathname.startsWith(`${href}/`);
@@ -57,6 +58,21 @@ export default function ContactDetailLayout({ children }: { children: React.Reac
           );
         })}
       </nav>
+      {/* Mobile tab selector */}
+      <div className="md:hidden">
+        <select
+          value={TABS.find((t) => pathname === `${base}/${t.id}` || pathname.startsWith(`${base}/${t.id}/`))?.id ?? ""}
+          onChange={(e) => {
+            const tab = TABS.find((t) => t.id === e.target.value);
+            if (tab) window.location.href = `${base}/${tab.id}`;
+          }}
+          className="w-full rounded-lg border border-border/50 bg-background px-3 py-2 text-sm"
+        >
+          {TABS.map((tab) => (
+            <option key={tab.id} value={tab.id}>{tab.label}</option>
+          ))}
+        </select>
+      </div>
       <div>{children}</div>
     </div>
   );

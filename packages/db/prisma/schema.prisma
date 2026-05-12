@@ -6769,7 +6769,7 @@ model ProcurementRequest {
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   requestedByUserId String? @map("requested_by_user_id")
 
-  status      String   @default("DRAFT") // DRAFT | SUBMITTED | REVIEWING | QUOTED | ACCEPTED | DECLINED | COMPLETED
+  status      String   @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | REJECTED | PO_ISSUED | VENDOR_ACKNOWLEDGED | FULFILLED | INVOICED | COMPLETED
   userPrompt  String   @map("user_prompt")
   /// AI-extracted structured need { category, urgency, scope, constraints }
   interpretedNeed Json  @default("{}") @map("interpreted_need")
@@ -6781,6 +6781,13 @@ model ProcurementRequest {
   priority    String?
   internalNotes String? @map("internal_notes")
 
+  supplierConnectionId String? @map("supplier_connection_id")
+  purchaseOrderId      String? @map("purchase_order_id")
+  poIssuedAt           DateTime? @map("po_issued_at")
+  vendorAcknowledgedAt DateTime? @map("vendor_acknowledged_at")
+  fulfilledAt          DateTime? @map("fulfilled_at")
+  invoicedAt           DateTime? @map("invoiced_at")
+
   submittedAt DateTime? @map("submitted_at")
   completedAt DateTime? @map("completed_at")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -6788,5 +6795,6 @@ model ProcurementRequest {
 
   @@index([businessId, status])
   @@index([businessId, createdAt])
+  @@index([businessId, supplierConnectionId])
   @@map("procurement_requests")
 }

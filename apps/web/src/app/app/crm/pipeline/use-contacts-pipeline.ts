@@ -210,6 +210,7 @@ export function useContactsPipeline() {
     statusFilter: contactsData.statusFilter, setStatusFilter: contactsData.setStatusFilter,
     sortBy: contactsData.sortBy, setSortBy: contactsData.setSortBy,
     activeSegment: contactsData.activeSegment, setActiveSegment: contactsData.setActiveSegment,
+    smartFilter: contactsData.smartFilter, setSmartFilter: contactsData.setSmartFilter,
     activeListTab: contactsData.activeListTab, setActiveListTab: contactsData.setActiveListTab,
     selectedContactId, selectedContact: detail.selectedContact, detailLoading: detail.detailLoading,
     detailEvents: detail.detailEvents, detailNotes: detail.detailNotes,

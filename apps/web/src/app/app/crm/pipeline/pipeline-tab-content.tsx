@@ -68,6 +68,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     statusFilter, setStatusFilter,
     sortBy, setSortBy,
     activeSegment, setActiveSegment,
+    smartFilter, setSmartFilter,
     segmentCounts, pinnedContacts, recentContacts, contacts,
     favoriteIds, favoriteContacts, handleToggleFavorite,
     setShowBroadcast,
@@ -387,9 +388,35 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         onClearSavedView={() => {
           setSearchInput("");
           setStatusFilter("ALL");
+          setSmartFilter(null);
           setActiveSegment(null);
         }}
       />
+
+      {/* Smart Filter Chips */}
+      <div className="flex flex-wrap gap-1.5 px-1 pb-1">
+        {[
+          { key: "unpaid", label: "Unpaid Invoices", icon: "💰" },
+          { key: "bookings", label: "Upcoming Bookings", icon: "📅" },
+          { key: "deals", label: "Open Deals", icon: "🤝" },
+          { key: "stale", label: "Stale 14+ days", icon: "⏰" },
+          { key: "atrisk", label: "At Risk", icon: "⚠️" },
+          { key: "highvalue", label: "High Value", icon: "💎" },
+        ].map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setSmartFilter(smartFilter === f.key ? null : f.key)}
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-medium transition-all ${
+              smartFilter === f.key
+                ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
+                : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
+            }`}
+          >
+            <span>{f.icon}</span>
+            {f.label}
+          </button>
+        ))}
+      </div>
 
       {viewMode === "kanban" ? (
         <PipelineKanban state={state} />

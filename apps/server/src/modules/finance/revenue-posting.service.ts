@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PostingService, buildExternalRef } from './posting.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
+import { TimelineService } from '../timeline/timeline.service';
 
 export type AccountingBasis = 'CASH' | 'ACCRUAL';
 
@@ -41,6 +42,7 @@ export class RevenuePostingService {
     @Inject(PostingService) private readonly posting: PostingService,
     @Inject(ChartOfAccountsSeederService)
     private readonly coaSeeder: ChartOfAccountsSeederService,
+    @Inject(TimelineService) private readonly timeline: TimelineService,
   ) {}
 
   /** Map a payment provider/method to a deposit-side COA system key. */
@@ -146,7 +148,7 @@ export class RevenuePostingService {
       });
     }
 
-    return this.posting.post(
+    const result = await this.posting.post(
       {
         businessId: invoice.businessId,
         type: 'INCOME',
@@ -164,6 +166,19 @@ export class RevenuePostingService {
       },
       opts.tx,
     );
+    this.timeline.recordEvent({
+      businessId: invoice.businessId,
+      module: 'FINANCE',
+      action: 'invoice_finalized',
+      entityType: 'invoice',
+      entityId: invoice.id,
+      title: `Invoice ${invoice.invoiceNumber} posted to ledger`,
+      detail: `${invoice.currency} ${total}`,
+      contactId: invoice.contactId ?? undefined,
+      data: { invoiceNumber: invoice.invoiceNumber, total, currency: invoice.currency },
+      occurredAt: new Date(),
+    }).catch(() => {});
+    return result;
   }
 
   /**
@@ -301,7 +316,7 @@ export class RevenuePostingService {
       memo: basis === 'ACCRUAL' ? 'Clear receivable' : 'Revenue (cash basis)',
     });
 
-    return this.posting.post(
+    const result = await this.posting.post(
       {
         businessId: payment.businessId,
         type: 'INCOME',
@@ -319,6 +334,19 @@ export class RevenuePostingService {
       },
       opts.tx,
     );
+    this.timeline.recordEvent({
+      businessId: payment.businessId,
+      module: 'FINANCE',
+      action: 'payment_recorded',
+      entityType: 'payment',
+      entityId: payment.id,
+      title: `Payment recorded: ${payment.currency} ${gross}`,
+      detail: `Invoice ${payment.invoice?.invoiceNumber ?? payment.invoiceId}`,
+      contactId: payment.invoice?.contactId ?? undefined,
+      data: { amount: gross, currency: payment.currency, provider: payment.provider },
+      occurredAt: new Date(),
+    }).catch(() => {});
+    return result;
   }
 
   /**
@@ -342,12 +370,22 @@ export class RevenuePostingService {
     if (original.status === 'REVERSED') {
       return { transactionId: original.id, externalRef, alreadyPosted: true };
     }
-    return this.posting.reverse(
+    const result = await this.posting.reverse(
       payment.businessId,
       original.id,
       { reason: 'Payment refunded', createdById: opts.createdById ?? null },
       opts.tx,
     );
+    this.timeline.recordEvent({
+      businessId: payment.businessId,
+      module: 'FINANCE',
+      action: 'payment_refunded',
+      entityType: 'payment',
+      entityId: payment.id,
+      title: 'Payment refunded — ledger reversed',
+      occurredAt: new Date(),
+    }).catch(() => {});
+    return result;
   }
 
   /**

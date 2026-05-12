@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   FileText,
@@ -27,6 +27,8 @@ import {
   CATEGORIES,
 } from "./commerce-types";
 import { formatAmount } from "../utils/commerce-utils";
+import { fetchDocumentTemplates, setDocumentTemplate } from "@/lib/client";
+import { toast } from "sonner";
 
 type DocType = "invoice" | "quote";
 
@@ -144,9 +146,26 @@ export const BillingFormModal = React.memo(function BillingFormModal({
     items: true,
     financials: false,
     notes: false,
+    template: false,
   });
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string; type: string; isDefault: boolean }> | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const toggle = (key: keyof typeof sections) =>
     setSections((s) => ({ ...s, [key]: !s[key] }));
+
+  useEffect(() => {
+    if (!open) return;
+    fetchDocumentTemplates().then((res) => {
+      if (res.data) {
+        const type = docType === "invoice" ? "invoice" : "quote";
+        const typeTemplates = res.data.templates.filter((t) => t.type === type);
+        setTemplates(typeTemplates);
+        const def = typeTemplates.find((t) => t.isDefault);
+        if (def) setSelectedTemplate(def.id);
+      }
+    });
+  }, [open, docType]);
 
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
 
@@ -589,6 +608,57 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                       rows={3}
                       className="kf-input w-full resize-none text-sm"
                     />
+                  </motion.div>
+                )}
+
+                <SectionHeader
+                  label="Document Template"
+                  icon={FileText}
+                  open={sections.template}
+                  onToggle={() => toggle("template")}
+                  accentColor={theme.accent}
+                />
+                {sections.template && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="pb-3 space-y-2"
+                  >
+                    <div className="grid grid-cols-3 gap-2">
+                      {(templates ?? []).map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={async () => {
+                            if (savingTemplate || selectedTemplate === t.id) return;
+                            setSavingTemplate(true);
+                            try {
+                              const body = docType === "invoice" ? { invoiceTemplate: t.id as any } : { quoteTemplate: t.id as any };
+                              const res = await setDocumentTemplate(body);
+                              if (res.data) {
+                                setSelectedTemplate(t.id);
+                                toast.success(`${t.name} template selected`);
+                              } else {
+                                toast.error("Failed to update template");
+                              }
+                            } catch {
+                              toast.error("Failed to update template");
+                            } finally {
+                              setSavingTemplate(false);
+                            }
+                          }}
+                          disabled={savingTemplate}
+                          className={`rounded-lg border px-2 py-1.5 text-[10px] font-medium transition-all ${
+                            selectedTemplate === t.id
+                              ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
+                              : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
+                          } disabled:opacity-50`}
+                        >
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
                   </motion.div>
                 )}
               </div>

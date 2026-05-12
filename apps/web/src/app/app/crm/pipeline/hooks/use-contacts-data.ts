@@ -53,6 +53,7 @@ interface FilterState {
   crmViewTab: "contacts" | "insights" | "studio";
   selectMode: boolean;
   selectedIds: Set<string>;
+  smartFilter: string | null;
 }
 
 type FilterAction =
@@ -67,6 +68,7 @@ type FilterAction =
   | { type: "SET_CRM_VIEW_TAB"; payload: "contacts" | "insights" | "studio" }
   | { type: "SET_SELECT_MODE"; payload: boolean }
   | { type: "SET_SELECTED_IDS"; payload: Set<string> }
+  | { type: "SET_SMART_FILTER"; payload: string | null }
   | { type: "TOGGLE_SELECT_MODE" }
   | { type: "TOGGLE_SELECT"; payload: string };
 
@@ -82,6 +84,7 @@ const initialFilterState: FilterState = {
   crmViewTab: "contacts",
   selectMode: false,
   selectedIds: new Set(),
+  smartFilter: null,
 };
 
 function filterReducer(state: FilterState, action: FilterAction): FilterState {
@@ -90,6 +93,7 @@ function filterReducer(state: FilterState, action: FilterAction): FilterState {
     case "SET_STATUS_FILTER": return { ...state, statusFilter: action.payload };
     case "SET_SORT_BY": return { ...state, sortBy: action.payload };
     case "SET_ACTIVE_SEGMENT": return { ...state, activeSegment: action.payload };
+    case "SET_SMART_FILTER": return { ...state, smartFilter: action.payload };
     case "SET_ACTIVE_LIST_TAB": return { ...state, activeListTab: action.payload };
     case "SET_ACTIVE_LIST_ID": return { ...state, activeListId: action.payload };
     case "SET_ACTIVE_LIST_CONTACT_IDS": return { ...state, activeListContactIds: action.payload };
@@ -135,6 +139,7 @@ export function useContactsData() {
   const setStatusFilter = useCallback((v: string) => dispatch({ type: "SET_STATUS_FILTER", payload: v }), []);
   const setSortBy = useCallback((v: SortOption) => dispatch({ type: "SET_SORT_BY", payload: v }), []);
   const setActiveSegment = useCallback((v: SmartSegment | null) => dispatch({ type: "SET_ACTIVE_SEGMENT", payload: v }), []);
+  const setSmartFilter = useCallback((v: string | null) => dispatch({ type: "SET_SMART_FILTER", payload: v }), []);
   const setActiveListTab = useCallback((v: ListTab) => dispatch({ type: "SET_ACTIVE_LIST_TAB", payload: v }), []);
   const setActiveListId = useCallback((v: string | null) => dispatch({ type: "SET_ACTIVE_LIST_ID", payload: v }), []);
   const setActiveListContactIds = useCallback((v: string[] | null) => dispatch({ type: "SET_ACTIVE_LIST_CONTACT_IDS", payload: v }), []);
@@ -228,6 +233,12 @@ export function useContactsData() {
             status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
             includeStats: true,
             ...sortOpts,
+            ...(filters.smartFilter === "unpaid" ? { hasUnpaidInvoices: true } : {}),
+            ...(filters.smartFilter === "bookings" ? { hasUpcomingBookings: true } : {}),
+            ...(filters.smartFilter === "deals" ? { hasOpenDeals: true } : {}),
+            ...(filters.smartFilter === "stale" ? { staleDays: 14 } : {}),
+            ...(filters.smartFilter === "atrisk" ? { relationshipHealth: ["AT_RISK", "DORMANT"] } : {}),
+            ...(filters.smartFilter === "highvalue" ? { minRevenue: SEGMENT_THRESHOLDS.highValueRevenue } : {}),
             signal,
           });
           if (signal.aborted) return;
@@ -244,6 +255,12 @@ export function useContactsData() {
               status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
               includeStats: true,
               ...sortOpts,
+              ...(filters.smartFilter === "unpaid" ? { hasUnpaidInvoices: true } : {}),
+              ...(filters.smartFilter === "bookings" ? { hasUpcomingBookings: true } : {}),
+              ...(filters.smartFilter === "deals" ? { hasOpenDeals: true } : {}),
+              ...(filters.smartFilter === "stale" ? { staleDays: 14 } : {}),
+              ...(filters.smartFilter === "atrisk" ? { relationshipHealth: ["AT_RISK", "DORMANT"] } : {}),
+              ...(filters.smartFilter === "highvalue" ? { minRevenue: SEGMENT_THRESHOLDS.highValueRevenue } : {}),
               signal,
             });
           if (signal.aborted) return;
@@ -264,7 +281,7 @@ export function useContactsData() {
         }
       }
     },
-    [businessId, search, filters.statusFilter, filters.sortBy],
+    [businessId, search, filters.statusFilter, filters.sortBy, filters.smartFilter],
   );
 
   const lastUpdatedAtRef = useRef<string | null>(null);
@@ -428,6 +445,7 @@ export function useContactsData() {
     activeListContactIds: filters.activeListContactIds, setActiveListContactIds,
     listsCount: filters.listsCount, setListsCount,
     crmViewTab: filters.crmViewTab, setCrmViewTab,
+    smartFilter: filters.smartFilter, setSmartFilter,
     isPending, startTransition,
     pinnedIds, pinnedContacts, recentContacts,
     favoriteIds, favoriteContacts, handleToggleFavorite,

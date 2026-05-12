@@ -1,12 +1,14 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { TimelineService } from '../timeline/timeline.service';
 
 @Injectable()
 export class ProjectsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(TimelineService) private readonly timeline: TimelineService,
   ) {}
 
   listProjects(businessId: string) {
@@ -55,6 +57,18 @@ export class ProjectsService {
       include: { tasks: true },
     });
     this.events.emit('project.created', { project, businessId });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'PROJECT',
+      action: 'created',
+      entityType: 'project',
+      entityId: project.id,
+      title: `Project created: ${project.name}`,
+      detail: project.description ?? undefined,
+      contactId: project.contactId ?? undefined,
+      data: { name: project.name, status: project.status },
+      occurredAt: new Date(),
+    });
     return project;
   }
 
@@ -78,6 +92,18 @@ export class ProjectsService {
       data,
       include: { tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } } },
     });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'PROJECT',
+      action: 'updated',
+      entityType: 'project',
+      entityId: project.id,
+      title: `Project updated: ${project.name}`,
+      detail: project.description ?? undefined,
+      contactId: project.contactId ?? undefined,
+      data: { name: project.name, status: project.status },
+      occurredAt: new Date(),
+    });
     this.events.emit('project.updated', { project, businessId });
     if (project.status === 'COMPLETED') {
       this.events.emit('project.completed', { project, businessId });
@@ -91,6 +117,15 @@ export class ProjectsService {
       data: { deletedAt: new Date() },
     });
     this.events.emit('project.deleted', { businessId, projectId });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'PROJECT',
+      action: 'deleted',
+      entityType: 'project',
+      entityId: projectId,
+      title: 'Project deleted',
+      occurredAt: new Date(),
+    });
     return result;
   }
 

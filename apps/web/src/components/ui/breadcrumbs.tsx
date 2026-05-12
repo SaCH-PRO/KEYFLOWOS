@@ -54,6 +54,19 @@ const LABEL_MAP: Record<string, string> = {
   cohorts: "Cohorts",
   certificates: "Certificates",
   feed: "Feed",
+  blueprint: "Blueprint",
+  procurement: "Procurement",
+  "keyflow-command": "Command",
+  "control-tower": "Control Tower",
+  suppliers: "Suppliers",
+  overview: "Overview",
+  timeline: "Timeline",
+  money: "Money",
+  "quotes-invoices": "Quotes & Invoices",
+  tasks: "Tasks",
+  notes: "Notes",
+  "ai-insights": "AI Insights",
+  recommendations: "Recommendations",
 };
 
 export function Breadcrumbs() {
