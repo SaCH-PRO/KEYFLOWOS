@@ -5685,6 +5685,8 @@ export interface ActionPlanResponse {
   intent: AiParsedIntent;
   plan: AiPlan | null;
   clarificationNeeded: boolean;
+  goal?: string;
+  findings?: string[];
   riskAssessment?: {
     maxTier: number;
     requiresApproval: boolean;
@@ -12732,6 +12734,62 @@ export async function completeReconciliation(businessId: string, id: string) {
  * auth, materialise it as a Blob, and trigger a browser download via
  * a transient object URL.
  */
+/* ── KEY Orchestrator (Phase 6-7) ─────────────────────────────────────── */
+
+export interface MorningBriefingData {
+  today: string;
+  schedule: Array<Record<string, unknown>>;
+  revenueToday: number;
+  openInvoices: number;
+  activeLeads: number;
+}
+
+export async function fetchMorningBriefing(businessId: string) {
+  return apiGetSimple<MorningBriefingData>(
+    `/ai/businesses/${encodeURIComponent(businessId)}/briefing/morning`,
+  );
+}
+
+export interface EodReportData {
+  date: string;
+  events: number;
+  revenueCollected: number;
+  bookingsCompleted: number;
+  contactsUpdated: number;
+}
+
+export async function fetchEodReport(businessId: string) {
+  return apiGetSimple<EodReportData>(
+    `/ai/businesses/${encodeURIComponent(businessId)}/briefing/eod`,
+  );
+}
+
+export interface AutopilotRule {
+  id: string;
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  category: string;
+}
+
+export async function fetchAutopilotRules(businessId: string) {
+  return apiGetSimple<AutopilotRule[]>(
+    `/ai/businesses/${encodeURIComponent(businessId)}/autopilot-rules`,
+  );
+}
+
+export async function updateAutopilotRule(
+  businessId: string,
+  ruleId: string,
+  body: { enabled: boolean },
+) {
+  return apiPut<{ success: boolean }>(
+    `/ai/businesses/${encodeURIComponent(businessId)}/autopilot-rules/${encodeURIComponent(ruleId)}`,
+    body,
+  );
+}
+
 export async function downloadReconciliationReportCsv(businessId: string, id: string): Promise<void> {
   const url = `${API_BASE}${finBase(businessId)}/reconciliations/${encodeURIComponent(id)}/report.csv`;
   const res = await fetch(url, { method: 'GET', headers: getAuthHeaders() });

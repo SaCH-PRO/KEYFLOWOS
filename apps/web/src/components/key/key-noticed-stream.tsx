@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Sparkles, RefreshCw, ChevronRight, AlertTriangle, AlertCircle, Zap, Info } from "lucide-react";
+import { Sparkles, RefreshCw, ChevronRight, AlertTriangle, AlertCircle, Zap, Info, ChevronDown, ChevronUp, Brain } from "lucide-react";
 import { fetchProAutoInsights, type ProAutoInsight } from "@/lib/client";
 import { openKey } from "./key-agent";
 
@@ -31,6 +31,7 @@ const SEVERITY_COLORS: Record<ProAutoInsight["severity"], string> = {
 export function KeyNoticedStream({ businessId, limit = 6 }: KeyNoticedStreamProps) {
   const [insights, setInsights] = useState<ProAutoInsight[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -97,40 +98,92 @@ export function KeyNoticedStream({ businessId, limit = 6 }: KeyNoticedStreamProp
         {insights.map((insight) => {
           const Icon = SEVERITY_ICONS[insight.severity] || Info;
           const color = SEVERITY_COLORS[insight.severity] || "hsl(var(--kf-info))";
+          const isExpanded = expandedId === insight.id;
           return (
-            <button
-              key={insight.id}
-              onClick={() =>
-                openKey({
-                  mode: "chat",
-                  prompt: insight.suggestedAction || `Tell me about: ${insight.title}`,
-                })
-              }
-              className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-muted/20 transition-colors group"
-            >
-              <div
-                className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                style={{ background: `${color}15` }}
+            <div key={insight.id} className="border-b border-border/10 last:border-0">
+              <button
+                onClick={() => setExpandedId((id) => (id === insight.id ? null : insight.id))}
+                className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-muted/20 transition-colors group"
               >
-                <Icon className="w-3.5 h-3.5" style={{ color }} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-foreground/90 truncate">
-                    {insight.title}
-                  </span>
-                  {insight.module && (
-                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
-                      {insight.module}
+                <div
+                  className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                  style={{ background: `${color}15` }}
+                >
+                  <Icon className="w-3.5 h-3.5" style={{ color }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-foreground/90 truncate">
+                      {insight.title}
                     </span>
+                    {insight.module && (
+                      <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                        {insight.module}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground/70 leading-relaxed mt-0.5 line-clamp-2">
+                    {insight.description}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 mt-1">
+                  {insight.suggestedAction && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openKey({
+                          mode: "chat",
+                          prompt: insight.suggestedAction,
+                        });
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                    >
+                      Act
+                    </button>
+                  )}
+                  {isExpanded ? (
+                    <ChevronUp className="w-4 h-4 text-muted-foreground/30" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-muted-foreground/30 group-hover:text-[hsl(var(--kf-accent1))]" />
                   )}
                 </div>
-                <p className="text-[11px] text-muted-foreground/70 leading-relaxed mt-0.5 line-clamp-2">
-                  {insight.description}
-                </p>
-              </div>
-              <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-[hsl(var(--kf-accent1))] mt-1" />
-            </button>
+              </button>
+
+              {isExpanded && (
+                <div className="px-4 pb-3 pl-[52px]">
+                  <div className="rounded-lg border border-border/30 bg-muted/20 p-3 space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <Brain className="w-3 h-3 text-muted-foreground/60" />
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                        Why KEY noticed this
+                      </span>
+                    </div>
+                    <ul className="space-y-1">
+                      <li className="text-[11px] text-muted-foreground flex items-start gap-1.5">
+                        <span className="text-primary mt-0.5">•</span>
+                        {insight.description}
+                      </li>
+                      {insight.metric && (
+                        <li className="text-[11px] text-muted-foreground flex items-start gap-1.5">
+                          <span className="text-primary mt-0.5">•</span>
+                          Metric: {insight.metric}
+                        </li>
+                      )}
+                      <li className="text-[11px] text-muted-foreground flex items-start gap-1.5">
+                        <span className="text-primary mt-0.5">•</span>
+                        Risk tier: {insight.riskTier} — {insight.riskTier <= 1 ? "Low risk" : insight.riskTier <= 2 ? "Medium risk" : "High risk"}
+                      </li>
+                      {insight.suggestedAction && (
+                        <li className="text-[11px] text-muted-foreground flex items-start gap-1.5">
+                          <span className="text-primary mt-0.5">•</span>
+                          Suggested action: {insight.suggestedAction}
+                        </li>
+                      )}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
