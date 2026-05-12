@@ -21,6 +21,8 @@ interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
 }
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { KeyCommandService } from './key-command.service';
+import { AutopilotRulesService } from './autopilot-rules.service';
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
 const ALLOWED_MEMORY_CATEGORIES = new Set<string>([
@@ -61,6 +63,8 @@ export class AiController {
     @Inject(ProfileIntelligenceService) private readonly profileIntelligence: ProfileIntelligenceService,
     @Inject(WorkspaceRecommendationsService) private readonly workspaceRecs: WorkspaceRecommendationsService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+    @Inject(KeyCommandService) private readonly keyCommand: KeyCommandService,
+    @Inject(AutopilotRulesService) private readonly autopilot: AutopilotRulesService,
   ) {}
 
   @Get('health')
@@ -925,5 +929,113 @@ export class AiController {
       throw new BadRequestException('Only super admins can update routing configuration');
     }
     return this.gateway.updateRoutingConfig(body as Record<string, Record<string, { primary: { provider: string; model: string }; fallbacks: Array<{ provider: string; model: string }> }>>);
+  }
+
+  // ── KEY Command Orchestrator (Phase 6 MD) ───────────────────────────────
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/key/command')
+  @CrmRateLimit(30, 60_000)
+  async executeKeyCommand(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() body: { rawInput: string; inputMode?: 'TEXT' | 'VOICE' },
+  ) {
+    const cmd = await this.keyCommand.receiveCommand(businessId, req.user?.id, body.rawInput, body.inputMode ?? 'TEXT');
+    const intent = await this.keyCommand.interpretIntent(cmd.id);
+    await this.keyCommand.groundIntent(cmd.id, businessId);
+    const plan = await this.keyCommand.planActions(cmd.id, intent);
+    const riskLevel = this.keyCommand.classifyRisk(plan);
+    const results = await this.keyCommand.executeApprovedPlan(cmd.id, plan, businessId);
+    return { commandId: cmd.id, intent, plan, riskLevel, results };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/key/commands')
+  @CrmRateLimit(60, 60_000)
+  async listKeyCommands(@Param('businessId') businessId: string) {
+    return (this.prisma as any).client.keyCommand.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
+
+  // ── Briefings (Phase 7 MD) ──────────────────────────────────────────────
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/briefing/morning')
+  @CrmRateLimit(30, 60_000)
+  async morningBriefing(@Param('businessId') businessId: string) {
+    const [schedule, revenue, openInvoices, leads] = await Promise.all([
+      (this.prisma as any).client.activity.findMany({
+        where: { businessId, occurredAt: { gte: new Date(Date.now() - 86400000) }, status: 'SCHEDULED' },
+        orderBy: { occurredAt: 'asc' },
+        take: 10,
+      }),
+      (this.prisma as any).client.invoice.aggregate({
+        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: new Date(Date.now() - 86400000) } },
+        _sum: { total: true },
+      }),
+      (this.prisma as any).client.invoice.count({
+        where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE'] } },
+      }),
+      (this.prisma as any).client.contact.count({
+        where: { businessId, deletedAt: null, leadScore: { gte: 60 } },
+      }),
+    ]);
+
+    return {
+      today: new Date().toISOString(),
+      schedule,
+      revenueToday: Number(revenue._sum.total ?? 0),
+      openInvoices,
+      activeLeads: leads,
+    };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/briefing/eod')
+  @CrmRateLimit(30, 60_000)
+  async endOfDayBriefing(@Param('businessId') businessId: string) {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const [events, revenue, bookings, contactsUpdated] = await Promise.all([
+      (this.prisma as any).client.activity.count({ where: { businessId, occurredAt: { gte: start } } }),
+      (this.prisma as any).client.invoice.aggregate({
+        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: start } },
+        _sum: { total: true },
+      }),
+      (this.prisma as any).client.booking.count({ where: { businessId, deletedAt: null, createdAt: { gte: start } } }),
+      (this.prisma as any).client.contact.count({ where: { businessId, deletedAt: null, updatedAt: { gte: start } } }),
+    ]);
+
+    return {
+      date: start.toISOString(),
+      events,
+      revenueCollected: Number(revenue._sum.total ?? 0),
+      bookingsCompleted: bookings,
+      contactsUpdated,
+    };
+  }
+
+  // ── Autopilot Rules (Phase 7 MD) ────────────────────────────────────────
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/autopilot-rules')
+  @CrmRateLimit(60, 60_000)
+  async getAutopilotRules(@Param('businessId') businessId: string) {
+    return this.autopilot.getRules(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/autopilot-rules/:ruleId')
+  @CrmRateLimit(30, 60_000)
+  async updateAutopilotRule(
+    @Param('businessId') businessId: string,
+    @Param('ruleId') ruleId: string,
+    @Body() body: { enabled: boolean },
+  ) {
+    return this.autopilot.updateRule(businessId, ruleId, body.enabled);
   }
 }

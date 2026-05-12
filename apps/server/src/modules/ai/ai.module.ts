@@ -24,6 +24,8 @@ import { MatchRefreshSchedulerService } from './match-refresh-scheduler.service'
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
+import { KeyCommandService } from './key-command.service';
+import { AutopilotRulesService } from './autopilot-rules.service';
 
 @Module({
   imports: [PrismaModule, SubscriptionsModule, BlueprintModule],
@@ -47,6 +49,8 @@ import { BlueprintModule } from '../blueprint/blueprint.module';
     WorkspaceRecommendationsService,
     BusinessMatchingService,
     MatchRefreshSchedulerService,
+    KeyCommandService,
+    AutopilotRulesService,
   ],
   exports: [
     ModelGatewayService,
@@ -65,6 +69,8 @@ import { BlueprintModule } from '../blueprint/blueprint.module';
     ProfileIntelligenceService,
     WorkspaceRecommendationsService,
     BusinessMatchingService,
+    KeyCommandService,
+    AutopilotRulesService,
   ],
 })
 export class AiModule {}
