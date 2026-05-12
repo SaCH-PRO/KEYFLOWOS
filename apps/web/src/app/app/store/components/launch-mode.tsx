@@ -2,12 +2,14 @@
 
 import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Rocket, Link2, Eye, Monitor, Smartphone, ExternalLink, Globe, Send, Megaphone, UserPlus, Loader2, CheckCircle2 } from "lucide-react";
+import { Rocket, Link2, Eye, Monitor, Smartphone, ExternalLink, Globe, Send, Megaphone, UserPlus, Loader2, CheckCircle2, ShieldCheck, Tag } from "lucide-react";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { SectionCard } from "@/components/ui/section-card";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { LaunchAdvisor } from "./launch-advisor";
 import { StoreSettings } from "./store-settings";
+import { TrustConversionChecklist } from "./trust-conversion-checklist";
+import { PublishChangelog } from "./publish-changelog";
 import { createCampaign } from "@/lib/client";
 import type { Service, Product, StorefrontConfig, StoreReadinessResult } from "@/lib/client";
 
@@ -40,6 +42,9 @@ type Props = {
   onModeChange: (mode: string) => void;
   readiness?: StoreReadinessResult | null;
   onCopilotAction?: (prompt: string) => void;
+  hasFaq?: boolean;
+  hasPolicies?: boolean;
+  hasBookingCta?: boolean;
 };
 
 function StorefrontPreview({ slug, previewMode }: { slug: string | null; previewMode: "desktop" | "mobile" }) {
@@ -228,6 +233,9 @@ export function LaunchMode({
   onModeChange,
   readiness,
   onCopilotAction,
+  hasFaq = false,
+  hasPolicies = false,
+  hasBookingCta = false,
 }: Props) {
   const pc = businessData?.primaryColor || "#F97316";
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
@@ -296,6 +304,25 @@ export function LaunchMode({
             />
           </AccordionSection>
           <AccordionSection
+            title="Trust & Conversion Checklist"
+            subtitle="Verify your store has everything customers need"
+            icon={ShieldCheck}
+            accentColor={pc}
+          >
+            <TrustConversionChecklist
+              hasLogo={!!businessData?.logoUrl}
+              hasPrimaryColor={!!businessData?.primaryColor}
+              hasContactInfo={!!(businessData?.phone || businessData?.email)}
+              productCount={services.length + commerceProducts.length}
+              hasTestimonials={_hasTestimonials}
+              hasFaq={hasFaq}
+              hasPolicies={hasPolicies}
+              hasPaymentMethods={_activeDeliveryMethodsCount > 0}
+              hasBookingCta={hasBookingCta}
+              mobileVerified={false}
+            />
+          </AccordionSection>
+          <AccordionSection
             title="Store URL & QR Code"
             subtitle="Set your link and generate a scannable QR"
             icon={Link2}
@@ -311,6 +338,14 @@ export function LaunchMode({
               onSaveSlug={onSaveSlug}
               slugSaving={slugSaving}
             />
+          </AccordionSection>
+          <AccordionSection
+            title="Publish History"
+            subtitle="Track what's changed between publishes"
+            icon={Tag}
+            accentColor={pc}
+          >
+            <PublishChangelog />
           </AccordionSection>
         </AccordionGroup>
       </motion.div>
