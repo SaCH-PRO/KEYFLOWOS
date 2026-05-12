@@ -939,15 +939,39 @@ export class AiController {
   async executeKeyCommand(
     @Param('businessId') businessId: string,
     @Req() req: AuthenticatedRequest,
-    @Body() body: { rawInput: string; inputMode?: 'TEXT' | 'VOICE' },
+    @Body() body: { rawInput: string; inputMode?: 'TEXT' | 'VOICE'; mode?: 'ask' | 'do' | 'plan' | 'auto' },
   ) {
-    const cmd = await this.keyCommand.receiveCommand(businessId, req.user?.id, body.rawInput, body.inputMode ?? 'TEXT');
+    const mode = body.mode ?? 'do';
+    const cmd = await this.keyCommand.receiveCommand(businessId, req.user?.id, body.rawInput, body.inputMode ?? 'TEXT', mode as any);
+
+    // DO and AUTO modes generate actionable "Do It For Me" suggestions
+    if (mode === 'do' || mode === 'auto') {
+      const result = await this.keyCommand.generateDoItForMe(businessId, body.rawInput);
+      await (this.prisma as any).client.keyCommand.update({
+        where: { id: cmd.id },
+        data: { status: 'EXECUTED', executionResult: result as any },
+      });
+      return result;
+    }
+
+    // ASK and PLAN modes use the traditional planning pipeline
     const intent = await this.keyCommand.interpretIntent(cmd.id);
     await this.keyCommand.groundIntent(cmd.id, businessId);
     const plan = await this.keyCommand.planActions(cmd.id, intent);
     const riskLevel = this.keyCommand.classifyRisk(plan);
+
+    // PLAN mode returns the plan without executing
+    if (mode === 'plan') {
+      await (this.prisma as any).client.keyCommand.update({
+        where: { id: cmd.id },
+        data: { status: 'PLANNED' },
+      });
+      return { commandId: cmd.id, intent, plan, riskLevel, mode };
+    }
+
+    // ASK mode executes low-risk plans, queues high-risk for approval
     const results = await this.keyCommand.executeApprovedPlan(cmd.id, plan, businessId);
-    return { commandId: cmd.id, intent, plan, riskLevel, results };
+    return { commandId: cmd.id, intent, plan, riskLevel, results, mode };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
