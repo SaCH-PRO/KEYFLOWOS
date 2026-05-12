@@ -30,8 +30,10 @@ import {
   AlertTriangle,
   Activity,
   Sparkles,
+  Percent,
 } from "lucide-react";
 import type { Product } from "@/lib/client";
+import { fetchProductCostProfile } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { PRODUCT_CATEGORY_CONFIG, type ProductForm } from "../components/commerce-types";
 import Image from "next/image";
@@ -116,6 +118,8 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
   const dragScale = useTransform(dragY, [0, 200], [1, 0.92]);
   const dragControls = useDragControls();
 
+  const [margin, setMargin] = useState<{ grossMargin: number | null; marginBand: string | null; landedCost: number | null } | null>(null);
+
   useEffect(() => {
     if (product) {
       setForm(productToForm(product));
@@ -126,6 +130,18 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
       setImagePreview(cachedImage || product.imageUrl || null);
       setSaving(false);
       dragY.set(0);
+      // Fetch margin data
+      fetchProductCostProfile(product.id).then((res) => {
+        if (res.data) {
+          setMargin({
+            grossMargin: res.data.grossMargin,
+            marginBand: res.data.marginBand,
+            landedCost: res.data.landedCost,
+          });
+        } else {
+          setMargin(null);
+        }
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-runs only when the selected product identity changes, to reset all editor state. Including `product`/`cachedImage`/`dragY` would clobber in-progress edits whenever any field of the same product mutated.
   }, [product?.id]);
@@ -443,6 +459,30 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
                   {product.category === "SERVICE" && product.duration && <StatCard icon={Clock} label="Duration" value={`${product.duration} min`} />}
                   <StatCard icon={isInactive ? ToggleLeft : ToggleRight} label="Status" value={isInactive ? "Inactive" : "Active"} accent={isInactive ? "text-red-400" : "text-emerald-400"} />
                   {createdDate && <StatCard icon={Calendar} label="Created" value={createdDate} />}
+                  {margin?.grossMargin != null && (
+                    <StatCard
+                      icon={Percent}
+                      label="Gross margin"
+                      value={`${margin.grossMargin}%`}
+                      accent={
+                        margin.marginBand === "premium"
+                          ? "text-emerald-400"
+                          : margin.marginBand === "high"
+                            ? "text-blue-400"
+                            : margin.marginBand === "medium"
+                              ? "text-amber-400"
+                              : "text-red-400"
+                      }
+                    />
+                  )}
+                  {margin?.landedCost != null && (
+                    <StatCard
+                      icon={DollarSign}
+                      label="Landed cost"
+                      value={formatCurrency(margin.landedCost, displayCurrency)}
+                      accent="text-muted-foreground/60"
+                    />
+                  )}
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/20">

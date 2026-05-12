@@ -125,6 +125,110 @@ export class CommerceController {
     return this.commerce.deleteProduct(businessId, productId);
   }
 
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/products/:productId/cost-profile')
+  async getProductCostProfile(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+  ) {
+    const product = await this.prisma.client.product.findFirst({
+      where: { id: productId, businessId },
+      include: { costProfile: true },
+    });
+    if (!product) return { costProfile: null, margin: null };
+    const price = Number(product.price ?? 0);
+    const cp = product.costProfile;
+    const landedCost = cp
+      ? Number(cp.sourceCost ?? 0) + Number(cp.shippingEstimate ?? 0) + Number(cp.dutiesEstimate ?? 0) +
+        Number(cp.packagingCost ?? 0) + Number(cp.transactionCost ?? 0)
+      : 0;
+    const grossMargin = price > 0 && landedCost > 0 ? Math.round(((price - landedCost) / price) * 1000) / 10 : null;
+    const marginBand = grossMargin != null
+      ? grossMargin < 20 ? 'low' : grossMargin < 40 ? 'medium' : grossMargin < 60 ? 'high' : 'premium'
+      : null;
+    return {
+      costProfile: cp ?? null,
+      price,
+      landedCost: landedCost > 0 ? landedCost : null,
+      grossMargin,
+      marginBand,
+      currency: cp?.currency ?? product.currency ?? 'TTD',
+    };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Patch('businesses/:businessId/products/:productId/cost-profile')
+  async upsertProductCostProfile(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+    @Body() body: {
+      sourceCost?: number;
+      shippingEstimate?: number;
+      dutiesEstimate?: number;
+      packagingCost?: number;
+      transactionCost?: number;
+      currency?: string;
+    },
+  ) {
+    const product = await this.prisma.client.product.findFirst({
+      where: { id: productId, businessId },
+      select: { id: true, price: true, currency: true },
+    });
+    if (!product) throw new ForbiddenException('Product not found');
+
+    const price = Number(product.price ?? 0);
+    const landedCost = Number(body.sourceCost ?? 0) + Number(body.shippingEstimate ?? 0) +
+      Number(body.dutiesEstimate ?? 0) + Number(body.packagingCost ?? 0) + Number(body.transactionCost ?? 0);
+    const grossMargin = price > 0 && landedCost > 0 ? Math.round(((price - landedCost) / price) * 1000) / 10 : null;
+    const marginBand = grossMargin != null
+      ? grossMargin < 20 ? 'low' : grossMargin < 40 ? 'medium' : grossMargin < 60 ? 'high' : 'premium'
+      : null;
+
+    const costProfile = await this.prisma.client.productCostProfile.upsert({
+      where: { productId },
+      create: {
+        productId,
+        sourceCost: body.sourceCost ?? 0,
+        shippingEstimate: body.shippingEstimate ?? 0,
+        dutiesEstimate: body.dutiesEstimate ?? 0,
+        packagingCost: body.packagingCost ?? 0,
+        transactionCost: body.transactionCost ?? 0,
+        landedCostEstimate: landedCost,
+        grossMargin,
+        marginBand,
+        currency: body.currency ?? product.currency ?? 'TTD',
+      },
+      update: {
+        sourceCost: body.sourceCost ?? 0,
+        shippingEstimate: body.shippingEstimate ?? 0,
+        dutiesEstimate: body.dutiesEstimate ?? 0,
+        packagingCost: body.packagingCost ?? 0,
+        transactionCost: body.transactionCost ?? 0,
+        landedCostEstimate: landedCost,
+        grossMargin,
+        marginBand,
+        currency: body.currency ?? product.currency ?? 'TTD',
+      },
+    });
+
+    // Create margin snapshot for history
+    await this.prisma.client.marginSnapshot.create({
+      data: {
+        productId,
+        sourceCost: body.sourceCost ?? 0,
+        sellingPrice: price,
+        landedCostEstimate: landedCost,
+        grossMargin: grossMargin ?? 0,
+        marginBand: marginBand ?? 'unknown',
+        currency: body.currency ?? product.currency ?? 'TTD',
+        snapshotReason: 'manual_update',
+      },
+    });
+
+    return { costProfile, landedCost, grossMargin, marginBand };
+  }
+
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/products/import/scan')
@@ -260,6 +364,44 @@ export class CommerceController {
       sentAt: body?.sentAt,
       dueDate: body?.dueDate,
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/document-templates')
+  async getDocumentTemplates(@Param('businessId') businessId: string) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { invoiceTemplate: true, quoteTemplate: true, primaryColor: true, secondaryColor: true, logoUrl: true },
+    });
+    return {
+      templates: [
+        { id: 'classic', type: 'invoice', name: 'Classic', isDefault: business?.invoiceTemplate === 'classic' },
+        { id: 'modern', type: 'invoice', name: 'Modern', isDefault: business?.invoiceTemplate === 'modern' },
+        { id: 'minimal', type: 'invoice', name: 'Minimal', isDefault: business?.invoiceTemplate === 'minimal' },
+        { id: 'classic', type: 'quote', name: 'Classic', isDefault: business?.quoteTemplate === 'classic' },
+        { id: 'modern', type: 'quote', name: 'Modern', isDefault: business?.quoteTemplate === 'modern' },
+        { id: 'minimal', type: 'quote', name: 'Minimal', isDefault: business?.quoteTemplate === 'minimal' },
+      ],
+      branding: {
+        primaryColor: business?.primaryColor,
+        secondaryColor: business?.secondaryColor,
+        logoUrl: business?.logoUrl,
+      },
+    };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Patch('businesses/:businessId/document-templates')
+  async setDocumentTemplate(
+    @Param('businessId') businessId: string,
+    @Body() body: { invoiceTemplate?: 'classic' | 'modern' | 'minimal'; quoteTemplate?: 'classic' | 'modern' | 'minimal' },
+  ) {
+    const data: Record<string, any> = {};
+    if (body.invoiceTemplate) data.invoiceTemplate = body.invoiceTemplate;
+    if (body.quoteTemplate) data.quoteTemplate = body.quoteTemplate;
+    await this.prisma.client.business.update({ where: { id: businessId }, data });
+    return { success: true, ...data };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
