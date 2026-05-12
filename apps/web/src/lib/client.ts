@@ -12861,3 +12861,86 @@ export async function downloadReconciliationReportCsv(businessId: string, id: st
     setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
   }
 }
+
+
+// ── Product Cost Profile ───────────────────────────────────────────────────
+
+export interface ProductCostProfile {
+  sourceCost: number;
+  shippingEstimate: number;
+  dutiesEstimate: number;
+  packagingCost: number;
+  transactionCost: number;
+  landedCostEstimate: number;
+  grossMargin: number | null;
+  marginBand: string | null;
+  currency: string;
+}
+
+export async function fetchProductCostProfile(productId: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<{
+    costProfile: ProductCostProfile | null;
+    price: number;
+    landedCost: number | null;
+    grossMargin: number | null;
+    marginBand: string | null;
+    currency: string;
+  }>(`/commerce/businesses/${encodeURIComponent(bid)}/products/${encodeURIComponent(productId)}/cost-profile`);
+}
+
+export async function updateProductCostProfile(
+  productId: string,
+  body: {
+    sourceCost?: number;
+    shippingEstimate?: number;
+    dutiesEstimate?: number;
+    packagingCost?: number;
+    transactionCost?: number;
+    currency?: string;
+  },
+  businessId?: string,
+) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{
+    costProfile: ProductCostProfile;
+    landedCost: number;
+    grossMargin: number | null;
+    marginBand: string | null;
+  }>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/products/${encodeURIComponent(productId)}/cost-profile`,
+    body,
+  });
+}
+
+// ── Document Templates ─────────────────────────────────────────────────────
+
+export interface DocumentTemplate {
+  id: string;
+  type: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export async function fetchDocumentTemplates(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<{
+    templates: DocumentTemplate[];
+    branding: { primaryColor?: string; secondaryColor?: string; logoUrl?: string };
+  }>(`/commerce/businesses/${encodeURIComponent(bid)}/document-templates`);
+}
+
+export async function setDocumentTemplate(
+  body: { invoiceTemplate?: 'classic' | 'modern' | 'minimal'; quoteTemplate?: 'classic' | 'modern' | 'minimal' },
+  businessId?: string,
+) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{
+    success: boolean;
+    invoiceTemplate?: string;
+    quoteTemplate?: string;
+  }>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/document-templates`,
+    body,
+  });
+}
