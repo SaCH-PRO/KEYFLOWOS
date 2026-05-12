@@ -15,12 +15,15 @@ import {
   AlertCircle,
   Sparkles,
   FileText,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchProcurementRequest,
   submitProcurementRequest,
+  approveProcurementRequest,
+  rejectProcurementRequest,
   type ProcurementRequest,
 } from "@/lib/client";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
@@ -46,6 +49,8 @@ export default function ProcurementDetailPage() {
   const [req, setReq] = useState<ProcurementRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [showRejectInput, setShowRejectInput] = useState(false);
 
   const load = useCallback(async () => {
     const biz = getStoredBusinessId();
@@ -78,6 +83,46 @@ export default function ProcurementDetailPage() {
       }
     } catch {
       toast.error("Failed to submit request");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    const biz = getStoredBusinessId();
+    if (!biz || !requestId) return;
+    setSubmitting(true);
+    try {
+      const res = await approveProcurementRequest(biz, requestId);
+      if (res.data) {
+        toast.success("Request approved");
+        setReq(res.data);
+      } else {
+        toast.error(res.error || "Failed to approve");
+      }
+    } catch {
+      toast.error("Failed to approve request");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReject = async () => {
+    const biz = getStoredBusinessId();
+    if (!biz || !requestId) return;
+    setSubmitting(true);
+    try {
+      const res = await rejectProcurementRequest(biz, requestId, rejectReason || undefined);
+      if (res.data) {
+        toast.success("Request rejected");
+        setReq(res.data);
+        setShowRejectInput(false);
+        setRejectReason("");
+      } else {
+        toast.error(res.error || "Failed to reject");
+      }
+    } catch {
+      toast.error("Failed to reject request");
     } finally {
       setSubmitting(false);
     }
@@ -155,6 +200,51 @@ export default function ProcurementDetailPage() {
                 {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                 Submit for Review
               </button>
+            )}
+            {req.status === "SUBMITTED" && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleApprove}
+                  disabled={submitting}
+                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-[11px] font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20"
+                >
+                  {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                  Approve
+                </button>
+                {!showRejectInput ? (
+                  <button
+                    onClick={() => setShowRejectInput(true)}
+                    disabled={submitting}
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-[11px] font-medium bg-red-500/10 text-red-600 hover:bg-red-500/20"
+                  >
+                    <X className="w-3 h-3" />
+                    Reject
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      placeholder="Reason (optional)"
+                      className="h-8 px-2 rounded-lg border border-border/50 bg-background text-[11px] w-40"
+                    />
+                    <button
+                      onClick={handleReject}
+                      disabled={submitting}
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-[11px] font-medium bg-red-500/10 text-red-600 hover:bg-red-500/20"
+                    >
+                      {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : "Confirm"}
+                    </button>
+                    <button
+                      onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
+                      className="h-8 px-2 rounded-lg text-[11px] text-muted-foreground hover:text-foreground"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
           <p className="text-sm font-medium text-foreground/90">{req.userPrompt}</p>

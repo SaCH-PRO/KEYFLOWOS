@@ -45,4 +45,25 @@ export class ProcurementController {
   async submit(@Param('businessId') businessId: string, @Param('id') id: string) {
     return this.service.submitForReview(businessId, id);
   }
+
+  @Post('businesses/:businessId/:id/approve')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(30, 60_000)
+  async approve(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    return this.service.updateStatus(businessId, id, 'APPROVED', req.user?.id);
+  }
+
+  @Post('businesses/:businessId/:id/reject')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(30, 60_000)
+  async reject(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any, @Body() body: { reason?: string }) {
+    return this.service.updateStatus(businessId, id, 'REJECTED', req.user?.id, body.reason);
+  }
+
+  @Get('businesses/:businessId/stats')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(60, 60_000)
+  async stats(@Param('businessId') businessId: string) {
+    return this.service.getStats(businessId);
+  }
 }
