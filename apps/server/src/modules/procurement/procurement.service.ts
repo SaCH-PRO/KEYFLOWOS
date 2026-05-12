@@ -1,11 +1,17 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { TimelineService } from '../timeline/timeline.service';
 import { CreateProcurementRequestDto } from './dto/create-procurement-request.dto';
 import { UpdateProcurementRequestDto } from './dto/update-procurement-request.dto';
 
 @Injectable()
 export class ProcurementService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ProcurementService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TimelineService) private readonly timeline: TimelineService,
+  ) {}
 
   async list(businessId: string) {
     return (this.prisma.client as any).procurementRequest.findMany({
@@ -24,7 +30,7 @@ export class ProcurementService {
 
     const recommendedPackages = this.generatePackages(dto.userPrompt);
 
-    return (this.prisma.client as any).procurementRequest.create({
+    const req = await (this.prisma.client as any).procurementRequest.create({
       data: {
         businessId,
         requestedByUserId: userId ?? null,
@@ -35,6 +41,27 @@ export class ProcurementService {
         estimatedBudget: dto.estimatedBudget as any,
       },
     });
+
+    // Write to unified Activity ledger (Wave 1)
+    this.timeline.recordEvent({
+      businessId,
+      module: 'procurement',
+      action: 'request.created',
+      entityType: 'procurement_request',
+      entityId: req.id,
+      title: 'Procurement request created',
+      detail: dto.userPrompt.slice(0, 200),
+      category: 'SYSTEM',
+      actorType: 'USER',
+      actorId: userId,
+      priority: dto.priority as any,
+      data: { interpretedCategory: interpretedNeed.category },
+      occurredAt: new Date(),
+    }).catch((err) => {
+      this.logger.warn(`[UnifiedLedger] failed to record procurement activity: ${(err as Error).message}`);
+    });
+
+    return req;
   }
 
   async get(businessId: string, id: string) {
@@ -61,7 +88,7 @@ export class ProcurementService {
   async submitForReview(businessId: string, id: string) {
     const req = await this.get(businessId, id);
     const brief = this.generateBrief(req);
-    return (this.prisma.client as any).procurementRequest.update({
+    const updated = await (this.prisma.client as any).procurementRequest.update({
       where: { id },
       data: {
         status: 'SUBMITTED',
@@ -69,6 +96,26 @@ export class ProcurementService {
         brief: brief as any,
       },
     });
+
+    // Write to unified Activity ledger (Wave 1)
+    this.timeline.recordEvent({
+      businessId,
+      module: 'procurement',
+      action: 'request.submitted',
+      entityType: 'procurement_request',
+      entityId: id,
+      title: 'Procurement request submitted for review',
+      detail: `Status: SUBMITTED · ${req.userPrompt.slice(0, 150)}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+      status: 'COMPLETED',
+      data: { brief },
+      occurredAt: new Date(),
+    }).catch((err) => {
+      this.logger.warn(`[UnifiedLedger] failed to record procurement activity: ${(err as Error).message}`);
+    });
+
+    return updated;
   }
 
   private inferCategory(prompt: string): string {

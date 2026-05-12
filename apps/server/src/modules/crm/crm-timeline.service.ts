@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { TimelineService } from '../timeline/timeline.service';
 
 type TimelineEntry = {
   id: string;
@@ -22,6 +23,7 @@ export class CrmTimelineService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(TimelineService) private readonly timeline: TimelineService,
   ) {}
 
   private formatContactName(contact: {
@@ -84,6 +86,38 @@ export class CrmTimelineService {
         source: meta?.source ?? 'system',
       },
     });
+
+    // Also write to unified Activity ledger (Wave 1)
+    const categoryMap: Record<string, 'CONTACT' | 'COMMERCE' | 'BOOKING' | 'PAYMENT' | 'AI' | 'SYSTEM' | 'STORE' | 'TASK'> = {
+      communication: 'CONTACT',
+      revenue: 'COMMERCE',
+      booking: 'BOOKING',
+      payment: 'PAYMENT',
+      ai: 'AI',
+      system: 'SYSTEM',
+      store: 'STORE',
+      task: 'TASK',
+    };
+    const contactEventCat = getContactEventCategory(normalized.canonical);
+    this.timeline.recordEvent({
+      businessId,
+      module: 'crm',
+      action: normalized.canonical,
+      entityType: 'contact',
+      entityId: contactId,
+      title: normalized.canonical,
+      detail: typeof data === 'string' ? data : JSON.stringify(data ?? {}),
+      contactId,
+      category: (contactEventCat ? categoryMap[contactEventCat] : undefined) ?? 'CONTACT',
+      type: normalized.canonical,
+      actorType: (meta?.actorType as any) ?? 'SYSTEM',
+      actorId: meta?.actorId,
+      data: data ?? {},
+      occurredAt: new Date(),
+    }).catch((err) => {
+      this.logger.warn(`[UnifiedLedger] failed to record activity for contactEvent: ${(err as Error).message}`);
+    });
+
     if (getContactEventCategory(normalized.canonical) === 'communication') {
       const contactClient = tx?.contact ?? this.prisma.client.contact;
       try {

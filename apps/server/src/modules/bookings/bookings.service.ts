@@ -16,6 +16,7 @@ import { RevenueAttributionService } from '../commerce/revenue-attribution.servi
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { PublicEventsService } from '../public-events/public-events.service';
+import { TimelineService } from '../timeline/timeline.service';
 
 interface DayHours {
   open: string;
@@ -46,6 +47,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
+    @Inject(TimelineService) private readonly timeline: TimelineService,
   ) {}
 
   onModuleInit() {

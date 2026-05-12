@@ -2068,6 +2068,7 @@ model Activity {
   startsAt   DateTime? @map("starts_at")
   endsAt     DateTime? @map("ends_at")
   occurredAt DateTime @default(now()) @map("occurred_at")
+  type       String?  // Convenience field for event type (e.g. "contact.created", "invoice.paid")
 
   createdAt  DateTime @default(now()) @map("created_at")
 
