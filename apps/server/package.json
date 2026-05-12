@@ -6,6 +6,7 @@
     "dev": "tsx src/main.ts",
     "start": "tsx src/main.ts",
     "build": "tsc --project tsconfig.json",
+    "lint": "eslint src --ext .ts",
     "test": "vitest run"
   },
   "dependencies": {

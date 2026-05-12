@@ -14,7 +14,8 @@
   },
   "scripts": {
     "build": "echo 'Skipping build for @keyflow/ui'",
-    "storybook": "storybook dev -p 6006 -c .storybook"
+    "storybook": "storybook dev -p 6006 -c .storybook",
+    "lint": "eslint src --ext .ts,.tsx"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
