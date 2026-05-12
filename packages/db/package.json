@@ -20,6 +20,7 @@
   "license": "ISC",
   "devDependencies": {
     "@prisma/adapter-pg": "^7.3.0",
+    "@types/pg": "^8.20.0",
     "dotenv": "^16.5.0",
     "pg": "^8.18.0",
     "prisma": "^6.19.0"

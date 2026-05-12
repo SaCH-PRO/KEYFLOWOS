@@ -1130,6 +1130,9 @@ export function BillingDetailModal({
           activeTemplate={templateId}
           onSaveBranding={onSaveBranding}
           savingBranding={savingBranding}
+          onTemplateChange={(id) => {
+            onSaveBranding?.({ [type === "quote" ? "quoteTemplate" : "invoiceTemplate"]: id });
+          }}
           data={{
             type: type === "invoice" ? "invoice" : "quote",
             number: number,

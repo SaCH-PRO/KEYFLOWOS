@@ -5,10 +5,11 @@ import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { MarketplaceService } from './marketplace.service';
+import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { CommerceIntegrationService } from './commerce-integration.service';
 
 @Controller('marketplace')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard)
 export class MarketplaceController {
   constructor(
     @Inject(MarketplaceService) private readonly marketplaceService: MarketplaceService,
@@ -30,6 +31,7 @@ export class MarketplaceController {
     return this.marketplaceService.getListings(businessId, { marketReach }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
+  @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/listings')
   createListing(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createListing(businessId, body);
@@ -57,6 +59,7 @@ export class MarketplaceController {
     return this.marketplaceService.getShippingZones(businessId);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/shipping-zones')
   createShippingZone(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createShippingZone(businessId, body);
@@ -84,6 +87,7 @@ export class MarketplaceController {
     return this.marketplaceService.getWarehouses(businessId);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/warehouses')
   createWarehouse(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createWarehouse(businessId, body);
@@ -114,6 +118,7 @@ export class MarketplaceController {
     return this.marketplaceService.getInventory(businessId, warehouseId);
   }
 
+  @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/inventory')
   upsertInventory(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.upsertInventory(businessId, body);
@@ -138,6 +143,7 @@ export class MarketplaceController {
     return this.marketplaceService.getOrder(businessId, orderId);
   }
 
+  @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/orders')
   createOrder(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createOrder(businessId, body);
@@ -162,6 +168,7 @@ export class MarketplaceController {
     return this.marketplaceService.getShipments(businessId, { status }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
+  @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/shipments')
   createShipment(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createShipment(businessId, body);
@@ -187,6 +194,7 @@ export class MarketplaceController {
     return this.marketplaceService.getCustomsDeclarations(businessId, { status, type }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/customs')
   createCustomsDeclaration(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createCustomsDeclaration(businessId, body);
@@ -211,6 +219,7 @@ export class MarketplaceController {
     return this.marketplaceService.getPreOrders(businessId, { status }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/pre-orders')
   createPreOrder(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createPreOrder(businessId, body);
@@ -235,11 +244,13 @@ export class MarketplaceController {
     return this.marketplaceService.getPurchaseOrders(businessId, { status }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/purchase-orders')
   createPurchaseOrder(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createPurchaseOrder(businessId, body);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Patch('businesses/:businessId/purchase-orders/:poId')
   updatePurchaseOrder(
     @Param('businessId') businessId: string,
@@ -249,6 +260,7 @@ export class MarketplaceController {
     return this.marketplaceService.updatePurchaseOrder(businessId, poId, body);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/orders/:orderId/fulfill')
   fulfillOrder(
     @Param('businessId') businessId: string,
@@ -259,6 +271,7 @@ export class MarketplaceController {
     return this.marketplaceService.fulfillOrder(businessId, orderId, action, data);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/orders/:orderId/route')
   routeOrder(
     @Param('businessId') businessId: string,
@@ -289,6 +302,7 @@ export class MarketplaceController {
     return this.marketplaceService.getInventoryAlerts(businessId);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/purchase-orders/:poId/advance')
   advancePurchaseOrderStatus(
     @Param('businessId') businessId: string,
@@ -298,6 +312,7 @@ export class MarketplaceController {
     return this.marketplaceService.advancePurchaseOrderStatus(businessId, poId, body);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/fulfillment-routes/:routeId/activate-preorder')
   activatePreorderRoute(
     @Param('businessId') businessId: string,
@@ -376,6 +391,7 @@ export class MarketplaceController {
     return this.marketplaceService.getInventoryMovements(businessId, limit ? parseInt(limit, 10) : 100);
   }
 
+  @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/inventory/adjust')
   adjustInventory(
     @Param('businessId') businessId: string,
@@ -387,6 +403,7 @@ export class MarketplaceController {
     return this.marketplaceService.adjustInventory(businessId, { ...body, userId: req.user?.id });
   }
 
+  @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/inventory/transfer')
   transferInventory(
     @Param('businessId') businessId: string,

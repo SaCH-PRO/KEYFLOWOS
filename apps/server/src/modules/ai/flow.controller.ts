@@ -1,16 +1,19 @@
 import { Body, Controller, Delete, Get, Inject, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { FlowOrchestratorService, FlowPageContext } from './flow-orchestrator.service';
 
 @Controller('ai')
+@UseGuards(CrmRateLimitGuard)
 export class FlowController {
   constructor(
     @Inject(FlowOrchestratorService) private readonly flow: FlowOrchestratorService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/flow/chat')
   async flowChat(
     @Param('businessId') businessId: string,
@@ -39,6 +42,7 @@ export class FlowController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/flow/chat/stream')
   async flowChatStream(
     @Param('businessId') businessId: string,

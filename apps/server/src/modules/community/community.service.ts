@@ -339,8 +339,9 @@ export class CommunityService {
   }
 
   async deleteComment(businessId: string, commentId: string) {
-    return this.prisma.client.communityComment.delete({
+    return this.prisma.client.communityComment.update({
       where: { id: commentId, businessId },
+      data: { deletedAt: new Date() },
     });
   }
 

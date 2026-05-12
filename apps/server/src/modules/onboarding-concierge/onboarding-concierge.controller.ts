@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Patch, Param, Body, UseGuards, Inject, Query } from '@nestjs/common';
-import { OnboardingConciergeService } from './onboarding-concierge.service';
+import { OnboardingConciergeService, AutoConfigureResult } from './onboarding-concierge.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -61,7 +61,7 @@ export class OnboardingConciergeController {
       setPaymentMethods?: boolean;
       customBusinessName?: string;
     },
-  ) {
+  ): Promise<AutoConfigureResult> {
     return this.concierge.autoConfigureFromTemplate(businessId, body.templateId, body);
   }
 

@@ -5,6 +5,7 @@ import type { Observable } from 'rxjs';
 import { CrmActionsService } from './crm-actions.service';
 import { CrmCommunicationService, type ConversationChannel, type ConversationDirection } from './crm-communication.service';
 import { ConversationAiService } from './conversation-ai.service';
+import { ContactInsightService } from './contact-insight.service';
 import { CrmFlowService } from './crm-flow.service';
 import { CrmImportService } from './crm-import.service';
 import { CrmJourneyService } from './crm-journey.service';
@@ -63,6 +64,7 @@ export class CrmController {
     @Inject(BestChannelService) private readonly bestChannel: BestChannelService,
     @Inject(ConversationAiService) private readonly conversationAi: ConversationAiService,
     @Inject(CrmNetworkService) private readonly network: CrmNetworkService,
+    @Inject(ContactInsightService) private readonly contactInsight: ContactInsightService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -674,6 +676,14 @@ export class CrmController {
       body as Partial<RelationshipHealthThresholds>,
     );
     return { thresholds };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(60, 60_000)
+  @Get('businesses/:businessId/intelligence')
+  async getIntelligenceSummary(@Param('businessId') businessId: string) {
+    return this.contactInsight.getIntelligenceSummary(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

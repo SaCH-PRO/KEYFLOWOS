@@ -22,7 +22,7 @@ export class WebhooksController {
   ) {
     const secretKey = process.env.STRIPE_SECRET_KEY;
     if (secretKey) {
-      this.stripe = new Stripe(secretKey, { apiVersion: '2025-06-30.basil' });
+      this.stripe = new Stripe(secretKey, { apiVersion: '2025-08-27.basil' });
     }
   }
 

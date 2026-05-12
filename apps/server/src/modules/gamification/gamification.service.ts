@@ -24,7 +24,7 @@ interface Challenge {
   type: 'daily' | 'weekly' | 'monthly';
 }
 
-interface GamificationStats {
+export interface GamificationStats {
   level: number;
   currentXp: number;
   xpToNextLevel: number;

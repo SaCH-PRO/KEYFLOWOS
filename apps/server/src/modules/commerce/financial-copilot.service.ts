@@ -8,7 +8,7 @@ interface LineItem {
   unitPrice?: number;
 }
 
-interface FinancialAlert {
+export interface FinancialAlert {
   id: string;
   type: 'expense_spike' | 'revenue_drop' | 'cash_shortfall' | 'milestone' | 'unpaid_invoices' | 'overdue_warning';
   severity: 'CRITICAL' | 'WARNING' | 'INFO';
@@ -20,7 +20,7 @@ interface FinancialAlert {
   createdAt: string;
 }
 
-interface FinancialPulse {
+export interface FinancialPulse {
   cashPosition: number;
   weeklyRevenue: number;
   lastWeekRevenue: number;
@@ -47,7 +47,7 @@ interface FinancialPulse {
   }>;
 }
 
-interface WeeklyBriefing {
+export interface WeeklyBriefing {
   summary: string;
   lastWeekRevenue: number;
   lastWeekExpenses: number;

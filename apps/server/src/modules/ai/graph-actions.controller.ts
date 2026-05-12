@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
@@ -24,6 +25,7 @@ function safeInt(val: string | undefined, fallback: number): number {
 }
 
 @Controller()
+@UseGuards(CrmRateLimitGuard)
 export class GraphActionsController {
   constructor(
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
@@ -38,6 +40,7 @@ export class GraphActionsController {
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(20, 60_000)
   @Get('graph/business/:businessId')
   async getGraph(
     @Param('businessId') businessId: string,

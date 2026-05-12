@@ -8,7 +8,10 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "emitDecoratorMetadata": true,
+    "declaration": false,
+    "declarationMap": false,
+    "composite": false
   },
   "ts-node": {
     "swc": true

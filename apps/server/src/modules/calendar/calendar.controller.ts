@@ -34,6 +34,7 @@ import {
 import {
   CalendarFilters,
   CalendarQueryService,
+  ListResult,
 } from './calendar-query.service';
 import {
   CALENDAR_SYNC_EVENT_TYPES,
@@ -183,7 +184,7 @@ export class CalendarController {
     @Query('includeExternal') includeExternal?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
-  ) {
+  ): Promise<ListResult> {
     const userId = requireUser(req);
     const filters: CalendarFilters = {
       start: parseDate(start, 'start'),
@@ -227,7 +228,7 @@ export class CalendarController {
     @Param('businessId') businessId: string,
     @Req() req: AuthedRequest,
     @Query('day') day?: string,
-  ) {
+  ): Promise<ListResult> {
     if (!day) throw new BadRequestException('day is required');
     const userId = requireUser(req);
     return this.query.agenda(businessId, userId, req.user?.role, day);

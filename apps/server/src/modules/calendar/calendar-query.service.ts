@@ -44,7 +44,7 @@ export interface CalendarFilters {
 export const MAX_EVENTS_RETURNED = 1000;
 export const DEFAULT_PAGE_LIMIT = 200;
 
-interface ListResult {
+export interface ListResult {
   events: ReturnedEvent[];
   total: number;
   truncated: boolean;

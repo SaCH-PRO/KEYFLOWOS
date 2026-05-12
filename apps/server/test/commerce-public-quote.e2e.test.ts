@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import { CommerceController } from '../src/modules/commerce/commerce.controller';
 import { CommerceService } from '../src/modules/commerce/commerce.service';
@@ -111,7 +111,7 @@ describe('Commerce public quote e2e', () => {
   let app: INestApplication;
   let prisma: CommercePrismaMock;
   let events: EventEmitter2;
-  let emitSpy: ReturnType<typeof vi.spyOn>;
+  let emitSpy: MockInstance<(event: string, ...args: any[]) => boolean>;
   let crm: { logContactEvent: ReturnType<typeof vi.fn> };
 
   beforeAll(async () => {

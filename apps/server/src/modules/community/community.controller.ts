@@ -1,6 +1,8 @@
 // @keyflow:dormant — UI surface gated by featureFlags (KEY-9 cleanup target).
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards, ValidationPipe } from '@nestjs/common';
 import { CommunityService } from './community.service';
+import { CreatePostDto, CreateCommentDto } from './dto';
+import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { ReputationService } from './reputation.service';
 import { OpportunityService } from './opportunity.service';
 import { PartnerProgramService } from './partner-program.service';
@@ -14,6 +16,7 @@ import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller()
+@UseGuards(CrmRateLimitGuard)
 export class CommunityController {
   constructor(
     @Inject(CommunityService) private readonly community: CommunityService,
@@ -60,10 +63,11 @@ export class CommunityController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/community/posts')
   createPost(
     @Param('businessId') businessId: string,
-    @Body() body: { title?: string; content: string; type?: string; tags?: string[] },
+    @Body(new ValidationPipe({ transform: true })) body: CreatePostDto,
   ) {
     return this.community.createPost(businessId, body);
   }
@@ -88,17 +92,19 @@ export class CommunityController {
   }
 
   @UseGuards(AuthGuard)
+  @CrmRateLimit(30, 60_000)
   @Post('community/posts/:postId/like')
   likePost(@Param('postId') postId: string) {
     return this.community.likePost(postId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/community/posts/:postId/comments')
   addComment(
     @Param('businessId') businessId: string,
     @Param('postId') postId: string,
-    @Body() body: { content: string },
+    @Body(new ValidationPipe({ transform: true })) body: CreateCommentDto,
   ) {
     return this.community.addComment(businessId, postId, body.content);
   }
@@ -350,6 +356,7 @@ export class CommunityController {
   // ==========================================
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/community/quote-requests')
   createQuoteRequest(
     @Param('businessId') businessId: string,
@@ -393,6 +400,7 @@ export class CommunityController {
   // ==========================================
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/community/referrals')
   createReferral(
     @Param('businessId') businessId: string,
@@ -432,6 +440,7 @@ export class CommunityController {
   // ==========================================
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/community/collaborations')
   createCollaboration(
     @Param('businessId') businessId: string,
@@ -471,6 +480,7 @@ export class CommunityController {
   // ==========================================
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/community/messages')
   sendMessage(
     @Param('businessId') businessId: string,
@@ -508,6 +518,7 @@ export class CommunityController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/community/collab-requests')
   createCollabRequest(
     @Param('businessId') businessId: string,

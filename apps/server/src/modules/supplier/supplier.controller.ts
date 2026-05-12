@@ -1,11 +1,13 @@
 // @keyflow:dormant — UI surface gated by featureFlags (KEY-9 cleanup target).
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards, Inject, ValidationPipe } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { SupplierService } from './supplier.service';
+import { CreateConnectionDto, UpdateConnectionDto } from './dto';
+import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 
 @Controller('supplier')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard)
 export class SupplierController {
   constructor(@Inject(SupplierService) private readonly supplierService: SupplierService) {}
 
@@ -32,19 +34,21 @@ export class SupplierController {
     return this.supplierService.getSupplierConnection(businessId, connectionId);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/connections')
   createConnection(
     @Param('businessId') businessId: string,
-    @Body() body: any,
+    @Body(new ValidationPipe({ transform: true })) body: CreateConnectionDto,
   ) {
     return this.supplierService.createSupplierConnection(businessId, body);
   }
 
+  @CrmRateLimit(10, 60_000)
   @Patch('businesses/:businessId/connections/:connectionId')
   updateConnection(
     @Param('businessId') businessId: string,
     @Param('connectionId') connectionId: string,
-    @Body() body: any,
+    @Body(new ValidationPipe({ transform: true })) body: UpdateConnectionDto,
   ) {
     return this.supplierService.updateSupplierConnection(businessId, connectionId, body);
   }
