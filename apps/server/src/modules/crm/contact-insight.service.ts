@@ -287,7 +287,14 @@ export class ContactInsightService {
       ? Math.floor((Date.now() - contact.lastInteractionAt.getTime()) / 86400000)
       : 999;
 
-    const [invoiceAgg, bookingAgg, quoteAgg] = await Promise.all([
+    const [
+      invoiceAgg,
+      paidInvoiceAgg,
+      bookingAgg,
+      cancelledBookingAgg,
+      quoteAgg,
+      acceptedQuoteAgg,
+    ] = await Promise.all([
       this.db.invoice.aggregate({
         where: { businessId, contactId, deletedAt: null },
         _sum: { total: true },
@@ -317,12 +324,12 @@ export class ContactInsightService {
     ]);
 
     const totalInvoices = invoiceAgg._count._all ?? 0;
-    const paidInvoices = (bookingAgg as any)?._count?._all ?? 0;
-    const totalPaid = Number((bookingAgg as any)?._sum?.total ?? 0);
+    const paidInvoices = (paidInvoiceAgg as any)?._count?._all ?? 0;
+    const totalPaid = Number((paidInvoiceAgg as any)?._sum?.total ?? 0);
     const totalBookings = (bookingAgg as any)?._count?._all ?? 0;
-    const cancelledBookings = (quoteAgg as any)?._count?._all ?? 0;
-    const quoteSentCount = totalInvoices; // reuse variable names from aggregate order
-    const quoteAcceptedCount = paidInvoices;
+    const cancelledBookings = (cancelledBookingAgg as any)?._count?._all ?? 0;
+    const quoteSentCount = (quoteAgg as any)?._count?._all ?? 0;
+    const quoteAcceptedCount = (acceptedQuoteAgg as any)?._count?._all ?? 0;
     const unpaidInvoiceCount = totalInvoices - paidInvoices;
 
     const { calculateLeadScore, calculatePaymentReliability, calculateCancellationRisk, calculateFollowUpPriority, generateNextBestAction } =
@@ -355,6 +362,84 @@ export class ContactInsightService {
       bookingCount: totalBookings,
     });
 
+    // Fetch additional data for missing intelligence fields
+    const [bookingsWithServices, recentNotes, openDeals, conversationInsights] = await Promise.all([
+      this.db.booking.findMany({
+        where: { businessId, contactId, deletedAt: null },
+        select: { service: { select: { name: true } } },
+        take: 100,
+      }),
+      this.db.contactNote.findMany({
+        where: { businessId, contactId },
+        select: { body: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+      this.db.deal.findMany({
+        where: { businessId, contactId, status: 'OPEN', deletedAt: null },
+        select: { value: true, stage: true },
+      }),
+      this.db.conversationAIInsight.findFirst({
+        where: { contactId },
+        orderBy: { createdAt: 'desc' },
+        select: { sentiment: true },
+      }),
+    ]);
+
+    // preferredServices: most booked services
+    const serviceCounts: Record<string, number> = {};
+    bookingsWithServices.forEach((b) => {
+      const name = b.service?.name;
+      if (name) serviceCounts[name] = (serviceCounts[name] ?? 0) + 1;
+    });
+    const preferredServices = Object.entries(serviceCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }));
+
+    // responsivenessScore: heuristic based on interaction recency and note frequency
+    const noteCount = recentNotes.length;
+    const daysSinceLastNote = recentNotes[0]
+      ? Math.floor((Date.now() - new Date(recentNotes[0].createdAt).getTime()) / 86400000)
+      : 999;
+    const responsivenessScore = Math.min(100, Math.round(
+      (noteCount > 5 ? 40 : noteCount * 8) +
+      (daysSinceLastNote < 7 ? 30 : daysSinceLastNote < 30 ? 15 : 0) +
+      (totalBookings > 0 ? 20 : 0) +
+      (paidInvoices > 0 ? 10 : 0),
+    ));
+
+    // sentimentScore: from conversation insights or neutral default
+    const rawSentiment = conversationInsights?.sentiment;
+    const sentimentScore = typeof rawSentiment === 'number'
+      ? Math.round(rawSentiment * 100)
+      : 50;
+
+    // referralLikelihood: based on satisfaction indicators
+    const referralLikelihood = Math.min(100, Math.round(
+      (sentimentScore > 70 ? 30 : sentimentScore > 40 ? 15 : 0) +
+      (totalPaid > 1000 ? 25 : totalPaid > 100 ? 10 : 0) +
+      (totalBookings >= 3 ? 25 : totalBookings >= 1 ? 10 : 0) +
+      (paymentReliability > 80 ? 20 : 0),
+    ));
+
+    // riskFlags: array of risk signals
+    const riskFlags: string[] = [];
+    if (unpaidInvoiceCount > 0) riskFlags.push('unpaid_invoices');
+    if (cancellationRate > 30) riskFlags.push('high_cancellation_rate');
+    if (daysSinceLastInteraction > 60) riskFlags.push('dormant');
+    if (paymentReliability < 50 && totalInvoices > 1) riskFlags.push('poor_payment_history');
+    if (leadScore < 30 && totalPaid > 0) riskFlags.push('declining_engagement');
+
+    // opportunities: array of upsell/cross-sell signals
+    const opportunities: string[] = [];
+    if (quoteSentCount > quoteAcceptedCount) opportunities.push('pending_quotes');
+    if (openDeals.length > 0) opportunities.push('open_deals');
+    if (totalBookings >= 2 && preferredServices.length > 1) opportunities.push('cross_sell_services');
+    if (totalPaid > 500 && daysSinceLastInteraction < 30) opportunities.push('upsell_ready');
+    if (totalBookings >= 3 && cancellationRate < 10) opportunities.push('loyalty_program');
+    if (recentNotes.length >= 2 && sentimentScore > 60) opportunities.push('referral_ask');
+
     await this.db.contact.update({
       where: { id: contactId },
       data: {
@@ -367,6 +452,12 @@ export class ContactInsightService {
         followUpPriority,
         nextBestAction,
         conversionProbability: leadScore,
+        responsivenessScore,
+        sentimentScore,
+        referralLikelihood,
+        ...(preferredServices.length > 0 ? { preferredServices } : {}),
+        ...(riskFlags.length > 0 ? { riskFlags } : {}),
+        ...(opportunities.length > 0 ? { opportunities } : {}),
       },
     });
   }
