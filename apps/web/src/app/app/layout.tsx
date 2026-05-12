@@ -56,6 +56,7 @@ import {
   Calculator,
   Building2,
   Truck,
+  ShoppingCart,
 } from "lucide-react";
 
 interface ResolvedFeatureFlag {
@@ -324,6 +325,7 @@ const moreNav: NavItem[] = [
   { label: "Projects", href: "/app/projects", icon: FolderKanban },
   { label: "Expenses", href: "/app/expenses", icon: Receipt },
   { label: "Reports", href: "/app/reports", icon: BarChart3 },
+  { label: "Procurement", href: "/app/procurement", icon: ShoppingCart },
   { label: "Inventory", href: "/app/commerce?tab=inventory", icon: Package },
   { label: "Team", href: "/app/settings/team", icon: Users2 },
   { label: "Connect", href: "/app/connect", icon: Plug },
