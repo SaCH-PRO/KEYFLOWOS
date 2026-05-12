@@ -11,6 +11,9 @@
       "default": "./src/root.ts"
     }
   },
+  "scripts": {
+    "lint": "eslint src --ext .ts"
+  },
   "dependencies": {
     "@keyflow/db": "workspace:*",
     "@prisma/client": "^6.19.2",
