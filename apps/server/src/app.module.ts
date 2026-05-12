@@ -39,6 +39,7 @@ import { TemplatesModule } from './modules/templates/templates.module';
 import { EducationModule } from './modules/education/education.module';
 import { CommunityModule } from './modules/community/community.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
+import { ProcurementModule } from './modules/procurement/procurement.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
 import { MomentumModule } from './modules/momentum/momentum.module';
 import { SeedModule } from './core/seed/seed.module';
@@ -98,6 +99,7 @@ import { PublicEventsModule } from './modules/public-events/public-events.module
     EducationModule,
     CommunityModule,
     MarketplaceModule,
+    ProcurementModule,
     SupplierModule,
     MomentumModule,
     SeedModule,

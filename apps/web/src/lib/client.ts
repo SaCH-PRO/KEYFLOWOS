@@ -12790,6 +12790,60 @@ export async function updateAutopilotRule(
   );
 }
 
+/* ── Procurement (Phase 8) ────────────────────────────────────────────── */
+
+export interface ProcurementRequest {
+  id: string;
+  businessId: string;
+  userPrompt: string;
+  interpretedNeed: Record<string, unknown> | null;
+  recommendedPackages: unknown[] | null;
+  brief: Record<string, unknown> | null;
+  estimatedBudget: Record<string, unknown> | null;
+  status: string;
+  priority: string | null;
+  internalNotes: string | null;
+  submittedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchProcurementRequests(businessId: string) {
+  return apiGetSimple<ProcurementRequest[]>(`/procurement/businesses/${encodeURIComponent(businessId)}`);
+}
+
+export async function fetchProcurementRequest(businessId: string, id: string) {
+  return apiGetSimple<ProcurementRequest>(`/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(id)}`);
+}
+
+export async function createProcurementRequest(
+  businessId: string,
+  body: { userPrompt: string; priority?: string; estimatedBudget?: Record<string, unknown> },
+) {
+  return apiPost<ProcurementRequest>({
+    path: `/procurement/businesses/${encodeURIComponent(businessId)}`,
+    body,
+  });
+}
+
+export async function updateProcurementRequest(
+  businessId: string,
+  id: string,
+  body: { status?: string; priority?: string; internalNotes?: string },
+) {
+  return apiPatch<ProcurementRequest>(
+    `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(id)}`,
+    body,
+  );
+}
+
+export async function submitProcurementRequest(businessId: string, id: string) {
+  return apiPost<ProcurementRequest>({
+    path: `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(id)}/submit`,
+    body: {},
+  });
+}
+
 export async function downloadReconciliationReportCsv(businessId: string, id: string): Promise<void> {
   const url = `${API_BASE}${finBase(businessId)}/reconciliations/${encodeURIComponent(id)}/report.csv`;
   const res = await fetch(url, { method: 'GET', headers: getAuthHeaders() });
