@@ -42,6 +42,8 @@ const SECTION_LABELS: Record<BlueprintSectionKey, string> = {
   customerModel: "Customer Model",
   financials: "Financials",
   intelligence: "Intelligence",
+  workflowModel: "Workflow Model",
+  aiPreferences: "AI Preferences",
 };
 
 function arrToCsv(value: string[] | undefined): string {
@@ -268,6 +270,9 @@ export default function BlueprintPage() {
       brand: draft.brand,
       customerModel: draft.customerModel,
       financials: draft.financials,
+      intelligence: draft.intelligence,
+      workflowModel: draft.workflowModel,
+      aiPreferences: draft.aiPreferences,
     };
     const res = await apiPatch<BlueprintData>(`/blueprint/businesses/${businessId}`, patch);
     setSaving(false);
@@ -299,6 +304,8 @@ export default function BlueprintPage() {
   const cust = draft.customerModel;
   const fin = draft.financials;
   const intel = draft.intelligence;
+  const wf = draft.workflowModel;
+  const ai = draft.aiPreferences;
 
   return (
     <div className="p-6 max-w-5xl mx-auto pb-32">
@@ -661,8 +668,7 @@ export default function BlueprintPage() {
         <section id="intelligence">
           <SectionCard title={SECTION_LABELS.intelligence} icon={Brain}>
             <p className="kf-text-caption mb-3" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-              Auto-derived from your business activity. Will deepen once the event timeline ledger
-              lands.
+              Auto-derived from your business activity via the unified event timeline.
             </p>
             <ul className="flex flex-col gap-1.5 kf-text-caption">
               <li>
@@ -692,6 +698,112 @@ export default function BlueprintPage() {
                 </span>
               </li>
             </ul>
+          </SectionCard>
+        </section>
+
+        <section id="workflowModel">
+          <SectionCard title={SECTION_LABELS.workflowModel} icon={Compass}>
+            <div className="grid gap-3">
+              <FieldRow label="Primary workflow">
+                <SelectField
+                  value={wf?.primaryWorkflow}
+                  onChange={(v) => updateSection("workflowModel", { primaryWorkflow: v })}
+                  options={[
+                    { value: "APPOINTMENT", label: "Appointment-based" },
+                    { value: "PROJECT", label: "Project-based" },
+                    { value: "RETAINER", label: "Retainer / Subscription" },
+                    { value: "WALK_IN", label: "Walk-in / Queue" },
+                    { value: "ECOMMERCE", label: "E-commerce / Self-serve" },
+                    { value: "INQUIRY", label: "Custom inquiry / Quote" },
+                  ]}
+                />
+              </FieldRow>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { key: "appointmentBooking", label: "Appointments" },
+                  { key: "projectManagement", label: "Projects" },
+                  { key: "retainerCycle", label: "Retainers" },
+                  { key: "walkInQueue", label: "Walk-ins" },
+                  { key: "ecommerceFulfillment", label: "E-commerce" },
+                  { key: "customInquiryFlow", label: "Custom inquiry" },
+                ].map((opt) => (
+                  <label key={opt.key} className="flex items-center gap-2 kf-text-caption">
+                    <input
+                      type="checkbox"
+                      checked={!!(wf as any)?.[opt.key]}
+                      onChange={(e) =>
+                        updateSection("workflowModel", { [opt.key]: e.target.checked })
+                      }
+                      className="rounded border-border"
+                    />
+                    {opt.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </SectionCard>
+        </section>
+
+        <section id="aiPreferences">
+          <SectionCard title={SECTION_LABELS.aiPreferences} icon={Sparkles}>
+            <div className="grid gap-3">
+              <FieldRow label="Autonomy level" hint="How much freedom KEY has to act on your behalf.">
+                <SelectField
+                  value={String(ai?.autonomyLevel ?? "")}
+                  onChange={(v) => updateSection("aiPreferences", { autonomyLevel: v ? Number(v) : undefined })}
+                  options={[
+                    { value: "0", label: "Advisory only — suggestions, no action" },
+                    { value: "1", label: "Draft mode — creates content for review" },
+                    { value: "2", label: "Internal exec — low-risk actions auto-approved" },
+                    { value: "3", label: "External approval — asks before external comms" },
+                    { value: "4", label: "Trusted autopilot — full delegation" },
+                  ]}
+                />
+              </FieldRow>
+              <FieldRow label="AI tone">
+                <TextField
+                  value={ai?.tone}
+                  onChange={(v) => updateSection("aiPreferences", { tone: v })}
+                  placeholder="e.g. professional, warm, direct"
+                />
+              </FieldRow>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex items-center gap-2 kf-text-caption">
+                  <input
+                    type="checkbox"
+                    checked={!!ai?.notifyOnRecommendations}
+                    onChange={(e) => updateSection("aiPreferences", { notifyOnRecommendations: e.target.checked })}
+                    className="rounded border-border"
+                  />
+                  Notify on recommendations
+                </label>
+                <label className="flex items-center gap-2 kf-text-caption">
+                  <input
+                    type="checkbox"
+                    checked={!!ai?.notifyOnAlerts}
+                    onChange={(e) => updateSection("aiPreferences", { notifyOnAlerts: e.target.checked })}
+                    className="rounded border-border"
+                  />
+                  Notify on alerts
+                </label>
+                <label className="flex items-center gap-2 kf-text-caption">
+                  <input
+                    type="checkbox"
+                    checked={!!ai?.voiceEnabled}
+                    onChange={(e) => updateSection("aiPreferences", { voiceEnabled: e.target.checked })}
+                    className="rounded border-border"
+                  />
+                  Voice input enabled
+                </label>
+              </div>
+              <FieldRow label="Approved actions" hint="Comma-separated list of actions KEY can auto-run.">
+                <TextField
+                  value={arrToCsv(ai?.approvedActions)}
+                  onChange={(v) => updateSection("aiPreferences", { approvedActions: csvToArr(v) })}
+                  placeholder="e.g. send_invoice_reminder, create_booking"
+                />
+              </FieldRow>
+            </div>
           </SectionCard>
         </section>
       </div>

@@ -116,6 +116,8 @@ export class BlueprintService {
 
     const completeness = this.calculateCompleteness(next);
 
+    const confidenceScores = this.calculateConfidenceScores(next);
+
     const updated = await this.prisma.client.businessBlueprint.update({
       where: { businessId },
       data: {
@@ -127,7 +129,11 @@ export class BlueprintService {
         customerModel: next.customerModel as Prisma.InputJsonValue,
         financials: next.financials as Prisma.InputJsonValue,
         intelligence: next.intelligence as Prisma.InputJsonValue,
+        workflowModel: next.workflowModel as Prisma.InputJsonValue,
+        aiPreferences: next.aiPreferences as Prisma.InputJsonValue,
+        confidenceScores: confidenceScores as unknown as Prisma.InputJsonValue,
         completeness,
+        lastAnalyzedAt: new Date(),
       },
     });
 
@@ -216,7 +222,19 @@ export class BlueprintService {
    * existing data so downstream consumers can already rely on the shape.
    */
   async inferFromEvents(businessId: string): Promise<BlueprintData> {
-    const [productCategories, monthlyRevenue] = (await Promise.all([
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      productCategories,
+      monthlyRevenue,
+      bookingCount,
+      projectCount,
+      ecommerceOrders,
+      walkInCount,
+      retainerInvoices,
+      topChannels,
+      activityCount,
+    ] = await Promise.all([
       this.prisma.client.product.groupBy({
         by: ['category'],
         where: { businessId, deletedAt: null, category: { not: null } } as unknown as Prisma.ProductWhereInput,
@@ -226,28 +244,56 @@ export class BlueprintService {
       }) as Promise<Array<{ category: string | null }>>,
       this.prisma.client.invoice
         .aggregate({
-          where: {
-            businessId,
-            deletedAt: null,
-            status: 'PAID',
-            paidAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-          },
+          where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: thirtyDaysAgo } },
           _sum: { total: true },
         })
         .catch(() => null),
-    ])) as [Array<{ category: string | null }>, { _sum: { total: number | null } } | null];
+      this.prisma.client.booking.count({ where: { businessId, deletedAt: null } }),
+      this.prisma.client.contactTask.count({ where: { businessId, status: 'OPEN' } }),
+      this.prisma.client.invoice.count({
+        where: { businessId, deletedAt: null },
+      }).catch(() => 0),
+      Promise.resolve(0),
+      this.prisma.client.invoice.count({
+        where: { businessId, deletedAt: null, status: 'PAID', recurringInvoiceId: { not: null } },
+      }).catch(() => 0),
+      this.prisma.client.activity.groupBy({
+        by: ['module'],
+        where: { businessId, occurredAt: { gte: thirtyDaysAgo } },
+        _count: { _all: true },
+        orderBy: { _count: { module: 'desc' } },
+        take: 3,
+      }).catch(() => [] as any),
+      this.prisma.client.activity.count({
+        where: { businessId, occurredAt: { gte: thirtyDaysAgo } },
+      }).catch(() => 0),
+    ]);
 
     const intelligence: Partial<BlueprintIntelligence> = {
       topProductCategories: productCategories
         .map((p) => p.category)
         .filter((c): c is string => typeof c === 'string'),
+      topChannels: (topChannels as any[])
+        ?.map((c: any) => c.module)
+        ?.filter((m: string) => typeof m === 'string') ?? [],
       recentMomentumScore: monthlyRevenue?._sum?.total
         ? Math.min(100, Math.round(Number(monthlyRevenue._sum.total) / 100))
-        : 0,
+        : activityCount > 0 ? Math.min(100, Math.round(activityCount * 2)) : 0,
       inferredAt: new Date().toISOString(),
     };
 
-    return this.updateBlueprint(businessId, { intelligence });
+    // Infer workflow model from data patterns
+    const workflowModel: Partial<any> = {};
+    if (bookingCount > 0) workflowModel.appointmentBooking = true;
+    if (projectCount > 0) workflowModel.projectManagement = true;
+    if (retainerInvoices > 0) workflowModel.retainerCycle = true;
+    if (walkInCount > 0) workflowModel.walkInQueue = true;
+    if (ecommerceOrders > 0) workflowModel.ecommerceFulfillment = true;
+    if (bookingCount === 0 && projectCount === 0 && ecommerceOrders === 0) {
+      workflowModel.customInquiryFlow = true;
+    }
+
+    return this.updateBlueprint(businessId, { intelligence, workflowModel: workflowModel as any });
   }
 
   /**
