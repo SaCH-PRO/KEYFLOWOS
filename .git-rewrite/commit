@@ -1,0 +1,41 @@
+tree e137e0f3e4812719977375a39fcaf1f081568374
+parent da09407725cce7c1aef9acbdf2f1ff4a77a2ba65
+author keyflowostt <54181748-keyflowostt@users.noreply.replit.com> 1775946918 +0000
+committer keyflowostt <54181748-keyflowostt@users.noreply.replit.com> 1775946918 +0000
+
+feat: AI Output Quality & Template System (Task #62) — complete
+
+## T001: AI Quality Directive Engine
+- ai-quality.ts: Per-category quality directives; expanded validateAiOutput with:
+  min length per category, placeholder detection, AI refusal detection,
+  required sections presence check (from resolved template), specificity heuristics
+  (generic filler phrase detection, metric presence for reports/briefings)
+
+## T002: OutputTemplate Data Model & Service
+- schema.prisma: OutputTemplate model
+- output-template.service.ts: single source of truth (resolveTemplate), full CRUD,
+  server-side DTO validation (category/tone/formality/length/sections/name constraints),
+  static import for buildQualityDirectiveSuffix
+- output-template.controller.ts: REST at /api/ai/businesses/:id/output-templates
+
+## T003: Template Editor UI (/app/settings/output-templates)
+- Category tiles with CRUD modal; up/down section ordering controls; live preview panel
+- Set-as-default, reset, delete; System Defaults reference panel
+- "AI Output" nav item added to settings layout
+
+## T004: Retrofit all AI services
+AiUsageService:
+- responseMode: 'user_text' | 'structured_json' (replaces boolean skipQualityDirectives)
+- Delegates to OutputTemplateService.resolveTemplate (no duplicated logic)
+- Passes requiredSections to validateAiOutput for section presence enforcement
+
+Quality scope: 10 structured_json calls remain only for true parser/classifier/extractor
+calls (NL→filter, command→action, tag extraction, binary scores):
+nl_search variants (4), command variants (2), ai_tags, ai_lead_score, churn_detection
+
+All other calls (50+) use the full quality pipeline including: document generation/tweaking,
+financial briefings, autopilot drafts, momentum recommendations, marketing content,
+campaign intelligence, onboarding concierge, CRM analysis, contact summaries, meeting
+prep briefs, follow-up drafts, bookings insights, commerce analysis, reports.
+
+Replit-Task-Id: 3c6c37a2-9fcb-4022-aedf-d1897791a3f3
