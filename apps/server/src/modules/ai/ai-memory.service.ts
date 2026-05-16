@@ -12,9 +12,12 @@ export type MemoryCategory =
   | 'bottlenecks'
   | 'corrections'
   | 'patterns'
-  | 'preferences';
+  | 'preferences'
+  | 'learned_corrections'
+  | 'execution_patterns'
+  | 'role_activity';
 
-export type MemorySource = 'user' | 'inferred' | 'approval_signal' | 'pattern_analysis';
+export type MemorySource = 'user' | 'inferred' | 'approval_signal' | 'pattern_analysis' | 'feedback_loop' | 'role_engine';
 
 export interface MemoryEntry {
   id: string;

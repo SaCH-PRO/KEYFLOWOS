@@ -1,6 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Resolve the git commit SHA the running container was built from.
@@ -17,6 +20,7 @@ import { dirname, resolve } from "node:path";
  */
 
 let cached: string | null = null;
+let pending: Promise<string> | null = null;
 
 function readDeployVersionFile(): string | null {
   let dir = process.cwd();
@@ -37,29 +41,41 @@ function readDeployVersionFile(): string | null {
   return null;
 }
 
-function readGitHead(): string | null {
+async function readGitHead(): Promise<string | null> {
   try {
-    const value = execFileSync("git", ["rev-parse", "HEAD"], {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
       cwd: process.cwd(),
-      stdio: ["ignore", "pipe", "ignore"],
       timeout: 1500,
-    })
-      .toString()
-      .trim();
-    return value || null;
+    });
+    return stdout.trim() || null;
   } catch {
     return null;
   }
 }
 
-export function getReleaseVersion(): { full: string; short: string } {
-  if (cached === null) {
-    const fromEnv =
-      process.env.GIT_COMMIT ||
-      process.env.REPL_COMMIT_SHA ||
-      process.env.SOURCE_COMMIT ||
-      "";
-    cached = (fromEnv || readDeployVersionFile() || readGitHead() || "unknown").trim();
+export async function getReleaseVersion(): Promise<{ full: string; short: string }> {
+  if (cached !== null) {
+    return { full: cached, short: cached.slice(0, 12) };
   }
-  return { full: cached, short: cached.slice(0, 12) };
+
+  if (!pending) {
+    pending = (async () => {
+      const fromEnv =
+        process.env.GIT_COMMIT ||
+        process.env.REPL_COMMIT_SHA ||
+        process.env.SOURCE_COMMIT ||
+        "";
+      const value = (
+        fromEnv ||
+        readDeployVersionFile() ||
+        (await readGitHead()) ||
+        "unknown"
+      ).trim();
+      cached = value;
+      return value;
+    })();
+  }
+
+  const value = await pending;
+  return { full: value, short: value.slice(0, 12) };
 }

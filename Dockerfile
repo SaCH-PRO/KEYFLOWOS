@@ -23,7 +23,7 @@ FROM node:${NODE_VERSION}-alpine AS base
 RUN apk add --no-cache libc6-compat openssl tini
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable && corepack prepare pnpm@10.26.1 --activate
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 
 
@@ -36,24 +36,37 @@ COPY apps/server/package.json apps/server/
 COPY apps/web/package.json    apps/web/
 COPY packages/api/package.json packages/api/
 COPY packages/db/package.json  packages/db/
+COPY packages/shared/package.json packages/shared/
 COPY packages/ui/package.json  packages/ui/
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 
 # -----------------------------------------------------------------------------
-# Builder — copy source, generate Prisma client, build the web app.
-# Server runs from TypeScript source via tsx (workspace packages export TS),
-# so only Prisma generation + web build are needed at build time.
+# Builder — copy source, generate Prisma client, build web app, compile server.
 # -----------------------------------------------------------------------------
 FROM deps AS builder
-COPY . .
+# Copy Prisma schema first for cacheable client generation
+COPY packages/db/prisma ./packages/db/prisma
+COPY packages/db/package.json ./packages/db/
 RUN pnpm --filter @keyflow/db run db:generate
+
+# Copy remaining source and build apps
+COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter web build
+
+# Compile workspace packages and server for CI validation / future migration.
+# The runtime stage below still uses tsx for maximum compatibility.
+RUN pnpm --filter @keyflow/shared build
+RUN pnpm --filter @keyflow/api build
+RUN pnpm --filter @keyflow/db build
+RUN pnpm --filter server build
 
 
 # -----------------------------------------------------------------------------
 # Server runtime — runs TypeScript directly via tsx.
+# NOTE: Compiled dist/ is built above and ready for a future switch to
+# `node apps/server/dist/src/main.js` once ESM/CJS interop is fully validated.
 # -----------------------------------------------------------------------------
 FROM base AS server
 ENV NODE_ENV=production

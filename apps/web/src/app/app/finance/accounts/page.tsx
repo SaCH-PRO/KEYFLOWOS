@@ -87,7 +87,8 @@ function AccountsBody({ businessId }: { businessId: string }) {
         <EmptyState icon={Wallet} title="No accounts yet" description="Add a Cash, Bank or processor account above, or in Settings → Accounts." variant="compact" />
       ) : (
         <div className="rounded-xl border border-border/40 bg-card/40 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="min-w-full w-full text-sm">
             <thead className="bg-background/60 text-xs text-muted-foreground">
               <tr><th className="text-left px-3 py-2 font-medium">Name</th><th className="text-left px-3 py-2 font-medium">Type</th><th className="text-right px-3 py-2 font-medium">Balance</th><th className="text-left px-3 py-2 font-medium">Currency</th></tr>
             </thead>
@@ -105,6 +106,7 @@ function AccountsBody({ businessId }: { businessId: string }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

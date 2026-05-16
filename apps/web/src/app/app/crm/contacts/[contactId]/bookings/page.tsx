@@ -40,7 +40,7 @@ export default function ContactBookingsPage() {
       setLoading(true);
       const res = await fetchBookings();
       const all = (res.data ?? []) as Booking[];
-      const filtered = all.filter((b) => (b as any).contactId === contactId);
+      const filtered = all.filter((b) => (b as unknown as { contactId: string }).contactId === contactId);
       setBookings(filtered.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()));
       setLoading(false);
     };

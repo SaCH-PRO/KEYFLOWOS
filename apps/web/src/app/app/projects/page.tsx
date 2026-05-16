@@ -23,6 +23,7 @@ import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
+import { KanbanSkeleton } from "@/components/ui/skeleton";
 
 const TABS = [
   { key: "board", label: "Board", icon: LayoutGrid, tooltip: "Kanban board view grouped by delivery stage." },
@@ -135,6 +136,22 @@ export default function ProjectsPage() {
       if (match) { setSelectedProjectId(match.id); return; }
     }
   }, [projects]);
+
+  if (loading && projects.length === 0) {
+    return (
+      <WorkspaceShell
+        icon={FolderKanban}
+        title="Projects"
+        subtitle="Plan, deliver, track, and complete client work across your business"
+        tabs={TABS}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        tabLayoutId="projects-tab"
+      >
+        <KanbanSkeleton />
+      </WorkspaceShell>
+    );
+  }
 
   if (selectedProject) {
     return (

@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { appUrl } from '../../core/config/runtime-urls';
 import {
   BookingCreatedPayload,
   BookingConfirmedPayload,
@@ -148,6 +149,20 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
       body: `Invoice ${payload.invoice.invoiceNumber ?? payload.invoice.id.slice(-6).toUpperCase()} is overdue.`,
       data: { invoiceId: payload.invoice.id },
     }).catch((e) => this.logger.error('Failed to create notification', e));
+
+    // Send customer overdue reminder
+    const inv = payload.invoice;
+    const daysOverdue = inv.dueDate
+      ? Math.max(1, Math.floor((Date.now() - new Date(inv.dueDate).getTime()) / (1000 * 60 * 60 * 24)))
+      : 1;
+    await this.sendCustomerNotification(payload.businessId, 'invoice_overdue', inv.contact, {
+      invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
+      total: inv.total,
+      currency: inv.currency,
+      dueDate: inv.dueDate,
+      invoiceUrl: `${appUrl()}/pay/${inv.id}`,
+      daysOverdue,
+    });
   }
 
   @OnEvent('contact.created')
@@ -327,7 +342,7 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
 
   private async sendCustomerNotification(
     businessId: string,
-    type: 'booking_confirmed' | 'booking_reminder' | 'booking_rescheduled' | 'booking_cancelled' | 'invoice_sent' | 'payment_receipt',
+    type: 'booking_confirmed' | 'booking_reminder' | 'booking_rescheduled' | 'booking_cancelled' | 'booking_created' | 'invoice_sent' | 'invoice_overdue' | 'payment_receipt',
     contact: { id?: string; firstName?: string | null; lastName?: string | null; email?: string | null } | undefined,
     templateData: Record<string, any>,
     dedupeKey?: string,
@@ -347,6 +362,23 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
     } catch (e) {
       this.logger.error(`Failed to send ${type} notification: ${(e as Error).message}`);
     }
+  }
+
+  @OnEvent('booking.created')
+  async handleBookingCreatedCustomerNotif(payload: BookingCreatedPayload) {
+    const booking = payload.booking;
+    const service = await this.prisma.client.service.findUnique({ where: { id: booking.serviceId } }).catch(() => null);
+    const staff = booking.staffId
+      ? await this.prisma.client.staffMember.findUnique({ where: { id: booking.staffId } }).catch(() => null)
+      : null;
+    await this.sendCustomerNotification(payload.businessId, 'booking_created', payload.contact, {
+      serviceName: service?.name ?? 'Appointment',
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      staffName: staff?.name,
+      bookingId: booking.id,
+      location: (booking as any).location ?? null,
+    });
   }
 
   @OnEvent('booking.confirmed')

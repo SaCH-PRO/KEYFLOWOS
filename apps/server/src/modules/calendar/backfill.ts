@@ -430,7 +430,7 @@ export class CalendarBackfillService {
 
   private async backfillRecurringInvoices(businessId: string): Promise<number> {
     const rows = await this.prisma.client.recurringInvoice.findMany({
-      where: { businessId, deletedAt: null, isActive: true },
+      where: { businessId, deletedAt: null, status: 'ACTIVE' },
     });
     const inputs: CalendarEventInput[] = rows.map((r) => ({
       businessId,
@@ -443,9 +443,9 @@ export class CalendarBackfillService {
       sourceType: 'recurring_invoice',
       sourceId: r.id,
       contactId: r.contactId,
-      amount: r.total,
+      amount: r.amount,
       currency: r.currency,
-      meta: { frequency: r.frequency, runCount: r.runCount },
+      meta: { frequency: r.frequency, runCount: r.generatedCount },
     }));
     return this.projection.upsertManyFromSource(inputs);
   }

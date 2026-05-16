@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
 import { SupabaseAuthService } from './supabase-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { verifyAdminToken } from './admin-token.util';
 
 /**
  * Server-side authentication gate for every inbound request.
@@ -62,7 +63,17 @@ export class AuthMiddleware implements NestMiddleware {
           `Attached user from supabase: id=${user.id} email=${user.email ?? 'n/a'}`,
         );
       } else {
-        this.logger.warn('Token provided but Supabase verification failed — rejecting');
+        // Fallback: try admin local-auth token (HMAC-JWT signed with ADMIN_JWT_SECRET)
+        const adminUser = verifyAdminToken(token);
+        if (adminUser) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (req as any).user = adminUser;
+          this.logger.debug(
+            `Attached user from admin token: id=${adminUser.id} email=${adminUser.email}`,
+          );
+        } else {
+          this.logger.warn('Token provided but Supabase verification failed — rejecting');
+        }
       }
     } catch (err) {
       this.logger.debug(`AuthMiddleware error: ${(err as Error).message}`);

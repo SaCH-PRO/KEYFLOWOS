@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ComposeModal, type ComposePrefill } from "./compose-modal";
 
 interface ComposeContextValue {
@@ -37,10 +37,10 @@ interface InternalState {
 function DeepLinkBridge({ state }: { state: InternalState }) {
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
 
   // Open from ?compose=1
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
     if (searchParams.get("compose") === "1") {
       state.setPrefill({
         to: searchParams.get("to") ?? undefined,
@@ -48,19 +48,21 @@ function DeepLinkBridge({ state }: { state: InternalState }) {
       });
       state.setIsOpen(true);
     }
-  }, [searchParams, state]);
+  }, [state]);
 
   // Strip compose query params when closed externally
   useEffect(() => {
-    if (!state.isOpen && searchParams.get("compose")) {
-      const params = new URLSearchParams(searchParams.toString());
-      params.delete("compose");
-      params.delete("to");
-      params.delete("subject");
-      const qs = params.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    if (!state.isOpen) {
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get("compose")) {
+        searchParams.delete("compose");
+        searchParams.delete("to");
+        searchParams.delete("subject");
+        const qs = searchParams.toString();
+        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      }
     }
-  }, [state.isOpen, searchParams, router, pathname]);
+  }, [state.isOpen, router, pathname]);
 
   return null;
 }

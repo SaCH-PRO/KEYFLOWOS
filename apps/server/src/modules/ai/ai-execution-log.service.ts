@@ -18,6 +18,7 @@ export interface LogEntry {
   durationMs?: number;
   planId?: string;
   planStepId?: string;
+  role?: string;
 }
 
 export interface LogFilter {
@@ -57,6 +58,7 @@ export class AiExecutionLogService {
           durationMs: entry.durationMs ?? null,
           planId: entry.planId ?? null,
           planStepId: entry.planStepId ?? null,
+          role: entry.role ?? null,
         },
       });
       return record.id;
@@ -73,7 +75,7 @@ export class AiExecutionLogService {
     result: any,
     success: boolean,
     durationMs: number,
-    opts?: { mode?: string; rationale?: string; planId?: string; planStepId?: string; riskTier?: number },
+    opts?: { mode?: string; rationale?: string; planId?: string; planStepId?: string; riskTier?: number; role?: string },
   ): Promise<string> {
     const module = this.inferModule(toolName);
     return this.log({
@@ -92,6 +94,7 @@ export class AiExecutionLogService {
       durationMs,
       planId: opts?.planId,
       planStepId: opts?.planStepId,
+      role: opts?.role,
     });
   }
 

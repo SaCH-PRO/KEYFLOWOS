@@ -85,6 +85,7 @@ function sanitize(input: string, maxLen = 500): string {
     /<\/s>/gi, /^Human:/gim, /^Assistant:/gim, /^System:/gim,
   ];
   for (const p of patterns) s = s.replace(p, '');
+  // eslint-disable-next-line no-control-regex
   s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   return s.slice(0, maxLen);
 }

@@ -411,8 +411,8 @@ export class FinancialCopilotService {
         orderBy: { total: 'desc' },
       }),
       this.db.recurringInvoice.findMany({
-        where: { businessId, isActive: true, deletedAt: null },
-        select: { name: true, frequency: true, lineItems: true },
+        where: { businessId, status: 'ACTIVE', deletedAt: null },
+        select: { name: true, frequency: true, amount: true },
       }),
       this.db.expense.findMany({
         where: { businessId, deletedAt: null, isRecurring: true },
@@ -434,8 +434,7 @@ export class FinancialCopilotService {
       : 0;
 
     const monthlyRecurringRev = recurringInvoices.reduce((sum, ri) => {
-      const items = (Array.isArray(ri.lineItems) ? ri.lineItems : []) as LineItem[];
-      const total = items.reduce((s, item) => s + ((item.quantity ?? 1) * (item.unitPrice ?? 0)), 0);
+      const total = ri.amount ?? 0;
       const freq = ri.frequency?.toUpperCase();
       if (freq === 'WEEKLY') return sum + total * 4.33;
       if (freq === 'BIWEEKLY') return sum + total * 2.17;

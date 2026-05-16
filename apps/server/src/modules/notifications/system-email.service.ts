@@ -120,7 +120,7 @@ export class SystemEmailService {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Resend send failed for ${args.to}: ${message}`);
-      throw new Error(`Failed to send email: ${message}`);
+      throw new Error(`Failed to send email: ${message}`, { cause: err });
     }
   }
 }

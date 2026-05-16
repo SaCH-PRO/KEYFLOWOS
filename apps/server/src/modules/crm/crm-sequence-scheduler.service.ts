@@ -331,11 +331,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
     }
 
     let variantId: string | null = null;
-    let payload: { subject?: string; body?: string; variantId: string | null } = {
-      subject: node.data?.subject,
-      body: node.data?.body,
-      variantId: null,
-    };
+    let payload: { subject?: string; body?: string; variantId: string | null };
 
     if (isSendNode(node)) {
       meta.variantAssignments = meta.variantAssignments ?? {};

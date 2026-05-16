@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Timer,
 } from "lucide-react";
 import { ProjectTask } from "@/lib/client";
 import { isOverdue, formatDate } from "../project-constants";
@@ -20,7 +21,7 @@ interface TasksTabProps {
   onAddTask: (projectId: string, title: string, dueDate?: string) => void;
   onToggleTask: (projectId: string, task: ProjectTask) => void;
   onDeleteTask: (projectId: string, taskId: string) => void;
-  onUpdateTask: (projectId: string, taskId: string, data: { dueDate?: string | null }) => void;
+  onUpdateTask: (projectId: string, taskId: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number }) => void;
 }
 
 export function TasksTab({
@@ -146,7 +147,7 @@ function TaskRow({ task, projectId, onToggle, onDelete, onUpdate }: {
   projectId: string;
   onToggle: (pid: string, task: ProjectTask) => void;
   onDelete: (pid: string, tid: string) => void;
-  onUpdate: (pid: string, tid: string, data: { dueDate?: string | null }) => void;
+  onUpdate: (pid: string, tid: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number }) => void;
 }) {
   const overdue = !task.isCompleted && isOverdue(task.dueDate);
 
@@ -162,9 +163,42 @@ function TaskRow({ task, projectId, onToggle, onDelete, onUpdate }: {
       >
         {task.isCompleted ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
       </button>
-      <span className={`text-sm flex-1 ${task.isCompleted ? "line-through text-muted-foreground" : ""}`}>
+      <span className={`text-sm flex-1 min-w-0 truncate ${task.isCompleted ? "line-through text-muted-foreground" : ""}`}>
         {task.title}
       </span>
+
+      {/* Time tracking inputs */}
+      <div className="flex items-center gap-1.5 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
+        <Timer className="w-3 h-3 text-muted-foreground" />
+        <input
+          type="number"
+          min={0}
+          step={0.5}
+          placeholder="Est"
+          value={task.estimatedHours ?? ""}
+          onChange={(e) => {
+            const val = e.target.value === "" ? null : parseFloat(e.target.value);
+            onUpdate(projectId, task.id, { estimatedHours: val });
+          }}
+          className="w-10 bg-transparent text-[10px] text-muted-foreground focus:outline-none text-center border-b border-transparent focus:border-border"
+          title="Estimated hours"
+        />
+        <span className="text-[10px] text-muted-foreground">/</span>
+        <input
+          type="number"
+          min={0}
+          step={0.5}
+          placeholder="Trk"
+          value={task.trackedHours ?? ""}
+          onChange={(e) => {
+            const val = e.target.value === "" ? 0 : parseFloat(e.target.value);
+            onUpdate(projectId, task.id, { trackedHours: val });
+          }}
+          className="w-10 bg-transparent text-[10px] text-foreground focus:outline-none text-center border-b border-transparent focus:border-border font-medium"
+          title="Tracked hours"
+        />
+      </div>
+
       {task.dueDate && (
         <span
           className="text-[10px] flex items-center gap-0.5 shrink-0"

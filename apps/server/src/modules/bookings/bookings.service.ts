@@ -154,15 +154,16 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  listBookings(businessId: string) {
+  listBookings(businessId: string, orgUnitId?: string) {
     return this.prisma.client.booking.findMany({
-      where: { businessId, deletedAt: null },
+      where: { businessId, deletedAt: null, ...(orgUnitId ? { orgUnitId } : {}) },
       orderBy: { startTime: 'desc' },
       include: {
         contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
         service: { select: { id: true, name: true, duration: true, price: true, bufferMins: true, leadTimeMins: true } },
         staff: { select: { id: true, name: true } },
         invoice: { select: { id: true, invoiceNumber: true, status: true, total: true, currency: true } },
+        orgUnit: { select: { id: true, name: true } },
       },
     });
   }
@@ -546,7 +547,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     return updated;
   }
 
-  async getBookingStats(businessId: string) {
+  async getBookingStats(businessId: string, orgUnitId?: string) {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
@@ -554,18 +555,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
     const endOfWeek = new Date(startOfWeek.getTime() + 7 * 24 * 60 * 60 * 1000);
 
+    const baseWhere = { businessId, deletedAt: null, ...(orgUnitId ? { orgUnitId } : {}) };
+
     const [todayCount, weekCount, pendingCount, totalBookings] = await Promise.all([
       this.prisma.client.booking.count({
-        where: { businessId, deletedAt: null, startTime: { gte: startOfDay, lt: endOfDay } },
+        where: { ...baseWhere, startTime: { gte: startOfDay, lt: endOfDay } },
       }),
       this.prisma.client.booking.count({
-        where: { businessId, deletedAt: null, startTime: { gte: startOfWeek, lt: endOfWeek } },
+        where: { ...baseWhere, startTime: { gte: startOfWeek, lt: endOfWeek } },
       }),
       this.prisma.client.booking.count({
-        where: { businessId, deletedAt: null, status: 'PENDING' },
+        where: { ...baseWhere, status: 'PENDING' },
       }),
       this.prisma.client.booking.count({
-        where: { businessId, deletedAt: null },
+        where: baseWhere,
       }),
     ]);
 
@@ -583,6 +586,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     location?: string;
     locationPlaceId?: string;
     locationLatLng?: { lat: number; lng: number };
+    orgUnitId?: string;
   }) {
     const createData: Prisma.BookingUncheckedCreateInput = {
       businessId: input.businessId,
@@ -598,6 +602,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     if (input.locationLatLng) {
       createData.locationLatLng = input.locationLatLng as unknown as Prisma.InputJsonValue;
     }
+    if (input.orgUnitId) createData.orgUnitId = input.orgUnitId;
 
     const booking = await this.prisma.client.booking.create({
       data: createData,
@@ -681,6 +686,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     storefrontSlug?: string | null;
     visitorId?: string | null;
     referralCode?: string | null;
+    orgUnitId?: string | null;
   }) {
     const business = await this.prisma.client.business.findFirstOrThrow({
       where: { id: input.businessId, deletedAt: null },
@@ -858,6 +864,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         lng: input.locationLatLng.lng,
       };
     }
+    if (input.orgUnitId) bookingData.orgUnitId = input.orgUnitId;
 
     const booking = await this.prisma.client.booking.create({
       data: bookingData,

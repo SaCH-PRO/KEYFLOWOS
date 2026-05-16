@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AiController } from './ai.controller';
+import { AiUsageAdminController } from './ai-usage-admin.controller';
+import { AiUsageAlertSchedulerService } from './ai-usage-alert-scheduler.service';
+import { AgentController } from './agent.controller';
 import { AiListener } from './ai.listener';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
@@ -22,20 +25,45 @@ import { ModelGatewayService } from './model-gateway.service';
 import { BusinessMatchingService } from './business-matching.service';
 import { MatchRefreshSchedulerService } from './match-refresh-scheduler.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
+import { RedisModule } from '../../core/redis/redis.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
 import { TimelineModule } from '../timeline/timeline.module';
 import { KeyCommandService } from './key-command.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
+import { PlanExecutorService } from './plan-executor.service';
+import { FeedbackLoopService } from './feedback-loop.service';
+import { ActionDispatcherService } from './action-dispatcher.service';
+import { AgentTriggerService } from './agent-trigger.service';
+import { AgentHealthService } from './agent-health.service';
+import { AgentBusService } from './agent-bus.service';
+import { AgentStateMachineService } from './agent-state-machine.service';
+import { PatternDetectorService } from './pattern-detector.service';
+import { DefaultTriggersService } from './default-triggers.service';
+import { DocumentIntelligenceService } from './document-intelligence.service';
+import { ConnectorIntelligenceService } from './connector-intelligence.service';
+import { ConversationalAIService } from './conversational-ai.service';
+import { CalendarIntelligenceService } from './calendar-intelligence.service';
+import { UndoService } from './undo.service';
+import { QueueService } from './queue.service';
+import { CronSchedulerService } from './cron-scheduler.service';
+import { AiMessageSenderService } from './ai-message-sender.service';
+import { SemanticMemoryService } from './semantic-memory.service';
+import { RoleEngineService } from './role-engine.service';
+import { UnifiedInboxService } from './unified-inbox.service';
+import { JourneyOrchestratorService } from './journey-orchestrator.service';
+import { MorningBriefingService } from './morning-briefing.service';
+import { GoalTrackerService } from './goal-tracker.service';
 
 @Module({
-  imports: [PrismaModule, SubscriptionsModule, BlueprintModule, TimelineModule],
-  controllers: [AiController, OutputTemplateController, FlowController, GraphActionsController],
+  imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule],
+  controllers: [AiController, OutputTemplateController, FlowController, GraphActionsController, AiUsageAdminController],
   providers: [
     AiListener,
     ModelGatewayService,
     AiAdvisorService,
     AiUsageService,
+    AiUsageAlertSchedulerService,
     OutputTemplateService,
     FlowOrchestratorService,
     BusinessGraphService,
@@ -52,11 +80,35 @@ import { AutopilotRulesService } from './autopilot-rules.service';
     MatchRefreshSchedulerService,
     KeyCommandService,
     AutopilotRulesService,
+    PlanExecutorService,
+    FeedbackLoopService,
+    ActionDispatcherService,
+    AgentTriggerService,
+    AgentHealthService,
+    AgentBusService,
+    AgentStateMachineService,
+    PatternDetectorService,
+    DefaultTriggersService,
+    DocumentIntelligenceService,
+    ConnectorIntelligenceService,
+    ConversationalAIService,
+    CalendarIntelligenceService,
+    UndoService,
+    QueueService,
+    CronSchedulerService,
+    AiMessageSenderService,
+    SemanticMemoryService,
+    RoleEngineService,
+    UnifiedInboxService,
+    JourneyOrchestratorService,
+    MorningBriefingService,
+    GoalTrackerService,
   ],
   exports: [
     ModelGatewayService,
     AiAdvisorService,
     AiUsageService,
+    AiUsageAlertSchedulerService,
     OutputTemplateService,
     FlowOrchestratorService,
     BusinessGraphService,
@@ -72,6 +124,29 @@ import { AutopilotRulesService } from './autopilot-rules.service';
     BusinessMatchingService,
     KeyCommandService,
     AutopilotRulesService,
+    PlanExecutorService,
+    FeedbackLoopService,
+    ActionDispatcherService,
+    AgentTriggerService,
+    AgentHealthService,
+    AgentBusService,
+    AgentStateMachineService,
+    PatternDetectorService,
+    DefaultTriggersService,
+    DocumentIntelligenceService,
+    ConnectorIntelligenceService,
+    ConversationalAIService,
+    CalendarIntelligenceService,
+    UndoService,
+    QueueService,
+    CronSchedulerService,
+    AiMessageSenderService,
+    SemanticMemoryService,
+    RoleEngineService,
+    UnifiedInboxService,
+    JourneyOrchestratorService,
+    MorningBriefingService,
+    GoalTrackerService,
   ],
 })
 export class AiModule {}

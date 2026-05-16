@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { BusinessGraphService } from './business-graph.service';
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
+import { AiUsageService } from './ai-usage.service';
 
 export interface ParsedIntent {
   objective: string;
@@ -37,7 +38,7 @@ const PARSE_INTENT_FUNCTION = {
         },
         modules: {
           type: 'array',
-          items: { type: 'string', enum: ['crm', 'commerce', 'bookings', 'marketing', 'content', 'projects', 'expenses', 'automations', 'storefront'] },
+          items: { type: 'string', enum: ['crm', 'commerce', 'bookings', 'marketing', 'social', 'content', 'projects', 'expenses', 'automations', 'storefront', 'seo', 'documents', 'community', 'marketplace', 'store', 'finance'] },
           description: 'KeyFlowOS modules involved',
         },
         missingInfo: {
@@ -67,15 +68,50 @@ const PARSE_INTENT_FUNCTION = {
 };
 
 const AVAILABLE_TOOLS = [
+  // Read family — business intelligence
+  'fetch_business_summary', 'fetch_client_health', 'fetch_schedule_health', 'fetch_revenue_risk',
+  'fetch_storefront_quality', 'fetch_project_status', 'fetch_expense_pressure',
+  'fetch_seo_dashboard', 'fetch_seo_keywords', 'fetch_seo_issues', 'fetch_content_gaps',
+  'fetch_seo_revenue_attribution',
+  // Draft family — AI-generated content
+  'draft_followup_message', 'draft_campaign_bundle', 'draft_payment_reminder',
+  'draft_storefront_copy', 'draft_project_update', 'generate_content_brief',
+  // Organize family — internal actions
+  'create_task', 'create_followup_queue', 'tag_contact', 'segment_contacts',
+  'schedule_action', 'sync_seo_pages', 'keyflow_create_note',
+  // Execute family — significant actions
+  'queue_campaign', 'send_message_with_approval', 'apply_storefront_recommendation',
+  'enable_flow_with_approval', 'update_status_with_confirmation',
+  // Delegation loops — autonomous workflows
+  'delegation_payment_recovery', 'delegation_lead_reactivation', 'delegation_post_purchase',
+  'delegation_booking_prep', 'delegation_weekly_hygiene',
+  // CRUD family — CRM
   'crm_search_contacts', 'crm_list_contacts', 'crm_create_contact', 'crm_update_contact',
   'crm_add_note', 'crm_add_task', 'crm_delete_contact',
+  // CRUD family — Commerce
   'commerce_list_invoices', 'commerce_create_invoice', 'commerce_mark_invoice_paid',
   'commerce_create_product', 'commerce_create_quote', 'commerce_delete_invoice',
+  // CRUD family — Bookings
   'bookings_list_bookings', 'bookings_list_services', 'bookings_create_booking',
   'bookings_reschedule_booking', 'bookings_cancel_booking',
+  // CRUD family — Marketing
   'marketing_list_campaigns', 'marketing_create_campaign', 'marketing_send_campaign',
+  // CRUD family — Social
   'social_list_posts', 'social_create_post', 'social_publish_post',
+  // CRUD family — Automations
   'automations_list_playbooks', 'automations_create_playbook', 'automations_toggle_playbook',
+  // CRUD family — Projects
+  'projects_list', 'projects_list_tasks', 'projects_create_task', 'projects_complete_task',
+  // CRUD family — Expenses
+  'expenses_list', 'expenses_create',
+  // CRUD family — Documents
+  'documents_list', 'documents_search',
+  // CRUD family — Community
+  'community_list_posts',
+  // CRUD family — Marketplace
+  'marketplace_list_listings', 'marketplace_list_orders',
+  // CRUD family — Store
+  'store_list_products', 'store_list_recent_orders',
 ];
 
 @Injectable()
@@ -86,6 +122,7 @@ export class IntentParserService {
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   async parse(businessId: string, userInput: string): Promise<ParsedIntent> {
@@ -117,16 +154,19 @@ Parse the user's input and call parse_intent with the structured result. Be spec
         { role: 'user', content: userInput },
       ];
 
-      const response = await this.gateway.complete({
+      const response = await this.aiUsage.trackAndComplete(
         businessId,
-        taskCategory: 'classification',
-        messages,
-        tools: [PARSE_INTENT_FUNCTION],
-        toolChoice: { type: 'function', function: { name: 'parse_intent' } },
-        maxTokens: 800,
-        temperature: 0.3,
-        expectedContract: 'intent_parse',
-      });
+        undefined,
+        'intent_parse',
+        {
+          messages,
+          tools: [PARSE_INTENT_FUNCTION],
+          toolChoice: { type: 'function', function: { name: 'parse_intent' } },
+          maxTokens: 800,
+          temperature: 0.3,
+          expectedContract: 'intent_parse',
+        },
+      );
 
       const toolCall = response.toolCalls?.[0];
       if (!toolCall) {

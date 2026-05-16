@@ -306,7 +306,8 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
         {recons.length === 0 ? (
           <p className="text-xs text-muted-foreground p-3">No sessions yet. Use “New reconciliation” to start one.</p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="min-w-full w-full text-sm">
             <thead className="bg-background/60 text-xs text-muted-foreground">
               <tr>
                 <th className="text-left px-3 py-2 font-medium">Period</th>
@@ -329,6 +330,7 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Panel>
     </div>

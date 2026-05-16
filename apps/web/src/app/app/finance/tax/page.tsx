@@ -575,7 +575,8 @@ function ContributingDrawer({
               <p className="text-xs text-muted-foreground">No invoices contributed to this period.</p>
             ) : (
               <div className="rounded-lg border border-border/40 overflow-hidden">
-                <table className="w-full text-xs">
+                <div className="overflow-x-auto">
+<table className="min-w-full w-full text-xs">
                   <thead className="bg-card/60">
                     <tr className="text-left">
                       <th className="px-2 py-1.5 font-medium">#</th>
@@ -601,6 +602,7 @@ function ContributingDrawer({
                     })}
                   </tbody>
                 </table>
+</div>
               </div>
             )}
           </div>

@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiMemoryService } from './ai-memory.service';
 import { getToolByName } from './flow-tool-registry';
+import { RoleEngineService, BusinessRole } from './role-engine.service';
 
 export type RiskTier = 1 | 2 | 3 | 4;
 
@@ -20,6 +21,9 @@ export interface AutonomySettings {
   maxAutoTier: RiskTier;
   blockedTools: string[];
   blockedModules: string[];
+  autonomyLevel: number;
+  approvedTools: string[];
+  approvalTimeoutHours: number;
 }
 
 const DEFAULT_AUTONOMY: AutonomySettings = {
@@ -27,6 +31,9 @@ const DEFAULT_AUTONOMY: AutonomySettings = {
   maxAutoTier: 1,
   blockedTools: [],
   blockedModules: [],
+  autonomyLevel: 0,
+  approvedTools: [],
+  approvalTimeoutHours: 24,
 };
 
 
@@ -38,6 +45,7 @@ export class GovernanceService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(forwardRef(() => AiExecutionLogService)) private readonly logService: AiExecutionLogService,
     @Inject(forwardRef(() => AiMemoryService)) private readonly memoryService: AiMemoryService,
+    @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
   ) {}
 
   getToolTier(toolName: string): RiskTier {
@@ -59,11 +67,17 @@ export class GovernanceService {
     businessId: string,
     toolName: string,
     mode?: string,
+    role?: BusinessRole,
   ): Promise<GovernanceDecision> {
     const tier = this.getToolTier(toolName);
     const settings = await this.getAutonomySettings(businessId);
 
     const blocked = { allowed: false, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier };
+
+    // Role-based tool filtering
+    if (role && !this.roleEngine.isToolAllowed(role, toolName)) {
+      return { ...blocked, reason: `Tool "${toolName}" is not available to the ${role} role` };
+    }
 
     if (settings.blockedTools.includes(toolName)) {
       return { ...blocked, reason: `Tool "${toolName}" is blocked by business settings` };
@@ -90,6 +104,17 @@ export class GovernanceService {
       return { ...auto, requiresAdminApproval: true, requiresFormalApproval: true, reason: 'Tier 4 action always requires admin-level approval — cannot be auto-approved' };
     }
 
+    // AutopilotSettings-based auto-approval overrides
+    if (settings.autonomyLevel >= 4 && tier <= 2) {
+      return { ...auto, reason: `Tier ${tier} auto-approved (autonomy level 4)` };
+    }
+    if (settings.autonomyLevel >= 3 && tier === 1) {
+      return { ...auto, reason: `Tier ${tier} auto-approved (autonomy level 3)` };
+    }
+    if (settings.approvedTools.includes(toolName)) {
+      return { ...auto, reason: `Tool "${toolName}" is in the approved-tools list` };
+    }
+
     if (tier <= settings.maxAutoTier) {
       return { ...auto, reason: `Tier ${tier} auto-approved (max auto tier: ${settings.maxAutoTier})` };
     }
@@ -105,7 +130,52 @@ export class GovernanceService {
     return { ...auto, requiresQuickConfirm: true, reason: `Tier ${tier} exceeds auto-execute threshold (${settings.maxAutoTier}), requires confirmation` };
   }
 
+  async evaluateAutoApproval(
+    businessId: string,
+    toolName: string,
+    opts?: { confidence?: number; timeoutHours?: number; role?: BusinessRole },
+  ): Promise<GovernanceDecision & { autoApproved: boolean }> {
+    const decision = await this.evaluate(businessId, toolName, undefined, opts?.role);
+    if (!decision.allowed) return { ...decision, autoApproved: false };
+    if (decision.requiresAdminApproval || decision.requiresFormalApproval) return { ...decision, autoApproved: false };
+
+    const settings = await this.getAutonomySettings(businessId);
+
+    // High confidence override
+    if (opts?.confidence && opts.confidence > 0.9 && decision.tier <= 2) {
+      return { ...decision, autoApproved: true, reason: `${decision.reason} (high confidence: ${Math.round(opts.confidence * 100)}%)` };
+    }
+
+    // Time-based auto-approval for quick-confirm items
+    if (decision.requiresQuickConfirm && settings.autonomyLevel >= 2) {
+      return { ...decision, autoApproved: true, requiresQuickConfirm: false, reason: `${decision.reason} — auto-approved by autonomy level ${settings.autonomyLevel}` };
+    }
+
+    return { ...decision, autoApproved: !decision.requiresQuickConfirm };
+  }
+
   async getAutonomySettings(businessId: string): Promise<AutonomySettings> {
+    // Try typed AutopilotSettings first
+    try {
+      const typed = await this.prisma.client.autopilotSettings.findUnique({
+        where: { businessId },
+      });
+      if (typed) {
+        return {
+          mode: this.inferModeFromLevel(typed.autonomyLevel),
+          maxAutoTier: Math.max(1, Math.min(3, typed.autonomyLevel)) as RiskTier,
+          blockedTools: typed.blockedTools,
+          blockedModules: [],
+          autonomyLevel: typed.autonomyLevel,
+          approvedTools: typed.approvedTools,
+          approvalTimeoutHours: typed.approvalTimeoutHours,
+        };
+      }
+    } catch {
+      /* table may not exist yet */
+    }
+
+    // Fallback to AiMemory
     try {
       const memory = await this.prisma.client.aiMemory.findUnique({
         where: { businessId_category_key: { businessId, category: 'settings', key: 'autonomy' } },
@@ -115,8 +185,16 @@ export class GovernanceService {
         return { ...DEFAULT_AUTONOMY, ...parsed };
       }
     } catch {
+      /* intentionally empty */
     }
     return { ...DEFAULT_AUTONOMY };
+  }
+
+  private inferModeFromLevel(level: number): AutonomySettings['mode'] {
+    if (level <= 0) return 'advisory';
+    if (level <= 1) return 'assisted';
+    if (level <= 3) return 'pro_auto';
+    return 'pro_auto';
   }
 
   async updateAutonomySettings(businessId: string, updates: Partial<AutonomySettings>, userId?: string): Promise<AutonomySettings> {
@@ -290,6 +368,61 @@ export class GovernanceService {
       orderBy: { resolvedAt: 'desc' },
       take: limit,
     });
+  }
+
+  async resolveApprovalsBatch(
+    businessId: string,
+    approvalIds: string[],
+    resolution: 'approved' | 'rejected',
+    resolvedByUserId: string,
+  ) {
+    const results = await Promise.allSettled(
+      approvalIds.map((id) => this.resolveApproval(id, businessId, resolution, resolvedByUserId)),
+    );
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    return { succeeded, failed, total: approvalIds.length };
+  }
+
+  async escalateStaleApprovals(businessId: string): Promise<number> {
+    const settings = await this.getAutonomySettings(businessId);
+    const cutoff = new Date(Date.now() - settings.approvalTimeoutHours * 60 * 60 * 1000);
+
+    const stale = await this.prisma.client.aiApprovalItem.findMany({
+      where: {
+        businessId,
+        status: 'pending',
+        createdAt: { lt: cutoff },
+      },
+    });
+
+    let escalated = 0;
+    for (const item of stale) {
+      // For tier 1-2 items, auto-resolve as approved if autonomy level >= 3
+      if (item.riskTier <= 2 && settings.autonomyLevel >= 3) {
+        await this.prisma.client.aiApprovalItem.update({
+          where: { id: item.id },
+          data: {
+            status: 'approved',
+            resolvedAt: new Date(),
+            resolution: 'Auto-approved after timeout by autonomy level 3+',
+          },
+        });
+        escalated++;
+      } else {
+        // Otherwise mark as escalated
+        await this.prisma.client.aiApprovalItem.update({
+          where: { id: item.id },
+          data: {
+            status: 'escalated',
+            resolution: `Auto-escalated after ${settings.approvalTimeoutHours} hours without resolution`,
+          },
+        });
+        escalated++;
+      }
+    }
+
+    return escalated;
   }
 
   private inferModule(toolName: string): string | null {

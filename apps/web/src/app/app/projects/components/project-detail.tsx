@@ -204,12 +204,15 @@ export function ProjectDetail({
     } catch { toast.error("Failed to delete task"); }
   }, [businessId, project, onProjectUpdate]);
 
-  const handleUpdateTask = useCallback(async (projectId: string, taskId: string, data: { dueDate?: string | null }) => {
+  const handleUpdateTask = useCallback(async (projectId: string, taskId: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number }) => {
     if (!businessId) return;
     try {
       const res = await updateProjectTask(businessId, taskId, data);
       if (res.data) {
-        const mapped = { dueDate: data.dueDate ?? undefined };
+        const mapped: Partial<ProjectTask> = {};
+        if (data.dueDate !== undefined) mapped.dueDate = data.dueDate ?? undefined;
+        if (data.estimatedHours !== undefined) mapped.estimatedHours = data.estimatedHours;
+        if (data.trackedHours !== undefined) mapped.trackedHours = data.trackedHours;
         onProjectUpdate({
           ...project,
           tasks: project.tasks.map((t) => (t.id === taskId ? { ...t, ...mapped } : t)),

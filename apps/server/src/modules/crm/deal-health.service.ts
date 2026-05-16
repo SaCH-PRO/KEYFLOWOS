@@ -148,7 +148,7 @@ export class DealHealthService {
       ageInStage = -5;
     }
 
-    let recency = 0;
+    let recency: number;
     if (daysSinceTouch == null) {
       recency = -5;
     } else if (daysSinceTouch <= 3) recency = 10;
@@ -157,7 +157,7 @@ export class DealHealthService {
     else if (daysSinceTouch <= 30) recency = -5;
     else recency = -10;
 
-    let sentiment = 0;
+    let sentiment: number;
     switch (input.sentiment) {
       case 'positive': sentiment = 8; break;
       case 'mixed':    sentiment = 0; break;
@@ -165,7 +165,7 @@ export class DealHealthService {
       default:         sentiment = 0;
     }
 
-    let relationship = 0;
+    let relationship: number;
     switch (input.contactHealth) {
       case 'HOT':     relationship = 8; break;
       case 'WARM':    relationship = 3; break;

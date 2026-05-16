@@ -124,7 +124,9 @@ export class EmailMarketingController {
       if (this.emailMarketing.verifyTrackingToken(token, campaignId, contactId, 'open')) {
         await this.emailMarketing.recordOpen(campaignId, contactId);
       }
-    } catch {}
+    } catch {
+      /* intentionally empty */
+    }
     const pixel = Buffer.from(
       'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
       'base64',
@@ -151,7 +153,9 @@ export class EmailMarketingController {
     }
     try {
       await this.emailMarketing.recordClick(campaignId, contactId);
-    } catch {}
+    } catch {
+      /* intentionally empty */
+    }
     return res.redirect(302, redirectUrl);
   }
 

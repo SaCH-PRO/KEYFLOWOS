@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMemoryService, MemoryCategory } from './ai-memory.service';
 import { BusinessGraphService } from './business-graph.service';
 import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
+import { AiUsageService } from './ai-usage.service';
 
 export interface ProfileInterviewMessage {
   role: 'user' | 'assistant';
@@ -57,6 +58,7 @@ export class ProfileIntelligenceService {
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   async getInterviewState(businessId: string): Promise<ProfileInterviewState> {
@@ -97,7 +99,7 @@ export class ProfileIntelligenceService {
 
     state.messages.push({ role: 'user', content: userMessage });
 
-    let businessContext = '';
+    let businessContext: string;
     try {
       const snapshot = await this.businessGraph.getSnapshot(businessId, false);
       businessContext = `Business name: ${snapshot.business.name || 'Unknown'}. Currency: ${snapshot.business.currency || 'TTD'}. Clients: ${snapshot.contacts.total}. Products: ${snapshot.storefront.activeProductCount}. Monthly revenue: $${snapshot.revenue.monthlyRevenue.toLocaleString()}.`;
@@ -160,20 +162,23 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     ];
 
     try {
-      const completion = await this.gateway.complete({
+      const completion = await this.aiUsage.trackAndComplete(
         businessId,
-        taskCategory: 'extraction',
-        messages: gatewayMessages,
-        temperature: 0.7,
-        maxTokens: 500,
-      });
+        undefined,
+        'profile_intel',
+        {
+          messages: gatewayMessages,
+          temperature: 0.7,
+          maxTokens: 500,
+        },
+      );
 
       const rawReply = completion.content || "I'd love to learn more about your business. What does your business do?";
 
       const extractMatch = rawReply.match(/```extract\s*\n([\s\S]*?)\n```/);
-      let reply = rawReply.replace(/```extract\s*\n[\s\S]*?\n```/g, '').trim();
+      const reply = rawReply.replace(/```extract\s*\n[\s\S]*?\n```/g, '').trim();
 
-      let pendingExtractions: ProfileExtraction[] = [];
+      const pendingExtractions: ProfileExtraction[] = [];
       if (extractMatch) {
         try {
           const rawExtractions: Array<{ topic?: string; category: MemoryCategory; key: string; value: string; confidence: number }> = JSON.parse(extractMatch[1]);

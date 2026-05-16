@@ -70,7 +70,7 @@ export class PlannerService {
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}
 
-  async createPlan(businessId: string, intent: ParsedIntent, userId?: string): Promise<AiPlanResult> {
+  async createPlan(businessId: string, intent: ParsedIntent, userId?: string, role?: string): Promise<AiPlanResult> {
     const snapshot = await this.businessGraph.getSnapshot(businessId);
     const contextString = this.businessGraph.buildContextString(snapshot);
 
@@ -106,7 +106,7 @@ RULES:
 
 Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_null", "module": "crm|commerce|bookings|marketing|content|projects|expenses|automations|null", "action": "verb phrase", "description": "detail", "riskTier": 1-4, "dependsOnOrders": [<order numbers of prerequisite steps, e.g. [1] means depends on step with order=1>], "inputPayload": {} or null, "expectedBenefit": "string" } ] }`;
 
-    let steps: PlanStep[] = [];
+    let steps: PlanStep[];
 
     try {
       const result = await this.aiUsage.callAi({
@@ -170,6 +170,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
         modules: intent.modules,
         maxRiskTier: maxRiskTier,
         status: 'draft',
+        role: role ?? null,
         steps: {
           create: steps.map(s => ({
             order: s.order,
@@ -183,6 +184,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
             inputPayload: s.inputPayload ? (s.inputPayload as Prisma.InputJsonValue) : Prisma.JsonNull,
             expectedBenefit: s.expectedBenefit ?? undefined,
             status: 'pending',
+            role: role ?? undefined,
           })),
         },
       },

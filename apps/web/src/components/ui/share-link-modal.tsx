@@ -77,6 +77,20 @@ export function ShareLinkModal({
 
   const qrImageUrl = `https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(url)}&choe=UTF-8`;
 
+  const canNativeShare = typeof navigator !== "undefined" && !!navigator.share;
+
+  const handleNativeShare = useCallback(async () => {
+    try {
+      await navigator.share({
+        title: title,
+        text: description || title,
+        url: url,
+      });
+    } catch {
+      // User cancelled or share failed — fallback is silent
+    }
+  }, [url, title, description]);
+
   useEffect(() => {
     if (!open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resets/mirrors prop or modal-open state into local form state
@@ -196,6 +210,20 @@ export function ShareLinkModal({
                 Share via
               </p>
               <div className="grid grid-cols-2 gap-2">
+                {canNativeShare && (
+                  <button
+                    onClick={handleNativeShare}
+                    className="flex items-center gap-2.5 px-3.5 py-3 kf-radius-md transition-all duration-200 hover:scale-[1.01] active:scale-[0.98]"
+                    style={{
+                      background: "hsl(var(--kf-accent1) / 0.08)",
+                      border: "1px solid hsl(var(--kf-accent1) / 0.15)",
+                      color: "hsl(var(--kf-accent1))",
+                    }}
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span className="kf-text-caption font-medium">Native Share</span>
+                  </button>
+                )}
                 <button
                   onClick={shareWhatsApp}
                   className="flex items-center gap-2.5 px-3.5 py-3 kf-radius-md transition-all duration-200 hover:scale-[1.01] active:scale-[0.98]"

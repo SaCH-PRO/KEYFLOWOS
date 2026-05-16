@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../../ai/model-gateway.service';
+import { AiUsageService } from '../../ai/ai-usage.service';
 import type { PresenceInsightsContract } from '../../ai/ai-output-contracts';
 
 export const PRESENCE_INSIGHTS_SCHEMA_VERSION = 1;
@@ -139,6 +140,7 @@ export class StorefrontIntelligenceService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   private get db() {
@@ -1165,17 +1167,20 @@ Rules:
     const userPrompt = `Aggregates and insights:\n${JSON.stringify(compact)}`;
 
     try {
-      const response = await this.gateway.complete({
+      const response = await this.aiUsage.trackAndComplete(
         businessId,
-        taskCategory: 'summarization',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.3,
-        maxTokens: 600,
-        expectedContract: 'presence_insights',
-      });
+        undefined,
+        'storefront_intel',
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.3,
+          maxTokens: 600,
+          expectedContract: 'presence_insights',
+        },
+      );
       const parsed = safeJsonParse(response.content ?? '');
       if (parsed && typeof parsed === 'object') {
         const obj = parsed as PresenceInsightsContract;

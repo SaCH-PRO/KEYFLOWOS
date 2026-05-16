@@ -2,6 +2,23 @@ import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+
+vi.mock('stripe', () => ({
+  default: class Stripe {
+    webhooks = {
+      constructEvent: vi.fn().mockReturnValue({
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            id: 'sess_1',
+            metadata: { invoiceId: 'inv_1' },
+            client_reference_id: null,
+          },
+        },
+      }),
+    };
+  },
+}));
 import { WebhooksController } from '../src/modules/webhooks/webhooks.controller';
 import { CommerceService } from '../src/modules/commerce/commerce.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
@@ -96,7 +113,12 @@ describe('WebhooksController', () => {
   const getDeliveryLogs = vi.fn();
   let currentUserId: string | undefined = 'user_1';
 
+  const originalStripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const originalStripeSecretKey = process.env.STRIPE_SECRET_KEY;
+
   beforeAll(async () => {
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test';
+    process.env.STRIPE_SECRET_KEY = 'sk_test_123';
     prismaMock = new WebhooksPrismaMock();
 
     const moduleRef = await Test.createTestingModule({
@@ -113,7 +135,7 @@ describe('WebhooksController', () => {
       ],
     }).compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ rawBody: true });
     app.use((req: any, _res: any, next: any) => {
       if (currentUserId) {
         req.user = { id: currentUserId };
@@ -126,6 +148,8 @@ describe('WebhooksController', () => {
 
   afterAll(async () => {
     await app.close();
+    process.env.STRIPE_WEBHOOK_SECRET = originalStripeWebhookSecret;
+    process.env.STRIPE_SECRET_KEY = originalStripeSecretKey;
   });
 
   beforeEach(() => {
@@ -140,6 +164,7 @@ describe('WebhooksController', () => {
   it('handles stripe webhook and marks invoice paid', async () => {
     await request(app.getHttpServer())
       .post('/webhooks/stripe')
+      .set('stripe-signature', 'test_sig')
       .send({ invoiceId: 'inv_1' })
       .expect(201);
 

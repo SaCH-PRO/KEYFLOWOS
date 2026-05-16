@@ -70,6 +70,7 @@ export class CrmAiService {
     for (const pattern of injectionPatterns) {
       sanitized = sanitized.replace(pattern, '');
     }
+    // eslint-disable-next-line no-control-regex
     sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
     return sanitized.slice(0, maxLen);
   }
@@ -1472,7 +1473,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
 
       let recommendedAction: string;
       let urgency: 'high' | 'medium' | 'low';
-      let suggestedSequence: string | null = null;
+      let suggestedSequence: string | null;
 
       if (c.status === 'CLIENT') {
         recommendedAction = 'Check-in call or satisfaction survey';

@@ -826,6 +826,58 @@ export function quoteRejectedCustomerTemplate(ctx: TemplateContext & {
   return { subject, html: baseLayout(ctx, subject, body) };
 }
 
+export function bookingCreatedTemplate(ctx: TemplateContext & {
+  serviceName: string;
+  startTime: Date | string;
+  endTime?: Date | string;
+  staffName?: string;
+  bookingId: string;
+  location?: string | null;
+  businessUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Booking request received — ${ctx.businessName}`;
+  const body = [
+    heading('Booking Request Received'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Thank you for booking with ${ctx.businessName}. Your appointment request has been received and is pending confirmation.`),
+    detailTable([
+      detailRow('Service', ctx.serviceName),
+      detailRow('Date', formatDate(ctx.startTime)),
+      ctx.endTime ? detailRow('Time', `${formatTime(ctx.startTime)} &ndash; ${formatTime(ctx.endTime)}`) : detailRow('Time', formatTime(ctx.startTime)),
+      ctx.staffName ? detailRow('With', ctx.staffName) : '',
+      detailRow('Reference', ctx.bookingId.slice(-8).toUpperCase()),
+    ].join('')),
+    paragraph('You will receive another email once your booking is confirmed. If you have any questions, please contact us.'),
+    ctx.businessUrl ? ctaButton('View Booking', ctx.businessUrl) : '',
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function invoiceOverdueTemplate(ctx: TemplateContext & {
+  invoiceNumber: string;
+  total: number;
+  currency: string;
+  dueDate?: Date | string;
+  invoiceUrl?: string;
+  daysOverdue: number;
+}): { subject: string; html: string } {
+  const subject = `Payment reminder — Invoice ${ctx.invoiceNumber} is ${ctx.daysOverdue} day${ctx.daysOverdue > 1 ? 's' : ''} overdue`;
+  const body = [
+    heading('Payment Reminder'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`This is a friendly reminder that invoice <strong>${ctx.invoiceNumber}</strong> for <strong>${formatCurrency(ctx.total, ctx.currency)}</strong> is now <strong>${ctx.daysOverdue} day${ctx.daysOverdue > 1 ? 's' : ''} overdue</strong>.`),
+    ctx.dueDate ? detailTable([
+      detailRow('Invoice', ctx.invoiceNumber),
+      detailRow('Amount', formatCurrency(ctx.total, ctx.currency)),
+      detailRow('Due Date', formatDate(ctx.dueDate)),
+      detailRow('Days Overdue', String(ctx.daysOverdue)),
+    ].join('')) : '',
+    paragraph('Please settle this invoice at your earliest convenience. If you have already paid, please disregard this message.'),
+    ctx.invoiceUrl ? ctaButton('Pay Now', ctx.invoiceUrl, '#dc2626') : '',
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
 export interface VerificationEmailContext {
   recipientName?: string;
   recipientEmail: string;

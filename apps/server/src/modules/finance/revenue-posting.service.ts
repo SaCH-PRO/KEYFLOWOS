@@ -376,7 +376,7 @@ export class RevenuePostingService {
       { reason: 'Payment refunded', createdById: opts.createdById ?? null },
       opts.tx,
     );
-    this.timeline.recordEvent({
+    Promise.resolve(this.timeline.recordEvent({
       businessId: payment.businessId,
       module: 'FINANCE',
       action: 'payment_refunded',
@@ -384,7 +384,7 @@ export class RevenuePostingService {
       entityId: payment.id,
       title: 'Payment refunded — ledger reversed',
       occurredAt: new Date(),
-    }).catch(() => {});
+    })).catch(() => {});
     return result;
   }
 

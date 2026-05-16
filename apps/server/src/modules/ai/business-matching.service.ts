@@ -778,7 +778,9 @@ export class BusinessMatchingService {
           ],
         },
       });
-    } catch {}
+    } catch {
+      /* intentionally empty */
+    }
 
     const sourceSkills = new Set(from.skills.map((s) => s.toLowerCase()));
     const sharedSkills = to.skills.filter((s) => sourceSkills.has(s.toLowerCase())).slice(0, 3);

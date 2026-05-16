@@ -30,14 +30,20 @@ export class BookingsController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId')
-  listBookings(@Param('businessId') businessId: string) {
-    return this.bookings.listBookings(businessId);
+  listBookings(
+    @Param('businessId') businessId: string,
+    @Query('orgUnitId') orgUnitId?: string,
+  ) {
+    return this.bookings.listBookings(businessId, orgUnitId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/stats')
-  getBookingStats(@Param('businessId') businessId: string) {
-    return this.bookings.getBookingStats(businessId);
+  getBookingStats(
+    @Param('businessId') businessId: string,
+    @Query('orgUnitId') orgUnitId?: string,
+  ) {
+    return this.bookings.getBookingStats(businessId, orgUnitId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -122,6 +128,7 @@ export class BookingsController {
       location: body.location,
       locationPlaceId: body.locationPlaceId,
       locationLatLng: body.locationLatLng,
+      orgUnitId: body.orgUnitId,
     });
   }
 
@@ -185,6 +192,7 @@ export class BookingsController {
       storefrontSlug: body.storefrontSlug ? sanitizeString(body.storefrontSlug, 200) : undefined,
       visitorId: body.visitorId ? sanitizeString(body.visitorId, 100) : undefined,
       referralCode: body.referralCode ? sanitizeString(body.referralCode, 100) : undefined,
+      orgUnitId: body.orgUnitId ? sanitizeString(body.orgUnitId, 200) : undefined,
     });
   }
 

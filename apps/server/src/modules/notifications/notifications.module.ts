@@ -17,9 +17,8 @@ import type { CommerceModule as CommerceModuleType } from '../commerce/commerce.
 @Module({
   imports: [
     forwardRef(
-      () =>
-        (require('../commerce/commerce.module') as { CommerceModule: typeof CommerceModuleType })
-          .CommerceModule,
+      async () =>
+        (await import('../commerce/commerce.module')).CommerceModule,
     ),
   ],
   controllers: [NotificationsController],

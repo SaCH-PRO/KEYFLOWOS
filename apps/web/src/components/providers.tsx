@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeColorsProvider } from "@/lib/theme-context";
-import { RegisterSW } from "@/components/register-sw";
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
 import { useSuppressTurbopackHmrFactoryError } from "@/components/dev-hmr-error-suppressor";
 import { ComposeProvider } from "@/components/email/compose-context";
@@ -21,7 +20,6 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
       <ThemeColorsProvider>
-        <RegisterSW />
         <PWAInstallPrompt />
         <Toaster
           theme="dark"

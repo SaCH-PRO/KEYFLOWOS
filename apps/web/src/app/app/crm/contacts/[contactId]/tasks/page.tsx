@@ -35,7 +35,15 @@ export default function ContactTasksPage() {
   };
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    (async () => {
+      const res = await fetchContactTasks({ contactId: contactId as string });
+      if (!cancelled) {
+        setTasks(res.data ?? []);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [contactId]);
 
   const handleAdd = async () => {

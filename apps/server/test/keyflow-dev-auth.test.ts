@@ -19,7 +19,7 @@ describe('KEYFLOW_DEV_AUTH_BYPASS boot guard', () => {
 async function runMain(value: string): Promise<{ code: number | null; stderr: string }> {
   const serverRoot = path.resolve(__dirname, '..');
   const mainEntry = path.join(serverRoot, 'src', 'main.ts');
-  const tsxBin = path.join(serverRoot, 'node_modules', '.bin', 'tsx');
+  const tsxBin = path.join(serverRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.CMD' : 'tsx');
 
   const child = spawn(tsxBin, [mainEntry], {
     cwd: serverRoot,

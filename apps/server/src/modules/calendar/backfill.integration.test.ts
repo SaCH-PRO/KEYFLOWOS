@@ -169,9 +169,9 @@ async function seed() {
       contactId,
       name: 'Monthly retainer',
       frequency: 'MONTHLY',
+      startDate: new Date('2026-09-15'),
       nextRunDate: new Date('2026-09-15'),
-      lineItems: [],
-      total: 1000,
+      amount: 1000,
       currency: 'TTD',
     },
   });

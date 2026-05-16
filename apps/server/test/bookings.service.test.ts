@@ -80,7 +80,10 @@ function makeService(prisma: PrismaService, opts: { findOrCreateContact?: any; c
     findOrCreateContact: opts.findOrCreateContact ?? vi.fn().mockResolvedValue({ id: 'contact_public' }),
     logContactEvent: vi.fn(),
   };
-  const commerce = { createInvoiceForService: opts.createInvoiceForService ?? vi.fn().mockResolvedValue(null) };
+  const commerce = {
+    createInvoiceForService: opts.createInvoiceForService ?? vi.fn().mockResolvedValue(null),
+    computeServiceDeposit: vi.fn().mockReturnValue(0),
+  };
   return new BookingsService(
     prisma,
     events,
@@ -184,7 +187,7 @@ describe('BookingsService', () => {
       prisma,
       events,
       { findOrCreateContact, logContactEvent } as any,
-      { createInvoiceForService, computeServiceDeposit: vi.fn().mockReturnValue(0) } as any,
+      { createInvoiceForService, computeServiceDeposit: vi.fn().mockReturnValue(25) } as any,
       { record: vi.fn().mockResolvedValue(undefined) } as any,
       { checkAndEnforceLimit: vi.fn() } as any,
       { sendTransactionalEmail: vi.fn() } as any,
@@ -203,11 +206,11 @@ describe('BookingsService', () => {
     expect(createInvoiceForService).toHaveBeenCalled();
     expect(findOrCreateContact).toHaveBeenCalledWith('biz_1', {
       email: 'a@example.com',
-      source: 'booking',
+      source: 'storefront',
       sourceDetail: 'public-booking',
     });
     expect(result.success).toBe(true);
-    expect(result.invoiceId).toBe('inv_1');
+    expect(result.depositInvoiceId).toBe('inv_1');
     expect(emit).toHaveBeenCalledWith(
       'booking.created',
       expect.objectContaining({

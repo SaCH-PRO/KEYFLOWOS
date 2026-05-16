@@ -125,7 +125,8 @@ export function DealsListView({ businessId, loading, deals, stages, reasons, onC
         <>
           <div className="text-xs text-muted-foreground mb-2">{deals.length} shown · {fmtMoney(totalValue)} open value</div>
           <div className="border border-border rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+              <table className="min-w-full w-full text-sm">
               <thead className="bg-muted/30 text-xs text-muted-foreground">
                 <tr>
                   <th className="p-2 w-8"><input type="checkbox" checked={allChecked} onChange={toggleAll} /></th>
@@ -189,6 +190,7 @@ export function DealsListView({ businessId, loading, deals, stages, reasons, onC
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}

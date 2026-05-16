@@ -1,64 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { apiGet } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { Sparkles, RefreshCw, Plug, Pencil, Share2 } from "lucide-react";
-import { useCompose } from "@/components/email/compose-context";
-import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
-import {
-  DollarSign,
-  Users,
-  Calendar,
-  FolderKanban,
-  ShieldCheck,
-  TrendingUp,
-  Link2,
-} from "lucide-react";
-import { ListPageSkeleton } from "@/components/ui/skeleton";
+import { Zap, RefreshCw, Rocket, TrendingUp, Building2, X } from "lucide-react";
 import { useControlTowerData } from "../control-tower/components/use-control-tower-data";
-import { useControlTowerAiHub } from "../control-tower/hooks/use-control-tower-ai-hub";
 import { CommandEntry } from "../control-tower/components/command-entry";
-import { HealthOverview } from "../control-tower/components/health-overview";
-import { PriorityQueue } from "../control-tower/components/priority-queue";
-import { DailyPlan } from "../control-tower/components/daily-plan";
-import { ModuleHealthGrid } from "../control-tower/components/module-health-grid";
-import { GrowthOpsPanel } from "../control-tower/components/growth-ops-panel";
-import { GrowthIntelligencePanel } from "../control-tower/components/growth-intelligence-panel";
-import { ApprovalsQueue } from "../control-tower/components/approvals-queue";
-import { RiskAlerts } from "../control-tower/components/risk-alerts";
-import { StorefrontIntel } from "../control-tower/components/storefront-intel";
-import { ServiceLinkWidget } from "../commerce/components/service-link-widget";
-import UnifiedCalendar from "./components/unified-calendar";
-import { TodaysPlanCard } from "./components/todays-plan-card";
-import { NextActionsWidget } from "../crm/dashboard/next-actions-widget";
-import { NextBestActionWidget } from "@/components/ai/next-best-action-widget";
-import { AskKeyButton, KeyNoticedStream } from "@/components/key";
-import { MorningBriefing } from "../control-tower/components/morning-briefing";
-import { EndOfDayReport } from "../control-tower/components/end-of-day-report";
 import { DoItForMePanel } from "../control-tower/components/do-it-for-me-panel";
-import { AutopilotRulesWidget } from "../control-tower/components/autopilot-rules-widget";
+import { ListPageSkeleton } from "@/components/ui/skeleton";
+import { GettingStartedChecklist } from "@/components/ui/getting-started-checklist";
+import { CockpitHero } from "./components/cockpit-hero";
+import { CockpitStatsRow } from "./components/cockpit-stats-row";
+import { CockpitFlowVisual } from "./components/cockpit-flow-visual";
+import { CockpitKeyPanel } from "./components/cockpit-key-panel";
+import { CockpitPriorities } from "./components/cockpit-priorities";
+import { CockpitBottomSection } from "./components/cockpit-bottom-section";
 import {
-  KeyflowNotesDrawer,
-  type KeyflowNotesTarget,
-} from "@/components/keyflow/keyflow-notes-drawer";
-import { BlueprintCompletenessWidget } from "@/components/keyflow/blueprint-completeness-widget";
-import { BusinessTimeline } from "@/components/timeline/business-timeline";
-
-function formatTTD(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}k`;
-  return `$${n.toFixed(0)}`;
-}
+  hasChosenMode,
+  setDisclosureMode,
+  MODE_LABELS,
+  type DisclosureMode,
+} from "@/lib/disclosure-mode";
 
 export default function KeyflowCommandPage() {
   const d = useControlTowerData();
   const router = useRouter();
-  const compose = useCompose();
-  const [notesTarget, setNotesTarget] = useState<KeyflowNotesTarget | null>(null);
-  const [notesOpen, setNotesOpen] = useState(false);
   const [connectorAlertCount, setConnectorAlertCount] = useState(0);
+  const [showModePrompt, setShowModePrompt] = useState(() => !hasChosenMode());
 
   useEffect(() => {
     if (!d.businessId) return;
@@ -79,223 +47,134 @@ export default function KeyflowCommandPage() {
     };
   }, [d.businessId]);
 
-  const aiCustomData = useMemo(
-    () => ({
-      momentumScore: d.data?.snapshot.momentumScore,
-      overdueInvoices: d.data?.dashboard.overdueInvoices,
-      staleLeads: d.data?.dashboard.staleLeads,
-      pendingApprovals: d.data?.pendingApprovals,
-      activeProjects: d.data?.dashboard.activeProjects,
-      overdueTaskCount: d.data?.dashboard.overdueTaskCount,
-      monthlyRevenue: d.data?.dashboard.monthlyRevenue,
-      utilizationRate: d.data?.dashboard.utilizationRate,
-    }),
-    [d.data],
-  );
-
-  const aiHub = useControlTowerAiHub(aiCustomData);
-
-  const handleAiAction = (actionKey: string) => {
-    if (actionKey.startsWith("navigate:")) {
-      router.push(actionKey.replace("navigate:", ""));
-    } else if (actionKey.startsWith("switch_tab:")) {
-      const section = actionKey.replace("switch_tab:", "");
-      const el = document.getElementById(`keyflow-${section}`);
-      if (el) el.scrollIntoView({ behavior: "smooth" });
-    }
-  };
-
-  const openNotes = (target: KeyflowNotesTarget) => {
-    setNotesTarget(target);
-    setNotesOpen(true);
-  };
-
-  const pageContext = useMemo(() => {
-    if (!d.data) return undefined;
-    return {
-      page: "KEYFLOW",
-      summary: "Operator's flagship workspace with priorities, calendar, projections, and module health.",
-      data: {
-        momentumScore: d.data.snapshot.momentumScore,
-        monthlyRevenue: d.data.dashboard.monthlyRevenue,
-        upcomingBookings: d.data.dashboard.upcomingBookings,
-        overdueInvoices: d.data.dashboard.overdueInvoices,
-        overdueTaskCount: d.data.dashboard.overdueTaskCount,
-        pendingApprovals: d.data.pendingApprovals,
-        activeProjects: d.data.dashboard.activeProjects,
-        priorities: d.priorities?.slice(0, 5).map((p: { title: string; severity: string; module: string }) => ({
-          title: p.title,
-          severity: p.severity,
-          module: p.module,
-        })),
-      },
-    };
-  }, [d.data, d.priorities]);
+  const db = d.data?.dashboard;
+  const snap = d.snapshot;
+  const pendingApprovals = d.data?.pendingApprovals ?? 0;
 
   if (d.loading) return <ListPageSkeleton />;
 
-  const db = d.data?.dashboard;
-  const mods = d.data?.modules;
-  const graphData = d.graph;
-  const snap = d.snapshot;
-
-  const metricItems: MetricStripItem[] =
-    db && mods
-      ? [
-          {
-            label: "Monthly Revenue",
-            value: formatTTD(snap?.revenue?.monthlyRevenue ?? db.monthlyRevenue),
-            icon: DollarSign,
-            iconColor: "#F97316",
-            threshold: {
-              status:
-                (snap?.revenue?.monthlyRevenue ?? db.monthlyRevenue) > 0
-                  ? "good"
-                  : "warn",
-            },
-          },
-          {
-            label: "Contacts",
-            value: snap?.contacts?.total ?? mods.contacts.total,
-            icon: Users,
-            iconColor: "#14B8A6",
-          },
-          {
-            label: "Bookings",
-            value: snap?.bookings?.upcomingCount ?? db.upcomingBookings,
-            icon: Calendar,
-            iconColor: "#3b82f6",
-          },
-          {
-            label: "Projects",
-            value: snap?.projects?.activeCount ?? db.activeProjects,
-            icon: FolderKanban,
-            iconColor: "#a78bfa",
-            threshold: {
-              status:
-                (snap?.projects?.overdueTaskCount ?? db.overdueTaskCount) > 0
-                  ? "warn"
-                  : "good",
-            },
-          },
-          {
-            label: "Approvals",
-            value: d.data?.pendingApprovals ?? 0,
-            icon: ShieldCheck,
-            iconColor: "#f59e0b",
-            threshold: {
-              status: (d.data?.pendingApprovals ?? 0) > 0 ? "warn" : "good",
-            },
-          },
-          {
-            label: "Momentum",
-            value: `${d.data?.snapshot.momentumScore ?? 0}/100`,
-            icon: TrendingUp,
-            iconColor: "#14B8A6",
-            threshold: {
-              status:
-                (d.data?.snapshot.momentumScore ?? 0) >= 70
-                  ? "good"
-                  : (d.data?.snapshot.momentumScore ?? 0) >= 40
-                  ? "warn"
-                  : "critical",
-            },
-          },
-          ...(graphData
-            ? [
-                {
-                  label: "Entity Links",
-                  value: graphData.linkCount ?? 0,
-                  icon: Link2,
-                  iconColor: "#6366f1",
-                },
-              ]
-            : []),
-        ]
-      : [];
+  const momentumScore =
+    d.data?.snapshot.momentumScore ?? db?.momentumScore ?? 0;
 
   return (
-    <>
-      <WorkspaceShell
-        icon={Sparkles}
-        title="KEYFLOW"
-        subtitle="Operator headquarters · live brain across every module"
-        iconColor="#F97316"
-        ai={{
-          hook: aiHub,
-          moduleName: "KEYFLOW",
-          onAction: handleAiAction,
-        }}
-        metricStrip={
-          metricItems.length > 0 ? (
-            <WorkspaceMetricStrip items={metricItems} columns={6} compact />
-          ) : undefined
-        }
-        headerRight={
-          <div className="flex items-center gap-2">
-            <AskKeyButton
-              variant="primary"
-              label="Ask KEY about this"
-              module="cockpit"
-              context={pageContext as Record<string, unknown> | undefined}
-            />
-            <button
-              onClick={() => compose.open()}
-              className="flex items-center gap-1.5 h-9 px-3 kf-radius-md text-xs font-medium min-h-[36px]"
-              style={{ background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-primary-foreground))" }}
-              aria-label="Compose new email (Cmd+Shift+M)"
-              title="Compose (Cmd+Shift+M)"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-              <span>Compose</span>
-            </button>
-            <button
-              onClick={() => router.push("/app/social")}
-              className="flex items-center gap-1.5 h-9 px-3 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-h-[36px]"
-              aria-label="Compose social post"
-              title="Compose social post"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              <span className="text-xs font-medium">Compose post</span>
-            </button>
-            <button
-              onClick={() => router.push("/app/connect")}
-              className="relative flex items-center gap-1.5 h-9 px-3 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-h-[36px]"
-              aria-label={
-                connectorAlertCount > 0
-                  ? `Connect — ${connectorAlertCount} need attention`
-                  : "Connect integrations"
-              }
-              title="Manage integrations"
-            >
-              <Plug className="w-3.5 h-3.5" />
-              <span className="text-xs font-medium">Connect</span>
-              {connectorAlertCount > 0 && (
-                <span
-                  className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 text-[10px] font-semibold rounded-full flex items-center justify-center"
-                  style={{
-                    background: "hsl(var(--kf-error))",
-                    color: "white",
-                  }}
-                >
-                  {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
-                </span>
-              )}
-            </button>
-            <EndOfDayReport businessId={d.businessId} />
+    <div className="flex flex-col xl:flex-row gap-6 pb-12">
+      {/* ─── MAIN COLUMN ─── */}
+      <div className="flex-1 min-w-0 space-y-6">
+        {/* Header row */}
+        <div className="flex items-center justify-between">
+          <CockpitHero preparedCount={Math.min(d.priorities.length, 5)} />
+          <div className="flex items-center gap-2 shrink-0">
+            {connectorAlertCount > 0 && (
+              <button
+                onClick={() => router.push("/app/connect")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/15 transition-colors"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                {connectorAlertCount} connector{connectorAlertCount > 1 ? "s" : ""} need attention
+              </button>
+            )}
             <button
               onClick={d.refresh}
-              className="flex items-center justify-center w-9 h-9 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all min-w-[36px] min-h-[36px]"
-              aria-label="Refresh data"
+              className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              aria-label="Refresh"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
-        }
-      >
+        </div>
+
+        {/* First-time mode selection prompt */}
+        {showModePrompt && (
+          <div className="rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Welcome to KeyflowOS</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Pick a workspace mode so we only show what you need. You can change this anytime.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowModePrompt(false)}
+                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {([
+                { mode: "startup" as DisclosureMode, icon: Rocket, border: "border-emerald-500/20", bg: "bg-emerald-500/5", bgHover: "hover:bg-emerald-500/10", text: "text-emerald-400" },
+                { mode: "growth" as DisclosureMode, icon: TrendingUp, border: "border-amber-500/20", bg: "bg-amber-500/5", bgHover: "hover:bg-amber-500/10", text: "text-amber-400" },
+                { mode: "enterprise" as DisclosureMode, icon: Building2, border: "border-violet-500/20", bg: "bg-violet-500/5", bgHover: "hover:bg-violet-500/10", text: "text-violet-400" },
+              ]).map(({ mode, icon: Icon, border, bg, bgHover, text }) => (
+                <button
+                  key={mode}
+                  onClick={() => {
+                    setDisclosureMode(mode);
+                    setShowModePrompt(false);
+                  }}
+                  className={`text-left rounded-lg border ${border} ${bg} ${bgHover} px-3 py-2.5 transition-colors group`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className={`w-3.5 h-3.5 ${text}`} />
+                    <span className="text-sm font-medium text-foreground">{MODE_LABELS[mode].title}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug">{MODE_LABELS[mode].subtitle}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Getting Started (new users) */}
+        <GettingStartedChecklist
+          businessName={d.data?.snapshot?.business?.name}
+          hasServices={false}
+          hasBookings={(db?.upcomingBookings ?? 0) > 0}
+          hasContacts={false}
+          hasBusinessHours={false}
+          storeEnabled={false}
+        />
+
+        {/* Business Flow Visual */}
+        <CockpitFlowVisual />
+
+        {/* Stats Row */}
+        <CockpitStatsRow
+          upcomingBookings={db?.upcomingBookings ?? 0}
+          overdueAmount={db?.overdueAmount ?? snap?.revenue?.overdueAmount ?? 0}
+          overdueInvoices={db?.overdueInvoices ?? snap?.revenue?.overdueCount ?? 0}
+          staleLeads={db?.staleLeads ?? snap?.contacts?.staleLeadCount ?? 0}
+          pendingApprovals={pendingApprovals}
+          momentumScore={momentumScore}
+        />
+
+        {/* Today's Priorities */}
+        <CockpitPriorities
+          priorities={d.priorities}
+          businessId={d.businessId}
+          onActionExecuted={d.refreshSilent}
+        />
+
+        {/* Bottom Section: Wins / Upcoming / Insight */}
+        <CockpitBottomSection
+          priorities={d.priorities}
+          upcomingBookings={db?.upcomingBookings ?? 0}
+          momentumScore={momentumScore}
+          staleLeads={db?.staleLeads ?? snap?.contacts?.staleLeadCount ?? 0}
+          overdueAmount={db?.overdueAmount ?? snap?.revenue?.overdueAmount ?? 0}
+        />
+
+        {/* Legacy KEY panels (preserved for functionality) */}
+        {d.businessId && (
+          <div className="space-y-4 pt-4 border-t border-[hsl(var(--kf-border))]">
+            <CommandEntry businessId={d.businessId} onActionExecuted={d.refreshSilent} />
+          </div>
+        )}
+
+        {/* Error */}
         {d.error && (
           <div
-            className="p-4 kf-radius-lg"
+            className="p-4 rounded-xl text-sm"
             style={{
               background: "hsl(var(--kf-error) / 0.1)",
               border: "1px solid hsl(var(--kf-error) / 0.2)",
@@ -305,100 +184,26 @@ export default function KeyflowCommandPage() {
             {d.error}
           </div>
         )}
+      </div>
 
-        {d.data && (
-          <div className="space-y-4">
-            {d.businessId && <MorningBriefing businessId={d.businessId} />}
-            {d.businessId && <KeyNoticedStream businessId={d.businessId} />}
-            {d.businessId && <ServiceLinkWidget compact />}
+      {/* ─── RIGHT SIDEBAR (KEY Panel) ─── */}
+      <aside className="w-full xl:w-80 shrink-0 space-y-4">
+        <div className="xl:sticky xl:top-4 space-y-4">
+          <CockpitKeyPanel
+            businessId={d.businessId}
+            priorities={d.priorities}
+            pendingApprovals={pendingApprovals}
+            onActionExecuted={d.refreshSilent}
+          />
 
-            <DoItForMePanel businessId={d.businessId} />
-
-            <CommandEntry
-              businessId={d.businessId}
-              onActionExecuted={d.refreshSilent}
-            />
-
-            <HealthOverview
-              momentumScore={d.data.snapshot.momentumScore}
-              healthIndicators={d.data.snapshot.healthIndicators}
-            />
-
-            <PriorityQueue
-              priorities={d.priorities}
-              businessId={d.businessId}
-              onActionExecuted={d.refreshSilent}
-            />
-
-            <NextActionsWidget businessId={d.businessId} windowDays={7} limit={25} />
-
-            {d.businessId && <NextBestActionWidget businessId={d.businessId} />}
-
-            <TodaysPlanCard businessId={d.businessId} />
-
-            <BlueprintCompletenessWidget businessId={d.businessId} />
-
-            {d.businessId && (
-              <div className="rounded-xl border border-border/50 bg-card/50 p-4">
-                <BusinessTimeline businessId={d.businessId} compact limit={30} />
-              </div>
-            )}
-
-            <div id="keyflow-calendar">
-              <UnifiedCalendar
-                businessId={d.businessId}
-                onOpenNotes={openNotes}
-              />
+          {/* Legacy Do It For Me Panel — tucked below KEY panel on desktop */}
+          {d.businessId && (
+            <div className="hidden xl:block">
+              <DoItForMePanel businessId={d.businessId} />
             </div>
-
-            {(d.data.risks?.length ?? 0) > 0 && (
-              <RiskAlerts risks={d.data.risks} />
-            )}
-
-            {d.data.pendingApprovals > 0 && (
-              <div id="keyflow-approvals">
-                <ApprovalsQueue
-                  businessId={d.businessId}
-                  pendingCount={d.data.pendingApprovals}
-                  onResolve={d.refreshSilent}
-                />
-              </div>
-            )}
-
-            <DailyPlan businessId={d.businessId} />
-
-            <StorefrontIntel
-              businessId={d.businessId}
-              storefront={d.data.modules.storefront}
-              monthlyRevenue={d.data.dashboard.monthlyRevenue}
-            />
-
-            <AutopilotRulesWidget businessId={d.businessId} />
-
-            <GrowthOpsPanel
-              businessId={d.businessId}
-              dashboard={d.data.dashboard}
-              modules={d.data.modules}
-            />
-
-            <div id="keyflow-growth-intelligence">
-              <GrowthIntelligencePanel businessId={d.businessId} />
-            </div>
-
-            <ModuleHealthGrid
-              modules={d.data.modules}
-              dashboard={d.data.dashboard}
-            />
-          </div>
-        )}
-      </WorkspaceShell>
-
-      <KeyflowNotesDrawer
-        businessId={d.businessId}
-        open={notesOpen}
-        target={notesTarget}
-        onClose={() => setNotesOpen(false)}
-      />
-    </>
+          )}
+        </div>
+      </aside>
+    </div>
   );
 }

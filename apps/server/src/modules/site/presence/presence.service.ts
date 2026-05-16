@@ -386,7 +386,9 @@ export class PresenceService {
           tone: 'success',
         },
       });
-    } catch {}
+    } catch {
+      /* intentionally empty */
+    }
     this.events.emit('SITE_PUBLISHED', { businessId, version: published.version });
     return {
       id: published.id,
@@ -420,7 +422,9 @@ export class PresenceService {
           tone: 'warning',
         },
       });
-    } catch {}
+    } catch {
+      /* intentionally empty */
+    }
     this.events.emit('SITE_UNPUBLISHED', { businessId, version: updated.version });
     return { id: updated.id, unpublishedAt: updated.unpublishedAt };
   }
@@ -610,7 +614,7 @@ export class PresenceService {
     const draft = await this.prisma.client.sitePageDraft.findUnique({ where: { businessId } });
     const payload = draft ? fromJson(draft.payload) : clone(DEFAULT_PAYLOAD);
     const checks = payload.sections.map((s) => {
-      let hasContent = false;
+      let hasContent: boolean;
       switch (s.type) {
         case 'hero': hasContent = !!(s.data.headline && s.data.headline.trim()); break;
         case 'about': hasContent = !!(s.data.body && s.data.body.trim().length > 20); break;

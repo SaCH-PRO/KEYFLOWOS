@@ -64,6 +64,26 @@ export const AI_CREDIT_COSTS: Record<string, number> = {
   seo_content_brief: 3,
   seo_gap_analysis: 2,
   growth_insight: 3,
+  // Tracked modalities (previously untracked)
+  intent_parse: 1,
+  document_extract: 2,
+  conversation_handle: 1,
+  calendar_suggest: 1,
+  semantic_embedding: 1,
+  vision_extract: 2,
+  vision_product: 2,
+  vision_contact: 1,
+  audio_tts: 1,
+  audio_stt: 1,
+  flow_chat_stream: 2,
+  feedback_loop: 1,
+  pattern_detect: 2,
+  profile_intel: 1,
+  storefront_intel: 2,
+  calendar_insight: 1,
+  revenue_action: 1,
+  note_summarize: 1,
+  automation_generate: 1,
 };
 
 export const AI_OVERAGE_RATE_TTD = 2.50;

@@ -7,8 +7,6 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
-import { AiHubTrigger, AiCommandHub } from "@/components/ai/ai-command-hub";
-import type { UseModuleAiReturn } from "@/hooks/use-module-ai";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface WorkspaceTab {
@@ -35,7 +33,7 @@ interface WorkspaceShellProps {
   metricStrip?: React.ReactNode;
   banners?: React.ReactNode;
   ai?: {
-    hook: UseModuleAiReturn;
+    hook: unknown;
     moduleName: string;
     onAction?: (actionKey: string) => void;
     toolResultRenderer?: (toolId: string, result: unknown) => React.ReactNode;
@@ -72,7 +70,6 @@ export function WorkspaceShell({
   headerRight,
   metricStrip,
   banners,
-  ai,
   enableSwipe = false,
   enableSlideAnimation = false,
   iconColor,
@@ -181,21 +178,7 @@ export function WorkspaceShell({
 
       {contentWrapper}
 
-      {ai && !ai.hook.useGlobalCopilot && (
-        <>
-          <AiHubTrigger ai={ai.hook} moduleName={ai.moduleName} />
-          <AnimatePresence>
-            {ai.hook.panelOpen && (
-              <AiCommandHub
-                ai={ai.hook}
-                moduleName={ai.moduleName}
-                onAction={ai.onAction}
-                toolResultRenderer={ai.toolResultRenderer}
-              />
-            )}
-          </AnimatePresence>
-        </>
-      )}
+      {/* AI hub centralized in Cockpit — module pages stay clean */}
     </div>
   );
 }

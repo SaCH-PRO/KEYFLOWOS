@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { RegisterSW } from "@/components/register-sw";
+import { OfflineBanner } from "@/components/ui/offline-banner";
 
 export const metadata: Metadata = {
   title: "KEYFLOWOS",
@@ -49,6 +51,8 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className="overscroll-none">
+        <RegisterSW />
+        <OfflineBanner />
         <Providers>{children}</Providers>
       </body>
     </html>

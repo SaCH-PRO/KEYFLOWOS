@@ -460,7 +460,8 @@ export default function ConnectContactsPage() {
               </div>
             ) : (
               <div className="rounded-2xl border border-border/40 bg-card/40 overflow-hidden">
-                <table className="w-full text-xs">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full w-full text-xs">
                   <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/10">
                     <tr>
                       <th className="text-left px-3 py-2">Name</th>
@@ -525,6 +526,7 @@ export default function ConnectContactsPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
           </section>

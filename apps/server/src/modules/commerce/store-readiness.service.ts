@@ -464,7 +464,9 @@ export class StoreReadinessService {
             roi: null,
           };
         }
-      } catch {}
+      } catch {
+        /* intentionally empty */
+      }
 
       const meta = (await this.db.business.findUnique({
         where: { id: businessId },

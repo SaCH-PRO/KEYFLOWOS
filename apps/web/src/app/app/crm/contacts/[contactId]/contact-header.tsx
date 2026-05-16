@@ -36,7 +36,7 @@ export default function ContactHeader() {
 
   useEffect(() => {
     fetchContactDetail(contactId as string).then((res) => {
-      if (res.data) setContact(res.data as any);
+      if (res.data?.contact) setContact(res.data.contact as Contact);
     });
   }, [contactId]);
 

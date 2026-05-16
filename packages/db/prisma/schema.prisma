@@ -1,6 +1,5 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
+  provider = "prisma-client-js"
 }
 
 // This is your datasource, pointing to your Supabase Postgres DB
@@ -30,6 +29,7 @@ model User {
   aiApprovalResolutions AiApprovalItem[] @relation("UserAiApprovalResolutions")
   aiPlans            AiPlan[]            @relation("UserAiPlans")
   contactShares      ContactShare[]      @relation("UserContactShares")
+  assignedTickets    SupportTicket[]
 
   @@map("users")
 }
@@ -146,6 +146,7 @@ model Business {
   staff            StaffMember[]
   socialPosts      SocialPost[]
   socialConns      SocialConnection[]
+  socialEngagements SocialEngagement[]
   automations      Automation[]
   projects         Project[]
   projectTasks     ProjectTask[]
@@ -198,6 +199,11 @@ model Business {
   guidanceAssessments  GuidanceAssessment[]
   revenueActions       RevenueAction[]
   financeActionItems   FinanceActionItem[]
+  supportTickets       SupportTicket[]
+  orgUnits             OrgUnit[]
+  jobRoles             JobRole[]
+  orgAssignments       OrgAssignment[]
+  delegationRules      DelegationRule[]
 
   // Finance OS (FIN1)
   financialAccounts     FinancialAccount[]
@@ -267,7 +273,13 @@ model Business {
   aiExecutionLogs      AiExecutionLog[]
   aiApprovalItems      AiApprovalItem[]
   aiMemories           AiMemory[]
+  aiMemoryEmbeddings   AiMemoryEmbedding[]
   aiPlans              AiPlan[]
+  autopilotSettings    AutopilotSettings?
+  agentTriggers        AgentTrigger[]
+  journeyInstances     JourneyInstance[]
+  conversationThreads  ConversationThread[]
+  businessGoals        BusinessGoal[]
 
   // Keyflow Command notes (polymorphic notes attached to any module item)
   keyflowNotes         KeyflowNote[]
@@ -450,6 +462,15 @@ model Business {
   // Phase 1 MD: KEY Commands
   keyCommands          KeyCommand[]
 
+  // Phase 0: Operating Kernel — Business Event Log, Evidence, Assignment, Content, Calls, Approvals, Assets
+  businessEvents       BusinessEvent[]
+  evidenceFiles        Evidence[]
+  contentRequests      ContentRequest[]
+  contentDeliveryPackages ContentDeliveryPackage[]
+  callLogs             CallLog[]
+  approvalRequests     ApprovalRequest[]
+  assets               Asset[]
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -468,6 +489,7 @@ model Membership {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  orgAssignments OrgAssignment[]
 
   createdAt  DateTime @default(now()) @map("created_at")
 
@@ -504,6 +526,109 @@ model Session {
 
   @@index([userId])
   @@map("sessions")
+}
+
+// ---
+// MODULE 1b: ORGANIZATIONAL STRUCTURE
+// ---
+model OrgUnit {
+  id          String  @id @default(cuid())
+  businessId  String  @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  type        String  @default("DEPARTMENT") // BRANCH | DEPARTMENT | DIVISION | TEAM | WAREHOUSE
+  address     String?
+  city        String?
+  country     String?
+  phone       String?
+  email       String?
+  managerId   String? @map("manager_id") // membershipId of manager
+  parentId    String? @map("parent_id")
+  parent      OrgUnit? @relation("OrgHierarchy", fields: [parentId], references: [id], onDelete: NoAction)
+  children    OrgUnit[] @relation("OrgHierarchy")
+  assignments OrgAssignment[]
+  bookings    Booking[]
+  supportTickets SupportTicket[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, type])
+  @@map("org_units")
+}
+
+model JobRole {
+  id          String  @id @default(cuid())
+  businessId  String  @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  level       Int     @default(0) // hierarchy level 0-10
+  permissions Json?   // { module: "read|write|admin", ... }
+  defaultApprovalTier Int @default(0) @map("default_approval_tier")
+  color       String? @default("#64748b")
+
+  assignments OrgAssignment[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("job_roles")
+}
+
+model OrgAssignment {
+  id            String  @id @default(cuid())
+  businessId    String  @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  membershipId  String  @map("membership_id")
+  membership    Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  userId        String  @map("user_id") // denormalized for quick lookups
+  orgUnitId     String  @map("org_unit_id")
+  orgUnit       OrgUnit @relation(fields: [orgUnitId], references: [id], onDelete: Cascade)
+  jobRoleId     String? @map("job_role_id")
+  jobRole       JobRole? @relation(fields: [jobRoleId], references: [id], onDelete: SetNull)
+  reportsToId   String? @map("reports_to_id") // another OrgAssignment id
+  reportsTo     OrgAssignment? @relation("ReportsTo", fields: [reportsToId], references: [id], onDelete: SetNull)
+  directReports OrgAssignment[] @relation("ReportsTo")
+
+  isPrimary     Boolean @default(true) @map("is_primary")
+  startedAt     DateTime @default(now()) @map("started_at")
+  endedAt       DateTime? @map("ended_at")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, membershipId])
+  @@index([businessId, orgUnitId])
+  @@index([businessId, userId])
+  @@map("org_assignments")
+}
+
+model DelegationRule {
+  id              String @id @default(cuid())
+  businessId      String @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  delegatorId     String @map("delegator_id") // OrgAssignment id
+  delegateId      String @map("delegate_id")  // OrgAssignment id
+  scope           String // module name or "ALL"
+  maxTier         Int    @map("max_tier")
+  activeFrom      DateTime @default(now()) @map("active_from")
+  activeUntil     DateTime? @map("active_until")
+  reason          String?
+  isActive        Boolean @default(true) @map("is_active")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, delegatorId])
+  @@index([businessId, scope])
+  @@map("delegation_rules")
 }
 
 // ---
@@ -604,6 +729,8 @@ model Contact {
   relationshipsTo     ContactRelationship[] @relation("ContactRelationshipTo")
   financialTransactions FinancialTransaction[]
   insightSnapshot      ContactInsightSnapshot?
+  supportTickets       SupportTicket[]
+  conversationThreads  ConversationThread[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
@@ -1190,6 +1317,11 @@ model ContactTask {
   deletedAt   DateTime? @map("deleted_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
+  /// Phase 0: evidence requirement for task completion
+  evidenceRequired Boolean @default(false) @map("evidence_required")
+  /// Phase 0: link to call log when this task originated from a call
+  callLogId String? @map("call_log_id")
+
   contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -1677,6 +1809,8 @@ model Booking {
   service    Service     @relation(fields: [serviceId], references: [id], onDelete: NoAction) // DATA INTEGRITY
   staffId    String?      @map("staff_id")
   staff      StaffMember? @relation(fields: [staffId], references: [id], onDelete: NoAction) // DATA INTEGRITY
+  orgUnitId  String?      @map("org_unit_id")
+  orgUnit    OrgUnit?     @relation(fields: [orgUnitId], references: [id], onDelete: SetNull)
 
   invoiceId String?  @unique @map("invoice_id")
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
@@ -1699,6 +1833,7 @@ model Booking {
 
   @@index([businessId, staffId, startTime, endTime])
   @@index([businessId, contactId])
+  @@index([businessId, orgUnitId])
   @@map("bookings")
 }
 
@@ -1976,6 +2111,29 @@ model WhatsAppMessage {
   @@map("whatsapp_messages")
 }
 
+model SocialEngagement {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  platform    String   // FACEBOOK | INSTAGRAM
+  type        String   // COMMENT | DM | MENTION | REACTION
+  postId      String?  @map("post_id")
+  externalId  String?  @map("external_id")
+  fromUserId  String?  @map("from_user_id")
+  fromUserName String? @map("from_user_name")
+  content     String?
+  aiHandled   Boolean  @default(false) @map("ai_handled")
+  aiResponse  String?  @map("ai_response")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, platform, aiHandled])
+  @@index([businessId, createdAt])
+  @@map("social_engagements")
+}
+
 // ---
 // MODULE 6: MARKETING AUTOMATION & PROJECTS
 // ---
@@ -2087,6 +2245,9 @@ model Project {
   priority    String @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
   color       String?
 
+  // Time tracking
+  hourlyRate  Float?   @map("hourly_rate")
+
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   tasks      ProjectTask[]
@@ -2115,6 +2276,10 @@ model ProjectTask {
   sortOrder   Int      @default(0) @map("sort_order")
   assigneeId  String?  @map("assignee_id")
 
+  // Time tracking
+  estimatedHours Float?  @map("estimated_hours")
+  trackedHours   Float   @default(0) @map("tracked_hours")
+
   projectId String   @map("project_id")
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
@@ -2124,6 +2289,9 @@ model ProjectTask {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
+
+  /// Phase 0: evidence requirement for task completion
+  evidenceRequired Boolean @default(false) @map("evidence_required")
 
   @@index([projectId])
   @@index([businessId])
@@ -2144,6 +2312,40 @@ model ProjectTemplate {
 
   @@index([businessId])
   @@map("project_templates")
+}
+
+// ---
+// MODULE: LIGHTWEIGHT HELPDESK
+// ---
+model SupportTicket {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      String   @default("OPEN") // OPEN, IN_PROGRESS, WAITING, RESOLVED, CLOSED
+  priority    String   @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+  source      String   @default("MANUAL") // MANUAL, EMAIL, PORTAL, WHATSAPP
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  contactId  String?  @map("contact_id")
+  contact    Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  assignedToId String? @map("assigned_to_id")
+  assignee     User?   @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  orgUnitId String? @map("org_unit_id")
+  orgUnit   OrgUnit? @relation(fields: [orgUnitId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([contactId])
+  @@index([orgUnitId])
+  @@map("support_tickets")
 }
 
 // ---
@@ -2368,6 +2570,7 @@ model AiUsageLog {
   id         String   @id @default(cuid())
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId     String?  @map("user_id")
 
   feature    String
   model      String   @default("gpt-5.2")
@@ -2389,7 +2592,22 @@ model AiUsageLog {
   @@index([businessId, createdAt])
   @@index([businessId, feature])
   @@index([businessId, provider])
+  @@index([userId, createdAt])
   @@map("ai_usage_logs")
+}
+
+model AiUsageAlert {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  type        String
+  threshold   Int?
+  triggeredAt DateTime @default(now()) @map("triggered_at")
+  notified    Boolean  @default(false)
+  metadata    Json?
+
+  @@index([businessId, type])
+  @@index([notified, triggeredAt])
+  @@map("ai_usage_alerts")
 }
 
 // ---
@@ -2549,41 +2767,38 @@ model ExpenseBudget {
 // MODULE 10: RECURRING INVOICES
 // ---
 model RecurringInvoice {
-  id          String   @id @default(cuid())
-  name        String
-  frequency   String   // WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, YEARLY
-  nextRunDate DateTime @map("next_run_date")
-  lastRunDate DateTime? @map("last_run_date")
-  endDate     DateTime? @map("end_date")
-  isActive    Boolean  @default(true) @map("is_active")
-  runCount    Int      @default(0) @map("run_count")
-  failureCount   Int       @default(0) @map("failure_count")
-  lastFailureAt  DateTime? @map("last_failure_at")
-  lastError      String?   @map("last_error")
-  cancelledAt    DateTime? @map("cancelled_at")
-
-  generatedInvoices Invoice[]
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  frequency       String   // WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY, CUSTOM
+  amount          Float
+  currency        String   @default("TTD")
+  startDate       DateTime @map("start_date")
+  endDate         DateTime? @map("end_date")
+  nextRunDate     DateTime @map("next_run_date")
+  status          String   @default("ACTIVE") // ACTIVE, PAUSED, COMPLETED, CANCELLED
+  lastGeneratedAt DateTime? @map("last_generated_at")
+  generatedCount  Int      @default(0) @map("generated_count")
+  metadata        Json?
 
   contactId  String   @map("contact_id")
   contact    Contact  @relation(fields: [contactId], references: [id], onDelete: NoAction)
 
-  lineItems  Json     @map("line_items")
-  subtotal   Float    @default(0)
-  taxRate    Float?   @default(0) @map("tax_rate")
-  discountType  String?  @map("discount_type")
-  discountValue Float?   @default(0) @map("discount_value")
-  total      Float
-  currency   String   @default("TTD")
-  notes      String?
-
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  generatedInvoices Invoice[]
+
+  // Internal audit / failure tracking
+  failureCount   Int       @default(0) @map("failure_count")
+  lastFailureAt  DateTime? @map("last_failure_at")
+  lastError      String?   @map("last_error")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  @@index([businessId, isActive])
+  @@index([businessId, status])
   @@index([businessId, nextRunDate])
   @@map("recurring_invoices")
 }
@@ -4868,6 +5083,10 @@ model AiExecutionLog {
   durationMs   Int?      @map("duration_ms")
   planId       String?   @map("plan_id")
   planStepId   String?   @map("plan_step_id")
+  toolResult   Json?     @map("tool_result")
+  nextStepSuggested Json? @map("next_step_suggested")
+  replanRequired Boolean @default(false) @map("replan_required")
+  role         String?
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -4875,6 +5094,7 @@ model AiExecutionLog {
   @@index([businessId, module])
   @@index([businessId, toolName])
   @@index([planId])
+  @@index([planStepId])
   @@map("ai_execution_logs")
 }
 
@@ -4911,6 +5131,69 @@ model AiApprovalItem {
   @@index([businessId, createdAt])
   @@index([planId])
   @@map("ai_approval_items")
+}
+
+model AutopilotSettings {
+  id                   String   @id @default(cuid())
+  businessId           String   @unique @map("business_id")
+  business             Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  autonomyLevel        Int      @default(0) @map("autonomy_level")
+  approvedTools        String[] @default([]) @map("approved_tools")
+  blockedTools         String[] @default([]) @map("blocked_tools")
+  maxDailyAutoActions  Int      @default(10) @map("max_daily_auto_actions")
+  approvalTimeoutHours Int      @default(24) @map("approval_timeout_hours")
+  notifyOnAutoAction   Boolean  @default(true) @map("notify_on_auto_action")
+  learningEnabled      Boolean  @default(true) @map("learning_enabled")
+  slackWebhookUrl      String?  @map("slack_webhook_url")
+
+  // Morning Briefing settings
+  briefingEnabled      Boolean  @default(true) @map("briefing_enabled")
+  briefingTime         String   @default("06:00") @map("briefing_time")
+  briefingDays         Int[]    @default([1, 2, 3, 4, 5]) @map("briefing_days")
+  briefingModules      String[] @default(["commerce", "crm", "bookings", "projects"]) @map("briefing_modules")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@map("autopilot_settings")
+}
+
+model AgentTrigger {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name         String
+  eventPattern String   @map("event_pattern")
+  condition    Json?
+  objective    String
+  enabled      Boolean  @default(true)
+  autoExecute  Boolean  @default(false) @map("auto_execute")
+  maxRiskTier  Int      @default(2) @map("max_risk_tier")
+  schedule     String?  @map("schedule") // Cron expression e.g. "0 9 * * 1"
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, enabled])
+  @@index([businessId, eventPattern])
+  @@map("agent_triggers")
+}
+
+model AgentMessage {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  topic        String
+  payload      Json
+  senderAgentId String  @map("sender_agent_id")
+  priority     Int      @default(0)
+  processed    Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+  expiresAt    DateTime? @map("expires_at")
+
+  @@index([businessId, topic, processed])
+  @@index([createdAt])
+  @@map("agent_messages")
 }
 
 /// R3: Revenue Action Queue. Each row is an actionable card surfaced in the
@@ -5064,6 +5347,24 @@ model AiMemory {
   @@map("ai_memories")
 }
 
+model AiMemoryEmbedding {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  content    String
+  sourceType String   @map("source_type") // memory | event | conversation | document
+  sourceId   String   @map("source_id")
+  embedding  Unsupported("vector(1536)")
+  metadata   Json?
+
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([businessId])
+  @@index([businessId, sourceType])
+  @@map("ai_memory_embeddings")
+}
+
 model AiPlan {
   id         String   @id @default(cuid())
   businessId String   @map("business_id")
@@ -5078,8 +5379,11 @@ model AiPlan {
   scope        String[] @default([])
   modules      String[] @default([])
   maxRiskTier  Int      @default(1) @map("max_risk_tier")
+  role         String?
+  journeyInstanceId String? @map("journey_instance_id")
 
   steps        AiPlanStep[]
+  journeyInstances JourneyInstance[]
 
   startedAt    DateTime? @map("started_at")
   completedAt  DateTime? @map("completed_at")
@@ -5127,6 +5431,8 @@ model AiPlanStep {
   description  String?
   riskTier     Int       @default(1) @map("risk_tier")
   requiresApproval Boolean @default(false) @map("requires_approval")
+  role         String?
+  journeyStepIndex Int?    @map("journey_step_index")
   dependsOn    String[]  @default([]) @map("depends_on")
   inputPayload Json?     @map("input_payload")
   outputResult Json?     @map("output_result")
@@ -5134,13 +5440,108 @@ model AiPlanStep {
   errorMessage String?   @map("error_message")
   durationMs   Int?      @map("duration_ms")
 
+  scheduledAt  DateTime? @map("scheduled_at")
   startedAt    DateTime? @map("started_at")
   completedAt  DateTime? @map("completed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([planId, order])
+  @@index([planId, status])
+  @@index([status, scheduledAt])
   @@map("ai_plan_steps")
+}
+
+// ---
+// CHIEF OF STAFF — Intelligence Orchestration Models
+// ---
+
+model JourneyInstance {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  templateKey  String   @map("template_key")
+  triggerEvent String   @map("trigger_event")
+  status       String   @default("running") // running | completed | failed | paused
+  planId       String?  @map("plan_id")
+  plan         AiPlan?  @relation(fields: [planId], references: [id], onDelete: SetNull)
+  steps        Json     // array of step states with results
+  startedAt    DateTime @default(now()) @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, status])
+  @@index([planId])
+  @@map("journey_instances")
+}
+
+model ConversationThread {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contactId    String?  @map("contact_id")
+  contact      Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  channel      String   // whatsapp | email | sms | instagram | messenger
+  channelId    String   @map("channel_id") // phone, email, or social handle
+  subject      String?
+  status       String   @default("open") // open | pending | resolved | archived
+  assignedRole String?  @map("assigned_role")
+  priority     Int      @default(0)
+  lastMessageAt DateTime? @map("last_message_at")
+  resolvedAt   DateTime? @map("resolved_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  messages ConversationMessage[]
+
+  @@index([businessId, contactId])
+  @@index([businessId, channel, status])
+  @@index([businessId, assignedRole, status])
+  @@index([lastMessageAt])
+  @@map("conversation_threads")
+}
+
+model ConversationMessage {
+  id          String   @id @default(cuid())
+  threadId    String   @map("thread_id")
+  thread      ConversationThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  direction   String   // inbound | outbound
+  body        String
+  rawPayload  Json?    @map("raw_payload")
+  role        String?  // sales | finance | support | ops | marketing | general
+  intent      String?
+  sentiment   String?
+  aiDraft     Boolean  @default(false) @map("ai_draft")
+  aiApproved  Boolean  @default(false) @map("ai_approved")
+  externalId  String?  @map("external_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([threadId, createdAt])
+  @@index([threadId, direction])
+  @@map("conversation_messages")
+}
+
+model BusinessGoal {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  category    String   // revenue | leads | retention | efficiency | custom
+  targetValue Float?   @map("target_value")
+  currentValue Float?  @map("current_value")
+  unit        String?  // dollars | count | percent
+  deadline    DateTime?
+  status      String   @default("active") // active | achieved | failed | paused
+  priority    Int      @default(1)
+  role        String?  // primary responsible role
+  autoActions Boolean  @default(true) @map("auto_actions")
+  actions     Json?    // array of suggested/executed actions
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, deadline])
+  @@map("business_goals")
 }
 
 // ---
@@ -5648,11 +6049,15 @@ model ContentBrief {
   approvedBy     String? @map("approved_by")
   approvedAt     DateTime? @map("approved_at")
 
+  /// Phase 0: link to parent content request
+  contentRequestId String? @map("content_request_id")
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt      @map("updated_at")
 
   @@index([businessId, status])
   @@index([businessId, priority])
+  @@index([contentRequestId])
   @@map("content_briefs")
 }
 
@@ -6797,4 +7202,253 @@ model ProcurementRequest {
   @@index([businessId, createdAt])
   @@index([businessId, supplierConnectionId])
   @@map("procurement_requests")
+}
+
+
+// ---
+// PHASE 0: OPERATING KERNEL — Business Event Log, Evidence, Assignment, Content, Calls, Approvals, Assets
+// ---
+
+/// Unified business event log. Every important mutation creates a BusinessEvent.
+/// This replaces fragmented audit tables (TeamActivityLog, ContactAuditEntry, etc.)
+model BusinessEvent {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  branchId    String?  @map("branch_id")
+  eventType   String   @map("event_type")
+  subjectType String   @map("subject_type")
+  subjectId   String   @map("subject_id")
+  actorType   String   @map("actor_type") // "human" | "ai" | "system" | "integration"
+  actorId     String   @map("actor_id")
+  action      String   // "create", "update", "delete", "approve", "execute", "complete"
+  before      Json?    // snapshot before mutation
+  after       Json?    // snapshot after mutation
+  evidenceIds String[] @map("evidence_ids")
+  messageIds  String[] @map("message_ids")
+  approvalId  String?  @map("approval_id")
+  riskScore   Int?     @map("risk_score")
+  source      String   // "web" | "mobile" | "email" | "whatsapp" | "api" | "worker" | "ai"
+  metadata    Json?    // extensible context
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, createdAt])
+  @@index([businessId, eventType])
+  @@index([subjectType, subjectId])
+  @@index([actorType, actorId])
+  @@index([businessId, eventType, createdAt])
+  @@map("business_events")
+}
+
+/// Evidence / proof attached to tasks, approvals, contacts, or work orders.
+/// Golden Rule: no completion without evidence when evidence is required.
+model Evidence {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  evidenceType String   @map("evidence_type") // "photo", "file", "signature", "checklist", "message", "note", "document"
+  url          String
+  storageKey   String   @map("storage_key") // S3 key or Drive file ID
+  checksum     String?  // SHA-256 for integrity verification
+  mimeType     String?  @map("mime_type")
+  sizeBytes    Int?     @map("size_bytes")
+  submittedBy  String   @map("submitted_by") // userId or "key_ai"
+  submittedAt  DateTime @default(now()) @map("submitted_at")
+  verifiedBy   String?  @map("verified_by")
+  verifiedAt   DateTime? @map("verified_at")
+  linkedType   String   @map("linked_type") // "Task", "ApprovalRequest", "Contact", "WorkOrder", "CallLog"
+  linkedId     String   @map("linked_id")
+  metadata     Json?    // e.g., GPS coords, timestamp, device info
+
+  @@index([businessId, linkedType, linkedId])
+  @@index([businessId, evidenceType])
+  @@index([businessId, submittedAt])
+  @@map("evidence")
+}
+
+/// Polymorphic task assignment junction table.
+/// Replaces loose assigneeId strings on ContactTask and ProjectTask.
+model TaskAssignment {
+  id             String   @id @default(cuid())
+  taskType       String   @map("task_type") // "ContactTask" | "ProjectTask" | "AutopilotTask"
+  taskId         String   @map("task_id")
+  assignableType String   @map("assignable_type") // "User" | "StaffMember" | "Contractor" | "KeyflowStaff" | "KEY"
+  assignableId   String   @map("assignable_id")
+  assignedBy     String   @map("assigned_by")
+  assignedAt     DateTime @default(now()) @map("assigned_at")
+  unassignedAt   DateTime? @map("unassigned_at")
+  reason         String?
+
+  @@unique([taskType, taskId, assignableType, assignableId])
+  @@index([taskType, taskId])
+  @@index([assignableType, assignableId])
+  @@index([assignedBy])
+  @@map("task_assignments")
+}
+
+/// Content request / work order for content operations.
+/// Need -> Request -> Brief -> Assignment -> Production -> QA -> Approval -> Drive Upload -> Delivery
+model ContentRequest {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  requestedBy       String   @map("requested_by") // userId or "key_ai"
+  source            String   // "user_request" | "key_recommendation" | "campaign_calendar" | "sales_signal" | "inventory_signal" | "customer_signal"
+  status            String   @default("draft")
+  // DRAFT -> SUBMITTED -> ASSIGNED -> IN_PRODUCTION -> INTERNAL_REVIEW -> USER_REVIEW -> APPROVED -> UPLOADED_TO_DRIVE -> DELIVERED
+
+  contentTypes      String[] @map("content_types") // "blog_post", "social_post", "email", "video_script", "flyer", "whitepaper"
+  businessGoal      String   @map("business_goal")
+  targetAudience    String?  @map("target_audience")
+  offer             String?
+  productOrService  String?  @map("product_or_service")
+  branch            String?
+  tone              String?
+  dueDate           DateTime? @map("due_date")
+  priority          String   @default("normal")
+  requiredInputs    String[] @map("required_inputs")
+  attachedAssetIds  String[] @map("attached_asset_ids")
+  assignedTeamMemberIds String[] @map("assigned_team_member_ids")
+  googleDriveFolderId String? @map("google_drive_folder_id")
+  deliveryFileIds   String[] @map("delivery_file_ids")
+  approvalRequired  Boolean  @default(true) @map("approval_required")
+  approvedBy        String?  @map("approved_by")
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, dueDate])
+  @@index([businessId, priority])
+  @@map("content_requests")
+}
+
+/// Content delivery package — tracks final files uploaded to Google Drive.
+model ContentDeliveryPackage {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  contentRequestId  String   @map("content_request_id")
+  destinationType   String   @default("google_drive") @map("destination_type")
+  destinationFolderId String @map("destination_folder_id")
+  status            String   @default("pending") // pending | uploading | uploaded | failed | delivered
+  uploadedBy        String   @map("uploaded_by") // "system" | "keyflow_staff"
+  uploadedFileIds   String[] @map("uploaded_file_ids")
+  userNotified      Boolean  @default(false) @map("user_notified")
+  deliveredAt       DateTime? @map("delivered_at")
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, contentRequestId])
+  @@index([businessId, status])
+  @@map("content_delivery_packages")
+}
+
+/// Manual call task logging. Tracks phone follow-ups with outcomes.
+model CallLog {
+  id             String   @id @default(cuid())
+  businessId     String   @map("business_id")
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  contactId      String?  @map("contact_id")
+  taskId         String?  @map("task_id") // linked ContactTask
+  callerId       String   @map("caller_id") // userId or staffMemberId
+  scheduledAt    DateTime? @map("scheduled_at")
+  completedAt    DateTime? @map("completed_at")
+  duration       Int?     // seconds
+  outcome        String?  // "reached" | "no_answer" | "voicemail" | "wrong_number" | "callback_requested" | "not_interested"
+  notes          String?
+  script         String?  // talking points used
+  recordingUrl   String?  @map("recording_url")
+  evidenceIds    String[] @map("evidence_ids")
+  followUpTaskId String?  @map("follow_up_task_id")
+
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, contactId])
+  @@index([businessId, callerId])
+  @@index([businessId, scheduledAt])
+  @@index([businessId, outcome])
+  @@map("call_logs")
+}
+
+/// General approval request for business processes (expense, PO, discount, content delivery).
+/// Extends beyond AI-centric AiApprovalItem.
+model ApprovalRequest {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  requestType String   @map("request_type") // "quote_discount" | "expense" | "content_delivery" | "refund" | "po" | "time_off"
+  requesterId String   @map("requester_id")
+  title       String
+  description String?
+  payload     Json     // the actual data being approved (e.g., quote object, expense details)
+  status      String   @default("pending") // pending | approved | rejected | escalated | delegated
+  threshold   Float?   // auto-approve under this amount
+  currentStep Int      @default(0) @map("current_step")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  resolvedAt  DateTime? @map("resolved_at")
+  resolution  String?  // "approved" | "rejected" | "escalated"
+
+  steps       ApprovalStep[]
+
+  @@index([businessId, status])
+  @@index([businessId, requestType])
+  @@index([businessId, requesterId])
+  @@map("approval_requests")
+}
+
+/// Approval step in a multi-step approval chain.
+model ApprovalStep {
+  id                String  @id @default(cuid())
+  approvalRequestId String  @map("approval_request_id")
+  approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+
+  stepOrder     Int      @map("step_order")
+  approverId    String   @map("approver_id")
+  status        String   @default("pending") // pending | approved | rejected | delegated
+  delegatedTo   String?  @map("delegated_to")
+  decidedAt     DateTime? @map("decided_at")
+  decision      String?  // "approved" | "rejected"
+  comment       String?
+
+  @@index([approvalRequestId, stepOrder])
+  @@map("approval_steps")
+}
+
+/// Asset / media library for creative files and general uploads.
+model Asset {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  type        String   // "image" | "video" | "document" | "audio" | "other"
+  url         String
+  storageKey  String   @map("storage_key")
+  mimeType    String?  @map("mime_type")
+  sizeBytes   Int?     @map("size_bytes")
+  tags        String[]
+  folder      String   @default("uncategorized")
+  permissions String   @default("team") // "private" | "team" | "public"
+  uploadedBy  String   @map("uploaded_by")
+  usageCount  Int      @default(0) @map("usage_count")
+  metadata    Json?    // dimensions, duration, etc.
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, type])
+  @@index([businessId, tags])
+  @@index([businessId, folder])
+  @@index([businessId, createdAt])
+  @@map("assets")
 }

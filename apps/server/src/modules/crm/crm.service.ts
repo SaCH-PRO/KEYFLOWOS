@@ -1744,7 +1744,7 @@ export class CrmService {
     actorId?: string | null;
   }) {
     const existing = await this.assertContact(input.businessId, input.contactId);
-    let target: Date | null = null;
+    let target: Date | null;
     if (input.snoozeUntil) {
       const parsed = new Date(input.snoozeUntil);
       if (Number.isNaN(parsed.getTime())) {

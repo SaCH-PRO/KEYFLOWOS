@@ -20,7 +20,8 @@ export type ConnectorType =
   | 'twitter'
   | 'typeform'
   | 'jotform'
-  | 'webhook_form';
+  | 'webhook_form'
+  | 'shopify';
 
 export type ConnectorCategory =
   | 'communication'

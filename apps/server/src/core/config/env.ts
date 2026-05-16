@@ -176,11 +176,11 @@ export function validateServerEnv(env: NodeJS.ProcessEnv = process.env): EnvVali
 export function ensureValidServerEnv(env: NodeJS.ProcessEnv = process.env): void {
   const report = validateServerEnv(env);
   if (report.warnings.length > 0) {
-    // eslint-disable-next-line no-console
+     
     console.warn('[env] Recommended config issues:\n' + report.warnings.map((w) => `  - ${w}`).join('\n'));
   }
   if (!report.ok) {
-    // eslint-disable-next-line no-console
+     
     console.error(
       '[FATAL] Environment validation failed:\n' +
         report.missingRequired.map((m) => `  - ${m}`).join('\n') +

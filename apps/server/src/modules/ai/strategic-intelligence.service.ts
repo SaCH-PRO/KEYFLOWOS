@@ -122,8 +122,8 @@ export class StrategicIntelligenceService {
         orderBy: { createdAt: 'asc' },
       }),
       this.db.recurringInvoice.findMany({
-        where: { businessId, isActive: true, deletedAt: null },
-        select: { name: true, frequency: true, nextRunDate: true, lineItems: true },
+        where: { businessId, status: 'ACTIVE', deletedAt: null },
+        select: { name: true, frequency: true, nextRunDate: true },
         take: 30,
       }),
       this.db.expense.aggregate({

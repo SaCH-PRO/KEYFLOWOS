@@ -211,6 +211,47 @@ export function OverviewTab({ project, onStageChange: _onStageChange, milestones
         />
       </div>
 
+      {/* Time Tracking Summary */}
+      {(project.tasks?.length ?? 0) > 0 && (
+        <div className="rounded-xl border border-border/40 bg-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Clock className="w-3 h-3" />
+              Time Tracking
+            </h4>
+            {project.hourlyRate ? (
+              <span className="text-xs text-muted-foreground">
+                Rate: TTD ${project.hourlyRate}/hr
+              </span>
+            ) : (
+              <span className="text-[10px] text-muted-foreground">No hourly rate set</span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <p className="text-xl font-bold text-foreground">
+                {(project.tasks ?? []).reduce((s, t) => s + (t.estimatedHours ?? 0), 0).toFixed(1)}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Est. Hours</p>
+            </div>
+            <div>
+              <p className="text-xl font-bold text-foreground">
+                {(project.tasks ?? []).reduce((s, t) => s + (t.trackedHours ?? 0), 0).toFixed(1)}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Tracked Hours</p>
+            </div>
+            <div>
+              <p className="text-xl font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>
+                {project.hourlyRate
+                  ? `TTD $${((project.tasks ?? []).reduce((s, t) => s + (t.trackedHours ?? 0), 0) * project.hourlyRate).toLocaleString("en-TT", { minimumFractionDigits: 2 })}`
+                  : "—"}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Billable</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {totalCost > 0 && (
         <div className="rounded-xl border border-border/40 bg-card p-4">
           <div className="flex items-center justify-between">

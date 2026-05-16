@@ -29,3 +29,7 @@ packages/db/prisma/*.db
 
 # Build-time release marker (written by .replit build / start-prod.sh)
 .deploy-version
+.turbo/cache/
+controllers_audit.txt
+controllers_chunk_*
+screenshot-home.png

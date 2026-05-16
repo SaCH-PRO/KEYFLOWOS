@@ -6,6 +6,7 @@
   "module": "./src/client.ts",
   "types": "./src/client.ts",
   "scripts": {
+    "build": "tsc --project tsconfig.json",
     "db:generate": "prisma generate --schema=./prisma/schema.prisma",
     "lint": "eslint src --ext .ts"
   },

@@ -74,6 +74,7 @@ export class IntakeService {
         },
       });
     } catch {
+      /* intentionally empty */
     }
 
     try {

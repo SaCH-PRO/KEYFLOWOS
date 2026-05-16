@@ -123,7 +123,8 @@ export function ClassicTemplate({ data }: { data: InvoiceTemplateData }) {
         </div>
 
         <div className="hidden sm:block mb-6">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+<table className="w-full text-sm">
             <thead>
               <tr style={{ backgroundColor: pc }}>
                 <th className="text-left py-3 px-4 text-white font-semibold rounded-tl-lg">Description</th>
@@ -143,6 +144,7 @@ export function ClassicTemplate({ data }: { data: InvoiceTemplateData }) {
               ))}
             </tbody>
           </table>
+</div>
         </div>
 
         <div className="sm:hidden mb-6 space-y-3">

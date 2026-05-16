@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import {
   DailyPlanContract,
   WeeklyCapacityContract,
@@ -33,6 +34,7 @@ export class CalendarInsightService {
     @Inject(CalendarQueryService) private readonly query: CalendarQueryService,
     @Inject(CalendarConflictService)
     private readonly conflicts: CalendarConflictService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   // ----- Cache helpers ------------------------------------------------
@@ -140,17 +142,20 @@ Currency is TTD. Timezone is America/Port_of_Spain. Pick at most 5 topPriorities
     const userPrompt = `Date: ${dayIso}\nEvents:\n${JSON.stringify(summary)}\nConflicts:\n${JSON.stringify(conflictSummary)}`;
 
     try {
-      const response = await this.gateway.complete({
+      const response = await this.aiUsage.trackAndComplete(
         businessId,
-        taskCategory: 'summarization',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.4,
-        maxTokens: 900,
-        expectedContract: 'daily_plan',
-      });
+        undefined,
+        'calendar_insight',
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.4,
+          maxTokens: 900,
+          expectedContract: 'daily_plan',
+        },
+      );
       const parsed = this.parseJson(response.content ?? '');
       if (parsed && typeof parsed === 'object') {
         return {
@@ -287,17 +292,20 @@ Use the byDay totals provided as ground truth. Add 1-3 recommendations to balanc
     const userPrompt = `weekStart: ${weekStart}\nbyDay: ${JSON.stringify(baseline.byDay)}\noverloaded: ${JSON.stringify(baseline.overloadedDays)}\nunderutilized: ${JSON.stringify(baseline.underutilizedDays)}`;
 
     try {
-      const response = await this.gateway.complete({
+      const response = await this.aiUsage.trackAndComplete(
         businessId,
-        taskCategory: 'summarization',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.3,
-        maxTokens: 700,
-        expectedContract: 'weekly_capacity',
-      });
+        undefined,
+        'calendar_insight',
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.3,
+          maxTokens: 700,
+          expectedContract: 'weekly_capacity',
+        },
+      );
       const parsed = this.parseJson(response.content ?? '');
       if (parsed && typeof parsed === 'object') {
         const obj = parsed as Record<string, unknown>;

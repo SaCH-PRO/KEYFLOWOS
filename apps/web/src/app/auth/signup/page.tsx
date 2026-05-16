@@ -28,8 +28,8 @@ import {
 import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
 import { setStoredToken, setStoredBusinessId } from "@/lib/workspace";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
 
 function signUpWithGoogle() {
@@ -39,14 +39,12 @@ function signUpWithGoogle() {
 }
 
 async function isUsernameAvailable(username: string): Promise<boolean> {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !username) return true;
+  if (!username) return true;
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?username=eq.${encodeURIComponent(username)}&select=id&limit=1`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-    });
+    const res = await fetch(`${API_BASE}/identity/check-username?username=${encodeURIComponent(username.trim())}`);
     if (!res.ok) return true;
-    const data = await res.json().catch(() => []);
-    return !Array.isArray(data) || data.length === 0;
+    const data = await res.json().catch(() => ({ available: true }));
+    return data.available === true;
   } catch { return true; }
 }
 
@@ -58,7 +56,7 @@ const FEATURES = [
 ];
 
 const PW_RULES = [
-  { label: "8+ chars", test: (p: string) => p.length >= 8 },
+  { label: "12+ chars", test: (p: string) => p.length >= 12 },
   { label: "Uppercase", test: (p: string) => /[A-Z]/.test(p) },
   { label: "Lowercase", test: (p: string) => /[a-z]/.test(p) },
   { label: "Number", test: (p: string) => /[0-9]/.test(p) },

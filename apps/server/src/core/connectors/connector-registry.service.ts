@@ -264,6 +264,7 @@ export class ConnectorRegistryService {
     try {
       await connector.disconnect(businessId);
     } catch {
+      /* intentionally empty */
     }
 
     return this.authenticateConnector(type, businessId);

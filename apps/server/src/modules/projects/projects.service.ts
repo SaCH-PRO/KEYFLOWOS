@@ -1,7 +1,9 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { EvidenceService } from '../evidence/evidence.service';
+import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 
 @Injectable()
 export class ProjectsService {
@@ -9,6 +11,8 @@ export class ProjectsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    @Inject(EvidenceService) private readonly evidence: EvidenceService,
+    @Inject(TaskAssignmentService) private readonly assignments: TaskAssignmentService,
   ) {}
 
   listProjects(businessId: string) {
@@ -40,6 +44,7 @@ export class ProjectsService {
     invoiceId?: string;
     bookingId?: string;
     dueDate?: string;
+    hourlyRate?: number;
   }) {
     const project = await this.prisma.client.project.create({
       data: {
@@ -49,6 +54,7 @@ export class ProjectsService {
         status: body.status || 'ACTIVE',
         priority: body.priority || 'NORMAL',
         color: body.color,
+        hourlyRate: body.hourlyRate,
         contactId: body.contactId,
         invoiceId: body.invoiceId,
         bookingId: body.bookingId,
@@ -82,6 +88,7 @@ export class ProjectsService {
     invoiceId?: string;
     bookingId?: string;
     dueDate?: string | null;
+    hourlyRate?: number | null;
   }) {
     const data: any = { ...body };
     if (body.dueDate !== undefined) {
@@ -135,23 +142,55 @@ export class ProjectsService {
     priority?: string;
     dueDate?: string;
     assigneeId?: string;
+    estimatedHours?: number;
+    trackedHours?: number;
   }) {
     const maxSort = await this.prisma.client.projectTask.aggregate({
       where: { projectId, businessId, deletedAt: null },
       _max: { sortOrder: true },
     });
-    const task = await this.prisma.client.projectTask.create({
-      data: {
-        projectId,
-        businessId,
-        title: body.title,
-        description: body.description,
-        priority: body.priority || 'NORMAL',
-        dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
-        assigneeId: body.assigneeId,
-        sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
-      },
+
+    const task = await this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.projectTask.create({
+        data: {
+          projectId,
+          businessId,
+          title: body.title,
+          description: body.description,
+          priority: body.priority || 'NORMAL',
+          dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+          assigneeId: body.assigneeId,
+          estimatedHours: body.estimatedHours,
+          trackedHours: body.trackedHours ?? 0,
+          sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
+        },
+      });
+
+      // Phase 3: polymorphic task assignment (atomic)
+      if (body.assigneeId) {
+        let assignableType = 'User';
+        const [user, staff] = await Promise.all([
+          tx.user.findUnique({ where: { id: body.assigneeId }, select: { id: true } }),
+          tx.staffMember.findUnique({ where: { id: body.assigneeId }, select: { id: true } }),
+        ]);
+        if (staff) assignableType = 'StaffMember';
+        else if (user) assignableType = 'User';
+
+        await tx.taskAssignment.create({
+          data: {
+            taskType: 'ProjectTask',
+            taskId: created.id,
+            assignableType,
+            assignableId: body.assigneeId,
+            assignedBy: 'system',
+            reason: 'task_created',
+          },
+        });
+      }
+
+      return created;
     });
+
     this.events.emit('project_task.created', { task, businessId });
     return task;
   }
@@ -164,19 +203,72 @@ export class ProjectsService {
     dueDate?: string | null;
     sortOrder?: number;
     assigneeId?: string | null;
+    estimatedHours?: number | null;
+    trackedHours?: number;
+    evidenceIds?: string[];
   }) {
     const existing = await this.prisma.client.projectTask.findFirst({
       where: { id: taskId, businessId },
     });
     if (!existing) throw new NotFoundException('Task not found');
-    const data: any = { ...body };
+
+    // Phase 2: Check evidence requirement before marking complete
+    if (body.isCompleted === true && !existing.isCompleted && existing.evidenceRequired) {
+      const check = await this.evidence.checkTaskEvidence('ProjectTask', taskId);
+      if (!check.hasEvidence && (!body.evidenceIds || body.evidenceIds.length === 0)) {
+        throw new BadRequestException(
+          `This task requires evidence before completion. Please submit proof (photo, file, note, etc.) and try again.`
+        );
+      }
+    }
+
+    const { evidenceIds, ...updateData } = body;
+    const data: any = { ...updateData };
     if (body.dueDate !== undefined) {
       data.dueDate = body.dueDate ? new Date(body.dueDate) : null;
     }
-    const task = await this.prisma.client.projectTask.update({
-      where: { id: taskId, businessId },
-      data,
+    const task = await this.prisma.client.$transaction(async (tx) => {
+      const updated = await tx.projectTask.update({
+        where: { id: taskId, businessId },
+        data,
+      });
+
+      // Phase 3: update polymorphic assignment when assignee changes (atomic)
+      if (body.assigneeId !== undefined && body.assigneeId !== existing.assigneeId) {
+        if (body.assigneeId) {
+          let assignableType = 'User';
+          const [user, staff] = await Promise.all([
+            tx.user.findUnique({ where: { id: body.assigneeId }, select: { id: true } }),
+            tx.staffMember.findUnique({ where: { id: body.assigneeId }, select: { id: true } }),
+          ]);
+          if (staff) assignableType = 'StaffMember';
+          else if (user) assignableType = 'User';
+
+          await tx.taskAssignment.updateMany({
+            where: { taskType: 'ProjectTask', taskId: updated.id, unassignedAt: null },
+            data: { unassignedAt: new Date(), reason: 'reassigned' },
+          });
+          await tx.taskAssignment.create({
+            data: {
+              taskType: 'ProjectTask',
+              taskId: updated.id,
+              assignableType,
+              assignableId: body.assigneeId,
+              assignedBy: 'system',
+              reason: 'task_updated',
+            },
+          });
+        } else {
+          await tx.taskAssignment.updateMany({
+            where: { taskType: 'ProjectTask', taskId: updated.id, unassignedAt: null },
+            data: { unassignedAt: new Date(), reason: 'unassigned_via_update' },
+          });
+        }
+      }
+
+      return updated;
     });
+
     this.events.emit('project_task.updated', { task, businessId });
     const prevDue = existing.dueDate?.getTime() ?? null;
     const newDue = task.dueDate?.getTime() ?? null;
@@ -184,7 +276,7 @@ export class ProjectsService {
       this.events.emit('project_task.rescheduled', { task, businessId });
     }
     if (body.isCompleted === true && !existing.isCompleted) {
-      this.events.emit('project_task.completed', { task, businessId });
+      this.events.emit('project_task.completed', { task, businessId, evidenceIds: body.evidenceIds ?? [] });
     }
     return task;
   }

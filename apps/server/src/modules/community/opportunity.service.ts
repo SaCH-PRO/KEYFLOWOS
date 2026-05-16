@@ -118,7 +118,7 @@ export class OpportunityService {
 
     let applications: any[] = [];
     let myApplication: any = null;
-    let applicationCount = 0;
+    let applicationCount: number;
 
     if (isPoster) {
       applications = await this.prisma.client.opportunityApplication.findMany({

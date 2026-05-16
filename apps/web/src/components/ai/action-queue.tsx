@@ -18,6 +18,7 @@ import {
   fetchAiPendingApprovals,
   fetchAiApprovalHistory,
   resolveAiApproval,
+  resolveAiApprovalsBatch,
   sendStaleQuoteFollowUp,
   type AiApprovalItem,
 } from "@/lib/client";
@@ -151,6 +152,56 @@ export function ActionQueue({ maxItems, showFilters = true, onCountChange }: Act
   }, [pendingItems, onCountChange]);
 
   const [editingItem, setEditingItem] = useState<AiApprovalItem | null>(null);
+  const [batchResolving, setBatchResolving] = useState(false);
+
+  const handleBatchResolve = useCallback(async (resolution: 'approved' | 'rejected') => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+    const pending = pendingItems.filter(i => i.status === "pending");
+    if (pending.length === 0) return;
+
+    setBatchResolving(true);
+    try {
+      const ids = pending.map(i => i.id);
+      const res = await resolveAiApprovalsBatch(businessId, ids, resolution);
+      if (res.data) {
+        toast.success(`Batch ${resolution}: ${res.data.succeeded} succeeded, ${res.data.failed} failed`);
+        loadItems();
+      } else {
+        toast.error(res.error || "Batch resolve failed");
+      }
+    } catch {
+      toast.error("Batch resolve failed");
+    } finally {
+      setBatchResolving(false);
+    }
+  }, [pendingItems, loadItems]);
+
+  const handleApproveAllLowRisk = useCallback(async () => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+    const lowRisk = pendingItems.filter(i => i.status === "pending" && i.riskTier <= 2);
+    if (lowRisk.length === 0) {
+      toast.info("No low-risk approvals pending");
+      return;
+    }
+
+    setBatchResolving(true);
+    try {
+      const ids = lowRisk.map(i => i.id);
+      const res = await resolveAiApprovalsBatch(businessId, ids, "approved");
+      if (res.data) {
+        toast.success(`Approved ${res.data.succeeded} low-risk items`);
+        loadItems();
+      } else {
+        toast.error(res.error || "Batch approve failed");
+      }
+    } catch {
+      toast.error("Batch approve failed");
+    } finally {
+      setBatchResolving(false);
+    }
+  }, [pendingItems, loadItems]);
 
   const handleEdit = useCallback((approvalId: string) => {
     const item = pendingItems.find(i => i.id === approvalId);
@@ -224,6 +275,35 @@ export function ActionQueue({ maxItems, showFilters = true, onCountChange }: Act
             aria-label="Refresh queue"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+      )}
+
+      {showFilters && view === "waiting" && pendingCount > 0 && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleApproveAllLowRisk}
+            disabled={batchResolving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/15 text-emerald-400 text-xs font-medium hover:bg-emerald-500/25 transition-all disabled:opacity-50"
+          >
+            {batchResolving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+            Approve All Low-Risk
+          </button>
+          <button
+            onClick={() => handleBatchResolve("approved")}
+            disabled={batchResolving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] text-xs font-medium hover:bg-[hsl(var(--kf-accent1))]/25 transition-all disabled:opacity-50"
+          >
+            {batchResolving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+            Approve All
+          </button>
+          <button
+            onClick={() => handleBatchResolve("rejected")}
+            disabled={batchResolving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-red-500/15 text-red-400 text-xs font-medium hover:bg-red-500/25 transition-all disabled:opacity-50"
+          >
+            {batchResolving ? <Loader2 className="w-3 h-3 animate-spin" /> : <AlertTriangle className="w-3 h-3" />}
+            Reject All
           </button>
         </div>
       )}

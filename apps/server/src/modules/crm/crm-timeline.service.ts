@@ -3,6 +3,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { EvidenceService } from '../evidence/evidence.service';
+import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 
 type TimelineEntry = {
   id: string;
@@ -24,6 +26,8 @@ export class CrmTimelineService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    @Inject(EvidenceService) private readonly evidence: EvidenceService,
+    @Inject(TaskAssignmentService) private readonly assignments: TaskAssignmentService,
   ) {}
 
   private formatContactName(contact: {
@@ -204,48 +208,73 @@ export class CrmTimelineService {
     });
   }
 
-  addTask(input: {
+  async addTask(input: {
     businessId: string;
     contactId: string;
     title: string;
     dueDate?: string | null;
     priority?: string | null;
     assigneeId?: string | null;
+    assigneeType?: string | null;
     remindAt?: string | null;
     creatorId?: string | null;
     source?: string | null;
   }) {
-    return this.assertContact(input.businessId, input.contactId)
-      .then(() =>
-        this.prisma.client.contactTask.create({
-          data: {
-            businessId: input.businessId,
-            contactId: input.contactId,
-            title: input.title,
-            dueDate: this.parseDateOrNull(input.dueDate),
-            priority: input.priority ?? 'NORMAL',
-            assigneeId: input.assigneeId ?? null,
-            remindAt: this.parseDateOrNull(input.remindAt),
-            source: input.source ?? 'manual',
-          },
-        }),
-      )
-      .then(async (task) => {
-        await this.logEvent(
-          input.businessId,
-          input.contactId,
-          'task.created',
-          {
-            title: input.title,
-            dueDate: input.dueDate,
-            priority: input.priority ?? 'NORMAL',
-            assigneeId: input.assigneeId,
-          },
-          { actorType: 'USER', actorId: input.creatorId ?? undefined, source: input.source ?? 'crm' },
-        );
-        this.events.emit('contact_task.created', { task, businessId: input.businessId });
-        return task;
+    await this.assertContact(input.businessId, input.contactId);
+
+    const task = await this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.contactTask.create({
+        data: {
+          businessId: input.businessId,
+          contactId: input.contactId,
+          title: input.title,
+          dueDate: this.parseDateOrNull(input.dueDate),
+          priority: input.priority ?? 'NORMAL',
+          assigneeId: input.assigneeId ?? null,
+          remindAt: this.parseDateOrNull(input.remindAt),
+          source: input.source ?? 'manual',
+        },
       });
+
+      // Phase 3: polymorphic task assignment (atomic)
+      if (input.assigneeId) {
+        let assignableType: string = (input.assigneeType as any) ?? 'User';
+        const [user, staff] = await Promise.all([
+          tx.user.findUnique({ where: { id: input.assigneeId }, select: { id: true } }),
+          tx.staffMember.findUnique({ where: { id: input.assigneeId }, select: { id: true } }),
+        ]);
+        if (staff) assignableType = 'StaffMember';
+        else if (user) assignableType = 'User';
+
+        await tx.taskAssignment.create({
+          data: {
+            taskType: 'ContactTask',
+            taskId: created.id,
+            assignableType,
+            assignableId: input.assigneeId,
+            assignedBy: input.creatorId ?? 'system',
+            reason: 'task_created',
+          },
+        });
+      }
+
+      return created;
+    });
+
+    await this.logEvent(
+      input.businessId,
+      input.contactId,
+      'task.created',
+      {
+        title: input.title,
+        dueDate: input.dueDate,
+        priority: input.priority ?? 'NORMAL',
+        assigneeId: input.assigneeId,
+      },
+      { actorType: 'USER', actorId: input.creatorId ?? undefined, source: input.source ?? 'crm' },
+    );
+    this.events.emit('contact_task.created', { task, businessId: input.businessId });
+    return task;
   }
 
   async updateNote(input: { businessId: string; noteId: string; body?: string; source?: string }) {
@@ -307,17 +336,31 @@ export class CrmTimelineService {
     return { deleted: true };
   }
 
-  async completeTask(input: { businessId: string; taskId: string }) {
+  async completeTask(input: { businessId: string; taskId: string; evidenceIds?: string[] }) {
     const task = await this.prisma.client.contactTask.findFirst({
       where: { id: input.taskId, businessId: input.businessId },
     });
     if (!task) throw new NotFoundException('Task not found');
 
+    // Phase 2: Check evidence requirement
+    if (task.evidenceRequired) {
+      const check = await this.evidence.checkTaskEvidence('ContactTask', input.taskId);
+      if (!check.hasEvidence && (!input.evidenceIds || input.evidenceIds.length === 0)) {
+        throw new BadRequestException(
+          `This task requires evidence before completion. Please submit proof (photo, file, note, etc.) and try again.`
+        );
+      }
+    }
+
     const updated = await this.prisma.client.contactTask.update({
       where: { id: input.taskId },
       data: { status: 'DONE', completedAt: new Date() },
     });
-    await this.logEvent(input.businessId, task.contactId, 'task.completed', { taskId: task.id, title: task.title });
+    await this.logEvent(input.businessId, task.contactId, 'task.completed', {
+      taskId: task.id,
+      title: task.title,
+      evidenceIds: input.evidenceIds ?? [],
+    });
     this.events.emit('contact_task.completed', { task: updated, businessId: input.businessId });
     return updated;
   }

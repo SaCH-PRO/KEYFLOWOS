@@ -53,7 +53,8 @@ export function parseBankDate(raw: string): Date | null {
   // dd/mm/yyyy or mm/dd/yyyy or dd-mm-yyyy — assume day-first (international/Trinidad).
   const m = trimmed.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
   if (m) {
-    let [, dd, mm, yy] = m;
+    const [, dd, mm] = m;
+    let yy = m[3];
     if (yy.length === 2) yy = (Number(yy) >= 70 ? '19' : '20') + yy;
     const d = new Date(Date.UTC(Number(yy), Number(mm) - 1, Number(dd)));
     return isNaN(d.getTime()) ? null : d;
@@ -77,7 +78,7 @@ export function parseBankAmount(raw: string): Prisma.Decimal | null {
     sign = -1;
     s = s.slice(1, -1);
   }
-  s = s.replace(/[^0-9.\-]/g, '');
+  s = s.replace(/[^0-9.-]/g, '');
   if (s === '' || s === '-' || s === '.') return null;
   // If there is a leading minus AND we already detected parentheses, the
   // signs cancel — that mirrors what users mean when they hand-type both.
@@ -137,7 +138,7 @@ export function parseBankCsv(content: string): { rows: ParsedBankRow[]; errors: 
       errors.push(`Row ${idx + 2}: invalid date "${rec[dateCol]}"`);
       return;
     }
-    let amount: Prisma.Decimal | null = null;
+    let amount: Prisma.Decimal | null;
     if (amountCol) {
       amount = parseBankAmount(rec[amountCol] ?? '');
     } else {

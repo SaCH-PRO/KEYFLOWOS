@@ -90,6 +90,9 @@ export default function Home() {
             <span className="text-lg font-bold tracking-tight">KeyFlowOS</span>
           </Link>
           <div className="flex items-center gap-2 sm:gap-4">
+            <Link href="/directory" className="hidden sm:inline-block text-sm text-[hsl(24_95%_53%)] hover:text-[hsl(24_95%_63%)] transition-colors font-medium">
+              Directory
+            </Link>
             <Link href="/pricing" className="hidden sm:inline-block text-sm text-[hsl(30_10%_55%)] hover:text-[hsl(30_20%_85%)] transition-colors">
               Pricing
             </Link>
@@ -250,6 +253,7 @@ export default function Home() {
           </div>
           <p className="text-xs text-[hsl(30_10%_30%)]">Your business, on autopilot.</p>
           <div className="flex items-center gap-4 text-xs text-[hsl(30_10%_35%)]">
+            <Link href="/directory" className="text-[hsl(24_95%_53%)] hover:text-[hsl(24_95%_63%)] transition-colors">Directory</Link>
             <Link href="/pricing" className="hover:text-[hsl(30_10%_60%)] transition-colors">Pricing</Link>
             <Link href="/auth/login" className="hover:text-[hsl(30_10%_60%)] transition-colors">Log in</Link>
             <Link href="/auth/signup" className="hover:text-[hsl(30_10%_60%)] transition-colors">Sign up</Link>

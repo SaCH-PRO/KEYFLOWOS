@@ -274,7 +274,8 @@ function AccountsSection({ businessId }: { businessId: string }) {
         <EmptyState icon={Wallet} title="No accounts yet" description="Add a bank or cash account to get started." variant="compact" />
       ) : (
         <div className="rounded-xl border border-border/40 bg-card/40 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="min-w-full w-full text-sm">
             <thead className="bg-background/60 text-xs text-muted-foreground">
               <tr><th className="text-left px-3 py-2 font-medium">Name</th><th className="text-left px-3 py-2 font-medium">Type</th><th className="text-right px-3 py-2 font-medium">Balance</th><th className="px-3 py-2"></th></tr>
             </thead>
@@ -295,6 +296,7 @@ function AccountsSection({ businessId }: { businessId: string }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>
@@ -374,7 +376,8 @@ function CoaSection({ businessId }: { businessId: string }) {
             return (
               <div key={type} className="rounded-xl border border-border/40 bg-card/40 overflow-hidden">
                 <div className="px-3 py-2 text-xs font-semibold uppercase text-muted-foreground bg-background/40">{type}</div>
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full w-full text-sm">
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.id} className={`border-t border-border/20 ${!r.isActive ? "opacity-50" : ""}`}>
@@ -404,6 +407,7 @@ function CoaSection({ businessId }: { businessId: string }) {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             );
           })}
@@ -472,7 +476,8 @@ function TaxRatesSection({ businessId }: { businessId: string }) {
         <EmptyState icon={Calculator} title="No tax rates yet" description="Add VAT, GST or any other rate you apply to invoices." variant="compact" />
       ) : (
         <div className="rounded-xl border border-border/40 bg-card/40 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="min-w-full w-full text-sm">
             <thead className="bg-background/60 text-xs text-muted-foreground">
               <tr><th className="text-left px-3 py-2 font-medium">Name</th><th className="text-left px-3 py-2 font-medium">Type</th><th className="text-right px-3 py-2 font-medium">Rate</th><th className="px-3 py-2"></th></tr>
             </thead>
@@ -490,6 +495,7 @@ function TaxRatesSection({ businessId }: { businessId: string }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

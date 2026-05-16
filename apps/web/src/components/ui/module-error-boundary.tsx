@@ -19,11 +19,8 @@ const DEFAULT_REASSURANCE: Record<string, string> = {
   Marketing: "Your campaigns, social posts, and forms are safe.",
   Commerce: "Your data is safe.",
   Store: "Your store configuration is safe.",
-  Community: "Your data is safe.",
   Reports: "Your data is safe.",
-  Documents: "Your documents are safe.",
   Profile: "Your data is safe.",
-  MasterClass: "Your progress is safe.",
 };
 
 export function ModuleErrorBoundary({

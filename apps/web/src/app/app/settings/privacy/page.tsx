@@ -170,7 +170,8 @@ export default function PrivacySettingsPage() {
           </p>
         ) : (
           <div className="overflow-auto">
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+<table className="min-w-full w-full text-xs">
               <thead className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/50">
                 <tr>
                   <th className="text-left py-2 pr-4">Contact</th>
@@ -196,6 +197,7 @@ export default function PrivacySettingsPage() {
                 ))}
               </tbody>
             </table>
+</div>
           </div>
         )}
       </div>

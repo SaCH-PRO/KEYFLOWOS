@@ -302,6 +302,29 @@ export class IdentityController {
   }
 
   /**
+   * Username availability check — public, no auth required.
+   * Checks whether the given username is already taken in the local User table.
+   */
+  @Get('check-username')
+  async checkUsernameAvailability(@Query('username') username?: string) {
+    if (!username || username.trim().length === 0) {
+      return { available: false, reason: 'Username is required' };
+    }
+    const trimmed = username.trim();
+    if (trimmed.length < 2) {
+      return { available: false, reason: 'Username must be at least 2 characters' };
+    }
+    const existing = await this.prisma.client.user.findFirst({
+      where: { name: { equals: trimmed, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (existing) {
+      return { available: false, reason: 'Username is already taken' };
+    }
+    return { available: true };
+  }
+
+  /**
    * Public business lookup by database ID.
    * Returns the same public-safe fields as the slug endpoint.
    * Used for deep-links or integrations that reference a business by its stable UUID.

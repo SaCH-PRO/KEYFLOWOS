@@ -947,11 +947,11 @@ export class RevenueReportingService {
   async recurringExpected(businessId: string): Promise<RecurringExpectedReport> {
     const currency = await this.businessCurrency(businessId);
     const recurring = await this.prisma.client.recurringInvoice.findMany({
-      where: { businessId, isActive: true, deletedAt: null },
+      where: { businessId, status: 'ACTIVE', deletedAt: null },
       select: {
         id: true,
         name: true,
-        total: true,
+        amount: true,
         frequency: true,
         nextRunDate: true,
         endDate: true,
@@ -968,7 +968,7 @@ export class RevenueReportingService {
         const horizonEnd = new Date(now.getTime() + h * 24 * 60 * 60 * 1000);
         return this.estimateRuns(r.nextRunDate, r.endDate ?? null, r.frequency, horizonEnd);
       });
-      const total = Number(r.total ?? 0);
+      const total = Number(r.amount ?? 0);
       runsByWindow.forEach((runs, i) => {
         windows[i].expected += runs * total;
         windows[i].runs += runs;

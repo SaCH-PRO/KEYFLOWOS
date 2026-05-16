@@ -225,7 +225,7 @@ export function CommerceOverviewTab({
     });
 
     const upcomingRecurring = recurring.filter((r) => {
-      if (!r.isActive || !r.nextRunDate) return false;
+      if (r.status !== 'ACTIVE' || !r.nextRunDate) return false;
       const daysUntil = getDaysUntilExpiry(r.nextRunDate);
       return daysUntil >= 0 && daysUntil <= 14;
     });
@@ -240,7 +240,7 @@ export function CommerceOverviewTab({
         bgColor: "bg-blue-500/10",
         title: `${r.name} — ${contactName}`,
         subtitle: days === 0 ? "Runs today" : `Runs in ${days}d`,
-        amount: r.subtotal,
+        amount: r.amount,
         urgency: 40 + (14 - days),
       });
     });

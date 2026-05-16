@@ -18,7 +18,7 @@ async function main(): Promise<void> {
     const svc = app.get(CalendarBackfillService);
     const businessId = process.argv[2];
     const stats = await svc.run(businessId ? { businessId } : {});
-    // eslint-disable-next-line no-console
+     
     console.log(JSON.stringify(stats, null, 2));
   } finally {
     await app.close();
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
+   
   console.error('calendar backfill failed', err);
   process.exit(1);
 });

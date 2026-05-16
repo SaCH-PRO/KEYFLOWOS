@@ -51,7 +51,7 @@ services:
     ports:
       - "3001:3001"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
       interval: 10s
       timeout: 5s
       retries: 6

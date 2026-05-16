@@ -1,5 +1,5 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import OpenAI from 'openai';
+import { Injectable, Logger, ServiceUnavailableException, Inject } from '@nestjs/common';
+import { AiUsageService } from '../ai/ai-usage.service';
 
 export interface KeyflowVoiceRequest {
   text: string;
@@ -10,23 +10,16 @@ export interface KeyflowVoiceRequest {
 @Injectable()
 export class KeyflowVoiceService {
   private readonly logger = new Logger(KeyflowVoiceService.name);
-  private readonly openai: OpenAI;
 
-  constructor() {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-  }
+  constructor(
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+  ) {}
 
   /**
    * Synthesize spoken audio from text using OpenAI TTS.
    * Returns the audio bytes as a Node Buffer the controller streams to the client.
    */
-  async synthesize(req: KeyflowVoiceRequest): Promise<{ buffer: Buffer; format: string }> {
-    if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-      throw new ServiceUnavailableException('Voice service is not configured.');
-    }
+  async synthesize(businessId: string, req: KeyflowVoiceRequest): Promise<{ buffer: Buffer; format: string }> {
     const trimmed = (req.text ?? '').trim();
     if (!trimmed) {
       throw new ServiceUnavailableException('No text supplied for synthesis.');
@@ -36,14 +29,18 @@ export class KeyflowVoiceService {
     const voice = req.voice ?? 'alloy';
 
     try {
-      const response = await this.openai.audio.speech.create({
-        model: 'gpt-4o-mini-tts',
-        voice,
-        input: safe,
-        response_format: format,
-      });
-      const arrayBuffer = await response.arrayBuffer();
-      return { buffer: Buffer.from(arrayBuffer), format };
+      const result = await this.aiUsage.trackAudio(
+        businessId,
+        undefined,
+        'audio_tts',
+        'tts',
+        {
+          text: safe,
+          voice,
+          model: 'gpt-4o-mini-tts',
+        },
+      );
+      return { buffer: result as Buffer, format };
     } catch (err) {
       this.logger.error(`TTS failed: ${(err as Error).message}`);
       throw new ServiceUnavailableException('Voice synthesis failed.');
@@ -54,23 +51,25 @@ export class KeyflowVoiceService {
    * Transcribe a short user utterance with Whisper.
    * The browser sends a webm/opus blob from MediaRecorder.
    */
-  async transcribe(buffer: Buffer, mimeType: string): Promise<{ text: string }> {
-    if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-      throw new ServiceUnavailableException('Voice service is not configured.');
-    }
-
+  async transcribe(businessId: string, buffer: Buffer, mimeType: string): Promise<{ text: string }> {
     const ext = mimeType.includes('mp4') ? 'mp4'
       : mimeType.includes('mpeg') ? 'mp3'
       : mimeType.includes('wav') ? 'wav'
       : 'webm';
 
     try {
-      const file = new File([new Uint8Array(buffer)], `utterance.${ext}`, { type: mimeType });
-      const result = await this.openai.audio.transcriptions.create({
-        file,
-        model: 'whisper-1',
-      });
-      return { text: result.text ?? '' };
+      const result = await this.aiUsage.trackAudio(
+        businessId,
+        undefined,
+        'audio_stt',
+        'stt',
+        {
+          audioFile: buffer,
+          fileName: `utterance.${ext}`,
+          model: 'whisper-1',
+        },
+      );
+      return { text: result as string };
     } catch (err) {
       this.logger.error(`STT failed: ${(err as Error).message}`);
       throw new ServiceUnavailableException('Voice transcription failed.');

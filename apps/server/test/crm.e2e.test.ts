@@ -22,6 +22,15 @@ import { CrmFlowService } from '../src/modules/crm/crm-flow.service';
 import { CrmActionsService } from '../src/modules/crm/crm-actions.service';
 import { CrmRevenueService } from '../src/modules/crm/crm-revenue.service';
 import { CrmJourneyService } from '../src/modules/crm/crm-journey.service';
+import { CrmDuplicateDetectionService } from '../src/modules/crm/crm-duplicate-detection.service';
+import { CrmDataQualityService } from '../src/modules/crm/crm-data-quality.service';
+import { CrmSavedViewsService } from '../src/modules/crm/crm-saved-views.service';
+import { CrmRelationshipHealthService } from '../src/modules/crm/crm-relationship-health.service';
+import { CrmCommunicationService } from '../src/modules/crm/crm-communication.service';
+import { BestChannelService } from '../src/modules/crm/best-channel.service';
+import { ConversationAiService } from '../src/modules/crm/conversation-ai.service';
+import { CrmNetworkService } from '../src/modules/crm/crm-network.service';
+import { ContactInsightService } from '../src/modules/crm/contact-insight.service';
 
 interface MembershipSeed {
   userId: string;
@@ -118,6 +127,15 @@ describe('CRM e2e', () => {
         { provide: CrmActionsService, useValue: {} },
         { provide: CrmRevenueService, useValue: {} },
         { provide: CrmJourneyService, useValue: {} },
+        { provide: CrmDuplicateDetectionService, useValue: {} },
+        { provide: CrmDataQualityService, useValue: {} },
+        { provide: CrmSavedViewsService, useValue: {} },
+        { provide: CrmRelationshipHealthService, useValue: {} },
+        { provide: CrmCommunicationService, useValue: {} },
+        { provide: BestChannelService, useValue: {} },
+        { provide: ConversationAiService, useValue: {} },
+        { provide: CrmNetworkService, useValue: {} },
+        { provide: ContactInsightService, useValue: {} },
       ],
     })
       .overrideGuard(AuthGuard)

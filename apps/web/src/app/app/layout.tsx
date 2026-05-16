@@ -6,6 +6,14 @@ import Image from "next/image";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  getDisclosureMode,
+  setDisclosureMode,
+  MODE_LABELS,
+  MODE_WORKSPACE_ITEMS,
+  MODE_STUDIO_ITEMS,
+  type DisclosureMode,
+} from "@/lib/disclosure-mode";
 import { KeyAgent } from "@/components/key";
 import { OriginAwareBreadcrumbs } from "@/components/ui/origin-aware-breadcrumbs";
 import { NavigationContextProvider, useNavigationContext } from "@/lib/navigation-context";
@@ -55,8 +63,14 @@ import {
   Landmark,
   Calculator,
   Building2,
+  Network,
   Truck,
   ShoppingCart,
+  TrendingUp,
+  Briefcase,
+  Share2,
+  LifeBuoy,
+  Activity,
 } from "lucide-react";
 
 interface ResolvedFeatureFlag {
@@ -73,6 +87,7 @@ import { AiContextProvider } from "@/contexts/ai-context";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
+import { MobileFab } from "@/components/ui/mobile-fab";
 import { RequireAuth } from "@/components/require-auth";
 import { featureFlags as dormantFeatureFlags, type DormantFeatureFlagKey } from "@/lib/feature-flags";
 import { NotesProvider } from "@/components/keyflow/notes-context";
@@ -260,88 +275,84 @@ interface PrimaryNavItem {
   href?: string;
 }
 
-// Seven approved primary modules (Task #605). The orange Zap logo at the
-// top of the rail is "Cockpit" (KEYFLOW home). KEY (the AI agent) lives
-// at the bottom of the rail. The remaining five are direct links here.
+// v2.0 Information Architecture: Cockpit / Workspaces / Studio / Public
+// Leverage principles: money, time, people, scalability
+
+// Rail: top-level surfaces + Cockpit + KEY
 const primaryNav: PrimaryNavItem[] = [
   { id: "cockpit", label: "Cockpit", icon: Zap, href: "/app/keyflow-command" },
-  { id: "workspaces", label: "Contacts", icon: Users, href: "/app/crm/pipeline" },
-  { id: "workspaces", label: "Commerce", icon: CreditCard, href: "/app/commerce" },
-  { id: "workspaces", label: "Calendar", icon: Calendar, href: "/app/calendar" },
-  { id: "store", label: "Storefront", icon: Store, href: "/app/store" },
-  { id: "key", label: "KEY", icon: Sparkles, href: "/app/keyflow-command?mode=key" },
-  { id: "studio", label: "Settings", icon: Settings, href: "/app/settings" },
+  { id: "workspaces", label: "Workspaces", icon: LayoutGrid, href: undefined },
+  { id: "studio", label: "Studio", icon: Wrench, href: undefined },
+  { id: "public", label: "Public", icon: Globe, href: undefined },
 ];
 
-// Legacy section-based secondary nav retained for compatibility with
-// any consumers (mobile copilot context, etc.) that still inspect the
-// Workspaces / Studio / Public groupings. The new rail no longer renders
-// these directly — see moreNav / comingSoonNav below.
+// Legacy section-based secondary nav retained for compatibility.
 const _legacySecondaryNav: Record<string, NavItem[]> = {
   workspaces: [
+    { label: "Revenue", href: "/app/commerce", icon: Landmark },
     { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
-    { label: "Inbox", href: "/app/inbox", icon: Mail },
-    { label: "Calendar", href: "/app/calendar", icon: Calendar },
     { label: "Bookings", href: "/app/bookings", icon: Calendar },
-    { label: "Finance", href: "/app/finance", icon: Landmark },
-    { label: "Accounting", href: "/app/accounting", icon: Calculator },
-    { label: "Revenue", href: "/app/commerce", icon: CreditCard },
-    { label: "Payments", href: "/app/payments", icon: CreditCard },
-    { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle },
-    { label: "Content", href: "/app/marketing", icon: Megaphone },
-    { label: "Automations", href: "/app/automations", icon: Zap },
+    { label: "Calendar", href: "/app/calendar", icon: Calendar },
+    { label: "Flows", href: "/app/automations", icon: Zap },
     { label: "Projects", href: "/app/projects", icon: FolderKanban },
-    { label: "Expenses", href: "/app/expenses", icon: Receipt },
+    { label: "Inbox", href: "/app/inbox", icon: Mail },
+    { label: "Content", href: "/app/marketing", icon: Megaphone },
     { label: "Reports", href: "/app/reports", icon: BarChart3 },
     { label: "Documents", href: "/app/documents", icon: FileText, featureKey: "nav.workspaces.documents" },
     { label: "SEO", href: "/app/seo", icon: SearchIcon2, featureKey: "nav.workspaces.seo" },
   ],
   studio: [
     { label: "Business", href: "/app/settings/business", icon: Building2 },
-    { label: "Services", href: "/app/commerce?tab=products", icon: Package, matchTab: "products" },
-    { label: "Team", href: "/app/settings/team", icon: Users2 },
+    { label: "Products", href: "/app/store?tab=catalog", icon: Package, matchTab: "catalog" },
+    { label: "Services", href: "/app/bookings?tab=catalog", icon: Briefcase, matchTab: "catalog" },
+    { label: "Storefront", href: "/app/store", icon: Store },
     { label: "Branding", href: "/app/profile", icon: Palette },
-    { label: "Connect", href: "/app/connect", icon: Plug },
+    { label: "Flows", href: "/app/automations", icon: Zap },
+    { label: "Team", href: "/app/settings/team", icon: Users2 },
+    { label: "Integrations", href: "/app/connect", icon: Plug },
     { label: "Templates", href: "/app/settings/templates", icon: FileText },
-    { label: "Emails", href: "/app/settings/notifications", icon: Mail },
+    { label: "Billing", href: "/app/settings/billing", icon: CreditCard },
   ],
   public: [
-    { label: "Site editor", href: "/app/presence", icon: Globe },
-    { label: "Community", href: "/app/community", icon: MessageCircle, featureKey: "nav.public.community" },
-    { label: "Learn", href: "/app/learn", icon: BookOpen, featureKey: "nav.public.learn" },
-    { label: "Marketplace", href: "/app/marketplace", icon: Globe, featureKey: "nav.public.marketplace" },
+    { label: "Booking Page", href: "/app/bookings", icon: Calendar },
+    { label: "Payment Page", href: "/app/commerce?tab=payments", icon: CreditCard, matchTab: "payments" },
+    { label: "Intake Forms", href: "/app/crm/intake", icon: FileText },
+    { label: "Business Profile", href: "/app/presence", icon: Globe },
+    { label: "Share Links", href: "/app/commerce?tab=quotes", icon: Share2, matchTab: "quotes" },
   ],
 };
 void _legacySecondaryNav;
 
-// Secondary/utility surfaces: still reachable via the "More" expander,
-// but visually demoted out of the primary rail.
-const moreNav: NavItem[] = [
-  { label: "Inbox", href: "/app/inbox", icon: Mail },
+// Workspaces = daily execution (money, time, people)
+const workspacesNav: NavItem[] = [
+  { label: "Revenue", href: "/app/commerce", icon: Landmark },
+  { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
   { label: "Bookings", href: "/app/bookings", icon: Calendar },
-  { label: "Finance", href: "/app/finance", icon: Landmark },
-  { label: "Accounting", href: "/app/accounting", icon: Calculator },
-  { label: "Payments", href: "/app/payments", icon: CreditCard },
-  { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle },
-  { label: "Automations", href: "/app/automations", icon: Zap },
+  { label: "Calendar", href: "/app/calendar", icon: Calendar },
+  { label: "Flows", href: "/app/automations", icon: Zap },
   { label: "Projects", href: "/app/projects", icon: FolderKanban },
-  { label: "Expenses", href: "/app/expenses", icon: Receipt },
-  { label: "Reports", href: "/app/reports", icon: BarChart3 },
-  { label: "Procurement", href: "/app/procurement", icon: ShoppingCart },
-  { label: "Inventory", href: "/app/commerce?tab=inventory", icon: Package },
-  { label: "Team", href: "/app/settings/team", icon: Users2 },
-  { label: "Connect", href: "/app/connect", icon: Plug },
-  { label: "Branding", href: "/app/profile", icon: Palette },
-  { label: "Site editor", href: "/app/presence", icon: Globe },
-  { label: "SEO", href: "/app/seo", icon: SearchIcon2, featureKey: "nav.workspaces.seo" },
-  { label: "Developer", href: "/app/settings/developers", icon: Wrench },
+  { label: "Inbox", href: "/app/inbox", icon: Mail },
+  { label: "Content", href: "/app/marketing", icon: Megaphone, dormantFlag: "contentScheduler" },
+  { label: "Helpdesk", href: "/app/helpdesk", icon: LifeBuoy },
+  { label: "Structure", href: "/app/structure", icon: Network },
+  { label: "Operations", href: "/app/operations", icon: Activity },
 ];
 
-// Dormant modules — only rendered in the "Coming soon" section when their
-// static featureFlag is enabled (dev defaults on, prod off).
+// Studio = build & configure (scalability)
+const studioNav: NavItem[] = [
+  { label: "Storefront", href: "/app/store", icon: Store },
+  { label: "Settings", href: "/app/settings", icon: Settings },
+];
+
+// Public = customer-facing surfaces
+const publicNav: NavItem[] = [
+  { label: "Intake Forms", href: "/app/crm/intake", icon: FileText },
+  { label: "Business Profile", href: "/app/presence", icon: Globe },
+];
+
+// Dormant modules — rendered when feature flags enable them
 const comingSoonNav: NavItem[] = [
   { label: "Documents", href: "/app/documents", icon: FileText, dormantFlag: "documents" },
-  { label: "Content", href: "/app/marketing", icon: Megaphone, dormantFlag: "contentScheduler" },
   { label: "Community", href: "/app/community", icon: MessageCircle, dormantFlag: "community" },
   { label: "Learn", href: "/app/learn", icon: BookOpen, dormantFlag: "learning" },
   { label: "Marketplace", href: "/app/marketplace", icon: Globe, dormantFlag: "marketplaceBrowsing" },
@@ -349,11 +360,11 @@ const comingSoonNav: NavItem[] = [
 ];
 
 const mobileBottomNav = [
-  { label: "KEYFLOW", href: "/app/keyflow-command", icon: Radar },
-  { label: "Revenue", href: "/app/commerce", icon: CreditCard },
-  { label: "Calendar", href: "/app/calendar", icon: Calendar },
-  { label: "Clients", href: "/app/crm/clients", icon: Users },
-  { label: "More", href: "#more", icon: MoreHorizontal },
+  { label: "Cockpit", href: "/app/keyflow-command", icon: Zap },
+  { label: "Workspaces", href: "#workspaces", icon: LayoutGrid },
+  { label: "AI", href: "/app/keyflow-command?mode=key", icon: Sparkles },
+  { label: "Notifications", href: "#notifications", icon: Bell },
+  { label: "Profile", href: "/app/profile", icon: User },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -393,12 +404,13 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     if (pathname.startsWith("/app/settings")) return "settings";
     if (pathname.startsWith("/app/store")) return "store";
     if (pathname.startsWith("/app/profile")) return "profile";
+    if (pathname.startsWith("/app/structure")) return "flows";
     return "cockpit";
   }, [pathname]);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [drawerSurface, setDrawerSurface] = useState<"workspaces" | "studio" | "public" | null>(null);
 
   useEffect(() => {
-    setMoreOpen(false);
+    setDrawerSurface(null);
   }, [pathname]);
 
   const isSecondaryActive = useCallback((item: NavItem) => {
@@ -445,17 +457,46 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     },
     [],
   );
-  const visibleMoreNav = useMemo(
-    () => moreNav.filter((i) => !isItemHiddenByDormantFlag(i)),
+  // Progressive disclosure mode (startup / growth / enterprise)
+  const [disclosureMode, setDisclosureModeState] = useState<DisclosureMode>(getDisclosureMode);
+
+  const visibleWorkspacesNav = useMemo(
+    () => workspacesNav.filter((i) => {
+      if (isItemHiddenByDormantFlag(i)) return false;
+      if (disclosureMode === "enterprise") return true;
+      return MODE_WORKSPACE_ITEMS[disclosureMode].includes(i.label);
+    }),
+    [isItemHiddenByDormantFlag, disclosureMode],
+  );
+  const visibleStudioNav = useMemo(
+    () => studioNav.filter((i) => {
+      if (isItemHiddenByDormantFlag(i)) return false;
+      if (disclosureMode === "enterprise") return true;
+      return MODE_STUDIO_ITEMS[disclosureMode].includes(i.label);
+    }),
+    [isItemHiddenByDormantFlag, disclosureMode],
+  );
+  const visiblePublicNav = useMemo(
+    () => publicNav.filter((i) => !isItemHiddenByDormantFlag(i)),
     [isItemHiddenByDormantFlag],
   );
   const visibleComingSoonNav = useMemo(
     () => comingSoonNav.filter((i) => !isItemHiddenByDormantFlag(i)),
     [isItemHiddenByDormantFlag],
   );
-  const showGamificationBadges = dormantFeatureFlags.gamificationBadges;
+  // Gamification badges hidden (dormant module sunset)
+  // const showGamificationBadges = dormantFeatureFlags.gamificationBadges;
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ mode: DisclosureMode }>) => {
+      setDisclosureModeState(e.detail.mode);
+    };
+    window.addEventListener("kf:disclosure-mode-changed", handler as EventListener);
+    return () => window.removeEventListener("kf:disclosure-mode-changed", handler as EventListener);
+  }, []);
 
   useEffect(() => {
     setMobileDrawerOpen(false);
@@ -466,13 +507,18 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         const isUuid = /^[0-9a-f-]{20,}$/i.test(last || "");
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
-          app: "KEYFLOW", crm: "CRM", pipeline: "Contacts", commerce: "Revenue",
-          bookings: "Calendar", marketing: "Content", expenses: "Expenses",
-          projects: "Projects", documents: "Documents", automations: "Automations", reports: "Reports",
-          store: "Store", settings: "Studio", learn: "Learn",
+          app: "KEYFLOW", crm: "Contacts", pipeline: "Contacts", commerce: "Revenue",
+          bookings: "Bookings", marketing: "Content", expenses: "Studio",
+          projects: "Projects", documents: "Documents", automations: "Flows", reports: "Reports",
+          store: "Storefront", settings: "Studio", learn: "Learn",
           community: "Community", marketplace: "Marketplace",
-          "control-tower": "KEYFLOW",
-          "keyflow-command": "KEYFLOW",
+          "control-tower": "Cockpit",
+          "keyflow-command": "Cockpit",
+          structure: "Studio",
+          inbox: "Inbox",
+          calendar: "Calendar",
+          presence: "Public",
+          connect: "Integrations",
         };
         const label = labelMap[labelSegment || ""] || (labelSegment ? labelSegment.charAt(0).toUpperCase() + labelSegment.slice(1) : "");
         if (label) {
@@ -637,7 +683,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           >
             <Link
               href="/app/keyflow-command"
-              className="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 mb-3"
+              className="h-10 w-10 min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center flex-shrink-0 mb-3"
               style={{ background: "hsl(var(--kf-accent1))" }}
               title="KEYFLOW — home"
             >
@@ -647,6 +693,36 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             {primaryNav.map((item) => {
               const Icon = item.icon;
               const isActive = isPrimaryActive(item);
+              const isSurface = !item.href;
+              const surfaceId = item.id as string;
+              const isSurfaceOpen = drawerSurface === surfaceId;
+
+              if (isSurface) {
+                return (
+                  <button
+                    key={item.label}
+                    onClick={() => setDrawerSurface((prev) => (prev === surfaceId ? null : surfaceId as "workspaces" | "studio" | "public"))}
+                    className={cn(
+                      "w-11 h-11 min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center transition-all relative group",
+                      isSurfaceOpen
+                        ? "text-foreground bg-muted/50"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                    )}
+                    title={item.label}
+                    aria-label={item.label}
+                    aria-expanded={isSurfaceOpen}
+                  >
+                    {isSurfaceOpen && (
+                      <div
+                        className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[14px] w-[3px] h-5 rounded-r-full"
+                        style={{ background: "hsl(var(--kf-accent1))" }}
+                      />
+                    )}
+                    <Icon className="w-[18px] h-[18px]" />
+                  </button>
+                );
+              }
+
               return (
                 <Link
                   key={item.label}
@@ -659,7 +735,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                   )}
                   title={item.label}
                   aria-label={item.label}
-                  onClick={() => setMoreOpen(false)}
+                  onClick={() => setDrawerSurface(null)}
                 >
                   {isActive && (
                     <div
@@ -672,43 +748,11 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
               );
             })}
 
-            <button
-              key="more"
-              onClick={() => setMoreOpen((v) => !v)}
-              className={cn(
-                "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group",
-                moreOpen
-                  ? "text-foreground bg-muted/50"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
-              )}
-              title="More"
-              aria-label="More"
-              aria-expanded={moreOpen}
-            >
-              <MoreHorizontal className="w-[18px] h-[18px]" />
-            </button>
-
             <div className="mt-auto flex flex-col items-center gap-1">
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "chat" } }))}
-                className="w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                title="Ask KEY (⌘J)"
-                aria-label="Ask KEY"
-              >
-                <Brain className="w-[18px] h-[18px]" />
-              </button>
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "voice" } }))}
-                className="w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                title="Talk to KEY"
-                aria-label="Talk to KEY"
-              >
-                <MessageCircle className="w-[18px] h-[18px]" />
-              </button>
               {isAdminUser && (
                 <Link
                   href="/admin"
-                  className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+                  className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
                   title="Owner Console"
                 >
                   <Shield className="w-[18px] h-[18px]" />
@@ -730,77 +774,180 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             </div>
           </div>
 
-          {moreOpen && (
+          {drawerSurface !== null && (
             <div
               className="w-[208px] border-r border-border h-full flex flex-col overflow-hidden"
               style={{ background: "hsl(var(--kf-sidebar-bg) / 0.7)" }}
             >
               <div className="px-3 py-3 border-b border-border/50 flex items-center justify-between">
                 <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  More
+                  {drawerSurface === "workspaces" ? "Workspaces" : drawerSurface === "studio" ? "Studio" : "Public"}
                 </h2>
                 <button
-                  onClick={() => setMoreOpen(false)}
+                  onClick={() => setDrawerSurface(null)}
                   className="p-0.5 rounded text-muted-foreground hover:text-foreground"
-                  aria-label="Close more menu"
+                  aria-label="Close menu"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto py-1.5 px-1.5">
-                <div className="flex flex-col gap-px">
-                  {visibleMoreNav.map((item) => {
-                    const Icon = item.icon;
-                    const active = isSecondaryActive(item);
-                    const showConnectorBadge =
-                      item.href === "/app/connect" && connectorAlertCount > 0;
-                    const isLocked = isFeatureLocked(item);
-                    if (isLocked) {
+                {/* WORKSPACES */}
+                <div className="mb-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 mb-1">
+                    Workspaces
+                  </div>
+                  <div className="flex flex-col gap-px">
+                    {visibleWorkspacesNav.map((item) => {
+                      const Icon = item.icon;
+                      const active = isSecondaryActive(item);
+                      const isLocked = isFeatureLocked(item);
+                      if (isLocked) {
+                        return (
+                          <button
+                            key={item.href + item.label}
+                            type="button"
+                            aria-disabled="true"
+                            title="future keyflow"
+                            onClick={(e) => e.preventDefault()}
+                            className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground/50 cursor-not-allowed opacity-60"
+                          >
+                            <Icon className="w-4 h-4 flex-shrink-0" />
+                            <span>{item.label}</span>
+                            <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
+                          </button>
+                        );
+                      }
                       return (
-                        <button
+                        <Link
                           key={item.href + item.label}
-                          type="button"
-                          aria-disabled="true"
-                          title="future keyflow"
-                          onClick={(e) => e.preventDefault()}
-                          className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground/50 cursor-not-allowed opacity-60"
+                          href={item.href}
+                          className={cn(
+                            "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all",
+                            active
+                              ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                          )}
                         >
                           <Icon className="w-4 h-4 flex-shrink-0" />
                           <span>{item.label}</span>
-                          <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
-                        </button>
+                          {active && (
+                            <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/50" />
+                          )}
+                        </Link>
                       );
-                    }
-                    return (
-                      <Link
-                        key={item.href + item.label}
-                        href={item.href}
-                        className={cn(
-                          "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all",
-                          active
-                            ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                        )}
-                      >
-                        <Icon className="w-4 h-4 flex-shrink-0" />
-                        <span>{item.label}</span>
-                        {showConnectorBadge && (
-                          <span
-                            className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
-                            style={{ background: "hsl(var(--kf-accent1))" }}
-                            title={`${connectorAlertCount} connector${connectorAlertCount === 1 ? "" : "s"} need${connectorAlertCount === 1 ? "s" : ""} attention`}
-                            aria-label={`${connectorAlertCount} connectors need attention`}
-                          >
-                            {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
-                          </span>
-                        )}
-                        {active && !showConnectorBadge && (
-                          <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/50" />
-                        )}
-                      </Link>
-                    );
-                  })}
+                    })}
+                  </div>
                 </div>
+
+                {/* STUDIO */}
+                <div className="mb-3 pt-3 border-t border-border/40">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 mb-1">
+                    Studio
+                  </div>
+                  <div className="flex flex-col gap-px">
+                    {visibleStudioNav.map((item) => {
+                      const Icon = item.icon;
+                      const active = isSecondaryActive(item);
+                      const showConnectorBadge =
+                        item.href === "/app/connect" && connectorAlertCount > 0;
+                      const isLocked = isFeatureLocked(item);
+                      if (isLocked) {
+                        return (
+                          <button
+                            key={item.href + item.label}
+                            type="button"
+                            aria-disabled="true"
+                            title="future keyflow"
+                            onClick={(e) => e.preventDefault()}
+                            className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground/50 cursor-not-allowed opacity-60"
+                          >
+                            <Icon className="w-4 h-4 flex-shrink-0" />
+                            <span>{item.label}</span>
+                            <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
+                          </button>
+                        );
+                      }
+                      return (
+                        <Link
+                          key={item.href + item.label}
+                          href={item.href}
+                          className={cn(
+                            "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all",
+                            active
+                              ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                          )}
+                        >
+                          <Icon className="w-4 h-4 flex-shrink-0" />
+                          <span>{item.label}</span>
+                          {showConnectorBadge && (
+                            <span
+                              className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
+                              style={{ background: "hsl(var(--kf-accent1))" }}
+                              title={`${connectorAlertCount} connector${connectorAlertCount === 1 ? "" : "s"} need${connectorAlertCount === 1 ? "s" : ""} attention`}
+                              aria-label={`${connectorAlertCount} connectors need attention`}
+                            >
+                              {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
+                            </span>
+                          )}
+                          {active && !showConnectorBadge && (
+                            <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/50" />
+                          )}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* PUBLIC */}
+                <div className="mb-3 pt-3 border-t border-border/40">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 mb-1">
+                    Public
+                  </div>
+                  <div className="flex flex-col gap-px">
+                    {visiblePublicNav.map((item) => {
+                      const Icon = item.icon;
+                      const active = isSecondaryActive(item);
+                      const isLocked = isFeatureLocked(item);
+                      if (isLocked) {
+                        return (
+                          <button
+                            key={item.href + item.label}
+                            type="button"
+                            aria-disabled="true"
+                            title="future keyflow"
+                            onClick={(e) => e.preventDefault()}
+                            className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground/50 cursor-not-allowed opacity-60"
+                          >
+                            <Icon className="w-4 h-4 flex-shrink-0" />
+                            <span>{item.label}</span>
+                            <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
+                          </button>
+                        );
+                      }
+                      return (
+                        <Link
+                          key={item.href + item.label}
+                          href={item.href}
+                          className={cn(
+                            "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all",
+                            active
+                              ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                          )}
+                        >
+                          <Icon className="w-4 h-4 flex-shrink-0" />
+                          <span>{item.label}</span>
+                          {active && (
+                            <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/50" />
+                          )}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {visibleComingSoonNav.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-border/40">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 mb-1">
@@ -885,6 +1032,60 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 <Search className="w-5 h-5" />
               </button>
 
+              {/* Disclosure Mode Switcher */}
+              <div className="relative" ref={modeMenuRef}>
+                <button
+                  onClick={() => setModeMenuOpen((v) => !v)}
+                  className={cn(
+                    "hidden sm:flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors shrink-0",
+                    disclosureMode === "startup"
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15"
+                      : disclosureMode === "growth"
+                        ? "border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/15"
+                        : "border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/15"
+                  )}
+                  title={`Mode: ${MODE_LABELS[disclosureMode].title}`}
+                >
+                  <span>{MODE_LABELS[disclosureMode].title}</span>
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                {modeMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-[55]" onClick={() => setModeMenuOpen(false)} />
+                    <div className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-xl z-[56] p-1.5">
+                      <div className="px-3 py-2">
+                        <p className="text-xs font-semibold text-foreground">Workspace Mode</p>
+                        <p className="text-[11px] text-muted-foreground">Show only what you need</p>
+                      </div>
+                      <div className="border-t border-border my-1" />
+                      {(["startup", "growth", "enterprise"] as DisclosureMode[]).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => {
+                            setDisclosureMode(mode);
+                            setModeMenuOpen(false);
+                          }}
+                          className={cn(
+                            "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between",
+                            disclosureMode === mode
+                              ? "bg-muted font-medium"
+                              : "hover:bg-muted/50 text-muted-foreground"
+                          )}
+                        >
+                          <div>
+                            <p className="text-sm">{MODE_LABELS[mode].title}</p>
+                            <p className="text-[11px] text-muted-foreground">{MODE_LABELS[mode].subtitle}</p>
+                          </div>
+                          {disclosureMode === mode && (
+                            <div className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent1))]" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
               <div className="relative">
                 <button
                   onClick={() => setAddMenuOpen((v) => !v)}
@@ -900,7 +1101,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 )}
               </div>
 
-              {showGamificationBadges && <MissionsButton />}
+              {/* MissionsButton hidden — gamification module is dormant */}
 
               <div className="relative" ref={notifRef}>
                 <button
@@ -1136,23 +1337,41 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                     "active"
                 )}
               >
-                <Radar className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                <span>KEYFLOW</span>
+                <Zap className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                <span>Cockpit</span>
               </Link>
 
+              {/* WORKSPACES */}
               <div className="mt-2">
                 <div className="kf-section-label flex items-center gap-1.5">
                   <LayoutGrid className="w-3 h-3" />
-                  Primary
+                  Workspaces
                 </div>
                 <div className="flex flex-col gap-px">
-                  {primaryNav.map((item) => {
+                  {visibleWorkspacesNav.map((item) => {
                     const Icon = item.icon;
-                    const active = isPrimaryActive(item);
+                    const active = isSecondaryActive(item);
+                    const isLocked = isFeatureLocked(item);
+                    if (isLocked) {
+                      return (
+                        <button
+                          key={item.href + item.label}
+                          type="button"
+                          aria-disabled="true"
+                          title="future keyflow"
+                          onClick={(e) => e.preventDefault()}
+                          className="kf-nav-item py-2.5 w-full text-left opacity-60 cursor-not-allowed"
+                        >
+                          <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                          <span>{item.label}</span>
+                          <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
+                        </button>
+                      );
+                    }
                     return (
                       <Link
-                        key={item.label}
-                        href={item.href ?? "#"}
+                        key={item.href + item.label}
+                        href={item.href}
                         onClick={() => setMobileDrawerOpen(false)}
                         className={cn("kf-nav-item py-2.5 active:scale-[0.98]", active && "active")}
                       >
@@ -1164,13 +1383,14 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
 
+              {/* STUDIO */}
               <div className="mt-2">
                 <div className="kf-section-label flex items-center gap-1.5">
-                  <MoreHorizontal className="w-3 h-3" />
-                  More
+                  <Wrench className="w-3 h-3" />
+                  Studio
                 </div>
                 <div className="flex flex-col gap-px">
-                  {visibleMoreNav.map((item) => {
+                  {visibleStudioNav.map((item) => {
                     const Icon = item.icon;
                     const active = isSecondaryActive(item);
                     const showConnectorBadge =
@@ -1210,6 +1430,48 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                             {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
                           </span>
                         )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* PUBLIC */}
+              <div className="mt-2">
+                <div className="kf-section-label flex items-center gap-1.5">
+                  <Globe className="w-3 h-3" />
+                  Public
+                </div>
+                <div className="flex flex-col gap-px">
+                  {visiblePublicNav.map((item) => {
+                    const Icon = item.icon;
+                    const active = isSecondaryActive(item);
+                    const isLocked = isFeatureLocked(item);
+                    if (isLocked) {
+                      return (
+                        <button
+                          key={item.href + item.label}
+                          type="button"
+                          aria-disabled="true"
+                          title="future keyflow"
+                          onClick={(e) => e.preventDefault()}
+                          className="kf-nav-item py-2.5 w-full text-left opacity-60 cursor-not-allowed"
+                        >
+                          <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                          <span>{item.label}</span>
+                          <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
+                        </button>
+                      );
+                    }
+                    return (
+                      <Link
+                        key={item.href + item.label}
+                        href={item.href}
+                        onClick={() => setMobileDrawerOpen(false)}
+                        className={cn("kf-nav-item py-2.5 active:scale-[0.98]", active && "active")}
+                      >
+                        <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                        <span>{item.label}</span>
                       </Link>
                     );
                   })}
@@ -1289,16 +1551,42 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         <div className="flex items-center justify-around px-1" style={{ height: "56px" }}>
           {mobileBottomNav.map((item) => {
             const Icon = item.icon;
-            if (item.href === "#more") {
+            if (item.href === "#workspaces") {
               return (
                 <button
-                  key="more"
+                  key="workspaces"
                   onClick={() => setMobileDrawerOpen(true)}
-                  className="flex flex-col items-center justify-center min-w-[56px] min-h-[44px] py-1 transition-all text-muted-foreground active:scale-95"
-                  aria-label="More navigation options"
+                  className={cn(
+                    "flex flex-col items-center justify-center min-w-[56px] min-h-[44px] py-1 transition-all active:scale-95",
+                    mobileDrawerOpen ? "" : "text-muted-foreground"
+                  )}
+                  style={mobileDrawerOpen ? { color: "hsl(var(--kf-accent1))" } : undefined}
+                  aria-label="Workspaces"
                 >
                   <Icon className="w-[20px] h-[20px]" />
                   <span className="text-[10px] mt-0.5">{item.label}</span>
+                </button>
+              );
+            }
+            if (item.href === "#notifications") {
+              return (
+                <button
+                  key="notifications"
+                  onClick={() => setNotifOpen((v) => !v)}
+                  className={cn(
+                    "flex flex-col items-center justify-center min-w-[56px] min-h-[44px] py-1 transition-all active:scale-95 relative",
+                    notifOpen ? "" : "text-muted-foreground"
+                  )}
+                  style={notifOpen ? { color: "hsl(var(--kf-accent1))" } : undefined}
+                  aria-label="Notifications"
+                >
+                  <Icon className="w-[20px] h-[20px]" />
+                  <span className="text-[10px] mt-0.5">{item.label}</span>
+                  {unreadCount > 0 && (
+                    <span className="absolute top-0 right-1 h-3.5 w-3.5 rounded-full text-[9px] font-bold flex items-center justify-center text-white" style={{ background: "hsl(var(--kf-accent1))" }}>
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
                 </button>
               );
             }
@@ -1324,6 +1612,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <PlanLimitDialog planLimit={planLimitHit} onClose={clearPlanLimit} />
       <KeyflowOSStoreDrawer open={kfStoreOpen} onClose={() => setKfStoreOpen(false)} />
       <KeyAgent currentModule={copilotModule} />
+      <MobileFab />
     </div>
   );
 }

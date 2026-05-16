@@ -23,6 +23,12 @@ interface AuthenticatedRequest extends Request {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCommandService } from './key-command.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
+import { AgentHealthService } from './agent-health.service';
+import { JourneyOrchestratorService } from './journey-orchestrator.service';
+import { MorningBriefingService } from './morning-briefing.service';
+import { UnifiedInboxService } from './unified-inbox.service';
+import { GoalTrackerService } from './goal-tracker.service';
+
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
 const ALLOWED_MEMORY_CATEGORIES = new Set<string>([
@@ -65,6 +71,11 @@ export class AiController {
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(KeyCommandService) private readonly keyCommand: KeyCommandService,
     @Inject(AutopilotRulesService) private readonly autopilot: AutopilotRulesService,
+    @Inject(AgentHealthService) private readonly agentHealth: AgentHealthService,
+    @Inject(JourneyOrchestratorService) private readonly journeyOrchestrator: JourneyOrchestratorService,
+    @Inject(MorningBriefingService) private readonly morningBriefingSvc: MorningBriefingService,
+    @Inject(UnifiedInboxService) private readonly inbox: UnifiedInboxService,
+    @Inject(GoalTrackerService) private readonly goalTracker: GoalTrackerService,
   ) {}
 
   @Get('health')
@@ -362,6 +373,26 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/approvals/batch-resolve')
+  async resolveApprovalsBatch(
+    @Param('businessId') businessId: string,
+    @Body() body: { approvalIds: string[]; resolution: 'approved' | 'rejected' },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const userId = req?.user?.id;
+    if (!userId) throw new UnauthorizedException('Authenticated user required to resolve approvals');
+    return this.governance.resolveApprovalsBatch(businessId, body.approvalIds, body.resolution, userId);
+  }
+
+
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/health')
+  async getAgentHealth(@Param('businessId') businessId: string) {
+    return this.agentHealth.getHealthDashboard(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/governance')
   async getGovernanceSettings(@Param('businessId') businessId: string) {
     return this.governance.getAutonomySettings(businessId);
@@ -599,7 +630,7 @@ export class AiController {
 
     if (dashboard.staleLeads > 0) {
       priorities.push({
-        id: `stale-leads-${priorityIdx++}`,
+        id: `stale-leads-${priorityIdx}`,
         type: 'opportunity',
         severity: 'warning',
         title: `${dashboard.staleLeads} stale leads need attention`,
@@ -1061,5 +1092,233 @@ export class AiController {
     @Body() body: { enabled: boolean },
   ) {
     return this.autopilot.updateRule(businessId, ruleId, body.enabled);
+  }
+
+  // ── Journey Orchestrator (Phase 7) ──────────────────────────────────────
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/journeys')
+  @CrmRateLimit(30, 60_000)
+  async listJourneys(@Param('businessId') businessId: string) {
+    const instances = await this.journeyOrchestrator.getJourneyInstances(businessId);
+    return { instances };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/journeys/:instanceId')
+  @CrmRateLimit(30, 60_000)
+  async getJourneyInstance(
+    @Param('businessId') businessId: string,
+    @Param('instanceId') instanceId: string,
+  ) {
+    return this.journeyOrchestrator.getJourneyInstance(instanceId, businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/journeys/:key/trigger')
+  @CrmRateLimit(10, 60_000)
+  async triggerJourney(
+    @Param('businessId') businessId: string,
+    @Param('key') key: string,
+    @Body() body: { payload?: Record<string, any> },
+  ) {
+    const { getJourneyTemplate } = await import('./journey-templates');
+    const template = getJourneyTemplate(key);
+    if (!template) throw new BadRequestException(`Unknown journey template: ${key}`);
+    return this.journeyOrchestrator.executeJourney(businessId, template, body.payload ?? {});
+  }
+
+  // ── Morning Briefing (Phase 7) ──────────────────────────────────────────
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/briefing')
+  @CrmRateLimit(10, 60_000)
+  async getBriefing(@Param('businessId') businessId: string) {
+    return this.morningBriefingSvc.generateBriefing(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/briefing/:planId/execute-all')
+  @CrmRateLimit(10, 60_000)
+  async executeAllBriefingCards(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+  ) {
+    return this.morningBriefingSvc.executeAllBriefingCards(businessId, planId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/briefing/:planId/skip')
+  @CrmRateLimit(10, 60_000)
+  async skipBriefing(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+  ) {
+    return this.morningBriefingSvc.skipBriefing(businessId, planId);
+  }
+
+  // ── Unified Inbox (Phase 7) ─────────────────────────────────────────────
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/inbox')
+  @CrmRateLimit(60, 60_000)
+  async getInbox(
+    @Param('businessId') businessId: string,
+    @Query('channel') channel?: string,
+    @Query('status') status?: string,
+    @Query('role') role?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.inbox.getInbox(businessId, {
+      channel,
+      status,
+      assignedRole: role,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/inbox/:threadId')
+  @CrmRateLimit(60, 60_000)
+  async getThread(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+  ) {
+    return this.inbox.getThread(threadId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/inbox/:threadId/reply')
+  @CrmRateLimit(30, 60_000)
+  async replyToThread(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+    @Body() body: { body: string; role?: string },
+  ) {
+    return this.inbox.recordOutboundMessage(threadId, body.body, { role: body.role });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/inbox/:threadId/resolve')
+  @CrmRateLimit(30, 60_000)
+  async resolveThread(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+  ) {
+    return this.inbox.resolveThread(threadId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/inbox/:threadId/assign-role')
+  @CrmRateLimit(30, 60_000)
+  async assignThreadRole(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+    @Body() body: { role: string },
+  ) {
+    return this.inbox.assignRole(threadId, body.role);
+  }
+
+  // ── Goal Tracker (Phase 7) ──────────────────────────────────────────────
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/goals')
+  @CrmRateLimit(60, 60_000)
+  async listGoals(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+    @Query('role') role?: string,
+  ) {
+    return this.goalTracker.getGoals(businessId, { status, category, role });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/goals')
+  @CrmRateLimit(30, 60_000)
+  async createGoal(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      title: string;
+      description?: string;
+      category: string;
+      targetValue?: number;
+      unit?: string;
+      deadline?: string;
+      role?: string;
+      autoActions?: boolean;
+    },
+  ) {
+    return this.goalTracker.createGoal(businessId, {
+      ...body,
+      deadline: body.deadline ? new Date(body.deadline) : undefined,
+      role: body.role as any,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/goals/:goalId')
+  @CrmRateLimit(60, 60_000)
+  async getGoal(
+    @Param('businessId') businessId: string,
+    @Param('goalId') goalId: string,
+  ) {
+    return this.goalTracker.getGoal(businessId, goalId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/goals/:goalId')
+  @CrmRateLimit(30, 60_000)
+  async updateGoal(
+    @Param('businessId') businessId: string,
+    @Param('goalId') goalId: string,
+    @Body() body: Partial<{
+      title: string;
+      description: string;
+      targetValue: number;
+      unit: string;
+      deadline: string;
+      status: string;
+      priority: number;
+      role: string;
+      autoActions: boolean;
+    }>,
+  ) {
+    return this.goalTracker.updateGoal(businessId, goalId, {
+      ...body,
+      deadline: body.deadline ? new Date(body.deadline) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/goals/:goalId')
+  @CrmRateLimit(30, 60_000)
+  async deleteGoal(
+    @Param('businessId') businessId: string,
+    @Param('goalId') goalId: string,
+  ) {
+    return this.goalTracker.deleteGoal(businessId, goalId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/goals/:goalId/progress')
+  @CrmRateLimit(30, 60_000)
+  async updateGoalProgress(
+    @Param('businessId') businessId: string,
+    @Param('goalId') goalId: string,
+  ) {
+    return this.goalTracker.updateProgress(businessId, goalId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/goals/:goalId/actions')
+  @CrmRateLimit(30, 60_000)
+  async suggestGoalActions(
+    @Param('businessId') businessId: string,
+    @Param('goalId') goalId: string,
+  ) {
+    return this.goalTracker.suggestActions(businessId, goalId);
   }
 }

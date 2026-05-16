@@ -19,6 +19,10 @@ export class CreateTaskDto {
   assigneeId?: string;
 
   @IsOptional()
+  @IsString()
+  assigneeType?: string;
+
+  @IsOptional()
   @IsISO8601()
   remindAt?: string;
 

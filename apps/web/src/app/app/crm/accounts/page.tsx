@@ -186,7 +186,8 @@ export default function AccountsPage() {
         </div>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="min-w-full w-full text-sm">
             <thead className="bg-muted/30 text-xs text-muted-foreground">
               <tr>
                 <th className="p-2 text-left">Account</th>
@@ -221,6 +222,7 @@ export default function AccountsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

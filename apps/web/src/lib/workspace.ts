@@ -4,6 +4,7 @@ import { bootstrapIdentity } from "./client";
 
 const BUSINESS_ID_KEY = "kf_business_id";
 const TOKEN_KEY = "kf_token";
+const REFRESH_TOKEN_KEY = "kf_refresh_token";
 const BUSINESS_CACHE_KEY = "kf_business_cache";
 const USER_CACHE_KEY = "kf_user_cache";
 
@@ -167,12 +168,80 @@ export function setStoredBusinessId(id: string) {
  *   - Global 401 interceptor (token rejected by server → force re-auth)
  *   - <RequireAuth> when /identity/me reports no session
  */
+export function setStoredRefreshToken(token: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(REFRESH_TOKEN_KEY, token);
+}
+
+export function getStoredRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function clearStoredRefreshToken() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+let isRefreshing = false;
+let refreshPromise: Promise<boolean> | null = null;
+
+/**
+ * Attempt to refresh the Supabase access token using the stored refresh token.
+ * Returns true if successful and the new token is stored. Safe to call multiple
+ * times concurrently — only one refresh request will be in flight.
+ */
+export async function refreshAccessToken(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const refreshToken = getStoredRefreshToken();
+  if (!refreshToken || !SUPABASE_URL || !SUPABASE_ANON_KEY) return false;
+
+  if (isRefreshing && refreshPromise) {
+    return refreshPromise;
+  }
+
+  isRefreshing = true;
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.access_token) {
+        return false;
+      }
+      setStoredToken(data.access_token);
+      if (data.refresh_token) {
+        setStoredRefreshToken(data.refresh_token);
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      isRefreshing = false;
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 export function clearStoredBusinessId() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(BUSINESS_ID_KEY);
   window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(REFRESH_TOKEN_KEY);
   window.localStorage.removeItem(USER_CACHE_KEY);
   window.localStorage.removeItem(BUSINESS_CACHE_KEY);
+  window.localStorage.removeItem("kf_auth_mode");
   clearTokenCookie();
   clearBusinessIdCookie();
   userCache = null;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, emitUnauthorizedEvent, type PlanLimitError } from "./api";
+import { refreshAccessToken } from "./workspace";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 
@@ -180,6 +181,8 @@ const bookingSchema = z.object({
     bufferMins: z.number().nullable().optional(),
     leadTimeMins: z.number().nullable().optional(),
   }).nullable().optional(),
+  orgUnitId: z.string().nullable().optional(),
+  orgUnit: z.object({ id: z.string(), name: z.string() }).nullable().optional(),
   staff: z.object({
     id: z.string(),
     name: z.string(),
@@ -313,7 +316,13 @@ async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, op
   try {
     const sep = path.includes("?") ? "&" : "?";
     const url = `${API_BASE}${path}${sep}_t=${Date.now()}`;
-    const res = await fetch(url, { headers: getAuthHeaders(), cache: "no-store", signal: opts?.signal });
+    let res = await fetch(url, { headers: getAuthHeaders(), cache: "no-store", signal: opts?.signal });
+    if (res.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        res = await fetch(url, { headers: getAuthHeaders(), cache: "no-store", signal: opts?.signal });
+      }
+    }
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
       let message: string = res.statusText;
@@ -531,9 +540,10 @@ export async function fetchContactDetail(contactId: string, businessId: string =
   );
 }
 
-export async function fetchBookings(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchBookings(businessId: string = DEFAULT_BUSINESS_ID, orgUnitId?: string) {
+  const qs = orgUnitId ? `?orgUnitId=${encodeURIComponent(orgUnitId)}` : '';
   return apiGet(
-    `/bookings/businesses/${encodeURIComponent(businessId)}`,
+    `/bookings/businesses/${encodeURIComponent(businessId)}${qs}`,
     z.array(bookingSchema),
     fallbackBookings,
   );
@@ -1910,6 +1920,7 @@ export async function createBooking(input: {
   location?: string;
   locationPlaceId?: string;
   locationLatLng?: { lat: number; lng: number };
+  orgUnitId?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const res = await apiPost<Booking>({
@@ -1924,6 +1935,7 @@ export async function createBooking(input: {
       location: input.location ?? undefined,
       locationPlaceId: input.locationPlaceId ?? undefined,
       locationLatLng: input.locationLatLng ?? undefined,
+      orgUnitId: input.orgUnitId ?? undefined,
     },
   });
 
@@ -4358,6 +4370,7 @@ export type Project = {
   status: string;
   priority: string;
   color?: string;
+  hourlyRate?: number | null;
   contactId?: string;
   invoiceId?: string;
   bookingId?: string;
@@ -4376,6 +4389,8 @@ export type ProjectTask = {
   sortOrder: number;
   dueDate?: string;
   assigneeId?: string;
+  estimatedHours?: number | null;
+  trackedHours?: number;
 };
 
 export async function fetchProjects(businessId: string): Promise<ApiResult<Project[]>> {
@@ -4384,7 +4399,7 @@ export async function fetchProjects(businessId: string): Promise<ApiResult<Proje
 
 export async function createProject(
   businessId: string,
-  data: { name: string; description?: string; status?: string; priority?: string; color?: string; contactId?: string; dueDate?: string },
+  data: { name: string; description?: string; status?: string; priority?: string; color?: string; hourlyRate?: number; contactId?: string; dueDate?: string },
 ): Promise<ApiResult<Project>> {
   return apiPost<Project>({
     path: `/projects/businesses/${encodeURIComponent(businessId)}`,
@@ -4395,7 +4410,7 @@ export async function createProject(
 export async function updateProject(
   businessId: string,
   projectId: string,
-  data: Partial<{ name: string; description: string; status: string; priority: string; color: string; dueDate: string | null }>,
+  data: Partial<{ name: string; description: string; status: string; priority: string; color: string; hourlyRate: number | null; dueDate: string | null }>,
 ): Promise<ApiResult<Project>> {
   return apiPatch<Project>(
     `/projects/businesses/${encodeURIComponent(businessId)}/projects/${encodeURIComponent(projectId)}`,
@@ -4412,7 +4427,7 @@ export async function deleteProject(businessId: string, projectId: string): Prom
 export async function createProjectTask(
   businessId: string,
   projectId: string,
-  data: { title: string; description?: string; priority?: string; dueDate?: string },
+  data: { title: string; description?: string; priority?: string; dueDate?: string; estimatedHours?: number; trackedHours?: number },
 ): Promise<ApiResult<ProjectTask>> {
   return apiPost<ProjectTask>({
     path: `/projects/businesses/${encodeURIComponent(businessId)}/projects/${encodeURIComponent(projectId)}/tasks`,
@@ -4423,7 +4438,7 @@ export async function createProjectTask(
 export async function updateProjectTask(
   businessId: string,
   taskId: string,
-  data: Partial<{ title: string; isCompleted: boolean; priority: string; sortOrder: number; dueDate: string | null }>,
+  data: Partial<{ title: string; isCompleted: boolean; priority: string; sortOrder: number; dueDate: string | null; estimatedHours: number | null; trackedHours: number }>,
 ): Promise<ApiResult<ProjectTask>> {
   return apiPatch<ProjectTask>(
     `/projects/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`,
@@ -4474,6 +4489,55 @@ export async function createProjectFromTemplate(
     path: `/projects/businesses/${encodeURIComponent(businessId)}/from-template/${encodeURIComponent(templateId)}`,
     body: data ?? {},
   });
+}
+
+export type SupportTicket = {
+  id: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority: string;
+  source: string;
+  contactId?: string;
+  contact?: { id: string; firstName?: string; lastName?: string; email?: string; displayName?: string } | null;
+  assignedToId?: string;
+  assignee?: { id: string; name?: string; email: string } | null;
+  orgUnitId?: string;
+  orgUnit?: { id: string; name: string } | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function fetchSupportTickets(businessId: string, orgUnitId?: string): Promise<ApiResult<SupportTicket[]>> {
+  const qs = orgUnitId ? `?orgUnitId=${encodeURIComponent(orgUnitId)}` : '';
+  return apiGetSimple<SupportTicket[]>(`/helpdesk/businesses/${encodeURIComponent(businessId)}/tickets${qs}`);
+}
+
+export async function createSupportTicket(
+  businessId: string,
+  data: { title: string; description?: string; status?: string; priority?: string; contactId?: string; assignedToId?: string; orgUnitId?: string },
+): Promise<ApiResult<SupportTicket>> {
+  return apiPost<SupportTicket>({
+    path: `/helpdesk/businesses/${encodeURIComponent(businessId)}/tickets`,
+    body: data,
+  });
+}
+
+export async function updateSupportTicket(
+  businessId: string,
+  ticketId: string,
+  data: Partial<{ title: string; description: string; status: string; priority: string; contactId: string | null; assignedToId: string | null; orgUnitId: string | null }>,
+): Promise<ApiResult<SupportTicket>> {
+  return apiPatch<SupportTicket>(
+    `/helpdesk/businesses/${encodeURIComponent(businessId)}/tickets/${encodeURIComponent(ticketId)}`,
+    data,
+  );
+}
+
+export async function deleteSupportTicket(businessId: string, ticketId: string): Promise<ApiResult<unknown>> {
+  return apiDelete<unknown>(
+    `/helpdesk/businesses/${encodeURIComponent(businessId)}/tickets/${encodeURIComponent(ticketId)}`,
+  );
 }
 
 export type StorefrontSectionType = 'hero' | 'trust' | 'featured' | 'categories' | 'catalog' | 'testimonials' | 'faq' | 'policies' | 'contact';
@@ -5185,27 +5249,24 @@ export function getExpenseExportUrl(businessId: string, params?: { startDate?: s
 export interface RecurringInvoice {
   id: string;
   name: string;
+  description?: string | null;
   frequency: string;
+  amount: number;
+  currency: string;
+  startDate: string;
+  endDate?: string | null;
   nextRunDate: string;
-  lastRunDate?: string;
-  endDate?: string;
-  isActive: boolean;
-  runCount: number;
-  failureCount?: number;
-  lastFailureAt?: string | null;
-  lastError?: string | null;
-  cancelledAt?: string | null;
+  status: string;
+  lastGeneratedAt?: string | null;
+  generatedCount: number;
+  metadata?: Record<string, unknown> | null;
   contactId: string;
   contact?: { id: string; firstName?: string; lastName?: string; email?: string };
-  lineItems: { description: string; quantity: number; unitPrice: number; total: number }[];
-  subtotal: number;
-  taxRate?: number;
-  discountType?: string;
-  discountValue?: number;
-  total: number;
-  currency: string;
-  notes?: string;
   createdAt: string;
+  updatedAt: string;
+  lineItems?: Array<{ description: string; quantity: number; unitPrice: number; total: number }>;
+  lastError?: string | null;
+  lastFailureAt?: string | null;
 }
 export interface RecurringGenerationEntry {
   id: string;
@@ -5554,7 +5615,7 @@ export async function approveAiPlan(businessId: string, planId: string): Promise
   });
 }
 
-export async function executeAiPlan(businessId: string, planId: string): Promise<ApiResult<{ planId: string; status: string; stepsExecuted: number; stepsFailed: number; stepsSkipped: number }>> {
+export async function executeFlowPlan(businessId: string, planId: string): Promise<ApiResult<{ planId: string; status: string; stepsExecuted: number; stepsFailed: number; stepsSkipped: number }>> {
   return apiPost<{ planId: string; status: string; stepsExecuted: number; stepsFailed: number; stepsSkipped: number }>({
     path: `/flow/businesses/${encodeURIComponent(businessId)}/flow/execute-plan/${encodeURIComponent(planId)}`,
     body: {},
@@ -5834,6 +5895,60 @@ export async function resolveAiApproval(
     path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/approvals/${encodeURIComponent(approvalId)}/resolve`,
     body: { resolution },
   });
+}
+
+export async function resolveAiApprovalsBatch(
+  businessId: string,
+  approvalIds: string[],
+  resolution: 'approved' | 'rejected',
+): Promise<ApiResult<{ succeeded: number; failed: number; total: number }>> {
+  return apiPost<{ succeeded: number; failed: number; total: number }>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/approvals/batch-resolve`,
+    body: { approvalIds, resolution },
+  });
+}
+
+export async function fetchAgentHealth(businessId: string) {
+  return apiGet<{
+    businessId: string;
+    timestamp: string;
+    plans: { total: number; executing: number; stalled: number; failed: number; completedToday: number };
+    loops: { total: number; healthy: number; unhealthy: number; lastRuns: Array<{ loopId: string; loopType: string; lastRunAt: string | null; status: string }> };
+    approvals: { pending: number; escalated: number; oldestPendingMinutes: number };
+    actions: { totalToday: number; failedToday: number; successRate: number };
+  }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/health`);
+}
+
+export async function fetchUndoableActions(businessId: string) {
+  return apiGetSimple<{ actions: Array<{ id: string; actionType: string; entityType: string; entityId: string; createdAt: string; canUndo: boolean }> }>(
+    `/ai/businesses/${encodeURIComponent(businessId)}/agent/undo`,
+  );
+}
+
+export async function undoAction(businessId: string, undoId: string) {
+  return apiPostSimple<{ success: boolean; message: string; restored?: Record<string, unknown> }>(
+    `/ai/businesses/${encodeURIComponent(businessId)}/agent/undo/${encodeURIComponent(undoId)}`,
+    {},
+  );
+}
+
+export async function fetchAgentTriggers(businessId: string) {
+  return apiGetSimple<Array<{ id: string; name: string; eventPattern: string; enabled: boolean; autoExecute: boolean; maxRiskTier: number; objective: string }>>(
+    `/ai/businesses/${encodeURIComponent(businessId)}/agent/triggers`,
+  );
+}
+
+export async function fetchDetectedPatterns(businessId: string) {
+  return apiGetSimple<{ patterns: Array<{ id: string; type: string; description: string; confidence: number; detectedAt: string }> }>(
+    `/ai/businesses/${encodeURIComponent(businessId)}/agent/patterns`,
+  );
+}
+
+export async function scanPatterns(businessId: string) {
+  return apiPostSimple<{ patterns: Array<{ type: string; description: string; confidence: number }> }>(
+    `/ai/businesses/${encodeURIComponent(businessId)}/agent/patterns/scan`,
+    {},
+  );
 }
 
 export interface ProAutoInsight {
@@ -13019,4 +13134,159 @@ export async function invoiceProcurementRequest(businessId: string, requestId: s
     `/procurement/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(requestId)}/invoice`,
     {},
   );
+}
+
+
+// ─── STRUCTURE MODULE ───
+
+export interface OrgUnit {
+  id: string;
+  businessId: string;
+  name: string;
+  type: string;
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  managerId?: string | null;
+  parentId?: string | null;
+  children?: OrgUnit[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobRole {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  level: number;
+  permissions?: Record<string, string> | null;
+  defaultApprovalTier: number;
+  color?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrgAssignment {
+  id: string;
+  businessId: string;
+  membershipId: string;
+  userId: string;
+  orgUnitId: string;
+  orgUnit?: OrgUnit;
+  jobRoleId?: string | null;
+  jobRole?: JobRole | null;
+  reportsToId?: string | null;
+  reportsTo?: OrgAssignment | null;
+  membership?: {
+    user: {
+      id: string;
+      email: string;
+      name?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
+      avatarUrl?: string | null;
+    };
+  };
+  isPrimary: boolean;
+  startedAt: string;
+  endedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DelegationRule {
+  id: string;
+  businessId: string;
+  delegatorId: string;
+  delegateId: string;
+  scope: string;
+  maxTier: number;
+  activeFrom: string;
+  activeUntil?: string | null;
+  reason?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StructureStats {
+  unitCount: number;
+  roleCount: number;
+  assignmentCount: number;
+  delegationCount: number;
+}
+
+export async function fetchOrgUnits(businessId: string) {
+  return apiGetSimple<OrgUnit[]>(`/structure/businesses/${encodeURIComponent(businessId)}/org-units`);
+}
+
+export async function createOrgUnit(businessId: string, data: Omit<OrgUnit, "id" | "businessId" | "createdAt" | "updatedAt" | "children">) {
+  return apiPostSimple<OrgUnit>(`/structure/businesses/${encodeURIComponent(businessId)}/org-units`, data);
+}
+
+export async function updateOrgUnit(businessId: string, id: string, data: Partial<Omit<OrgUnit, "id" | "businessId" | "createdAt" | "updatedAt" | "children">>) {
+  return apiPatch<OrgUnit>(`/structure/businesses/${encodeURIComponent(businessId)}/org-units/${encodeURIComponent(id)}`, data);
+}
+
+export async function deleteOrgUnit(businessId: string, id: string) {
+  return apiDelete<OrgUnit>(`/structure/businesses/${encodeURIComponent(businessId)}/org-units/${encodeURIComponent(id)}`);
+}
+
+export async function fetchJobRoles(businessId: string) {
+  return apiGetSimple<JobRole[]>(`/structure/businesses/${encodeURIComponent(businessId)}/job-roles`);
+}
+
+export async function createJobRole(businessId: string, data: Omit<JobRole, "id" | "businessId" | "createdAt" | "updatedAt">) {
+  return apiPostSimple<JobRole>(`/structure/businesses/${encodeURIComponent(businessId)}/job-roles`, data);
+}
+
+export async function updateJobRole(businessId: string, id: string, data: Partial<Omit<JobRole, "id" | "businessId" | "createdAt" | "updatedAt">>) {
+  return apiPatch<JobRole>(`/structure/businesses/${encodeURIComponent(businessId)}/job-roles/${encodeURIComponent(id)}`, data);
+}
+
+export async function deleteJobRole(businessId: string, id: string) {
+  return apiDelete<JobRole>(`/structure/businesses/${encodeURIComponent(businessId)}/job-roles/${encodeURIComponent(id)}`);
+}
+
+export async function fetchAssignments(businessId: string) {
+  return apiGetSimple<OrgAssignment[]>(`/structure/businesses/${encodeURIComponent(businessId)}/assignments`);
+}
+
+export async function createAssignment(businessId: string, data: Omit<OrgAssignment, "id" | "businessId" | "createdAt" | "updatedAt" | "startedAt" | "orgUnit" | "jobRole" | "reportsTo">) {
+  return apiPostSimple<OrgAssignment>(`/structure/businesses/${encodeURIComponent(businessId)}/assignments`, data);
+}
+
+export async function updateAssignment(businessId: string, id: string, data: Partial<Omit<OrgAssignment, "id" | "businessId" | "createdAt" | "updatedAt" | "orgUnit" | "jobRole" | "reportsTo">>) {
+  return apiPatch<OrgAssignment>(`/structure/businesses/${encodeURIComponent(businessId)}/assignments/${encodeURIComponent(id)}`, data);
+}
+
+export async function deleteAssignment(businessId: string, id: string) {
+  return apiDelete<OrgAssignment>(`/structure/businesses/${encodeURIComponent(businessId)}/assignments/${encodeURIComponent(id)}`);
+}
+
+export async function fetchDelegationRules(businessId: string) {
+  return apiGetSimple<DelegationRule[]>(`/structure/businesses/${encodeURIComponent(businessId)}/delegation-rules`);
+}
+
+export async function createDelegationRule(businessId: string, data: Omit<DelegationRule, "id" | "businessId" | "createdAt" | "updatedAt">) {
+  return apiPostSimple<DelegationRule>(`/structure/businesses/${encodeURIComponent(businessId)}/delegation-rules`, data);
+}
+
+export async function updateDelegationRule(businessId: string, id: string, data: Partial<Omit<DelegationRule, "id" | "businessId" | "createdAt" | "updatedAt">>) {
+  return apiPatch<DelegationRule>(`/structure/businesses/${encodeURIComponent(businessId)}/delegation-rules/${encodeURIComponent(id)}`, data);
+}
+
+export async function deleteDelegationRule(businessId: string, id: string) {
+  return apiDelete<DelegationRule>(`/structure/businesses/${encodeURIComponent(businessId)}/delegation-rules/${encodeURIComponent(id)}`);
+}
+
+export async function fetchOrgTree(businessId: string) {
+  return apiGetSimple<{ units: OrgUnit[]; rootUnits: OrgUnit[] }>(`/structure/businesses/${encodeURIComponent(businessId)}/tree`);
+}
+
+export async function fetchStructureStats(businessId: string) {
+  return apiGetSimple<StructureStats>(`/structure/businesses/${encodeURIComponent(businessId)}/stats`);
 }

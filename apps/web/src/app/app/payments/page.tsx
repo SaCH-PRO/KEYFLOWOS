@@ -295,7 +295,8 @@ function TransactionsTab({
         />
       ) : (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+<table className="min-w-full w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-600">
               <tr>
                 <th className="px-4 py-3">Date</th>
@@ -363,6 +364,7 @@ function TransactionsTab({
               ))}
             </tbody>
           </table>
+</div>
         </div>
       )}
     </div>
@@ -413,7 +415,8 @@ function LinksTab({
         />
       ) : (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+<table className="min-w-full w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-600">
               <tr>
                 <th className="px-4 py-3">Created</th>
@@ -466,6 +469,7 @@ function LinksTab({
               ))}
             </tbody>
           </table>
+</div>
         </div>
       )}
     </div>
@@ -491,7 +495,8 @@ function RefundsTab({ refunds, onIssue }: { refunds: PaymentsTransaction[]; onIs
         />
       ) : (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+<table className="min-w-full w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-600">
               <tr>
                 <th className="px-4 py-3">Date</th>
@@ -515,6 +520,7 @@ function RefundsTab({ refunds, onIssue }: { refunds: PaymentsTransaction[]; onIs
               ))}
             </tbody>
           </table>
+</div>
         </div>
       )}
     </div>

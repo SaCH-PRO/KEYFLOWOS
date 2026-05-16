@@ -747,8 +747,16 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     const contextPrefix = buildContextPrefix();
     const enrichedMessage = contextPrefix ? `${contextPrefix}${msg}` : msg;
+
+    // Build page context so Key can intelligently adapt its role
+    const flowPageContext: Record<string, unknown> = {
+      route: typeof window !== "undefined" ? window.location.pathname : undefined,
+      surface: currentModule ?? "cockpit",
+      ...(pageContext || {}),
+    };
+
     try {
-      const res = await sendFlowChat(biz, enrichedMessage, history);
+      const res = await sendFlowChat(biz, enrichedMessage, history, undefined, flowPageContext);
       if (res.data) {
         const assistantMsg = processFlowResponse(res.data);
         setMessages((prev) => [...prev, assistantMsg]);

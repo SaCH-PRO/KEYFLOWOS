@@ -26,6 +26,7 @@ import { TaxLiabilityRollupScheduler } from './tax-liability-rollup.scheduler';
 import { AccountantExportService } from './accountant-export.service';
 import { AccountantExportEmailService } from './accountant-export-email.service';
 import { SystemEmailService } from '../notifications/system-email.service';
+import { TimelineModule } from '../timeline/timeline.module';
 import { FinanceController } from './finance.controller';
 
 /**
@@ -39,7 +40,7 @@ import { FinanceController } from './finance.controller';
  * Settings) plus its sub-services.
  */
 @Module({
-  imports: [PrismaModule, AuthModule, AiModule, forwardRef(() => CommerceModule)],
+  imports: [PrismaModule, AuthModule, AiModule, forwardRef(() => CommerceModule), TimelineModule],
   controllers: [FinanceController],
   providers: [
     PostingService,

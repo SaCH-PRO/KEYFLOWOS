@@ -15,6 +15,8 @@ import { StoreReadinessService } from '../src/modules/commerce/store-readiness.s
 import { CommerceStatsService } from '../src/modules/commerce/commerce-stats.service';
 import { InvoiceWorkflowService } from '../src/modules/commerce/invoice-workflow.service';
 import { CatalogService } from '../src/modules/catalog/catalog.service';
+import { PublicEventsService } from '../src/modules/public-events/public-events.service';
+import { RevenuePostingService } from '../src/modules/finance/revenue-posting.service';
 import { CrmService } from '../src/modules/crm/crm.service';
 import { SubscriptionsService } from '../src/modules/subscriptions/subscriptions.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
@@ -134,6 +136,8 @@ describe('Commerce public quote e2e', () => {
         { provide: CommerceStatsService, useValue: statsCache },
         { provide: InvoiceWorkflowService, useValue: {} },
         { provide: CatalogService, useValue: {} },
+        { provide: PublicEventsService, useValue: {} },
+        { provide: RevenuePostingService, useValue: {} },
         CommerceService,
         { provide: RecurringInvoiceService, useValue: {} },
         { provide: ReceiptService, useValue: {} },

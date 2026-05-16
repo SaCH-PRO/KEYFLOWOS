@@ -1160,7 +1160,7 @@ export class PaymentsService {
       return { orderId: result.id };
     } catch (error: any) {
       this.logger.error(`PayPal order creation failed: ${error.message}`, error.stack);
-      throw new Error('Failed to create PayPal order');
+      throw new Error('Failed to create PayPal order', { cause: error });
     }
   }
 
@@ -1237,6 +1237,89 @@ export class PaymentsService {
 
       this.logger.error(`WiPay store checkout failed: ${response.status} - ${body}`);
       throw new Error('Failed to create WiPay checkout');
+    }
+
+    if (input.method === 'STRIPE') {
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: input.businessId },
+        select: { id: true, name: true, metaData: true },
+      });
+      if (!business) throw new BadRequestException('Business not found');
+
+      const meta = (business.metaData as Record<string, any>) || {};
+      const secretKey = meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY;
+      if (!secretKey) throw new BadRequestException('Stripe is not configured for this business');
+
+      const allowed = (process.env.PUBLIC_URL_ALLOWLIST || process.env.NEXT_PUBLIC_BASE_URL || process.env.REPLIT_DEV_DOMAIN || '')
+        .split(',').map((s) => s.trim()).filter(Boolean)
+        .map((s) => s.startsWith('http') ? s : `https://${s}`);
+      if (allowed.length === 0) {
+        this.logger.error('No PUBLIC_URL_ALLOWLIST configured; rejecting Stripe store checkout for safety');
+        throw new BadRequestException('Server misconfigured: no allowed return-URL origins set');
+      }
+      const isAllowedUrl = (u: string): boolean => {
+        try {
+          const parsed = new URL(u);
+          if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+          return allowed.some((a) => {
+            try { return new URL(a).origin === parsed.origin; } catch { return false; }
+          });
+        } catch { return false; }
+      };
+      if (input.returnUrl && !isAllowedUrl(input.returnUrl)) {
+        throw new BadRequestException('Invalid return URL');
+      }
+
+      const currency = (input.currency || 'USD').toLowerCase();
+      const amountCents = Math.round(input.amount * 100);
+
+      const body = new URLSearchParams();
+      body.append('mode', 'payment');
+      body.append('client_reference_id', input.orderId);
+      body.append('metadata[orderId]', input.orderId);
+      body.append('metadata[businessId]', business.id);
+      body.append('line_items[0][quantity]', '1');
+      body.append('line_items[0][price_data][currency]', currency);
+      body.append('line_items[0][price_data][unit_amount]', String(amountCents));
+      body.append('line_items[0][price_data][product_data][name]', `Store Order — ${business.name || ''}`.trim());
+      if (input.returnUrl) {
+        body.append('success_url', input.returnUrl);
+        body.append('cancel_url', input.returnUrl);
+      }
+
+      const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${secretKey}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: body.toString(),
+      });
+
+      const json = await res.json().catch(() => ({ error: { message: 'Invalid Stripe response' } }));
+      if (!res.ok) {
+        this.logger.error(`Stripe store checkout failed: ${json.error?.message || res.statusText}`);
+        throw new BadRequestException(json.error?.message || 'Stripe checkout creation failed');
+      }
+      if (!json.url) {
+        this.logger.error('Stripe store checkout returned no redirect URL');
+        throw new BadRequestException('Stripe checkout creation failed: no redirect URL');
+      }
+
+      await this.prisma.client.payment.create({
+        data: {
+          provider: 'stripe',
+          providerPaymentId: json.id,
+          amount: input.amount,
+          currency: input.currency,
+          status: 'PENDING',
+          method: 'stripe',
+          invoiceId: input.orderId,
+          businessId: input.businessId,
+        },
+      });
+
+      return { paymentId: json.id, status: 'REDIRECT', redirectUrl: json.url };
     }
 
     if (input.method === 'PAYPAL') {
@@ -1370,7 +1453,7 @@ export class PaymentsService {
         this.logger.error(`Failed to record failed PayPal payment: ${recErrMsg}`);
       }
 
-      throw new Error('Failed to capture PayPal order');
+      throw new Error('Failed to capture PayPal order', { cause: error });
     }
   }
 }

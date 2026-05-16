@@ -143,7 +143,8 @@ export function ProjectListView({ projects, loading, onOpenProject }: ProjectLis
         </div>
       ) : (
         <div className="rounded-xl border border-border/60 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+<table className="min-w-full w-full text-sm">
             <thead>
               <tr className="border-b border-border/40 bg-muted/20">
                 <th className="text-left px-4 py-2.5">
@@ -283,6 +284,7 @@ export function ProjectListView({ projects, loading, onOpenProject }: ProjectLis
               })}
             </tbody>
           </table>
+</div>
         </div>
       )}
     </div>

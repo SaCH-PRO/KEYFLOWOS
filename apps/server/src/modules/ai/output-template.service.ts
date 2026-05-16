@@ -18,6 +18,7 @@ export interface CreateOutputTemplateDto {
   isDefault?: boolean;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface UpdateOutputTemplateDto extends Partial<CreateOutputTemplateDto> {}
 
 const VALID_CATEGORIES: OutputCategory[] = ['documents', 'messages', 'reports', 'briefings', 'marketing', 'general'];

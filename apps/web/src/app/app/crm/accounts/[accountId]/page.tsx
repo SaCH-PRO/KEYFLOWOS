@@ -115,9 +115,10 @@ export default function AccountDetailPage() {
           {contacts.length === 0 ? (
             <p className="text-sm text-muted-foreground p-3">No contacts linked.</p>
           ) : (
-            <table className="w-full text-sm">
-              <tbody>
-                {contacts.map((c) => (
+            <div className="overflow-x-auto">
+              <table className="min-w-full w-full text-sm">
+                <tbody>
+                  {contacts.map((c) => (
                   <tr key={c.id} className="border-t border-border first:border-0">
                     <td className="p-2">
                       <Link href={`/app/crm?contactId=${c.id}`} className="font-medium text-[hsl(var(--kf-accent2))] hover:underline">
@@ -128,9 +129,10 @@ export default function AccountDetailPage() {
                     <td className="p-2 text-xs text-muted-foreground">{c.lifecycleStage ?? "—"}</td>
                     <td className="p-2 text-xs text-muted-foreground text-right">{c.lastInteractionAt ? new Date(c.lastInteractionAt).toLocaleDateString() : "—"}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Section>
 
@@ -139,9 +141,10 @@ export default function AccountDetailPage() {
           {deals.length === 0 ? (
             <p className="text-sm text-muted-foreground p-3">No deals linked.</p>
           ) : (
-            <table className="w-full text-sm">
-              <tbody>
-                {deals.map((d) => (
+            <div className="overflow-x-auto">
+              <table className="min-w-full w-full text-sm">
+                <tbody>
+                  {deals.map((d) => (
                   <tr key={d.id} className="border-t border-border first:border-0">
                     <td className="p-2">
                       <div className="font-medium">{d.title}</div>
@@ -152,9 +155,10 @@ export default function AccountDetailPage() {
                       <span className={`px-1.5 py-0.5 rounded ${d.status === "WON" ? "bg-emerald-500/15 text-emerald-500" : d.status === "LOST" ? "bg-red-500/15 text-red-500" : "bg-sky-500/15 text-sky-500"}`}>{d.status}</span>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Section>
 

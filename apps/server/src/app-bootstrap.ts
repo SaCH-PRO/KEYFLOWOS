@@ -1,6 +1,8 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import compression from 'compression';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { Server } from 'http';
 import { GlobalHttpExceptionFilter } from './core/filters/http-exception.filter';
 import { allowedCorsOrigins } from './core/config/runtime-urls';
 
@@ -16,6 +18,10 @@ export function configureNestApp(app: INestApplication): void {
   const trustProxy = process.env.TRUST_PROXY ?? '1';
   const parsedHops = Number.parseInt(trustProxy, 10);
   expressApp.set('trust proxy', Number.isFinite(parsedHops) ? parsedHops : trustProxy);
+
+  // Gzip/Brotli compression for JSON and text responses
+  app.use(compression());
+
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.useGlobalPipes(
     new ValidationPipe({
@@ -79,4 +85,11 @@ export function configureNestApp(app: INestApplication): void {
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'x-business-id'],
   });
+
+  // Request timeout: abort connections that hang longer than 60s.
+  // This prevents resource exhaustion from slow clients or stuck queries.
+  const httpServer = app.getHttpServer() as Server;
+  httpServer.setTimeout(60_000);
+  httpServer.keepAliveTimeout = 65_000;
+  httpServer.headersTimeout = 66_000;
 }

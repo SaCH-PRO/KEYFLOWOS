@@ -566,7 +566,8 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                           if (r.length === 0) return <p className="text-xs text-muted-foreground">No recipients tracked.</p>;
                           return (
                             <div className="max-h-64 overflow-y-auto rounded-lg border border-border/30">
-                              <table className="w-full text-xs">
+                              <div className="overflow-x-auto">
+<table className="min-w-full w-full text-xs">
                                 <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
                                   <tr>
                                     <th className="px-3 py-2 text-left">Recipient</th>
@@ -591,6 +592,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                                   ))}
                                 </tbody>
                               </table>
+</div>
                             </div>
                           );
                         })()}

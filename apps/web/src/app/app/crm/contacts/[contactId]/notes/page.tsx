@@ -46,7 +46,15 @@ export default function ContactNotesPage() {
   };
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    (async () => {
+      const res = await fetchContactNotes(contactId as string);
+      if (!cancelled) {
+        setNotes(res.data ?? []);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [contactId]);
 
   const handleAdd = async () => {

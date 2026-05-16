@@ -6,7 +6,7 @@ export class SignupDto {
   email!: string;
 
   @IsString()
-  @MinLength(8, { message: 'password must be at least 8 characters' })
+  @MinLength(12, { message: 'password must be at least 12 characters' })
   @MaxLength(128)
   password!: string;
 

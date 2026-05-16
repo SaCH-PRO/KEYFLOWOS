@@ -85,12 +85,44 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+import { refreshAccessToken } from "./workspace";
+
+/**
+ * Wrapper around fetch that attempts to refresh the Supabase access token
+ * on 401 and retries the request once with the new token.
+ */
+async function fetchWithRefresh(url: string, init: RequestInit): Promise<Response> {
+  let res = await fetch(url, init);
+  if (res.status === 401) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      const newInit = {
+        ...init,
+        headers: buildHeaders(init.headers),
+      };
+      res = await fetch(url, newInit);
+    }
+  }
+  return res;
+}
+
+function handleErrorResponse<T>(data: unknown, statusText: string, status?: number, path?: string): ApiResponse<T> {
+
+  const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
+  const planLimit = parsePlanLimitError(parsed);
+  if (planLimit) emitPlanLimitEvent(planLimit);
+  if (status === 401) emitUnauthorizedEvent(path ?? "");
+  const message =
+    parsed && typeof parsed.message === "string" ? parsed.message : statusText || "Request failed";
+  return { data: null, error: message, planLimitReached: planLimit };
+}
+
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {
   const { headers: initHeaders, ...restInit } = init ?? {};
   const headers = buildHeaders(initHeaders);
 
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetchWithRefresh(`${API_BASE}${path}`, {
       method: "POST",
       headers,
       body: body ? JSON.stringify(body) : undefined,
@@ -106,22 +138,11 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
   }
 }
 
-function handleErrorResponse<T>(data: unknown, statusText: string, status?: number, path?: string): ApiResponse<T> {
-
-  const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
-  const planLimit = parsePlanLimitError(parsed);
-  if (planLimit) emitPlanLimitEvent(planLimit);
-  if (status === 401) emitUnauthorizedEvent(path ?? "");
-  const message =
-    parsed && typeof parsed.message === "string" ? parsed.message : statusText || "Request failed";
-  return { data: null, error: message, planLimitReached: planLimit };
-}
-
 export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): Promise<ApiResponse<T>> {
   try {
     const sep = path.includes("?") ? "&" : "?";
     const url = `${API_BASE}${path}${sep}_t=${Date.now()}`;
-    const res = await fetch(url, {
+    const res = await fetchWithRefresh(url, {
       method: "GET",
       headers: buildHeaders(),
       cache: "no-store",
@@ -139,7 +160,7 @@ export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): 
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetchWithRefresh(`${API_BASE}${path}`, {
       method: "PATCH",
       headers: buildHeaders(),
       body: JSON.stringify(body),
@@ -156,7 +177,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiRespo
 
 export async function apiDelete<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetchWithRefresh(`${API_BASE}${path}`, {
       method: "DELETE",
       headers: buildHeaders(),
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -177,7 +198,7 @@ export async function apiPostSimple<T>(path: string, body: unknown): Promise<Api
 
 export async function apiPut<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetchWithRefresh(`${API_BASE}${path}`, {
       method: "PUT",
       headers: buildHeaders(),
       body: JSON.stringify(body),

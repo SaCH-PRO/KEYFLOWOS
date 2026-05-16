@@ -1,0 +1,34 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+.next
+dist
+*.tsbuildinfo
+
+# Env & secrets
+.env
+.env.local
+.env.*
+
+# Git & IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# Large attachments & docs not needed for build
+attached_assets
+docs
+artifacts
+*.md
+
+# Testing
+e2e
+playwright.config.ts
+coverage
+
+# Misc
+.DS_Store
+*.log

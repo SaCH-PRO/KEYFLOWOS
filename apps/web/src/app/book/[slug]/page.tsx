@@ -30,6 +30,7 @@ import { CatalogGrid } from "./components/catalog-grid";
 import { CartDrawer } from "./components/cart-drawer";
 import { CheckoutFlow } from "./components/checkout-flow";
 import { TrustBar, SecurityFooter } from "./components/trust-bar";
+import { StoreSectionWrapper } from "./components/store-section-wrapper";
 import { OrderConfirmation } from "./components/order-confirmation";
 import { FaqSection } from "./components/faq-section";
 import { PoliciesFooterLinks } from "./components/policies-section";
@@ -1289,7 +1290,22 @@ function PublicBookingPageInner() {
           </div>
         )}
 
-        {sectionOrder.map((key) => renderSection(key))}
+        {sectionOrder.map((key, idx) => {
+          const section = renderSection(key);
+          if (!section) return null;
+          return (
+            <StoreSectionWrapper
+              key={key}
+              sectionKey={key}
+              index={idx}
+              primaryColor={primaryColor}
+              secondaryColor={secondaryColor}
+              pageBg={ts.pageBg}
+            >
+              {section}
+            </StoreSectionWrapper>
+          );
+        })}
 
         {(storefrontConfig?.merchandising?.collections ?? []).filter((col) => col.itemIds?.length > 0).map((col) => {
           const colItems = catalogItems.filter((i) => col.itemIds.includes(i.id));

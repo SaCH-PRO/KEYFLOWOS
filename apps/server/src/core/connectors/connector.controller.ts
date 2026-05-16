@@ -246,7 +246,7 @@ export class ConnectorController {
       url,
       secret,
       headerName: 'x-keyflow-signature',
-      sampleCurl: `curl -X POST '${url}' \\\n  -H 'Content-Type: application/json' \\\n  -H 'x-keyflow-signature: ${secret}' \\\n  -d '{\"formId\":\"contact-us\",\"email\":\"jane@example.com\",\"fields\":{\"name\":\"Jane Doe\"}}'`,
+      sampleCurl: `curl -X POST '${url}' \\\n  -H 'Content-Type: application/json' \\\n  -H 'x-keyflow-signature: ${secret}' \\\n  -d '{"formId":"contact-us","email":"jane@example.com","fields":{"name":"Jane Doe"}}'`,
     };
   }
 

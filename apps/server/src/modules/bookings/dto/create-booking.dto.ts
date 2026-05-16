@@ -58,4 +58,8 @@ export class CreateBookingDto {
   @ValidateNested()
   @Type(() => BookingLatLngDto)
   locationLatLng?: BookingLatLngDto;
+
+  @IsString()
+  @IsOptional()
+  orgUnitId?: string;
 }

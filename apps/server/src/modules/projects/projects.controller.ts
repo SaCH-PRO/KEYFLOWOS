@@ -30,6 +30,7 @@ export class ProjectsController {
       status?: string;
       priority?: string;
       color?: string;
+      hourlyRate?: number;
       contactId?: string;
       invoiceId?: string;
       bookingId?: string;
@@ -49,6 +50,7 @@ export class ProjectsController {
       status?: string;
       priority?: string;
       color?: string;
+      hourlyRate?: number | null;
       contactId?: string;
       invoiceId?: string;
       bookingId?: string;
@@ -76,6 +78,8 @@ export class ProjectsController {
       priority?: string;
       dueDate?: string;
       assigneeId?: string;
+      estimatedHours?: number;
+      trackedHours?: number;
     },
   ) {
     return this.projects.addTask(businessId, projectId, body);
@@ -93,6 +97,9 @@ export class ProjectsController {
       dueDate?: string | null;
       sortOrder?: number;
       assigneeId?: string | null;
+      estimatedHours?: number | null;
+      trackedHours?: number;
+      evidenceIds?: string[];
     },
   ) {
     return this.projects.updateTask(businessId, taskId, body);

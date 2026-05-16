@@ -12,6 +12,7 @@ import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
 import { KeyflowCommandService } from '../src/modules/keyflow-command/keyflow-command.service';
+import { CatalogService } from '../src/modules/catalog/catalog.service';
 
 class CalendarPrismaMock {
   client: any;
@@ -95,6 +96,7 @@ describe('BookingsController — Google Calendar two-way editing', () => {
         },
         { provide: BookingOptimizerService, useValue: {} },
         { provide: SubscriptionsService, useValue: { checkLimit: vi.fn() } },
+        { provide: CatalogService, useValue: {} },
       ],
     }).compile();
 

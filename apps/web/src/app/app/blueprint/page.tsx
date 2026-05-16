@@ -730,7 +730,7 @@ export default function BlueprintPage() {
                   <label key={opt.key} className="flex items-center gap-2 kf-text-caption">
                     <input
                       type="checkbox"
-                      checked={!!(wf as any)?.[opt.key]}
+                      checked={!!(wf as unknown as Record<string, boolean>)?.[opt.key]}
                       onChange={(e) =>
                         updateSection("workflowModel", { [opt.key]: e.target.checked })
                       }

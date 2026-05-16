@@ -3,6 +3,7 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import type {
   InvoicePaidPayload,
   InvoiceStatusPayload,
@@ -64,6 +65,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   onModuleInit() {
@@ -152,7 +154,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
         OR: [
           { invoices: { some: { deletedAt: null, status: { in: ['SENT', 'OVERDUE', 'PAID', 'PARTIALLY_PAID'] } } } },
           { quotes: { some: { deletedAt: null, status: { in: ['SENT', 'ACCEPTED'] } } } },
-          { recurringInvoices: { some: { isActive: true } } },
+          { recurringInvoices: { some: { status: 'ACTIVE' } } },
         ],
       },
       select: { id: true },
@@ -224,7 +226,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
 
     // 5. Recurring failures (recent)
     const failed = await this.prisma.client.recurringInvoice.findMany({
-      where: { businessId, isActive: true, failureCount: { gt: 0 } },
+      where: { businessId, status: 'ACTIVE', failureCount: { gt: 0 } },
       select: { id: true },
       take: 100,
     });
@@ -422,11 +424,11 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
     relatedId: string,
     relatedType: 'invoice' | 'recurring' = 'invoice',
   ): Promise<boolean> {
-    let recurring: { id: string; name: string; failureCount: number; lastError: string | null; contactId: string; total: number; currency: string } | null = null;
-    let scheduleName = 'recurring schedule';
-    let amount = 0;
-    let currency = 'TTD';
-    let contactId: string | null = null;
+    let recurring: { id: string; name: string; failureCount: number; lastError: string | null; contactId: string; total: number; currency: string } | null;
+    let scheduleName: string;
+    let amount: number;
+    let currency: string;
+    let contactId: string | null;
     if (relatedType === 'invoice') {
       const inv = await this.prisma.client.invoice.findFirst({
         where: { id: relatedId, businessId, deletedAt: null },
@@ -442,11 +444,11 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
         failureCount: inv.recurringInvoice.failureCount,
         lastError: inv.recurringInvoice.lastError,
         contactId: inv.recurringInvoice.contactId,
-        total: Number(inv.recurringInvoice.total),
+        total: Number(inv.recurringInvoice.amount),
         currency: inv.recurringInvoice.currency,
       };
       scheduleName = inv.recurringInvoice.name;
-      amount = Number(inv.total ?? inv.recurringInvoice.total ?? 0);
+      amount = Number(inv.total ?? inv.recurringInvoice.amount ?? 0);
       currency = inv.currency;
       contactId = inv.contactId;
     } else {
@@ -457,10 +459,10 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       if (!r || r.failureCount === 0) return false;
       recurring = {
         id: r.id, name: r.name, failureCount: r.failureCount, lastError: r.lastError,
-        contactId: r.contactId, total: Number(r.total), currency: r.currency,
+        contactId: r.contactId, total: Number(r.amount), currency: r.currency,
       };
       scheduleName = r.name;
-      amount = Number(r.total);
+      amount = Number(r.amount);
       currency = r.currency;
       contactId = r.contactId;
     }
@@ -813,8 +815,8 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
         _sum: { total: true }, _count: true,
       }),
       this.prisma.client.recurringInvoice.findMany({
-        where: { businessId, isActive: true },
-        select: { total: true, frequency: true },
+        where: { businessId, status: 'ACTIVE' },
+        select: { amount: true, frequency: true },
       }),
       this.prisma.client.invoice.aggregate({
         where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: monthStart } },
@@ -833,7 +835,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
 
     const recurringExpected = recurringRows.reduce((sum, r) => {
       // Normalize to monthly cadence for the "expected this month" KPI.
-      const t = Number(r.total ?? 0);
+      const t = Number(r.amount ?? 0);
       switch (r.frequency) {
         case 'WEEKLY': return sum + t * 4;
         case 'BIWEEKLY': return sum + t * 2;
@@ -920,16 +922,19 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
     const fallback = templateRecommendation(ctx);
     try {
       const prompt = buildRecommendationPrompt(ctx);
-      const res = await this.gateway.complete({
+      const res = await this.aiUsage.trackAndComplete(
         businessId,
-        taskCategory: 'content-generation',
-        maxTokens: 320,
-        temperature: 0.4,
-        messages: [
-          { role: 'system', content: 'You are a concise revenue operations assistant. Reply ONLY with valid JSON matching {"explanation":string,"suggestedAction":string,"draft":{"subject":string,"body":string}}. Keep explanation under 200 chars and body under 600 chars. Never invent specific dates or invoice numbers beyond what is provided.' },
-          { role: 'user', content: prompt },
-        ],
-      });
+        undefined,
+        'revenue_action',
+        {
+          maxTokens: 320,
+          temperature: 0.4,
+          messages: [
+            { role: 'system', content: 'You are a concise revenue operations assistant. Reply ONLY with valid JSON matching {"explanation":string,"suggestedAction":string,"draft":{"subject":string,"body":string}}. Keep explanation under 200 chars and body under 600 chars. Never invent specific dates or invoice numbers beyond what is provided.' },
+            { role: 'user', content: prompt },
+          ],
+        },
+      );
       const content = res.content?.trim();
       if (!content) return fallback;
       const parsed = safeJsonParse(content);

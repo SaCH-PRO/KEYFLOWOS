@@ -51,6 +51,7 @@ export class CommerceAiService {
     for (const pattern of injectionPatterns) {
       sanitized = sanitized.replace(pattern, '');
     }
+    // eslint-disable-next-line no-control-regex
     sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
     return sanitized.slice(0, maxLen);
   }
@@ -297,8 +298,8 @@ ${allProducts.map((p) => `  - ${p.name}: $${p.price}`).join('\n')}`;
     ]);
 
     const recurringInvoices = await this.db.recurringInvoice.findMany({
-      where: { businessId, isActive: true, deletedAt: null },
-      select: { name: true, frequency: true, nextRunDate: true, lineItems: true },
+      where: { businessId, status: 'ACTIVE', deletedAt: null },
+      select: { name: true, frequency: true, nextRunDate: true },
       take: 20,
     });
 
@@ -1174,7 +1175,7 @@ Items: ${(quote.items ?? []).map((i: any) => `${i.description} ($${i.total})`).j
       const lastPayment = paid.length > 0 ? paid[0].paidAt : null;
       const daysSinceLastPayment = lastPayment ? Math.floor((now.getTime() - new Date(lastPayment).getTime()) / 86400000) : null;
 
-      contextParts.push(`ContactID: ${schedule.contact.id} | Contact: ${name} (${schedule.contact.status}) | Schedule: ${schedule.name} (${schedule.frequency}, ${schedule.isActive ? 'Active' : 'Paused'}) | Invoices: ${contactInvoices.length} total, ${paid.length} paid, ${overdue.length} overdue | Last payment: ${daysSinceLastPayment !== null ? `${daysSinceLastPayment} days ago` : 'never'} | Monthly value: ~$${Number(schedule.total || 0)}`);
+      contextParts.push(`ContactID: ${schedule.contact.id} | Contact: ${name} (${schedule.contact.status}) | Schedule: ${schedule.name} (${schedule.frequency}, ${schedule.status === 'ACTIVE' ? 'Active' : 'Paused'}) | Invoices: ${contactInvoices.length} total, ${paid.length} paid, ${overdue.length} overdue | Last payment: ${daysSinceLastPayment !== null ? `${daysSinceLastPayment} days ago` : 'never'} | Monthly value: ~$${Number(schedule.amount || 0)}`);
     }
 
     const result = await this.aiUsage.callAi({

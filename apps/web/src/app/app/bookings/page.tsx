@@ -32,6 +32,8 @@ import {
   fetchBookingStats,
   fetchScheduleHealth,
   getBusinessById,
+  fetchOrgUnits,
+  OrgUnit,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useOpenComposer } from "@/hooks/use-open-composer";
@@ -64,6 +66,7 @@ import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar, tooltip: "View and manage upcoming bookings. Filter by status, date, or service." },
@@ -138,6 +141,8 @@ export default function BookingsPage() {
   const [staffFilter, setStaffFilter] = useState("");
   const [serviceFilter, setServiceFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [orgUnitFilter, setOrgUnitFilter] = useState("");
+  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
 
   const [staffForm, setStaffForm] = useState({ name: "", email: "" });
   const [businessHoursSet, setBusinessHoursSet] = useState(false);
@@ -217,15 +222,17 @@ export default function BookingsPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, healthRes] = await Promise.all([
-        fetchBookings(businessId),
+      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, healthRes, orgUnitsRes] = await Promise.all([
+        fetchBookings(businessId, orgUnitFilter || undefined),
         fetchServices(businessId),
         fetchStaff(businessId),
         getCalendarStatus(businessId).catch(() => ({ data: null, error: null })),
         fetchContacts(businessId, { take: 200 }),
         fetchBookingStats(businessId).catch(() => ({ data: null, error: null })),
         fetchScheduleHealth(businessId).catch(() => ({ data: null, error: null })),
+        fetchOrgUnits(businessId).catch(() => ({ data: null, error: null })),
       ]);
+      setOrgUnits(orgUnitsRes.data ?? []);
       setBookings(bookingsRes.data ?? []);
       setServices(servicesRes.data ?? []);
       setStaff(staffRes.data ?? []);
@@ -243,7 +250,7 @@ export default function BookingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, orgUnitFilter]);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
@@ -649,33 +656,74 @@ export default function BookingsPage() {
                   setShowCreateBooking(true);
                 }}
               />
-              <ScheduleFilters
-                services={services}
-                staff={staff}
-                staffFilter={staffFilter}
-                serviceFilter={serviceFilter}
-                statusFilter={statusFilter}
-                onStaffChange={setStaffFilter}
-                onServiceChange={setServiceFilter}
-                onStatusChange={setStatusFilter}
-              />
-              <div className="flex items-center justify-end">
-                <Link
-                  href="/app/calendar?modules=BOOKINGS"
-                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Open in Master Calendar
-                  <ExternalLink className="w-3 h-3" />
-                </Link>
-              </div>
-              {businessId && (
-                <MasterCalendar
-                  businessId={businessId}
-                  scopeModule={["BOOKINGS"]}
-                  scopeTypes={["BOOKING", "EXTERNAL_GOOGLE_EVENT"]}
-                  compact
-                  hideRail
+              <div className="flex items-center gap-2 flex-wrap">
+                <ScheduleFilters
+                  services={services}
+                  staff={staff}
+                  staffFilter={staffFilter}
+                  serviceFilter={serviceFilter}
+                  statusFilter={statusFilter}
+                  onStaffChange={setStaffFilter}
+                  onServiceChange={setServiceFilter}
+                  onStatusChange={setStatusFilter}
                 />
+                {orgUnits.length > 0 && (
+                  <select
+                    value={orgUnitFilter}
+                    onChange={(e) => setOrgUnitFilter(e.target.value)}
+                    className="h-8 px-2 rounded-md border border-border bg-background text-xs"
+                  >
+                    <option value="">All Units</option>
+                    {orgUnits.map((u) => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              {services.length === 0 && !loading && (
+                <EmptyState
+                  icon={Calendar}
+                  title="Set up your services"
+                  description="Add your first bookable service so clients can start scheduling appointments."
+                  actionLabel="Add Service"
+                  onAction={() => setTab("catalog")}
+                  tip="Services define what you offer, how long it takes, and how much it costs."
+                  iconColor="hsl(var(--kf-accent1))"
+                />
+              )}
+              {services.length > 0 && bookings.length === 0 && !loading && (
+                <EmptyState
+                  icon={Calendar}
+                  title="No bookings yet"
+                  description="Your services are ready. Share your booking link to start receiving appointments."
+                  actionLabel="New Booking"
+                  onAction={() => setShowCreateBooking(true)}
+                  secondaryAction={{ label: "Share Link", onClick: () => setShareModalOpen(true) }}
+                  tip="Share your booking page on social media or via WhatsApp to get your first booking."
+                  iconColor="hsl(var(--kf-accent1))"
+                />
+              )}
+              {(services.length === 0 || bookings.length > 0 || loading) && (
+                <>
+                  <div className="flex items-center justify-end">
+                    <Link
+                      href="/app/calendar?modules=BOOKINGS"
+                      className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Open in Master Calendar
+                      <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  </div>
+                  {businessId && (
+                    <MasterCalendar
+                      businessId={businessId}
+                      scopeModule={["BOOKINGS"]}
+                      scopeTypes={["BOOKING", "EXTERNAL_GOOGLE_EVENT"]}
+                      compact
+                      hideRail
+                    />
+                  )}
+                </>
               )}
             </div>
           )}

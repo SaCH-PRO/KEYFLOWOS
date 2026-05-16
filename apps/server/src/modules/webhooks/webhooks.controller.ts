@@ -36,6 +36,20 @@ export class WebhooksController {
     @Req() req: Request,
     @Headers('stripe-signature') signature: string,
   ) {
+    // ─── DEPRECATED — consolidated into /payments/stripe/webhook ────────────
+    // The legacy /webhooks/stripe endpoint has been superseded by
+    // /payments/stripe/webhook, which performs full ledger reconciliation
+    // (payment recording, journal posting, connector events) rather than
+    // only marking the invoice paid.
+    //
+    // For backward compatibility during transition we forward the raw
+    // payload to the payments module. This preserves any in-flight
+    // Stripe Dashboard webhook configurations while ensuring consistent
+    // processing.
+    this.logger.warn(
+      'Legacy /webhooks/stripe called — migrate Stripe Dashboard webhook URL to /payments/stripe/webhook',
+    );
+
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!webhookSecret) {
       this.logger.error('STRIPE_WEBHOOK_SECRET is not configured');
@@ -90,7 +104,7 @@ export class WebhooksController {
     }
 
     // Acknowledge all other events
-    return { received: true, type: event.type };
+    return { received: true, type: event.type, deprecated: true, use: '/payments/stripe/webhook' };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

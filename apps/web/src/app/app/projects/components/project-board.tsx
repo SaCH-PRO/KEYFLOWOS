@@ -64,6 +64,7 @@ export function ProjectBoard({
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectColor, setNewProjectColor] = useState(PROJECT_COLORS[0]);
   const [newProjectDueDate, setNewProjectDueDate] = useState("");
+  const [newProjectRate, setNewProjectRate] = useState("");
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -101,6 +102,7 @@ export function ProjectBoard({
     }
     setNewProjectName("");
     setNewProjectDueDate("");
+    setNewProjectRate("");
     setShowNewProject(false);
   };
 
@@ -288,6 +290,18 @@ export function ProjectBoard({
                   className="bg-transparent border border-border/60 rounded-lg px-3 py-1.5 text-xs text-muted-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
                 />
               </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Hourly rate (TTD):</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  placeholder="e.g. 150"
+                  value={newProjectRate}
+                  onChange={(e) => setNewProjectRate(e.target.value)}
+                  className="bg-transparent border border-border/60 rounded-lg px-3 py-1.5 text-xs text-muted-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))] w-28"
+                />
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateProject}
@@ -297,7 +311,7 @@ export function ProjectBoard({
                   Create
                 </button>
                 <button
-                  onClick={() => { setShowNewProject(false); setNewProjectDueDate(""); }}
+                  onClick={() => { setShowNewProject(false); setNewProjectDueDate(""); setNewProjectRate(""); }}
                   className="px-4 min-h-[44px] rounded-lg text-sm text-muted-foreground hover:bg-muted/30"
                 >
                   Cancel

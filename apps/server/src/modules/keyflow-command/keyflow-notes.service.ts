@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 
 export interface KeyflowNoteInput {
   targetType: string;
@@ -17,6 +18,7 @@ export class KeyflowNotesService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   async list(businessId: string, targetType?: string, targetId?: string) {
@@ -93,24 +95,29 @@ export class KeyflowNotesService {
       return { ...note, aiBrief: null };
     }
 
-    let brief: string | null = null;
+    let brief: string | null;
     try {
-      const response = await this.gateway.complete({
+      const response = await this.aiUsage.trackAndComplete(
         businessId,
-        taskCategory: 'summarization',
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a Caribbean small-business operator’s assistant. Summarize the user note in one or two clear sentences, surface action items as a short bullet list when present, and keep the tone warm and pragmatic. Use TTD currency formatting when amounts appear.',
-          },
-          {
-            role: 'user',
-            content: `Note attached to ${note.targetType}${note.targetLabel ? ` (${note.targetLabel})` : ''}:\n\n${note.body}`,
-          },
-        ],
-        maxTokens: 280,
-      });
+        undefined,
+        'note_summarize',
+        {
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a Caribbean small-business operator’s assistant. Summarize the user note in one or two clear sentences, surface action items as a short bullet list when present, and keep the tone warm and pragmatic. Use TTD currency formatting when amounts appear.',
+            },
+            {
+              role: 'user',
+              content: `Note attached to ${note.targetType}${note.targetLabel ? ` (${note.targetLabel})` : ''}:
+
+${note.body}`,
+            },
+          ],
+          maxTokens: 280,
+        },
+      );
       brief = response.content?.trim() || null;
     } catch (err) {
       this.logger.warn(`Keyflow note brief generation failed: ${(err as Error).message}`);

@@ -959,7 +959,7 @@ export class ExpensesService {
     }
 
     const clientIds = Object.keys(byClient);
-    let clientNames: Record<string, string> = {};
+    const clientNames: Record<string, string> = {};
     if (clientIds.length > 0) {
       const contacts = await this.prisma.client.contact.findMany({
         where: { id: { in: clientIds }, businessId },
@@ -971,7 +971,7 @@ export class ExpensesService {
     }
 
     const projectIds = Object.keys(byProject);
-    let projectNames: Record<string, string> = {};
+    const projectNames: Record<string, string> = {};
     if (projectIds.length > 0) {
       const projects = await this.prisma.client.project.findMany({
         where: { id: { in: projectIds }, businessId },
@@ -983,7 +983,7 @@ export class ExpensesService {
     }
 
     const svcNameIds = Object.keys(byService);
-    let serviceNames: Record<string, string> = {};
+    const serviceNames: Record<string, string> = {};
     if (svcNameIds.length > 0) {
       const services = await this.prisma.client.service.findMany({
         where: { id: { in: svcNameIds }, businessId },

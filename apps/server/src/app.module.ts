@@ -3,6 +3,11 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './core/prisma/prisma.module';
+import { BusinessEventModule } from './modules/business-events/business-event.module';
+import { BusinessEventInterceptor } from './modules/business-events/business-event.interceptor';
+import { EvidenceModule } from './modules/evidence/evidence.module';
+import { TaskAssignmentModule } from './modules/task-assignments/task-assignment.module';
+import { EventStreamModule } from './modules/event-stream/event-stream.module';
 import { EventBusModule } from './core/event-bus/event-bus.module';
 import { AuthModule } from './core/auth/auth.module';
 import { TrpcModule } from './trpc.module';
@@ -30,6 +35,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PaymentsModule } from './modules/payments/payments.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { ProjectsModule } from './modules/projects/projects.module';
+import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -41,6 +47,7 @@ import { CommunityModule } from './modules/community/community.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { ProcurementModule } from './modules/procurement/procurement.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
+import { StructureModule } from './modules/structure/structure.module';
 import { MomentumModule } from './modules/momentum/momentum.module';
 import { SeedModule } from './core/seed/seed.module';
 import { OnboardingConciergeModule } from './modules/onboarding-concierge/onboarding-concierge.module';
@@ -49,6 +56,9 @@ import { GoogleDriveModule } from './modules/google-drive/google-drive.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { CommunicationsModule } from './modules/communications/communications.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { SlackModule } from './modules/slack/slack.module';
+import { ShopifyModule } from './modules/shopify/shopify.module';
+import { SentryModule } from './core/sentry/sentry.module';
 import { ConnectorModule } from './core/connectors/connector.module';
 import { KeyflowCommandModule } from './modules/keyflow-command/keyflow-command.module';
 import { ConnectModule } from './modules/connect/connect.module';
@@ -58,6 +68,8 @@ import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module
 import { BlueprintModule } from './modules/blueprint/blueprint.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { PublicEventsModule } from './modules/public-events/public-events.module';
+import { DirectoryModule } from './modules/directory/directory.module';
+import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
 
 @Module({
   imports: [
@@ -67,6 +79,10 @@ import { PublicEventsModule } from './modules/public-events/public-events.module
     AuthModule,
     TrpcModule,
     ConnectorModule,
+    BusinessEventModule,
+    EvidenceModule,
+    TaskAssignmentModule,
+    EventStreamModule,
 
     // Feature Modules
     IdentityModule,
@@ -90,6 +106,7 @@ import { PublicEventsModule } from './modules/public-events/public-events.module
     PaymentsModule,
     SubscriptionsModule,
     ProjectsModule,
+    HelpdeskModule,
     ExpensesModule,
     FinanceModule,
     ReportsModule,
@@ -101,6 +118,7 @@ import { PublicEventsModule } from './modules/public-events/public-events.module
     MarketplaceModule,
     ProcurementModule,
     SupplierModule,
+    StructureModule,
     MomentumModule,
     SeedModule,
     OnboardingConciergeModule,
@@ -109,6 +127,9 @@ import { PublicEventsModule } from './modules/public-events/public-events.module
     DiagnosticsModule,
     CommunicationsModule,
     WhatsAppModule,
+    SlackModule,
+    ShopifyModule,
+    SentryModule,
     KeyflowCommandModule,
     ConnectModule,
     SeoModule,
@@ -117,12 +138,15 @@ import { PublicEventsModule } from './modules/public-events/public-events.module
     BlueprintModule,
     CalendarModule,
     PublicEventsModule,
+    DirectoryModule,
+    AdminAuthModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     AuthMiddleware,
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: BusinessEventInterceptor },
   ],
 })
 export class AppModule implements NestModule {

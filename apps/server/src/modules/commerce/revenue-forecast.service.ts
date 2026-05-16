@@ -33,7 +33,7 @@ export interface RevenueForecast {
   };
 }
 
-interface RecurringRow { total: number | null; frequency: string | null }
+interface RecurringRow { amount: number | null; frequency: string | null }
 interface PaidInvoiceRow { total: number; paidAt: Date | null; createdAt: Date; dueDate: Date | null }
 interface OpenInvoiceRow { id: string; total: number; dueDate: Date | null; issueDate: Date }
 interface AcceptedQuoteRow { id: string; total: number; acceptedAt: Date | null; createdAt: Date }
@@ -69,8 +69,8 @@ export class RevenueForecastService {
         select: { id: true, total: true, acceptedAt: true, createdAt: true },
       }),
       this.db.recurringInvoice.findMany({
-        where: { businessId, isActive: true },
-        select: { total: true, frequency: true },
+        where: { businessId, status: 'ACTIVE' },
+        select: { amount: true, frequency: true },
       }),
     ]);
 
@@ -206,7 +206,7 @@ export class RevenueForecastService {
 
   private estimateMonthlyRecurring(rows: RecurringRow[]): number {
     return rows.reduce((sum, r) => {
-      const t = Number(r.total ?? 0);
+      const t = Number(r.amount ?? 0);
       const f = (r.frequency ?? '').toUpperCase();
       if (f === 'WEEKLY') return sum + t * 4.33;
       if (f === 'BIWEEKLY') return sum + t * 2.17;

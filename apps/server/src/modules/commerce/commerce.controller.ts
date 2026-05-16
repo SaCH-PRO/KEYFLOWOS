@@ -2,7 +2,6 @@ import { Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, Para
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { CommerceService } from './commerce.service';
-import { RecurringInvoiceService } from './recurring-invoice.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -33,7 +32,6 @@ export class CommerceController {
 
   constructor(
     @Inject(CommerceService) private readonly commerce: CommerceService,
-    @Inject(RecurringInvoiceService) private readonly recurringInvoices: RecurringInvoiceService,
     @Inject(ReceiptService) private readonly receipts: ReceiptService,
     @Inject(GmailService) private readonly gmail: GmailService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -240,7 +238,7 @@ export class CommerceController {
   ) {
     if (!file) throw new ForbiddenException('Image file is required');
     const base64 = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
-    const extracted = await this.vision.extractProductsFromImage(base64, body.currency || 'TTD');
+    const extracted = await this.vision.extractProductsFromImage(businessId, base64, body.currency || 'TTD');
     return { extracted, count: extracted.length };
   }
 
@@ -1186,111 +1184,6 @@ export class CommerceController {
     @Param('campaignId') campaignId: string,
   ) {
     return this.commerce.getCampaignRevenue(businessId, campaignId);
-  }
-
-  // ========== RECURRING INVOICES ==========
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'read')
-  @Get('businesses/:businessId/recurring-invoices')
-  listRecurringInvoices(@Param('businessId') businessId: string) {
-    return this.recurringInvoices.listRecurringInvoices(businessId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'read')
-  @Get('businesses/:businessId/recurring-invoices/:id')
-  getRecurringInvoice(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-  ) {
-    return this.recurringInvoices.getRecurringInvoice(businessId, id);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'write')
-  @Post('businesses/:businessId/recurring-invoices')
-  createRecurringInvoice(
-    @Param('businessId') businessId: string,
-    @Body() body: {
-      name: string;
-      frequency: string;
-      nextRunDate: string;
-      endDate?: string;
-      contactId: string;
-      lineItems: { description: string; quantity: number; unitPrice: number; total: number; productId?: string }[];
-      taxRate?: number;
-      discountType?: 'PERCENT' | 'FIXED';
-      discountValue?: number;
-      currency?: string;
-      notes?: string;
-    },
-  ) {
-    return this.recurringInvoices.createRecurringInvoice({ businessId, ...body });
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'write')
-  @Patch('businesses/:businessId/recurring-invoices/:id')
-  updateRecurringInvoice(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-    @Body() body: {
-      name?: string;
-      frequency?: string;
-      nextRunDate?: string;
-      endDate?: string | null;
-      contactId?: string;
-      lineItems?: { description: string; quantity: number; unitPrice: number; total: number; productId?: string }[];
-      taxRate?: number;
-      discountType?: 'PERCENT' | 'FIXED' | null;
-      discountValue?: number | null;
-      currency?: string;
-      notes?: string | null;
-      isActive?: boolean;
-    },
-  ) {
-    return this.recurringInvoices.updateRecurringInvoice({ id, businessId, ...body });
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'write')
-  @Delete('businesses/:businessId/recurring-invoices/:id')
-  deleteRecurringInvoice(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-  ) {
-    return this.recurringInvoices.deleteRecurringInvoice(businessId, id);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'write')
-  @Post('businesses/:businessId/recurring-invoices/:id/toggle')
-  toggleRecurringInvoice(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-  ) {
-    return this.recurringInvoices.toggleActive(businessId, id);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'write')
-  @Post('businesses/:businessId/recurring-invoices/:id/cancel')
-  cancelRecurringInvoice(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-  ) {
-    return this.recurringInvoices.cancelRecurringInvoice(businessId, id);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'read')
-  @Get('businesses/:businessId/recurring-invoices/:id/history')
-  getRecurringHistory(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-  ) {
-    return this.recurringInvoices.getGenerationHistory(businessId, id);
   }
 
   // ========== PAYMENTS (BUSINESS-SCOPED) ==========

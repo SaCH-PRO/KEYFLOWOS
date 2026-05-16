@@ -101,4 +101,8 @@ export class PublicCreateBookingDto {
   @IsOptional()
   @MaxLength(100)
   referralCode?: string | null;
+
+  @IsString()
+  @IsOptional()
+  orgUnitId?: string | null;
 }

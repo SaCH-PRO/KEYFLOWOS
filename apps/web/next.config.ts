@@ -63,6 +63,7 @@ function buildAllowedDevOrigins(): string[] {
 const isProd = process.env.NODE_ENV === "production";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   // `@keyflow/ui` is a workspace package whose package.json `exports` already
   // points at its TypeScript source. `transpilePackages` is sufficient on its
   // own to consume it. Do NOT add a `turbopack.resolveAlias` entry for it —
@@ -75,6 +76,21 @@ const nextConfig: NextConfig = {
     root: repoRoot,
   },
   allowedDevOrigins: buildAllowedDevOrigins(),
+  reactStrictMode: false,
+  experimental: {
+    optimizePackageImports: [
+      "lucide-react",
+      "framer-motion",
+      "sonner",
+      "recharts",
+      "@tiptap/starter-kit",
+      "@tiptap/react",
+      "@tiptap/extension-underline",
+      "@tiptap/extension-link",
+      "@tiptap/extension-text-align",
+      "@tiptap/extension-placeholder",
+    ],
+  },
   /**
    * Same-origin API proxy. Browsers running inside an iframe / behind a
    * preview proxy (Replit dev domain, ngrok, custom hosting) cannot
@@ -103,6 +119,16 @@ const nextConfig: NextConfig = {
       {
         source: "/app/control-tower/:path*",
         destination: "/app/keyflow-command",
+        permanent: true,
+      },
+      {
+        source: "/app/payments",
+        destination: "/app/commerce?tab=payments",
+        permanent: true,
+      },
+      {
+        source: "/app/payments/:path*",
+        destination: "/app/commerce?tab=payments",
         permanent: true,
       },
     ];

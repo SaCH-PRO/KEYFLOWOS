@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
 import { setStoredToken, setStoredBusinessId } from "@/lib/workspace";
@@ -46,7 +46,6 @@ type CallbackErrorKind = "generic" | "account_email_conflict";
 
 function AuthCallbackInner() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [status, setStatus] = useState<"loading" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<CallbackErrorKind>("generic");
@@ -58,7 +57,8 @@ function AuthCallbackInner() {
         const hash = window.location.hash.substring(1);
         const params = new URLSearchParams(hash);
         const accessToken = params.get("access_token");
-        const errorDescription = searchParams?.get("error_description");
+        const searchParams = new URLSearchParams(window.location.search);
+        const errorDescription = searchParams.get("error_description");
         
         if (errorDescription) {
           throw new Error(errorDescription);
@@ -93,9 +93,7 @@ function AuthCallbackInner() {
           window.localStorage.setItem("kf_email", email);
         }
 
-        const profileDraft = { firstName, lastName, username: "", company: "", phone: "" };
-        window.localStorage.setItem("kf_profile_draft", JSON.stringify(profileDraft));
-
+        window.localStorage.setItem("kf_profile_draft", JSON.stringify({ firstName, lastName, username: "", company: "", phone: "" }));
         const bootstrap = await bootstrapIdentity({
           email,
           name: fullName,
@@ -132,7 +130,7 @@ function AuthCallbackInner() {
     };
 
     handleCallback();
-  }, [router, searchParams]);
+  }, [router]);
 
   if (status === "error") {
     if (errorKind === "account_email_conflict") {

@@ -91,10 +91,12 @@ export class IdentitySignupService {
     requestOrigin?: string | null;
   }): Promise<SignupOutcome> {
     if (!this.supabaseAdmin.isConfigured()) {
+      const missing = this.supabaseAdmin.describeMissingConfig();
       throw new BadRequestException({
         code: 'server_misconfigured',
         message:
           'Sign up is temporarily unavailable. The server is missing required configuration.',
+        detail: missing,
       });
     }
 

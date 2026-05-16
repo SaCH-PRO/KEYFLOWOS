@@ -634,7 +634,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                             if (savingTemplate || selectedTemplate === t.id) return;
                             setSavingTemplate(true);
                             try {
-                              const body = docType === "invoice" ? { invoiceTemplate: t.id as any } : { quoteTemplate: t.id as any };
+                              const body = docType === "invoice" ? { invoiceTemplate: t.id as 'classic' | 'modern' | 'minimal' } : { quoteTemplate: t.id as 'classic' | 'modern' | 'minimal' };
                               const res = await setDocumentTemplate(body);
                               if (res.data) {
                                 setSelectedTemplate(t.id);

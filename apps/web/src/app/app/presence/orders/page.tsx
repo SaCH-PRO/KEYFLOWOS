@@ -58,7 +58,8 @@ export default function PresenceOrdersAndBookingsPage() {
           <Empty text="No storefront orders yet." />
         ) : (
           <div className="rounded-lg border border-border/40 overflow-hidden">
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+<table className="min-w-full w-full text-xs">
               <thead className="bg-slate-900/60 text-muted-foreground">
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">Order</th>
@@ -88,6 +89,7 @@ export default function PresenceOrdersAndBookingsPage() {
                 ))}
               </tbody>
             </table>
+</div>
           </div>
         )}
       </section>
@@ -114,7 +116,8 @@ export default function PresenceOrdersAndBookingsPage() {
           <Empty text="No bookings yet." />
         ) : (
           <div className="rounded-lg border border-border/40 overflow-hidden">
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+<table className="min-w-full w-full text-xs">
               <thead className="bg-slate-900/60 text-muted-foreground">
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">Customer</th>
@@ -144,6 +147,7 @@ export default function PresenceOrdersAndBookingsPage() {
                 })}
               </tbody>
             </table>
+</div>
           </div>
         )}
       </section>

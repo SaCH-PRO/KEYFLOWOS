@@ -263,6 +263,15 @@ describe('CalendarController (C2)', () => {
             })),
           },
         },
+        {
+          provide: (await import('../src/modules/ai/ai-usage.service')).AiUsageService,
+          useValue: {
+            trackAndComplete: vi.fn(async (_biz: string, _uid: string | undefined, _feature: string, request: any) => ({
+              text: '{}',
+              usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+            })),
+          },
+        },
         { provide: PrismaService, useValue: prismaMock },
       ],
     }).compile();

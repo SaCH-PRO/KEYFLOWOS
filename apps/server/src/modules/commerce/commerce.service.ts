@@ -1630,7 +1630,7 @@ export class CommerceService {
     const recipientEmail = invoice.contact?.email ?? null;
     const channel = input.channel ?? (recipientEmail ? 'email' : 'manual');
 
-    let delivered = false;
+    let delivered: boolean;
     let messageId: string | undefined;
     try {
       const result = await input.deliver({ invoice, recipientEmail, paymentUrl });

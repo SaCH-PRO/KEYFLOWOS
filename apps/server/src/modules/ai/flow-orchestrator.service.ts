@@ -11,6 +11,9 @@ import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
+import { AiMessageSenderService } from './ai-message-sender.service';
+import { SemanticMemoryService } from './semantic-memory.service';
+import { RoleEngineService, BusinessRole, RoleDetectionContext } from './role-engine.service';
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
@@ -189,6 +192,9 @@ export class FlowOrchestratorService {
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
+    @Inject(AiMessageSenderService) private readonly messageSender: AiMessageSenderService,
+    @Inject(SemanticMemoryService) private readonly semanticMemory: SemanticMemoryService,
+    @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
   ) {}
 
   /**
@@ -216,14 +222,62 @@ export class FlowOrchestratorService {
     return '\n' + lines.join('\n');
   }
 
+  /**
+   * Infer the business role from conversation context.
+   * Uses page route, focused item, message content, and conversation history
+   * to determine which role Key should adopt. This makes Key feel like one
+   * intelligent assistant that adapts transparently.
+   */
+  private async inferRole(
+    businessId: string,
+    message: string,
+    conversationHistory: FlowMessage[],
+    pageContext?: FlowPageContext,
+  ): Promise<BusinessRole> {
+    // Extract previous role from conversation history (look for role in assistant messages)
+    let previousRole: BusinessRole | undefined;
+    for (let i = conversationHistory.length - 1; i >= 0; i--) {
+      const msg = conversationHistory[i];
+      if (msg.role === 'assistant' && msg.content) {
+        // Heuristic: check if the sign-off matches a role
+        for (const role of ['sales', 'finance', 'support', 'operations', 'marketing'] as BusinessRole[]) {
+          const def = this.roleEngine.getRoleDefinition(role);
+          if (msg.content.includes(def.signOff)) {
+            previousRole = role;
+            break;
+          }
+        }
+        if (previousRole) break;
+      }
+    }
+
+    const detectionCtx: RoleDetectionContext = {
+      route: pageContext?.route,
+      focusedItemType: pageContext?.focusedItem?.type,
+      message,
+      previousRole,
+      entityContext: pageContext ? {
+        surface: pageContext.surface,
+        focusedItem: pageContext.focusedItem,
+        hints: pageContext.hints,
+      } : undefined,
+    };
+
+    return this.roleEngine.detectRoleFromContext(detectionCtx);
+  }
+
   async chat(
     businessId: string,
     message: string,
     conversationHistory: FlowMessage[] = [],
     pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, any> },
     pageContext?: FlowPageContext,
+    role?: BusinessRole,
   ): Promise<FlowResponse> {
     this.aiUsage.checkRateLimit(businessId);
+
+    // Auto-detect role if not explicitly provided
+    const detectedRole = role ?? await this.inferRole(businessId, message, conversationHistory, pageContext);
 
     const canProceed = await this.aiUsage.checkCredits(businessId, 2);
     if (!canProceed.allowed) {
@@ -238,12 +292,36 @@ export class FlowOrchestratorService {
 
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
+
+    // Semantic memory search based on last user message
+    const lastUserMessage = conversationHistory.slice().reverse().find((m) => m.role === 'user');
+    let semanticMemorySection = '';
+    if (lastUserMessage?.content) {
+      const relevant = await this.semanticMemory.search({
+        businessId,
+        query: lastUserMessage.content,
+        limit: 5,
+        minSimilarity: 0.65,
+      });
+      if (relevant.length > 0) {
+        semanticMemorySection = '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
+          relevant.map((m) => `- ${m.content} (similarity: ${Math.round(m.similarity * 100)}%)`).join('\n');
+      }
+    }
+
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);
 
-    const systemPrompt = FLOW_SYSTEM_PROMPT
-      .replace('{{CURRENT_DATE}}', new Date().toISOString())
-      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + pageContextSection + blueprintSection);
+    let systemPrompt: string;
+    if (detectedRole && detectedRole !== 'general') {
+      const businessContext = contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
+      systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext)
+        .replace('{{CURRENT_DATE}}', new Date().toISOString());
+    } else {
+      systemPrompt = FLOW_SYSTEM_PROMPT
+        .replace('{{CURRENT_DATE}}', new Date().toISOString())
+        .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection);
+    }
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -286,7 +364,7 @@ export class FlowOrchestratorService {
         return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
       }
       if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
-        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName);
+        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, detectedRole);
         if (!confirmDecision.allowed) {
           return {
             reply: `This action is blocked: ${confirmDecision.reason}`,
@@ -318,7 +396,7 @@ export class FlowOrchestratorService {
             usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
           };
         }
-        const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs);
+        const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, undefined, { planId: '', planStepId: '', role: detectedRole ?? undefined });
         return {
           reply: result.success
             ? `Done! ${this.formatToolSuccess(pendingConfirmation.toolName, result.result)}`
@@ -332,15 +410,20 @@ export class FlowOrchestratorService {
     messages.push({ role: 'user', content: message });
 
     try {
-      const gatewayResponse = await this.gateway.complete({
+      const gatewayResponse = await this.aiUsage.trackAndComplete(
         businessId,
-        taskCategory: 'tool-calling',
-        messages: messages as GatewayMessage[],
-        tools: getOpenAiToolDefinitions(),
-        toolChoice: 'auto',
-        maxTokens: 1000,
-        temperature: 0.7,
-      });
+        undefined,
+        'flow_chat',
+        {
+          messages: messages as GatewayMessage[],
+          tools: detectedRole && detectedRole !== 'general'
+            ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
+            : getOpenAiToolDefinitions(),
+          toolChoice: 'auto',
+          maxTokens: 1000,
+          temperature: 0.7,
+        },
+      );
 
       const assistantMessage = {
         content: gatewayResponse.content,
@@ -349,26 +432,6 @@ export class FlowOrchestratorService {
       const promptTokens = gatewayResponse.usage.promptTokens;
       const completionTokens = gatewayResponse.usage.completionTokens;
       const totalTokens = gatewayResponse.usage.totalTokens;
-
-      await this.prisma.client.aiUsageLog.create({
-        data: {
-          businessId,
-          feature: 'flow_chat',
-          model: gatewayResponse.model,
-          provider: gatewayResponse.provider,
-          promptTokens,
-          completionTokens,
-          totalTokens,
-          estimatedCost: gatewayResponse.usage.estimatedCost,
-          creditsUsed: 2,
-          latencyMs: gatewayResponse.latencyMs,
-          fallbackUsed: gatewayResponse.fallbackUsed,
-          fallbackProvider: gatewayResponse.fallbackProvider,
-          taskCategory: 'tool-calling',
-          metadata: { maxTokens: 1000, temperature: 0.7, outputCategory: 'general' },
-        },
-      });
-
       const usage = { promptTokens, completionTokens, totalTokens, creditsUsed: 2 };
 
       if (!assistantMessage.tool_calls || assistantMessage.tool_calls.length === 0) {
@@ -390,7 +453,7 @@ export class FlowOrchestratorService {
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole);
           return { tc, decision };
         }),
       );
@@ -448,7 +511,7 @@ export class FlowOrchestratorService {
       }
 
       const toolResults: FlowToolResult[] = await Promise.all(
-        toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id)),
+        toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined })),
       );
 
       const followUpMessages: GatewayMessage[] = [
@@ -465,13 +528,16 @@ export class FlowOrchestratorService {
         })),
       ];
 
-      const followUpGateway = await this.gateway.complete({
+      const followUpGateway = await this.aiUsage.trackAndComplete(
         businessId,
-        taskCategory: 'summarization',
-        messages: followUpMessages,
-        maxTokens: 500,
-        temperature: 0.7,
-      });
+        undefined,
+        'flow_chat',
+        {
+          messages: followUpMessages,
+          maxTokens: 500,
+          temperature: 0.7,
+        },
+      );
 
       const finalReply = followUpGateway.content
         || 'Done! The action was completed successfully.';
@@ -493,7 +559,11 @@ export class FlowOrchestratorService {
     message: string,
     conversationHistory: FlowMessage[] = [],
     pageContext?: FlowPageContext,
+    role?: BusinessRole,
   ): AsyncGenerator<FlowStreamChunk> {
+    // Auto-detect role if not explicitly provided
+    const detectedRole = role ?? await this.inferRole(businessId, message, conversationHistory, pageContext);
+
     try {
       this.aiUsage.checkRateLimit(businessId);
     } catch (err) {
@@ -514,12 +584,35 @@ export class FlowOrchestratorService {
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
+
+    // Semantic memory search based on current message
+    let semanticMemorySection = '';
+    if (message) {
+      const relevant = await this.semanticMemory.search({
+        businessId,
+        query: message,
+        limit: 5,
+        minSimilarity: 0.65,
+      });
+      if (relevant.length > 0) {
+        semanticMemorySection = '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
+          relevant.map((m) => `- ${m.content} (similarity: ${Math.round(m.similarity * 100)}%)`).join('\n');
+      }
+    }
+
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);
 
-    const systemPrompt = FLOW_SYSTEM_PROMPT
-      .replace('{{CURRENT_DATE}}', new Date().toISOString())
-      .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + pageContextSection + blueprintSection);
+    let systemPrompt: string;
+    if (detectedRole && detectedRole !== 'general') {
+      const businessContext = contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
+      systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext)
+        .replace('{{CURRENT_DATE}}', new Date().toISOString());
+    } else {
+      systemPrompt = FLOW_SYSTEM_PROMPT
+        .replace('{{CURRENT_DATE}}', new Date().toISOString())
+        .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection);
+    }
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -560,15 +653,20 @@ export class FlowOrchestratorService {
     messages.push({ role: 'user', content: message });
 
     try {
-      const stream = this.gateway.streamComplete({
+      const stream = this.aiUsage.trackAndStream(
         businessId,
-        taskCategory: 'tool-calling',
-        messages,
-        tools: getOpenAiToolDefinitions(),
-        toolChoice: 'auto',
-        maxTokens: 1000,
-        temperature: 0.7,
-      });
+        undefined,
+        'flow_chat_stream',
+        {
+          messages,
+          tools: detectedRole && detectedRole !== 'general'
+            ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
+            : getOpenAiToolDefinitions(),
+          toolChoice: 'auto',
+          maxTokens: 1000,
+          temperature: 0.7,
+        },
+      );
 
       let fullContent = '';
       const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
@@ -606,25 +704,7 @@ export class FlowOrchestratorService {
         }
       }
 
-      this.prisma.client.aiUsageLog.create({
-        data: {
-          businessId,
-          feature: 'flow_chat_stream',
-          model: streamModel,
-          provider: streamProvider,
-          promptTokens: streamUsage?.promptTokens ?? 0,
-          completionTokens: streamUsage?.completionTokens ?? 0,
-          totalTokens: streamUsage?.totalTokens ?? 0,
-          estimatedCost: streamUsage?.estimatedCost ?? 0,
-          creditsUsed: 2,
-          latencyMs: 0,
-          fallbackUsed: false,
-          taskCategory: 'tool-calling',
-          metadata: { maxTokens: 1000, temperature: 0.7, streaming: true },
-        },
-      }).catch((e: unknown) => {
-        this.logger.error(`Failed to log streaming usage: ${e instanceof Error ? e.message : String(e)}`);
-      });
+
 
       const usage = {
         promptTokens: streamUsage?.promptTokens ?? 0,
@@ -654,7 +734,7 @@ export class FlowOrchestratorService {
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole);
           return { tc, decision };
         }),
       );
@@ -719,7 +799,7 @@ export class FlowOrchestratorService {
       }
 
       const toolResults: FlowToolResult[] = await Promise.all(
-        toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id)),
+        toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined })),
       );
 
       yield { type: 'tool_results', toolResults };
@@ -742,13 +822,16 @@ export class FlowOrchestratorService {
         })),
       ];
 
-      const followUpStream = this.gateway.streamComplete({
+      const followUpStream = this.aiUsage.trackAndStream(
         businessId,
-        taskCategory: 'summarization',
-        messages: followUpMessages,
-        maxTokens: 500,
-        temperature: 0.7,
-      });
+        undefined,
+        'flow_chat_stream',
+        {
+          messages: followUpMessages,
+          maxTokens: 500,
+          temperature: 0.7,
+        },
+      );
 
       for await (const chunk of followUpStream) {
         if (chunk.type === 'content_delta' && chunk.content) {
@@ -764,12 +847,25 @@ export class FlowOrchestratorService {
     }
   }
 
+  async executeToolDirectly(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+    planContext?: { planId: string; planStepId: string },
+  ): Promise<any> {
+    const result = await this.executeTool(businessId, toolName, args, `direct_${toolName}`, planContext);
+    if (!result.success) {
+      throw new Error(result.error ?? `Tool ${toolName} failed`);
+    }
+    return result.result;
+  }
+
   private async executeTool(
     businessId: string,
     toolName: string,
     args: Record<string, any>,
     toolCallId?: string,
-    planContext?: { planId: string; planStepId: string },
+    planContext?: { planId: string; planStepId: string; role?: string },
   ): Promise<FlowToolResult> {
     const id = toolCallId ?? `manual_${toolName}`;
     const startTime = Date.now();
@@ -783,6 +879,7 @@ export class FlowOrchestratorService {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
+        role: planContext?.role,
       }).catch((e: unknown) => {
         this.logger.error(`Failed to log tool execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
@@ -804,6 +901,7 @@ export class FlowOrchestratorService {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
+        role: planContext?.role,
       }).catch((e: unknown) => {
         this.logger.error(`Failed to log tool execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
@@ -1856,11 +1954,22 @@ export class FlowOrchestratorService {
         });
         if (!contact) throw new Error('Contact not found');
 
-        const note = await this.prisma.client.contactNote.create({
+        // Actually send the message
+        const result = await this.messageSender.sendMessage({
+          businessId,
+          contactId: args.contactId,
+          channel: args.channel,
+          subject: args.subject,
+          body: args.body,
+          fromName: args.fromName,
+        });
+
+        // Store a note of what was sent
+        await this.prisma.client.contactNote.create({
           data: {
             contactId: args.contactId,
             businessId,
-            body: `[${args.channel.toUpperCase()} Draft]\nSubject: ${args.subject ?? 'N/A'}\n\n${args.body}`,
+            body: `[${args.channel.toUpperCase()} Sent]\nSubject: ${args.subject ?? 'N/A'}\n\n${args.body}\n\nStatus: ${result.success ? 'Delivered' : 'Failed'}${result.messageId ? ` (ID: ${result.messageId})` : ''}${result.error ? `\nError: ${result.error}` : ''}`,
             source: 'flow_ai',
           },
         });
@@ -1869,20 +1978,22 @@ export class FlowOrchestratorService {
           data: {
             businessId,
             module: 'ai',
-            action: 'message_queued',
+            action: result.success ? 'message_sent' : 'message_failed',
             entityType: 'contact',
             entityId: args.contactId,
-            title: `Message queued for ${contact.firstName ?? ''} ${contact.lastName ?? ''} via ${args.channel}`,
+            title: `Message ${result.success ? 'sent' : 'failed'} to ${contact.firstName ?? ''} ${contact.lastName ?? ''} via ${args.channel}`,
             detail: args.body.slice(0, 200),
-            tone: 'info',
+            tone: result.success ? 'success' : 'warning',
           },
         });
 
         return {
-          id: note.id,
+          id: contact.id,
           contactName: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim(),
           channel: args.channel,
-          status: 'queued_for_review',
+          status: result.success ? 'sent' : 'failed',
+          messageId: result.messageId,
+          error: result.error,
         };
       }
 
@@ -2434,6 +2545,7 @@ export class FlowOrchestratorService {
       rationale: `Executing plan: ${plan.objective}`,
       planId,
       success: true,
+      role: plan.role ?? undefined,
     });
 
     const results: Array<{ stepId: string; action: string; status: string; error?: string }> = [];
@@ -2454,7 +2566,8 @@ export class FlowOrchestratorService {
       }
 
       if (step.toolName) {
-        const decision = await this.governance.evaluate(businessId, step.toolName);
+        const stepRole = (step.role ?? plan.role ?? undefined) as BusinessRole | undefined;
+        const decision = await this.governance.evaluate(businessId, step.toolName, undefined, stepRole);
         if (!decision.allowed) {
           await this.planner.updateStepStatus(step.id, 'blocked', null, decision.reason);
           stepsSkipped++;
@@ -2498,7 +2611,7 @@ export class FlowOrchestratorService {
           step.toolName,
           (step.inputPayload as Record<string, any>) ?? {},
           undefined,
-          { planId, planStepId: step.id },
+          { planId, planStepId: step.id, role: step.role ?? plan.role ?? undefined },
         );
         const durationMs = Date.now() - startTime;
 
@@ -2533,6 +2646,7 @@ export class FlowOrchestratorService {
       rationale: `Plan finished: ${stepsExecuted} executed, ${stepsFailed} failed, ${stepsSkipped} skipped`,
       planId,
       success: stepsFailed === 0,
+      role: plan.role ?? undefined,
     });
 
     this.businessGraph.invalidateCache(businessId);

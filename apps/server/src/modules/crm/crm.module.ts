@@ -58,9 +58,11 @@ import { AiModule } from '../ai/ai.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { ConnectorModule } from '../../core/connectors/connector.module';
 import { CommunityModule } from '../community/community.module';
+import { EvidenceModule } from '../evidence/evidence.module';
+import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
 
 @Module({
-  imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule, CommunityModule, TimelineModule, forwardRef(() => AutopilotModule)],
+  imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule, CommunityModule, TimelineModule, EvidenceModule, TaskAssignmentModule, forwardRef(() => AutopilotModule)],
   controllers: [
     CrmController,
     CrmAiController,

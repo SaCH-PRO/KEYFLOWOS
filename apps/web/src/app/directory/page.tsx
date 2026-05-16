@@ -1,364 +1,349 @@
+"use client";
+
+import { useState, useMemo } from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
+import {
+  Search,
+  MapPin,
+  Store,
+  ArrowRight,
+  Sparkles,
+  Layers,
+} from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
-const PUBLIC_BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? "";
+const CATEGORIES = ["All", "Beauty", "Health", "Food", "Services", "Retail"];
 
-export const dynamic = "force-dynamic";
-export const revalidate = 60;
+const MOCK_BUSINESSES = [
+  {
+    slug: "island-glow-spa",
+    name: "Island Glow Spa",
+    logoUrl: null,
+    tagline: "Radiant skin, island soul",
+    category: "Beauty",
+    city: "Port of Spain",
+    country: "Trinidad & Tobago",
+  },
+  {
+    slug: "coconut-cove-barbers",
+    name: "Coconut Cove Barbers",
+    logoUrl: null,
+    tagline: "Sharp cuts by the shore",
+    category: "Services",
+    city: "Scarborough",
+    country: "Trinidad & Tobago",
+  },
+  {
+    slug: "spice-isle-kitchen",
+    name: "Spice Isle Kitchen",
+    logoUrl: null,
+    tagline: "Authentic Grenadian flavours",
+    category: "Food",
+    city: "St. George's",
+    country: "Grenada",
+  },
+  {
+    slug: "reef-wellness",
+    name: "Reef & Wellness",
+    logoUrl: null,
+    tagline: "Healing from the sea",
+    category: "Health",
+    city: "Bridgetown",
+    country: "Barbados",
+  },
+  {
+    slug: "sunset-boutique",
+    name: "Sunset Boutique",
+    logoUrl: null,
+    tagline: "Island fashion finds",
+    category: "Retail",
+    city: "Kingston",
+    country: "Jamaica",
+  },
+  {
+    slug: "tropical-twist-salon",
+    name: "Tropical Twist Salon",
+    logoUrl: null,
+    tagline: "Braids, beauty & beyond",
+    category: "Beauty",
+    city: "Castries",
+    country: "St. Lucia",
+  },
+];
 
-type DirectoryItem = {
-  slug: string;
-  name: string;
-  logoUrl: string | null;
-  tagline: string | null;
-  headline: string | null;
-  industry: string | null;
-  city: string | null;
-  country: string | null;
-  website: string | null;
-  publishedAt: string | null;
-};
+const fadeUp = { hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0 } };
+const stagger = { visible: { transition: { staggerChildren: 0.08 } } };
 
-type DirectoryFilterFacet = { value: string; count: number };
+export default function DirectoryPage() {
+  const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState("All");
 
-type DirectoryResponse = {
-  items: DirectoryItem[];
-  total: number;
-  page: number;
-  pageSize: number;
-  pageCount: number;
-  filters: { industries: DirectoryFilterFacet[]; cities: DirectoryFilterFacet[] };
-};
-
-type SearchParams = Record<string, string | string[] | undefined>;
-
-function pickStr(v: string | string[] | undefined): string | undefined {
-  if (Array.isArray(v)) return v[0];
-  return typeof v === "string" && v.trim() ? v.trim() : undefined;
-}
-
-async function fetchDirectory(params: SearchParams): Promise<DirectoryResponse | null> {
-  const qs = new URLSearchParams();
-  const industry = pickStr(params.industry);
-  const city = pickStr(params.city);
-  const q = pickStr(params.q);
-  const page = pickStr(params.page);
-  if (industry) qs.set("industry", industry);
-  if (city) qs.set("city", city);
-  if (q) qs.set("q", q);
-  if (page) qs.set("page", page);
-  try {
-    const res = await fetch(`${API_BASE}/site/presence/directory?${qs.toString()}`, {
-      next: { revalidate: 60 },
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as DirectoryResponse;
-  } catch {
-    return null;
-  }
-}
-
-export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const params = await searchParams;
-  const industry = pickStr(params.industry);
-  const city = pickStr(params.city);
-  const parts = ["Business Directory"];
-  if (industry) parts.push(industry);
-  if (city) parts.push(city);
-  const title = `${parts.join(" · ")} | KeyFlow`;
-  const description = `Discover ${industry ?? "businesses"} in ${city ?? "your area"} powered by KeyFlow. Browse storefronts, services and contacts.`;
-  const canonical = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/directory` : "/directory";
-  return {
-    title,
-    description,
-    alternates: { canonical },
-    openGraph: {
-      type: "website",
-      title,
-      description,
-      url: canonical,
-      siteName: "KeyFlow",
-    },
-    robots: { index: true, follow: true },
-  };
-}
-
-function buildHref(base: SearchParams, overrides: Record<string, string | undefined>) {
-  const next = new URLSearchParams();
-  const merged: Record<string, string | undefined> = {
-    industry: pickStr(base.industry),
-    city: pickStr(base.city),
-    q: pickStr(base.q),
-    page: pickStr(base.page),
-    ...overrides,
-  };
-  for (const [k, v] of Object.entries(merged)) {
-    if (v && v.length > 0) next.set(k, v);
-  }
-  const qs = next.toString();
-  return qs ? `/directory?${qs}` : "/directory";
-}
-
-export default async function DirectoryPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
-  const params = await searchParams;
-  const data = await fetchDirectory(params);
-  const industry = pickStr(params.industry);
-  const city = pickStr(params.city);
-  const q = pickStr(params.q);
-  const page = Number(pickStr(params.page) ?? "1") || 1;
-
-  const items = data?.items ?? [];
-  const total = data?.total ?? 0;
-  const pageCount = data?.pageCount ?? 1;
-  const industries = data?.filters.industries ?? [];
-  const cities = data?.filters.cities ?? [];
-
-  const itemListLd = {
-    "@context": "https://schema.org",
-    "@type": "ItemList",
-    name: "KeyFlow Business Directory",
-    numberOfItems: items.length,
-    itemListElement: items.map((b, i) => {
-      const url = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/site/${b.slug}` : `/site/${b.slug}`;
-      return {
-        "@type": "ListItem",
-        position: i + 1,
-        url,
-        item: {
-          "@type": "LocalBusiness",
-          name: b.name,
-          url,
-          image: b.logoUrl || undefined,
-          description: b.headline || b.tagline || undefined,
-          address: b.city || b.country
-            ? {
-                "@type": "PostalAddress",
-                addressLocality: b.city || undefined,
-                addressCountry: b.country || undefined,
-              }
-            : undefined,
-        },
-      };
-    }),
-  };
+  const filtered = useMemo(() => {
+    let items = [...MOCK_BUSINESSES];
+    if (activeCategory !== "All") {
+      items = items.filter((b) => b.category === activeCategory);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      items = items.filter(
+        (b) =>
+          b.name.toLowerCase().includes(q) ||
+          b.tagline.toLowerCase().includes(q) ||
+          b.city.toLowerCase().includes(q) ||
+          b.category.toLowerCase().includes(q)
+      );
+    }
+    return items;
+  }, [search, activeCategory]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-950 to-black text-zinc-100">
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListLd).replace(/<\//g, "<\\/") }}
-      />
-      <header className="border-b border-zinc-900 bg-zinc-950/80 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
-          <Link href="/" className="text-lg font-bold tracking-tight">
-            KeyFlow
+    <div className="relative min-h-screen bg-[hsl(20_14%_4%)] text-[hsl(30_20%_98%)] overflow-hidden">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute -top-60 right-0 w-[700px] h-[700px] rounded-full bg-[radial-gradient(circle,hsl(24_95%_53%/0.1),transparent_65%)]" />
+        <div className="absolute -bottom-40 -left-40 w-[600px] h-[600px] rounded-full bg-[radial-gradient(circle,hsl(173_58%_39%/0.07),transparent_65%)]" />
+      </div>
+
+      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-[hsl(20_14%_4%/0.8)] backdrop-blur-xl">
+        <div className="max-w-6xl mx-auto px-5 sm:px-8 flex items-center justify-between h-16">
+          <Link href="/" className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-[hsl(24_95%_53%)] to-[hsl(173_58%_39%)]">
+              <Layers className="w-4.5 h-4.5 text-white" />
+            </div>
+            <span className="text-lg font-bold tracking-tight">KeyFlowOS</span>
           </Link>
-          <nav className="text-sm text-zinc-400 flex items-center gap-4">
-            <Link href="/pricing" className="hover:text-zinc-100">Pricing</Link>
-            <Link href="/auth/sign-up" className="rounded-full bg-orange-500 px-4 py-1.5 text-zinc-950 font-medium hover:bg-orange-400">
-              Get listed
-            </Link>
-          </nav>
-        </div>
-      </header>
-
-      <section className="max-w-6xl mx-auto px-6 pt-12 pb-6">
-        <p className="text-xs uppercase tracking-[0.18em] text-orange-400/80">Business directory</p>
-        <h1 className="mt-3 text-3xl md:text-5xl font-bold tracking-tight">
-          Discover {total > 0 ? `${total.toLocaleString()} ` : ""}businesses on KeyFlow
-        </h1>
-        <p className="mt-3 max-w-2xl text-zinc-400">
-          Browse every published storefront on the network. Filter by industry or city to find the right team
-          for your next project — every entry links straight to the live business page.
-        </p>
-
-        <form action="/directory" method="get" className="mt-8 flex flex-wrap items-center gap-2">
-          <input
-            type="search"
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Search businesses, services, taglines"
-            className="flex-1 min-w-[240px] rounded-full border border-zinc-800 bg-zinc-900/60 px-5 py-3 text-sm placeholder:text-zinc-500 focus:border-orange-500 focus:outline-none"
-            maxLength={80}
-          />
-          {industry ? <input type="hidden" name="industry" value={industry} /> : null}
-          {city ? <input type="hidden" name="city" value={city} /> : null}
-          <button
-            type="submit"
-            className="rounded-full bg-orange-500 px-6 py-3 text-sm font-medium text-zinc-950 hover:bg-orange-400"
-          >
-            Search
-          </button>
-          {(q || industry || city) && (
+          <div className="flex items-center gap-2 sm:gap-4">
             <Link
               href="/directory"
-              className="rounded-full border border-zinc-800 px-5 py-3 text-sm text-zinc-400 hover:text-zinc-100"
+              className="hidden sm:inline-block text-sm text-[hsl(24_95%_53%)] font-medium"
             >
-              Clear filters
+              Directory
             </Link>
-          )}
-        </form>
-      </section>
-
-      <section className="max-w-6xl mx-auto px-6 pb-12">
-        <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8">
-          <aside className="space-y-8 lg:sticky lg:top-28 self-start">
-            <FacetGroup
-              title="Industry"
-              facets={industries}
-              activeValue={industry}
-              hrefFor={(value) => buildHref(params, { industry: value, page: undefined })}
-              clearHref={buildHref(params, { industry: undefined, page: undefined })}
-            />
-            <FacetGroup
-              title="City"
-              facets={cities}
-              activeValue={city}
-              hrefFor={(value) => buildHref(params, { city: value, page: undefined })}
-              clearHref={buildHref(params, { city: undefined, page: undefined })}
-            />
-          </aside>
-
-          <div>
-            {items.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/30 p-12 text-center">
-                <h2 className="text-lg font-semibold">No businesses match those filters yet.</h2>
-                <p className="mt-2 text-sm text-zinc-400">
-                  Try clearing a filter, or <Link className="text-orange-400 hover:text-orange-300" href="/auth/sign-up">publish your own storefront</Link> to be the first.
-                </p>
-              </div>
-            ) : (
-              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {items.map((b) => (
-                  <li key={b.slug}>
-                    <DirectoryCard item={b} />
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {pageCount > 1 ? (
-              <nav className="mt-10 flex items-center justify-between text-sm text-zinc-400">
-                <div>
-                  Page {page} of {pageCount}
-                </div>
-                <div className="flex items-center gap-2">
-                  {page > 1 ? (
-                    <Link
-                      href={buildHref(params, { page: String(page - 1) })}
-                      className="rounded-full border border-zinc-800 px-4 py-2 hover:text-zinc-100"
-                    >
-                      ← Previous
-                    </Link>
-                  ) : null}
-                  {page < pageCount ? (
-                    <Link
-                      href={buildHref(params, { page: String(page + 1) })}
-                      className="rounded-full border border-zinc-800 px-4 py-2 hover:text-zinc-100"
-                    >
-                      Next →
-                    </Link>
-                  ) : null}
-                </div>
-              </nav>
-            ) : null}
+            <Link
+              href="/pricing"
+              className="hidden sm:inline-block text-sm text-[hsl(30_10%_55%)] hover:text-[hsl(30_20%_85%)] transition-colors"
+            >
+              Pricing
+            </Link>
+            <Link
+              href="/auth/login"
+              className="text-sm text-[hsl(30_10%_55%)] hover:text-[hsl(30_20%_85%)] transition-colors"
+            >
+              Log in
+            </Link>
+            <Link
+              href="/auth/signup"
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-[hsl(24_95%_53%)] to-[hsl(24_95%_45%)] hover:brightness-110 transition-all"
+            >
+              Start Free
+            </Link>
           </div>
         </div>
-      </section>
+      </nav>
 
-      <footer className="border-t border-zinc-900 py-8 text-center text-xs text-zinc-500">
-        Powered by KeyFlow · <Link href="/" className="hover:text-zinc-300">keyflow.app</Link>
+      <main className="relative z-10 max-w-6xl mx-auto px-5 sm:px-8 pt-16 sm:pt-24 pb-20">
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={stagger}
+          className="text-center max-w-3xl mx-auto mb-12"
+        >
+          <motion.div
+            variants={fadeUp}
+            transition={{ duration: 0.5 }}
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[hsl(24_95%_53%/0.08)] border border-[hsl(24_95%_53%/0.15)] text-sm font-medium text-[hsl(24_95%_63%)] mb-6"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            Caribbean Business Directory
+          </motion.div>
+
+          <motion.h1
+            variants={fadeUp}
+            transition={{ duration: 0.6 }}
+            className="text-4xl sm:text-5xl font-bold leading-[1.08] mb-5 tracking-tight"
+          >
+            Discover local businesses{" "}
+            <span className="bg-gradient-to-r from-[hsl(24_95%_53%)] to-[hsl(173_58%_50%)] bg-clip-text text-transparent">
+              on KeyFlow
+            </span>
+          </motion.h1>
+
+          <motion.p
+            variants={fadeUp}
+            transition={{ duration: 0.5 }}
+            className="text-base sm:text-lg text-[hsl(30_10%_55%)] max-w-xl mx-auto leading-relaxed"
+          >
+            Find and book appointments with the best service businesses across
+            the Caribbean.
+          </motion.p>
+        </motion.div>
+
+        <motion.div
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="max-w-2xl mx-auto mb-10"
+        >
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-[hsl(30_10%_40%)]" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by business name, category or location"
+              className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.03] pl-11 pr-4 py-3.5 text-sm placeholder:text-[hsl(30_10%_40%)] focus:border-[hsl(24_95%_53%)] focus:outline-none focus:ring-1 focus:ring-[hsl(24_95%_53%/0.2)] transition-all"
+            />
+          </div>
+        </motion.div>
+
+        <motion.div
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          transition={{ duration: 0.5, delay: 0.3 }}
+          className="flex flex-wrap justify-center gap-2 mb-12"
+        >
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                activeCategory === cat
+                  ? "bg-gradient-to-r from-[hsl(24_95%_53%)] to-[hsl(24_95%_45%)] text-white shadow-lg shadow-orange-500/20"
+                  : "bg-white/[0.04] border border-white/[0.08] text-[hsl(30_10%_55%)] hover:text-[hsl(30_20%_85%)] hover:bg-white/[0.07]"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </motion.div>
+
+        {filtered.length === 0 ? (
+          <div className="text-center py-20">
+            <Store className="w-12 h-12 text-[hsl(30_10%_30%)] mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-[hsl(30_20%_85%)] mb-2">
+              No businesses found
+            </h3>
+            <p className="text-sm text-[hsl(30_10%_45%)]">
+              Try adjusting your search or category filter.
+            </p>
+          </div>
+        ) : (
+          <motion.ul
+            variants={stagger}
+            initial="hidden"
+            animate="visible"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
+          >
+            {filtered.map((business) => (
+              <motion.li key={business.slug} variants={fadeUp} transition={{ duration: 0.4 }}>
+                <BusinessCard business={business} />
+              </motion.li>
+            ))}
+          </motion.ul>
+        )}
+      </main>
+
+      <footer className="relative z-10 border-t border-white/[0.06]">
+        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-gradient-to-br from-[hsl(24_95%_53%)] to-[hsl(173_58%_39%)]">
+              <Layers className="w-3.5 h-3.5 text-white" />
+            </div>
+            <span className="text-sm font-semibold text-[hsl(30_10%_45%)]">
+              KeyFlowOS
+            </span>
+          </div>
+          <p className="text-xs text-[hsl(30_10%_30%)]">
+            Your business, on autopilot.
+          </p>
+          <div className="flex items-center gap-4 text-xs text-[hsl(30_10%_35%)]">
+            <Link
+              href="/directory"
+              className="text-[hsl(24_95%_53%)] hover:text-[hsl(24_95%_63%)] transition-colors"
+            >
+              Directory
+            </Link>
+            <Link
+              href="/pricing"
+              className="hover:text-[hsl(30_10%_60%)] transition-colors"
+            >
+              Pricing
+            </Link>
+            <Link
+              href="/auth/login"
+              className="hover:text-[hsl(30_10%_60%)] transition-colors"
+            >
+              Log in
+            </Link>
+            <Link
+              href="/auth/signup"
+              className="hover:text-[hsl(30_10%_60%)] transition-colors"
+            >
+              Sign up
+            </Link>
+          </div>
+        </div>
       </footer>
-    </main>
-  );
-}
-
-function FacetGroup({
-  title,
-  facets,
-  activeValue,
-  hrefFor,
-  clearHref,
-}: {
-  title: string;
-  facets: DirectoryFilterFacet[];
-  activeValue?: string;
-  hrefFor: (value: string) => string;
-  clearHref: string;
-}) {
-  if (!facets.length && !activeValue) return null;
-  return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">{title}</h2>
-        {activeValue ? (
-          <Link href={clearHref} className="text-xs text-orange-400 hover:text-orange-300">
-            Clear
-          </Link>
-        ) : null}
-      </div>
-      <ul className="mt-3 space-y-1">
-        {facets.slice(0, 12).map((f) => {
-          const active = activeValue && activeValue.toLowerCase() === f.value.toLowerCase();
-          return (
-            <li key={f.value}>
-              <Link
-                href={active ? clearHref : hrefFor(f.value)}
-                className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-sm transition ${
-                  active
-                    ? "bg-orange-500/15 text-orange-200"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-                }`}
-              >
-                <span className="truncate">{f.value}</span>
-                <span className="ml-2 shrink-0 text-xs text-zinc-500">{f.count}</span>
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
     </div>
   );
 }
 
-function DirectoryCard({ item }: { item: DirectoryItem }) {
-  const subtitle = item.headline || item.tagline || item.industry || "";
-  const location = [item.city, item.country].filter(Boolean).join(", ");
+function BusinessCard({
+  business,
+}: {
+  business: (typeof MOCK_BUSINESSES)[number];
+}) {
+  const location = [business.city, business.country]
+    .filter(Boolean)
+    .join(", ");
+
   return (
-    <Link
-      href={`/site/${item.slug}`}
-      className="group flex h-full flex-col rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 transition hover:-translate-y-0.5 hover:border-orange-500/60 hover:bg-zinc-900/70"
-    >
-      <div className="flex items-start gap-4">
-        <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-zinc-800 ring-1 ring-zinc-700/60 flex items-center justify-center text-sm font-semibold text-zinc-300">
-          {item.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.logoUrl} alt={`${item.name} logo`} className="h-full w-full object-cover" loading="lazy" />
+    <div className="group flex h-full flex-col rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] hover:border-[hsl(24_95%_53%/0.25)] transition-all p-5">
+      <div className="flex items-start gap-4 mb-4">
+        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br from-[hsl(24_95%_53%/0.15)] to-[hsl(173_58%_39%/0.1)] ring-1 ring-white/[0.08] flex items-center justify-center text-sm font-bold text-[hsl(30_20%_85%)]">
+          {business.logoUrl ? (
+            <img
+              src={business.logoUrl}
+              alt={`${business.name} logo`}
+              className="h-full w-full object-cover"
+              loading="lazy"
+            />
           ) : (
-            <span>{item.name.slice(0, 2).toUpperCase()}</span>
+            <span>{business.name.slice(0, 2).toUpperCase()}</span>
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-base font-semibold text-zinc-100 group-hover:text-orange-200">
-            {item.name}
+          <h3 className="truncate text-base font-semibold text-[hsl(30_20%_98%)] group-hover:text-[hsl(24_95%_63%)] transition-colors">
+            {business.name}
           </h3>
-          {subtitle ? (
-            <p className="mt-0.5 line-clamp-2 text-sm text-zinc-400">{subtitle}</p>
-          ) : null}
+          <p className="mt-0.5 text-sm text-[hsl(30_10%_45%)]">
+            {business.tagline}
+          </p>
         </div>
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-        {item.industry ? (
-          <span className="rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1">{item.industry}</span>
-        ) : null}
-        {location ? (
-          <span className="rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1">{location}</span>
-        ) : null}
+
+      <div className="mt-auto space-y-4">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[hsl(30_10%_55%)]">
+            {business.category}
+          </span>
+          {location && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[hsl(30_10%_55%)]">
+              <MapPin className="w-3 h-3" />
+              {location}
+            </span>
+          )}
+        </div>
+
+        <Link
+          href={`/book/${business.slug}`}
+          className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-[hsl(24_95%_53%)] to-[hsl(24_95%_45%)] hover:brightness-110 transition-all shadow-lg shadow-orange-500/10"
+        >
+          Book Now
+          <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+        </Link>
       </div>
-    </Link>
+    </div>
   );
 }

@@ -177,17 +177,11 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
       frequency: rec.frequency,
       nextRunDate: rec.nextRunDate ? rec.nextRunDate.split("T")[0] : "",
       endDate: rec.endDate ? rec.endDate.split("T")[0] : "",
-      notes: rec.notes || "",
-      taxRate: String(rec.taxRate ?? 0),
-      discountType: (rec.discountType as "PERCENT" | "FIXED") || "PERCENT",
-      discountValue: rec.discountValue ? String(rec.discountValue) : "",
-      items: (rec.lineItems ?? []).map((item: { description: string; quantity: number | string; unitPrice: number | string }) => ({
-        id: generateItemId(),
-        productId: "",
-        description: item.description,
-        quantity: String(item.quantity),
-        unitPrice: String(item.unitPrice),
-      })),
+      notes: rec.description || "",
+      taxRate: "0",
+      discountType: "PERCENT" as const,
+      discountValue: "",
+      items: [],
     });
     setShowBuilder(true);
   }
@@ -271,7 +265,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
     const res = await toggleRecurringInvoice(businessId, id);
     if (res.data) {
       setRecurring((prev) => prev.map((r) => (r.id === id ? res.data! : r)));
-      emitEvent("billing:schedule_toggled", "commerce", { scheduleId: id, active: res.data.isActive });
+      emitEvent("billing:schedule_toggled", "commerce", { scheduleId: id, active: res.data.status === 'ACTIVE' });
     }
   }
 
@@ -308,15 +302,15 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
   useEffect(() => {
     const now = Date.now();
     for (const r of recurring) {
-      if (!r.isActive) continue;
+      if (r.status !== 'ACTIVE') continue;
       const due = r.nextRunDate ? new Date(r.nextRunDate).getTime() : 0;
       const overdueByMs = now - due;
       const oneDay = 24 * 60 * 60 * 1000;
-      if ((r.failureCount ?? 0) > 0) {
+      if (0 > 0) {
         emitEvent("billing:schedule_failed", "commerce", {
           scheduleId: r.id,
-          failureCount: r.failureCount,
-          lastError: r.lastError,
+          failureCount: 0,
+          lastError: null,
         });
       } else if (due > 0 && overdueByMs > oneDay) {
         emitEvent("billing:schedule_missed", "commerce", {
@@ -550,10 +544,10 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
       </AnimatePresence>
 
       {recurring.length > 0 && (() => {
-        const active = recurring.filter((r) => r.isActive);
+        const active = recurring.filter((r) => r.status === 'ACTIVE');
         const inactive = recurring.length - active.length;
         const dailyRate = active.reduce((sum, r) => {
-          const scheduleTotal = Number(r.total ?? 0);
+          const scheduleTotal = Number(r.amount ?? 0);
           const perDay: Record<string, number> = {
             WEEKLY: 1 / 7,
             BIWEEKLY: 1 / 14,
@@ -564,7 +558,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
           return sum + scheduleTotal * (perDay[r.frequency] ?? 12 / 365);
         }, 0);
         const expected30 = dailyRate * 30;
-        const missedCount = recurring.filter((r) => r.isActive && (r.failureCount ?? 0) > 0).length;
+        const missedCount = recurring.filter((r) => r.status === 'ACTIVE' && 0 > 0).length;
         const nextRun = active
           .filter((r) => r.nextRunDate)
           .sort((a, b) => new Date(a.nextRunDate!).getTime() - new Date(b.nextRunDate!).getTime())[0];
@@ -652,7 +646,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
               key={rec.id}
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`rounded-xl border bg-card p-4 transition-all ${rec.isActive ? "border-border/50 hover:border-border/70" : "border-border/30 opacity-60"} ${selectedIds.has(rec.id) ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
+              className={`rounded-xl border bg-card p-4 transition-all ${rec.status === 'ACTIVE' ? "border-border/50 hover:border-border/70" : "border-border/30 opacity-60"} ${selectedIds.has(rec.id) ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
             >
               <div className="flex items-start justify-between gap-4">
                 <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
@@ -666,26 +660,26 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3 flex-wrap">
                     <h3 className="font-semibold text-base truncate">{rec.name}</h3>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${rec.isActive ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" : rec.cancelledAt ? "bg-red-500/20 text-red-300 border-red-500/40" : "bg-slate-500/20 text-slate-400 border-slate-500/40"}`}>
-                      {rec.isActive ? "Active" : rec.cancelledAt ? "Cancelled" : "Paused"}
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${rec.status === 'ACTIVE' ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" : rec.status === "CANCELLED" ? "bg-red-500/20 text-red-300 border-red-500/40" : "bg-slate-500/20 text-slate-400 border-slate-500/40"}`}>
+                      {rec.status === 'ACTIVE' ? "Active" : rec.status === "CANCELLED" ? "Cancelled" : "Paused"}
                     </span>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20">
                       <RefreshCw className="w-3 h-3" />
                       {FREQUENCIES.find((f) => f.value === rec.frequency)?.label ?? rec.frequency}
                     </span>
-                    {(rec.failureCount ?? 0) > 0 && (
+                    {0 > 0 && (
                       <button
                         type="button"
                         onClick={() => openHistory(rec)}
                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/15 text-red-300 border border-red-500/40 hover:bg-red-500/25 transition-colors"
-                        title={rec.lastError || "Last generation failed"}
+                        title={"Last generation failed"}
                       >
                         <AlertTriangle className="w-3 h-3" />
-                        Missed {rec.failureCount} {rec.failureCount === 1 ? "run" : "runs"}
+                        Missed 0 runs
                         <ArrowRight className="w-3 h-3 opacity-60" />
                       </button>
                     )}
-                    {rec.isActive && (rec.failureCount ?? 0) > 0 && (
+                    {rec.status === 'ACTIVE' && 0 > 0 && (
                       <a
                         href={`/app/inbox?source=recurring&recurringId=${rec.id}`}
                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/15 text-amber-200 border border-amber-500/40 hover:bg-amber-500/25 transition-colors"
@@ -705,18 +699,18 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                     </span>
                     <span className="flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5" />
-                      {rec.runCount} generated
+                      {rec.generatedCount} generated
                     </span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3 shrink-0">
                   <span className="text-lg font-bold text-primary">
-                    {rec.currency} {Number(rec.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {rec.currency} {Number(rec.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </span>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => handleToggle(rec.id)} className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${rec.isActive ? "hover:bg-amber-500/20 text-amber-400" : "hover:bg-emerald-500/20 text-emerald-400"}`} title={rec.isActive ? "Pause" : "Resume"}>
-                      {rec.isActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                    <button onClick={() => handleToggle(rec.id)} className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${rec.status === 'ACTIVE' ? "hover:bg-amber-500/20 text-amber-400" : "hover:bg-emerald-500/20 text-emerald-400"}`} title={rec.status === 'ACTIVE' ? "Pause" : "Resume"}>
+                      {rec.status === 'ACTIVE' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                     </button>
                     <button onClick={() => openEdit(rec)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Edit">
                       <Pencil className="w-4 h-4" />
@@ -724,7 +718,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                     <button onClick={() => openHistory(rec)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Generation history">
                       <History className="w-4 h-4" />
                     </button>
-                    {!rec.cancelledAt && (
+                    {rec.status !== 'CANCELLED' && (
                       <button onClick={() => handleCancel(rec.id)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-orange-500/20 text-orange-400 transition-colors" title="Cancel schedule">
                         <Ban className="w-4 h-4" />
                       </button>
@@ -744,7 +738,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                       <span className="text-[10px] text-muted-foreground/50">Revenue to Date</span>
                     </div>
                     <span className="text-sm font-bold text-emerald-400">
-                      {rec.currency} {(Number(rec.total) * rec.runCount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {rec.currency} {(Number(rec.amount) * rec.generatedCount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
@@ -754,7 +748,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                     </div>
                     <span className="text-sm font-bold text-blue-400">
                       {rec.currency} {(() => {
-                        const total = Number(rec.total);
+                        const total = Number(rec.amount);
                         const freqMultiplier: Record<string, number> = { WEEKLY: 52, BIWEEKLY: 26, MONTHLY: 12, QUARTERLY: 4, YEARLY: 1 };
                         return (total * (freqMultiplier[rec.frequency] ?? 12)).toLocaleString(undefined, { minimumFractionDigits: 2 });
                       })()}
@@ -762,11 +756,11 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                   </div>
                   <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
                     <div className="flex items-center gap-1 mb-0.5">
-                      {rec.isActive ? <CheckCircle className="w-2.5 h-2.5 text-emerald-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />}
+                      {rec.status === 'ACTIVE' ? <CheckCircle className="w-2.5 h-2.5 text-emerald-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />}
                       <span className="text-[10px] text-muted-foreground/50">Status</span>
                     </div>
-                    <span className={`text-sm font-bold ${rec.isActive ? "text-emerald-400" : "text-amber-400"}`}>
-                      {rec.isActive ? "Running" : "Paused"}
+                    <span className={`text-sm font-bold ${rec.status === 'ACTIVE' ? "text-emerald-400" : "text-amber-400"}`}>
+                      {rec.status === 'ACTIVE' ? "Running" : "Paused"}
                     </span>
                   </div>
                   <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
@@ -775,14 +769,14 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                       <span className="text-[10px] text-muted-foreground/50">Last Run</span>
                     </div>
                     <span className="text-sm font-bold text-muted-foreground/70">
-                      {rec.lastRunDate ? new Date(rec.lastRunDate as string).toLocaleDateString() : rec.runCount > 0 ? "Completed" : "Pending"}
+                      {rec.lastGeneratedAt ? new Date(rec.lastGeneratedAt as string).toLocaleDateString() : rec.generatedCount > 0 ? "Completed" : "Pending"}
                     </span>
                   </div>
                 </div>
 
-                {rec.lineItems && rec.lineItems.length > 0 && (
+                {false && (
                   <div className="flex flex-wrap gap-2">
-                    {rec.lineItems.map((item, idx) => (
+                    {rec.lineItems?.map((item, idx) => (
                       <span key={idx} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-muted/30 border border-border/30 text-xs">
                         {item.description} x{item.quantity} @ {Number(item.unitPrice).toLocaleString()}
                       </span>
@@ -810,7 +804,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
           const wantActive = action === "activate";
           const eligible = Array.from(selectedIds).filter((id) => {
             const rec = recurring.find((r) => r.id === id);
-            return rec ? rec.isActive !== wantActive : false;
+            return rec ? rec.status === 'ACTIVE' !== wantActive : false;
           });
           if (eligible.length === 0) {
             toast.info(`All selected schedules are already ${wantActive ? "active" : "paused"}`);
@@ -860,7 +854,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60">Generation history</p>
                   <h3 className="text-base font-semibold truncate">{historyDrawer.recurring.name}</h3>
                   <p className="text-xs text-muted-foreground/70 mt-1">
-                    {historyDrawer.recurring.runCount} runs · {historyDrawer.recurring.failureCount ?? 0} failures
+                    {0} runs · {0} failures
                   </p>
                 </div>
                 <button

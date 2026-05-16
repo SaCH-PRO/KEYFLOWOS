@@ -187,7 +187,9 @@ export class CrmController {
     try {
       await this.crm.healthPing();
       dbOk = true;
-    } catch {}
+    } catch {
+      /* intentionally empty */
+    }
     const cacheMetrics = this.crmStats.getCacheMetrics();
     const duration = Date.now() - start;
     return {
@@ -794,6 +796,7 @@ export class CrmController {
       dueDate: body.dueDate,
       priority: body.priority,
       assigneeId: body.assigneeId,
+      assigneeType: body.assigneeType,
       remindAt: body.remindAt,
       creatorId: req?.user?.id,
       source: body.source || 'crm',
@@ -866,8 +869,9 @@ export class CrmController {
   completeTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
+    @Body() body: { evidenceIds?: string[] },
   ) {
-    return this.timeline.completeTask({ businessId, taskId });
+    return this.timeline.completeTask({ businessId, taskId, evidenceIds: body.evidenceIds });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

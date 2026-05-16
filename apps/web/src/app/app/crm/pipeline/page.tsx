@@ -6,6 +6,13 @@ import { AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Users,
+  Zap,
+  TrendingUp,
+  Lightbulb,
+  Phone,
+  Mail,
+  MessageSquare,
+  ArrowRight,
 } from "lucide-react";
 import {
   BroadcastDrawer,
@@ -13,14 +20,11 @@ import {
 import { KanbanSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { ProgressivePrompts } from "../../profile/components/progressive-prompts";
 import { PageHeader } from "@/components/ui/page-header";
 import { NotesTrigger } from "@/components/keyflow/notes-trigger";
-import { InfoBadge } from "@/components/ui/info-badge";
 import { PipelineTabContent } from "./pipeline-tab-content";
 import { ClientsMetricsStrip } from "./clients-metrics-strip";
 import { useContactsPipeline } from "./use-contacts-pipeline";
-import { useCrmAiHub } from "./hooks/use-crm-ai-hub";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
@@ -29,10 +33,6 @@ import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
-import { AiHubTrigger, AiCommandHub } from "@/components/ai/ai-command-hub";
-import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
-import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
-import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 
 const CRM_TABS = ["contacts"];
 
@@ -41,7 +41,6 @@ export default function ContactsPage() {
   const router = useRouter();
   const googleHandled = useRef(false);
   const state = useContactsPipeline();
-  const crmAi = useCrmAiHub();
   const { checkLimit } = usePlan();
   const emitEvent = useModuleEmit();
   const [, setSlideDirection] = useState(0);
@@ -68,41 +67,18 @@ export default function ContactsPage() {
     selectContact, loadFlowData,
   } = state;
 
-  const intelligence = useGraphIntelligence({ businessId, module: "crm" });
-
-  useEffect(() => {
-    if (businessId) {
-      crmAi.updateCrmContext({
-        businessId,
-        activeView: crmViewTab,
-        contactCount: contacts.length,
-        selectedContactId: state.selectedContact?.id,
-      });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes 'crmAi' object as a whole; including it would re-create this hook on every AI hub state change. Only the specific method invoked is referenced.
-  }, [businessId, crmViewTab, contacts.length, state.selectedContact?.id, crmAi.updateCrmContext]);
-
-  const handleCrmAiAction = useCallback((actionKey: string) => {
-    const { contactId } = crmAi.parseActionKey(actionKey);
-    if (contactId) {
-      selectContact(contactId);
-      setCrmViewTab("contacts");
-    }
-  }, [crmAi, selectContact, setCrmViewTab]);
-
   const crmShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
-      groupName: "CRM Navigation",
+      groupName: "Network Navigation",
       shortcuts: [
         { key: "n", description: "New contact", action: () => { if (typeof window !== "undefined") window.dispatchEvent(new Event("kf:open-quick-add-contact")); } },
-        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search contacts"]'); el?.focus(); } },
-        { key: "1", description: "Contacts tab", action: () => setCrmViewTab("contacts") },
-        { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
-        { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
+        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search network"]'); el?.focus(); } },
+        { key: "1", description: "Network tab", action: () => setCrmViewTab("contacts") },
+        { key: "r", description: "Refresh network", action: () => { void loadContacts(); void loadFlowData(); } },
+        { key: "b", description: "Open broadcast", action: () => setShowBroadcast(true) },
       ],
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to the specific setters used; including the full `state` bag would re-create shortcuts on every contact-pipeline state change and re-bind keyboard handlers.
-  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowBroadcast]);
+  ], [setCrmViewTab, loadContacts, loadFlowData, setShowBroadcast]);
 
   useKeyboardShortcuts(crmShortcuts, !workspaceLoading);
 
@@ -129,8 +105,6 @@ export default function ContactsPage() {
     } else if (action === "new") {
       googleHandled.current = true;
       if (typeof window !== "undefined") {
-        // Defer dispatch so the AddContactControl child has time to register its
-        // `kf:open-quick-add-contact` listener (parent effects run before child effects).
         setTimeout(() => window.dispatchEvent(new Event("kf:open-quick-add-contact")), 0);
       }
       router.replace("/app/crm/pipeline");
@@ -138,7 +112,10 @@ export default function ContactsPage() {
   }, [searchParams, router, loadContacts, loadFlowData]);
 
   const confirmStateRef = useRef(confirmState);
-  confirmStateRef.current = confirmState;
+
+  useEffect(() => {
+    confirmStateRef.current = confirmState;
+  }, [confirmState]);
 
   const handleCloseBroadcast = useCallback(() => setShowBroadcast(false), [setShowBroadcast]);
   const handleDeselectAll = useCallback(() => { setSelectedIds(new Set()); setSelectMode(false); }, [setSelectedIds, setSelectMode]);
@@ -162,54 +139,127 @@ export default function ContactsPage() {
     onTabChange: handleTabChange,
   });
 
+  /* Leverage insights — must be BEFORE any early return */
+  const leverageInsights = useMemo(() => {
+    if (workspaceLoading || workspaceError) return [];
+    const items: { icon: React.ElementType; label: string; detail: string; cta: string; href: string }[] = [];
+    
+    const staleCount = state.segmentCounts["needs-followup"] ?? 0;
+    if (staleCount > 0) {
+      items.push({
+        icon: Lightbulb,
+        label: `${staleCount} relationship${staleCount > 1 ? "s" : ""} need attention`,
+        detail: "Re-engaging dormant contacts often yields the highest ROI",
+        cta: "View",
+        href: "#followup",
+      });
+    }
+    
+    const atRiskCount = state.segmentCounts["at-risk"] ?? 0;
+    if (atRiskCount > 0) {
+      items.push({
+        icon: TrendingUp,
+        label: `${atRiskCount} contact${atRiskCount > 1 ? "s" : ""} at risk of churning`,
+        detail: "Proactive outreach can save these relationships",
+        cta: "Act now",
+        href: "#atrisk",
+      });
+    }
+    
+    const highValueCount = state.segmentCounts["high-value"] ?? 0;
+    if (highValueCount > 0) {
+      items.push({
+        icon: Zap,
+        label: `${highValueCount} high-value contact${highValueCount > 1 ? "s" : ""}`,
+        detail: "These people drive the most revenue — keep them close",
+        cta: "Review",
+        href: "#highvalue",
+      });
+    }
+    
+    return items.slice(0, 3);
+  }, [state.segmentCounts, workspaceLoading, workspaceError]);
 
   if (workspaceLoading) return <KanbanSkeleton />;
-
-  if (workspaceError) {
-    return <WorkspaceError />;
-  }
+  if (workspaceError) return <WorkspaceError />;
 
   return (
-    <div className="space-y-4" aria-label="Contacts Workspace">
+    <div className="space-y-4" aria-label="Network Workspace">
       <ResumePrompt module="crm" />
+      
       <PageHeader
         icon={Users}
-        title="Contacts"
-        subtitle={<span className="inline-flex items-center gap-1.5">Manage relationships, follow-ups, health, and contact activity across your pipeline <InfoBadge title="Contact Workspace" body="Your contact workspace centralizes relationship intelligence, communication history, and AI-powered insights. Use Smart Segments to triage contacts by engagement and health." side="bottom" iconSize={12} /></span>}
+        title="Network"
+        subtitle="Your people are assets. Leverage relationships to drive revenue, unlock opportunities, and build momentum."
         titleExtra={<NotesTrigger pageKey="crm" variant="header" />}
       />
-
 
       {(() => {
         const cl = checkLimit("contacts");
         return <PlanLimitBanner resourceKey="contacts" label="contacts" currentUsage={cl.current} limit={cl.limit} isUnlimited={cl.isUnlimited} nearLimit={cl.nearLimit} atLimit={cl.atLimit} upgradeTo={cl.upgradeTo} />;
       })()}
 
-      <div className="flex items-center justify-between gap-2">
-        <ClientsMetricsStrip
-          totalClients={contacts.length}
-          activeClients={state.flowIntelligence?.clients ?? contacts.filter((c) => c.status === "CLIENT").length}
-          followUpsDue={state.segmentCounts["needs-followup"] ?? 0}
-          atRisk={state.segmentCounts["at-risk"] ?? 0}
-          newThisWeek={state.segmentCounts["new-this-week"] ?? 0}
-          highValue={state.segmentCounts["high-value"] ?? 0}
-          onSegmentClick={state.setActiveSegment}
-        />
-        {intelligence.moduleCoverage && (
-          <AutomationCoverageIndicator
-            coveragePct={intelligence.moduleCoverage.coveragePct}
-            automatedCount={intelligence.moduleCoverage.automatedCount}
-            totalProcesses={intelligence.moduleCoverage.totalProcesses}
-          />
-        )}
-      </div>
-
-      <GraphInsightsPanel
-        recommendations={intelligence.recommendations}
-        loading={intelligence.loading}
-        onDismiss={intelligence.dismiss}
-        onNavigate={(route) => router.push(route)}
+      <ClientsMetricsStrip
+        totalClients={contacts.length}
+        activeClients={state.flowIntelligence?.clients ?? contacts.filter((c) => c.status === "CLIENT").length}
+        followUpsDue={state.segmentCounts["needs-followup"] ?? 0}
+        atRisk={state.segmentCounts["at-risk"] ?? 0}
+        newThisWeek={state.segmentCounts["new-this-week"] ?? 0}
+        highValue={state.segmentCounts["high-value"] ?? 0}
+        onSegmentClick={state.setActiveSegment}
       />
+
+      {/* Leverage Insights */}
+      {leverageInsights.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Leverage Opportunities</h2>
+          </div>
+          <div className="grid gap-2">
+            {leverageInsights.map((item, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  if (item.href === "#followup") state.setActiveSegment("needs-followup");
+                  else if (item.href === "#atrisk") state.setActiveSegment("at-risk");
+                  else if (item.href === "#highvalue") state.setActiveSegment("high-value");
+                }}
+                className="flex items-start gap-3 p-3.5 rounded-xl border border-border/40 bg-card/30 hover:bg-card/50 transition-all text-left"
+              >
+                <div className="p-2 rounded-lg bg-[hsl(var(--kf-accent1))]/10 shrink-0">
+                  <item.icon className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{item.label}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{item.detail}</p>
+                </div>
+                <span className="text-xs font-medium text-[hsl(var(--kf-accent1))] flex items-center gap-1 shrink-0">
+                  {item.cta} <ArrowRight className="w-3 h-3" />
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Quick Actions */}
+      <div className="flex items-center gap-2">
+        {[
+          { label: "Add contact", icon: Users, action: () => window.dispatchEvent(new Event("kf:open-quick-add-contact")) },
+          { label: "Send broadcast", icon: MessageSquare, action: () => setShowBroadcast(true) },
+          { label: "Import", icon: Phone, action: () => router.push("/app/crm/import") },
+        ].map((a) => (
+          <button
+            key={a.label}
+            onClick={a.action}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border/40 bg-card/30 hover:bg-card/50 transition-all"
+          >
+            <a.icon className="w-3.5 h-3.5" />
+            {a.label}
+          </button>
+        ))}
+      </div>
 
       <PipelineTabContent
         state={state}
@@ -239,20 +289,6 @@ export default function ContactsPage() {
         onConfirm={handleConfirmAction}
         onCancel={handleCancelConfirm}
       />
-
-      <ProgressivePrompts moduleFilter={["customer", "sales", "partnerships"]} />
-
-
-      {!crmAi.aiHook.useGlobalCopilot && (
-        <>
-          <AiHubTrigger ai={crmAi.aiHook} moduleName="Contacts" />
-          <AnimatePresence>
-            {crmAi.aiHook.panelOpen && (
-              <AiCommandHub ai={crmAi.aiHook} moduleName="Contacts" onAction={handleCrmAiAction} />
-            )}
-          </AnimatePresence>
-        </>
-      )}
     </div>
   );
 }

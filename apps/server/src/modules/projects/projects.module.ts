@@ -2,8 +2,11 @@ import { Module } from '@nestjs/common';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 import { ProjectRevenueListener } from './project-revenue.listener';
+import { TimelineModule } from '../timeline/timeline.module';
+import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
 
 @Module({
+  imports: [TimelineModule, TaskAssignmentModule],
   controllers: [ProjectsController],
   providers: [ProjectsService, ProjectRevenueListener],
   exports: [ProjectsService],

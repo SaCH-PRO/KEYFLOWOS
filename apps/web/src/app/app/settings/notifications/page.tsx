@@ -323,7 +323,8 @@ export default function NotificationsSettingsPage() {
             </div>
           ) : (
             <div className="border border-border/40 rounded-xl overflow-hidden">
-              <table className="w-full">
+              <div className="overflow-x-auto">
+<table className="min-w-full w-full">
                 <thead>
                   <tr className="border-b border-border/40 bg-muted/20">
                     <th className="text-left p-3 kf-text-caption font-medium text-muted-foreground">Type</th>
@@ -393,6 +394,7 @@ export default function NotificationsSettingsPage() {
                   })}
                 </tbody>
               </table>
+</div>
             </div>
           )}
         </motion.div>

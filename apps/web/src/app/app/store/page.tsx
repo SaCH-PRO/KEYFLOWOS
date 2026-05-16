@@ -18,6 +18,7 @@ import { useStoreData } from "./hooks/use-store-data";
 import { StoreSkeleton } from "./components/store-skeleton";
 import { StoreHeaderActions } from "./components/store-header-actions";
 import { VIEW_TABS, type TabKey } from "./components/store-types";
+import { EmptyState } from "@/components/ui/empty-state";
 import { OverviewMode } from "./components/overview-mode";
 import { DesignMode } from "./components/design-mode";
 import { MerchandisingMode } from "./components/merchandising-mode";
@@ -241,6 +242,19 @@ export default function StorePage() {
         </div>
       </div>
 
+      {s.commerceProducts.length === 0 && s.services.length === 0 && (
+        <EmptyState
+          icon={Store}
+          title="Your storefront is empty"
+          description="Add products or services to start selling online. Your customers will see them on your public booking page."
+          actionLabel="Add Product"
+          onAction={() => handleTabChange("catalog")}
+          secondaryAction={{ label: "Design Store", onClick: () => handleTabChange("design") }}
+          tip="Start with your most popular service. You can always add more later."
+          iconColor="hsl(var(--kf-accent1))"
+        />
+      )}
+
       <div className="touch-pan-y">
         <AnimatePresence mode="wait" custom={dir}>
           <motion.div
@@ -376,16 +390,7 @@ export default function StorePage() {
 
       <PageNotesMount pageKey="store" />
 
-      {!ai.aiHook.useGlobalCopilot && (
-        <>
-          <AiHubTrigger ai={ai.aiHook} moduleName="Store" />
-          <AnimatePresence>
-            {ai.aiHook.panelOpen && (
-              <AiCommandHub ai={ai.aiHook} moduleName="Store" onAction={handleStoreAiAction} />
-            )}
-          </AnimatePresence>
-        </>
-      )}
+      {/* AI hub trigger removed — use global Command Palette (⌘K) or Copilot (⌘J) instead */}
     </div>
   );
 }

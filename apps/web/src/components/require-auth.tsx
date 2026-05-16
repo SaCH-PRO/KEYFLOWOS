@@ -3,7 +3,7 @@
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { API_BASE, getAuthHeaders } from "@/lib/api";
-import { clearStoredBusinessId, ensureTokenCookieMirror, getStoredToken } from "@/lib/workspace";
+import { clearStoredBusinessId, ensureTokenCookieMirror, getStoredToken, refreshAccessToken } from "@/lib/workspace";
 
 type Status = "checking" | "authenticated" | "redirecting";
 
@@ -51,10 +51,20 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
-        const res = await fetch(`${API_BASE}/identity/me`, {
+        let res = await fetch(`${API_BASE}/identity/me`, {
           headers: getAuthHeaders(),
           cache: "no-store",
         });
+        if (cancelled) return;
+        if (res.status === 401) {
+          const refreshed = await refreshAccessToken();
+          if (refreshed && !cancelled) {
+            res = await fetch(`${API_BASE}/identity/me`, {
+              headers: getAuthHeaders(),
+              cache: "no-store",
+            });
+          }
+        }
         if (cancelled) return;
         if (res.status === 401) {
           redirectToLogin("server rejected token (401)");

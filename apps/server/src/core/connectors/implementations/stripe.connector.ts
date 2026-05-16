@@ -214,7 +214,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
       body: body?.toString(),
     });
     const text = await res.text();
-    let parsed: unknown = null;
+    let parsed: unknown;
     try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
     if (!res.ok) {
       const msg = (parsed as { error?: { message?: string } } | null)?.error?.message || text || `HTTP ${res.status}`;

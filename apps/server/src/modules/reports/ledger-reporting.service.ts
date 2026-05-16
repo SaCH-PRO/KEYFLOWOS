@@ -498,8 +498,8 @@ export class LedgerReportingService {
     let byAccount: Array<{ accountId: string; systemKey: string | null; name: string; inflow: number; outflow: number; net: number }>;
     let cashIn: number;
     let cashOut: number;
-    let accrualAdjustments = {
-      netIncome: 0, arChange: 0, apChange: 0, taxPayableChange: 0, cashFromOperations: 0,
+    let accrualAdjustments: {
+      netIncome: number; arChange: number; apChange: number; taxPayableChange: number; cashFromOperations: number;
     };
 
     if (basis === 'cash') {
@@ -1117,8 +1117,8 @@ export class LedgerReportingService {
 
       total += remaining;
       const days = dueDate ? Math.floor((asOf.getTime() - dueDate.getTime()) / 86400000) : 0;
-      let bucket: keyof typeof buckets = 'current';
-      let field: keyof Omit<Row, 'key' | 'label' | 'total'> = 'current';
+      let bucket: keyof typeof buckets;
+      let field: keyof Omit<Row, 'key' | 'label' | 'total'>;
       if (!dueDate || days <= 0) { bucket = 'current'; field = 'current'; }
       else if (days <= 30) { bucket = 'd_1_30'; field = 'd1to30'; }
       else if (days <= 60) { bucket = 'd_31_60'; field = 'd31to60'; }

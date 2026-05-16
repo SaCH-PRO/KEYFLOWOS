@@ -44,7 +44,7 @@ async function walk(dir: string, out: string[] = []): Promise<string[]> {
     if (entry.isDirectory()) {
       if (entry.name === 'node_modules' || entry.name === 'dist') continue;
       await walk(full, out);
-    } else if (entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts')) {
+    } else if (entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts') && !entry.name.endsWith('.integration.test.ts')) {
       out.push(full);
     }
   }

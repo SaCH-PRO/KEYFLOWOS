@@ -54,11 +54,11 @@ export class LandedCostEngine {
     const sourceLinks = product.sourceLinks;
     const profile = product.costProfile;
 
-    let sourceCost = 0;
-    let shippingEstimate = 0;
-    let dutiesEstimate = 0;
-    let packagingCost = 0;
-    let transactionCost = 0;
+    let sourceCost: number;
+    let shippingEstimate: number;
+    let dutiesEstimate: number;
+    let packagingCost: number;
+    let transactionCost: number;
 
     if (profile) {
       sourceCost = profile.sourceCost;

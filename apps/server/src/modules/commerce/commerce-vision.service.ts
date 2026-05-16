@@ -1,5 +1,4 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import OpenAI from 'openai';
 import { AiUsageService } from '../ai/ai-usage.service';
 
 export interface ExtractedProduct {
@@ -15,22 +14,22 @@ export interface ExtractedProduct {
 @Injectable()
 export class CommerceVisionService {
   private readonly logger = new Logger(CommerceVisionService.name);
-  private openai: OpenAI;
 
   constructor(
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
-  ) {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-  }
+  ) {}
 
-  async extractProductsFromImage(imageBase64: string, businessCurrency?: string): Promise<ExtractedProduct[]> {
+  async extractProductsFromImage(businessId: string, imageBase64: string, businessCurrency?: string): Promise<ExtractedProduct[]> {
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
+      const imageUrl = imageBase64.startsWith('data:')
+        ? imageBase64
+        : `data:image/jpeg;base64,${imageBase64}`;
+
+      const response = await this.aiUsage.trackVision(
+        businessId,
+        undefined,
+        'vision_product',
+        [
           {
             role: 'system',
             content: `You are a product catalog extractor. Analyze the image and extract ALL products, services, or packages you can identify.
@@ -52,11 +51,7 @@ Only return the JSON array, no markdown or explanation.`,
             content: [
               {
                 type: 'image_url',
-                image_url: {
-                  url: imageBase64.startsWith('data:')
-                    ? imageBase64
-                    : `data:image/jpeg;base64,${imageBase64}`,
-                },
+                image_url: { url: imageUrl, detail: 'high' },
               },
               {
                 type: 'text',
@@ -65,10 +60,12 @@ Only return the JSON array, no markdown or explanation.`,
             ],
           },
         ],
-        max_tokens: 2000,
-      });
+        2000,
+        0.3,
+        'gpt-4o',
+      );
 
-      const content = response.choices[0]?.message?.content || '[]';
+      const content = response.content || '[]';
       const cleanJson = content.replace(/```json\n?|\n?```/g, '').trim();
 
       let parsed: any;
@@ -77,7 +74,7 @@ Only return the JSON array, no markdown or explanation.`,
       } catch {
         this.logger.warn('AI returned invalid JSON, attempting recovery', { content: cleanJson.substring(0, 200) });
         const arrayMatch = cleanJson.match(/\[[\s\S]*\]/);
-        const objectMatch = cleanJson.match(/\{[\s\S]*\}/);
+        const objectMatch = cleanJson.match(/\{[\s\S]*\]/);
         try {
           parsed = arrayMatch ? JSON.parse(arrayMatch[0]) : objectMatch ? JSON.parse(objectMatch[0]) : null;
         } catch {

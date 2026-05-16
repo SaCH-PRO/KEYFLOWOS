@@ -18,4 +18,8 @@ export class UpdateBookingDto {
   @ValidateNested()
   @Type(() => BookingLatLngDto)
   locationLatLng?: BookingLatLngDto | null;
+
+  @IsString()
+  @IsOptional()
+  orgUnitId?: string | null;
 }

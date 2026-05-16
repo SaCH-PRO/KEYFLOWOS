@@ -4,6 +4,7 @@ import { AccountingController } from './accounting.controller';
 import { CommerceAiController } from './commerce-ai.controller';
 import { CommerceInsightsController } from './commerce-insights.controller';
 import { FinancialCopilotController } from './financial-copilot.controller';
+import { RecurringInvoiceController } from './recurring-invoice.controller';
 import { CommerceService } from './commerce.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
@@ -65,16 +66,13 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     FinanceModule,
     DocumentTemplateModule,
     // notifications -> commerce -> notifications is a circular cycle, so we
-    // mirror the lazy require pattern used in NotificationsModule itself to
-    // avoid a TDZ "Cannot access ... before initialization" error.
+    // Dynamic import avoids a TDZ "Cannot access ... before initialization" error.
     forwardRef(
-      () =>
-        (require('../notifications/notifications.module') as {
-          NotificationsModule: typeof NotificationsModuleType;
-        }).NotificationsModule,
+      async () =>
+        (await import('../notifications/notifications.module')).NotificationsModule,
     ),
   ],
-  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController, DocumentTemplateController],
+  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RecurringInvoiceController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController, DocumentTemplateController],
   providers: [
     CommerceService,
     CommerceStatsService,

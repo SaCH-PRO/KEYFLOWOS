@@ -413,7 +413,9 @@ export class BestChannelService {
       const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' })
         .formatToParts(new Date());
       abbr = parts.find((p) => p.type === 'timeZoneName')?.value || tz;
-    } catch {}
+    } catch {
+      /* intentionally empty */
+    }
     return `${PLURAL_DAY[dow] ?? DAY_NAMES[dow]} ${fmt(start)}–${fmt(start + span)} ${abbr}`;
   }
 }

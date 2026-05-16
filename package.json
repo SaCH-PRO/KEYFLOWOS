@@ -3,16 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm --parallel --stream -r dev",
-    "build": "pnpm --filter @keyflow/db run db:generate && pnpm --filter server build && pnpm --filter web build",
-    "build:all": "pnpm run build",
-    "start": "pnpm run --parallel --stream start:server start:web",
-    "start:all": "pnpm run start",
-    "start:server": "pnpm --filter server start",
-    "start:web": "pnpm --filter web start",
-    "lint": "pnpm -r lint",
-    "db:generate": "pnpm --filter db run db:generate",
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "build:all": "turbo run build",
+    "start": "turbo run start",
+    "start:all": "turbo run start",
+    "start:server": "turbo run start --filter=server",
+    "start:web": "turbo run start --filter=web",
+    "lint": "turbo run lint",
+    "db:generate": "turbo run db:generate",
     "db:push": "pnpm --filter db exec prisma db push",
+    "db:migrate": "pnpm --filter db exec prisma migrate dev",
+    "db:deploy": "pnpm --filter db exec prisma migrate deploy",
+    "db:seed": "pnpm --filter db exec tsx --env-file ../../.env prisma/seed.ts",
+    "db:reset": "pnpm --filter db exec prisma migrate reset --force --skip-generate",
     "db:studio": "pnpm --filter db exec prisma studio",
     "ui:dev": "pnpm --filter ui exec storybook dev -p 6006",
     "test:db:soft-delete": "pnpm --filter db exec tsx --env-file .env src/test-soft-delete.ts",
@@ -34,7 +38,8 @@
     "typescript-eslint": "^8.59.3"
   },
   "engines": {
-    "node": ">=20"
+    "node": "20.18.1",
+    "pnpm": "9.15.0"
   },
   "packageManager": "pnpm@9.15.0",
   "pnpm": {
@@ -62,10 +67,13 @@
       "brace-expansion@>=2.0.0 <2.0.3": "^2.0.3",
       "path-to-regexp@<0.1.13": "^0.1.13",
       "file-type@>=13.0.0 <21.3.2": "^21.3.2",
-      "uuid@<14.0.0": "^14.0.0"
+      "uuid@<9.0.0": "^9.0.1"
     }
   },
   "dependencies": {
+    "@sentry/nestjs": "^10.53.1",
+    "@sentry/nextjs": "^10.53.1",
+    "@sentry/node": "^10.53.1",
     "@swc-node/register": "^1.11.1",
     "@swc/core": "^1.15.11",
     "@swc/helpers": "^0.5.18",

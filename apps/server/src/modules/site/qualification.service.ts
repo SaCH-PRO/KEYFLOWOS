@@ -276,6 +276,7 @@ export class QualificationService {
           });
         }
       } catch {
+        /* intentionally empty */
       }
     }
 

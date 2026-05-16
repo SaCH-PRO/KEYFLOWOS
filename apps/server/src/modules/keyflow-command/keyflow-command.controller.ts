@@ -104,11 +104,11 @@ export class KeyflowCommandController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/voice/tts')
   async tts(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Body() body: { text: string; voice?: any; format?: any },
     @Res() res: Response,
   ) {
-    const { buffer, format } = await this.voice.synthesize({
+    const { buffer, format } = await this.voice.synthesize(businessId, {
       text: body.text,
       voice: body.voice,
       format: body.format,
@@ -128,12 +128,12 @@ export class KeyflowCommandController {
   @Post('businesses/:businessId/voice/transcribe')
   @UseInterceptors(FileInterceptor('audio', { limits: { fileSize: 25 * 1024 * 1024 } }))
   async transcribe(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) {
       return { text: '' };
     }
-    return this.voice.transcribe(file.buffer, file.mimetype || 'audio/webm');
+    return this.voice.transcribe(businessId, file.buffer, file.mimetype || 'audio/webm');
   }
 }

@@ -54,6 +54,7 @@ function sanitize(input: string | null | undefined, maxLen = MAX_BODY): string {
     /^Human:/gim, /^Assistant:/gim, /^System:/gim,
   ];
   for (const p of patterns) s = s.replace(p, '');
+  // eslint-disable-next-line no-control-regex
   s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   return s.slice(0, maxLen);
 }
@@ -248,7 +249,7 @@ Return JSON of shape:
 THREAD:
 ${transcript}`;
 
-    let result: ThreadSummaryResult | null = null;
+    let result: ThreadSummaryResult | null;
     let modelUsed: string | undefined;
     try {
       const r = await this.aiUsage.callAi({
@@ -319,7 +320,7 @@ Return JSON:
   "reason": "1 short sentence why"
 }`;
 
-    let analysis: MessageAnalysisResult | null = null;
+    let analysis: MessageAnalysisResult | null;
     let modelUsed: string | undefined;
     try {
       const r = await this.aiUsage.callAi({

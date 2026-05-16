@@ -73,6 +73,12 @@ const failingGateway = {
   complete: vi.fn().mockRejectedValue(new Error('AI offline')),
 };
 
+const mockAiUsage = {
+  trackAndComplete: vi.fn().mockImplementation(async (_biz: string, _uid: string | undefined, _feature: string, request: any) => {
+    return failingGateway.complete(request);
+  }),
+};
+
 describe('StorefrontIntelligenceService', () => {
   beforeEach(() => {
     process.env.PRESENCE_INSIGHTS_AI = '0'; // force template-only path
@@ -80,7 +86,7 @@ describe('StorefrontIntelligenceService', () => {
 
   it('regenerate returns deterministic snapshot with template narrative when AI is disabled', async () => {
     const prisma = makePrisma();
-    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any);
+    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any, mockAiUsage as any);
 
     const result = await service.regenerate('biz-1', 30);
 
@@ -104,7 +110,7 @@ describe('StorefrontIntelligenceService', () => {
   it('falls back to template narrative when AI gateway throws', async () => {
     delete process.env.PRESENCE_INSIGHTS_AI;
     const prisma = makePrisma();
-    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any);
+    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any, mockAiUsage as any);
 
     const result = await service.regenerate('biz-1', 14);
     expect(result.narrativeSource).toBe('template');
@@ -124,7 +130,7 @@ describe('StorefrontIntelligenceService', () => {
         ]),
       },
     });
-    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any);
+    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any, mockAiUsage as any);
 
     const result = await service.regenerate('biz-1', 30);
     // 1 paid order is below MIN_SAMPLES.orders (3): no money insights surfaced.
@@ -133,7 +139,7 @@ describe('StorefrontIntelligenceService', () => {
 
   it('regenerate auto-enqueues every actionable insight as a PRESENCE_RECOMMENDATION_* revenue action', async () => {
     const prisma = makePrisma();
-    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any);
+    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any, mockAiUsage as any);
 
     const gen = await service.regenerate('biz-1', 30);
     const actionable = Object.values(gen.snapshot.categories).flatMap((b) =>
@@ -152,7 +158,7 @@ describe('StorefrontIntelligenceService', () => {
 
   it('delegateInsight is idempotent on top of auto-enqueue', async () => {
     const prisma = makePrisma();
-    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any);
+    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any, mockAiUsage as any);
 
     const gen = await service.regenerate('biz-1', 30);
     const target = gen.snapshot.categories.money.insights.find((i) => i.actionable);
@@ -202,7 +208,7 @@ describe('StorefrontIntelligenceService', () => {
       },
       publicEvent: { findMany: vi.fn().mockResolvedValue(events) },
     });
-    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any);
+    const service = new StorefrontIntelligenceService(prisma as any, failingGateway as any, mockAiUsage as any);
     const gen = await service.regenerate('biz-1', 30);
     const ids = gen.snapshot.categories.services.insights.map((i) => i.id);
     expect(ids).toContain('services.low_time_on_page:svc-1');

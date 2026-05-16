@@ -19,8 +19,8 @@ try {
   envError = err instanceof Error ? err.message : String(err);
 }
 
-function getCommit(): string {
-  return getReleaseVersion().short;
+async function getCommit(): Promise<string> {
+  return (await getReleaseVersion()).short;
 }
 
 function getApiBase(): string {
@@ -58,7 +58,7 @@ export async function GET() {
     {
       status,
       uptimeSec: Math.round((Date.now() - BOOT_TIME_MS) / 1000),
-      commit: getCommit(),
+      commit: await getCommit(),
       nodeVersion: process.version,
       apiBase,
       apiReachable: apiProbe.ok,

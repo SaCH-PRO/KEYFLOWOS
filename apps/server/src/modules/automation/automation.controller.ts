@@ -5,22 +5,17 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { ActivityService } from '../flow/activity.service';
-import OpenAI from 'openai';
+import { AiUsageService } from '../ai/ai-usage.service';
 
 @Controller('automation')
 export class AutomationController {
   private readonly logger = new Logger(AutomationController.name);
-  private readonly openai: OpenAI | null;
-
   constructor(
     @Inject(AutomationService) private readonly automation: AutomationService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ActivityService) private readonly activity: ActivityService,
-  ) {
-    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-    const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-    this.openai = apiKey ? new OpenAI({ apiKey, baseURL }) : null;
-  }
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+  ) {}
 
   @Get('health')
   health() {
@@ -164,21 +159,20 @@ export class AutomationController {
     @Param('businessId') businessId: string,
     @Body() body: { prompt: string },
   ) {
-    if (!this.openai) {
-      return { success: false, error: 'AI service not configured' };
-    }
     if (!body.prompt?.trim()) {
       return { success: false, error: 'Prompt is required' };
     }
 
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        temperature: 0.3,
-        messages: [
-          {
-            role: 'system',
-            content: `You are an automation flow designer for KeyFlowOS, a Caribbean business platform.
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'automation_generate',
+        {
+          messages: [
+            {
+              role: 'system',
+              content: `You are an automation flow designer for KeyFlowOS, a Caribbean business platform.
 Given a user's plain-English description, generate a structured automation flow configuration.
 
 Available triggers: contact.created, contact.updated, contact.stage_changed, contact.inactive, contact.no_activity_30d, lead.scored, invoice.paid, invoice.sent, invoice.overdue, quote.sent, quote.accepted, quote.viewed, quote.not_accepted_xdays, payment.received, recurring.failed, booking.created, booking.confirmed, booking.completed, booking.cancelled, booking.scheduled, booking.reminder, campaign.sent, campaign.opened, campaign.not_opened_14d, post.published, form.submitted, subscriber.joined, segment.changed, staff.assignment_missing, schedule.daily, schedule.weekly, schedule.monthly
@@ -197,15 +191,18 @@ Return ONLY valid JSON in this exact format:
 }
 
 Always pick the most relevant trigger. Include 1-3 actions in logical order. Add conditions only when the description implies filtering. For delay actions, include {"hours": "N"} in config.`,
-          },
-          {
-            role: 'user',
-            content: body.prompt,
-          },
-        ],
-      });
+            },
+            {
+              role: 'user',
+              content: body.prompt,
+            },
+          ],
+          maxTokens: 800,
+          temperature: 0.3,
+        },
+      );
 
-      const content = completion.choices[0]?.message?.content?.trim();
+      const content = response.content?.trim() ?? '';
       if (!content) {
         return { success: false, error: 'AI returned empty response' };
       }

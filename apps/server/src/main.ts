@@ -1,4 +1,7 @@
-import 'dotenv/config';
+import { config } from 'dotenv';
+import { resolve } from 'path';
+// In monorepo .env lives at repo root; cwd is apps/server when running directly
+config({ path: resolve(process.cwd(), '../../.env') });
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { configureNestApp } from './app-bootstrap';
@@ -18,7 +21,6 @@ async function bootstrap() {
     process.env.KEYFLOW_DEV_AUTH_BYPASS === 'true' ||
     process.env.KEYFLOW_DEV_AUTH_BYPASS === '1'
   ) {
-    // eslint-disable-next-line no-console
     console.error(
       '[FATAL] KEYFLOW_DEV_AUTH_BYPASS is set, but the dev auth bypass code path no longer exists. Unset this env var (and remove it from any .env file or workflow command) to start the server. To sign in locally, use the real /auth/signup → email-verify → /auth/login flow.',
     );
@@ -40,7 +42,6 @@ async function bootstrap() {
     if (!(process.env.RESEND_API_KEY || '').trim()) missing.push('RESEND_API_KEY');
     if (!(process.env.EMAIL_FROM_ADDRESS || '').trim()) missing.push('EMAIL_FROM_ADDRESS');
     if (missing.length) {
-      // eslint-disable-next-line no-console
       console.error(
         `[FATAL] AUTH_REQUIRE_EMAIL_VERIFICATION is on but required env vars are missing: ${missing.join(', ')}. Refusing to start.`,
       );
@@ -51,7 +52,6 @@ async function bootstrap() {
     // requires the Supabase service-role key for admin createUser. Warn loudly
     // at boot so devs aren't surprised by a runtime "server_misconfigured"
     // response on their first signup attempt.
-    // eslint-disable-next-line no-console
     console.warn(
       '[WARN] SUPABASE_SERVICE_ROLE_KEY is not set. POST /identity/signup will return server_misconfigured until this is configured.',
     );
@@ -59,11 +59,27 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule, { rawBody: true });
   configureNestApp(app);
+
+  // Graceful shutdown: on SIGTERM/SIGINT finish in-flight requests,
+  // close DB connections, and flush logs before exiting.
+  app.enableShutdownHooks();
+
   const port = Number(process.env.PORT) || 3001;
   await app.listen(port, '0.0.0.0');
-  // eslint-disable-next-line no-console
-  console.log(`[boot] API ready on http://localhost:${port} (commit=${getReleaseVersion().short}, env=${process.env.NODE_ENV || 'development'})`);
-  // eslint-disable-next-line no-console
+  const version = await getReleaseVersion();
+
+  console.log(`[boot] API ready on http://localhost:${port} (commit=${version.short}, env=${process.env.NODE_ENV || 'development'})`);
   console.log(`[boot] Health: GET /healthz  Readiness: GET /readyz`);
+
+  // Global uncaught-exception safety net: log and exit cleanly so the
+  // process manager (Docker, systemd, PM2) can restart us.
+  process.on('uncaughtException', (err) => {
+    console.error('[FATAL] Uncaught exception:', err);
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[FATAL] Unhandled rejection:', reason);
+    process.exit(1);
+  });
 }
 bootstrap();

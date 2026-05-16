@@ -160,6 +160,13 @@ export function CatalogGrid({
     const wishlisted = isWishlisted?.(item.id);
     const hasHighRating = reviewAgg && reviewAgg.averageRating >= 4;
 
+    const typeBorderAccent =
+      item.itemType === "package"
+        ? `linear-gradient(180deg, ${accentColor}, ${secondaryColor})`
+        : item.itemType === "service"
+          ? `linear-gradient(180deg, ${primaryColor}, ${primaryColor}40)`
+          : `linear-gradient(180deg, ${secondaryColor}, ${secondaryColor}40)`;
+
     return (
       <div
         key={`${item.id}_${item.itemType}`}
@@ -167,7 +174,11 @@ export function CatalogGrid({
         style={{
           background: inCart
             ? `linear-gradient(135deg, ${itemColor}08, ${itemColor}04)`
-            : ts.cardBg,
+            : item.itemType === "package"
+              ? `linear-gradient(135deg, ${accentColor}06, ${ts.cardBg})`
+              : item.itemType === "service"
+                ? `linear-gradient(135deg, ${primaryColor}04, ${ts.cardBg})`
+                : ts.cardBg,
           border: inCart ? `1px solid ${itemColor}30` : ts.cardBorder,
           boxShadow: inCart
             ? `0 0 20px ${itemColor}10, ${ts.cardShadow}`
@@ -188,6 +199,12 @@ export function CatalogGrid({
           el.style.border = inCart ? `1px solid ${itemColor}30` : ts.cardBorder;
         }}
       >
+        {/* Type accent border */}
+        <div
+          className="absolute top-3 bottom-3 left-0 w-[3px] rounded-full z-10 opacity-60"
+          style={{ background: typeBorderAccent }}
+        />
+
         {isFeatured && (
           <div
             className="absolute top-0 left-0 right-0 h-[2px] z-10"

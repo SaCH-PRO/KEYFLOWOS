@@ -123,7 +123,8 @@ export function ModernTemplate({ data }: { data: InvoiceTemplateData }) {
         </div>
 
         <div className="hidden sm:block rounded-xl overflow-hidden border border-gray-200 mb-6">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+<table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50">
                 <th className="text-left py-3 px-4 text-gray-500 font-semibold text-xs uppercase tracking-wider">Description</th>
@@ -143,6 +144,7 @@ export function ModernTemplate({ data }: { data: InvoiceTemplateData }) {
               ))}
             </tbody>
           </table>
+</div>
         </div>
 
         <div className="sm:hidden mb-6 space-y-3">

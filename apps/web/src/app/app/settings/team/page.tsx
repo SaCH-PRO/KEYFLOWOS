@@ -19,6 +19,7 @@ import {
   Lock,
   Unlock,
   Filter,
+  Network,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -35,6 +36,10 @@ type TeamMember = {
   maxApprovalTier: number;
   activeTasks?: number;
   recentActions?: ActivityItem[];
+  orgUnit?: string | null;
+  jobRole?: string | null;
+  orgUnitId?: string | null;
+  jobRoleId?: string | null;
   user: {
     id: string;
     email: string;
@@ -244,6 +249,20 @@ function MemberCard({
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium truncate">{displayName}</div>
           <div className="text-xs text-muted-foreground truncate">{member.user.email}</div>
+          {(member.orgUnit || member.jobRole) && (
+            <div className="mt-1 flex items-center gap-1.5">
+              {member.orgUnit && (
+                <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20 text-[10px]">
+                  {member.orgUnit}
+                </span>
+              )}
+              {member.jobRole && (
+                <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[10px]">
+                  {member.jobRole}
+                </span>
+              )}
+            </div>
+          )}
           <div className="mt-1 flex items-center gap-2">
             <ScopesSummary scopes={member.permissionScopes} />
             {member.maxApprovalTier > 0 && (
@@ -692,6 +711,10 @@ export default function TeamSettingsPage() {
             <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">{adminCount} admin</span>
             <span className="px-2 py-0.5 rounded bg-muted/20 text-muted-foreground border border-border/30">{staffCount} staff</span>
           </div>
+          <Button size="sm" variant="subtle" onClick={() => window.location.href = "/app/structure?tab=assignments"}>
+            <Network className="h-3.5 w-3.5 mr-1.5" />
+            Structure
+          </Button>
           <Button size="sm" onClick={() => setShowInvite(!showInvite)}>
             <UserPlus className="h-3.5 w-3.5 mr-1.5" />
             Invite

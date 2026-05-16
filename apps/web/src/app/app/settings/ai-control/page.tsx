@@ -19,6 +19,7 @@ import {
   updateAiGovernance,
   fetchAutopilotRules,
   updateAutopilotRule,
+  fetchAgentHealth,
   type AiAutonomySettings,
 } from "@/lib/client";
 import { ExecutionHistory } from "@/components/ai/execution-history";
@@ -73,7 +74,7 @@ const MODES: Array<{
   },
 ];
 
-type SectionTab = "governance" | "preferences" | "autopilot" | "queue" | "history";
+type SectionTab = "governance" | "preferences" | "autopilot" | "queue" | "history" | "health";
 
 export default function AiControlCenterPage() {
   const [settings, setSettings] = useState<AiAutonomySettings | null>(null);
@@ -81,15 +82,32 @@ export default function AiControlCenterPage() {
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<SectionTab>("governance");
   const [pendingCount, setPendingCount] = useState(0);
+  const [health, setHealth] = useState<{
+    plans: { total: number; executing: number; stalled: number; failed: number; completedToday: number };
+    loops: { total: number; healthy: number; unhealthy: number };
+    approvals: { pending: number; escalated: number };
+    actions: { totalToday: number; failedToday: number; successRate: number };
+  } | null>(null);
 
   const load = useCallback(async () => {
     const biz = getStoredBusinessId();
     if (!biz) { setLoading(false); return; }
     setLoading(true);
     try {
-      const res = await fetchAiGovernance(biz);
-      if (res.data) setSettings(res.data);
-      else if (res.error) toast.error(res.error);
+      const [govRes, healthRes] = await Promise.all([
+        fetchAiGovernance(biz),
+        fetchAgentHealth(biz),
+      ]);
+      if (govRes.data) setSettings(govRes.data);
+      else if (govRes.error) toast.error(govRes.error);
+      if (healthRes.data) {
+        setHealth({
+          plans: healthRes.data.plans,
+          loops: healthRes.data.loops,
+          approvals: healthRes.data.approvals,
+          actions: healthRes.data.actions,
+        });
+      }
     } catch {
       toast.error("Failed to load AI settings");
     } finally {
@@ -179,6 +197,7 @@ export default function AiControlCenterPage() {
           { id: "autopilot" as SectionTab, label: "Autopilot Rules", icon: Zap },
           { id: "queue" as SectionTab, label: `Action Queue${pendingCount > 0 ? ` (${pendingCount})` : ""}`, icon: AlertTriangle },
           { id: "history" as SectionTab, label: "Execution History", icon: Activity },
+          { id: "health" as SectionTab, label: "Health", icon: Activity },
         ]).map(t => (
           <button
             key={t.id}
@@ -276,7 +295,8 @@ export default function AiControlCenterPage() {
               How each action type is handled based on your current autonomy settings.
             </p>
             <div className="rounded-xl border border-border/30 overflow-hidden">
-              <table className="w-full text-xs">
+              <div className="overflow-x-auto">
+<table className="min-w-full w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/20 bg-muted/10">
                     <th className="text-left px-3 py-2.5 text-muted-foreground/60 font-medium">Action Type</th>
@@ -326,6 +346,7 @@ export default function AiControlCenterPage() {
                   })}
                 </tbody>
               </table>
+</div>
             </div>
           </div>
 
@@ -380,6 +401,37 @@ export default function AiControlCenterPage() {
           <ExecutionHistory />
         </div>
       )}
+
+      {activeTab === "health" && health && (
+        <div role="tabpanel" id="panel-health" aria-label="Agent health" className="space-y-6">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <HealthCard label="Plans Total" value={health.plans.total} color="text-foreground/80" />
+            <HealthCard label="Executing" value={health.plans.executing} color="text-blue-400" />
+            <HealthCard label="Stalled" value={health.plans.stalled} color="text-red-400" />
+            <HealthCard label="Completed Today" value={health.plans.completedToday} color="text-emerald-400" />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <HealthCard label="Loops Total" value={health.loops.total} color="text-foreground/80" />
+            <HealthCard label="Healthy" value={health.loops.healthy} color="text-emerald-400" />
+            <HealthCard label="Unhealthy" value={health.loops.unhealthy} color="text-red-400" />
+            <HealthCard label="Success Rate" value={`${health.actions.successRate}%`} color="text-emerald-400" />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <HealthCard label="Actions Today" value={health.actions.totalToday} color="text-foreground/80" />
+            <HealthCard label="Failed Today" value={health.actions.failedToday} color="text-red-400" />
+            <HealthCard label="Pending Approvals" value={health.approvals.pending} color="text-amber-400" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HealthCard({ label, value, color }: { label: string; value: number | string; color: string }) {
+  return (
+    <div className="p-4 rounded-xl border border-border/30 bg-card/30">
+      <div className={`text-2xl font-bold ${color}`}>{value}</div>
+      <div className="text-xs text-muted-foreground/60 mt-1">{label}</div>
     </div>
   );
 }

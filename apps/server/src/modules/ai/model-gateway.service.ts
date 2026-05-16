@@ -12,6 +12,7 @@ export type TaskCategory =
   | 'reasoning'
   | 'content-generation'
   | 'summarization'
+  | 'analysis'
   | 'tool-calling'
   | 'general';
 
@@ -189,6 +190,10 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
       primary: { provider: 'openai', model: 'gpt-4o' },
       fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
     },
+    analysis: {
+      primary: { provider: 'openai', model: 'gpt-4o-mini' },
+      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-haiku-20241022' }],
+    },
     general: {
       primary: { provider: 'openai', model: 'gpt-4o' },
       fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
@@ -219,6 +224,10 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
       primary: { provider: 'openai', model: 'gpt-4o' },
       fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
     },
+    analysis: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+    },
     general: {
       primary: { provider: 'openai', model: 'gpt-4o' },
       fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
@@ -246,6 +255,10 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
       fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
     },
     'tool-calling': {
+      primary: { provider: 'openai', model: 'gpt-4o-mini' },
+      fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
+    },
+    analysis: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
       fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
     },
@@ -748,6 +761,7 @@ export class ModelGatewayService {
                 outputTokens = event.usage.output_tokens ?? 0;
               }
             } catch {
+              /* intentionally empty */
             }
           }
         }
@@ -1358,6 +1372,7 @@ export class ModelGatewayService {
         return prefs;
       }
     } catch {
+      /* intentionally empty */
     }
 
     this.preferencesCache.set(businessId, {

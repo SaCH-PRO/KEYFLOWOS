@@ -106,9 +106,9 @@ export class ReportsService {
     // back to source-row sums only if the ledger query fails (e.g. on a
     // brand-new business before any postings).
     const basis = await this.resolveBasis(businessId);
-    let totalRevenue = 0;
-    let totalExpenses = 0;
-    let netProfit = 0;
+    let totalRevenue: number;
+    let totalExpenses: number;
+    let netProfit: number;
     try {
       const pnl = await this.ledger.getPnl(businessId, start, end, basis);
       totalRevenue = pnl.revenue.total - pnl.discounts.total;
@@ -213,7 +213,7 @@ export class ReportsService {
       },
     };
 
-    let aiNarrative = '';
+    let aiNarrative: string;
     try {
       const reportTypeTitles: Record<string, string> = {
         executive: 'Executive Summary',

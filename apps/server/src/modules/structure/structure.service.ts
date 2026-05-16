@@ -1,0 +1,297 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { CreateOrgUnitDto } from './dto/create-org-unit.dto';
+import { UpdateOrgUnitDto } from './dto/update-org-unit.dto';
+import { CreateJobRoleDto } from './dto/create-job-role.dto';
+import { UpdateJobRoleDto } from './dto/update-job-role.dto';
+import { CreateAssignmentDto } from './dto/create-assignment.dto';
+import { UpdateAssignmentDto } from './dto/update-assignment.dto';
+import { CreateDelegationRuleDto } from './dto/create-delegation-rule.dto';
+import { UpdateDelegationRuleDto } from './dto/update-delegation-rule.dto';
+
+@Injectable()
+export class StructureService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  // ─── Org Units ───
+  async listOrgUnits(businessId: string) {
+    return this.prisma.client.orgUnit.findMany({
+      where: { businessId },
+      include: { children: true, assignments: { where: { endedAt: null } } },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createOrgUnit(businessId: string, dto: CreateOrgUnitDto) {
+    return this.prisma.client.orgUnit.create({
+      data: {
+        businessId,
+        name: dto.name,
+        type: dto.type ?? 'DEPARTMENT',
+        address: dto.address,
+        city: dto.city,
+        country: dto.country,
+        phone: dto.phone,
+        email: dto.email,
+        managerId: dto.managerId,
+        parentId: dto.parentId,
+      },
+    });
+  }
+
+  async getOrgUnit(businessId: string, id: string) {
+    const unit = await this.prisma.client.orgUnit.findFirst({
+      where: { id, businessId },
+      include: {
+        children: true,
+        assignments: {
+          where: { endedAt: null },
+          include: { jobRole: true },
+        },
+      },
+    });
+    if (!unit) throw new NotFoundException('Org unit not found');
+    return unit;
+  }
+
+  async updateOrgUnit(businessId: string, id: string, dto: UpdateOrgUnitDto) {
+    await this.getOrgUnit(businessId, id);
+    return this.prisma.client.orgUnit.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        type: dto.type,
+        address: dto.address,
+        city: dto.city,
+        country: dto.country,
+        phone: dto.phone,
+        email: dto.email,
+        managerId: dto.managerId,
+        parentId: dto.parentId,
+      },
+    });
+  }
+
+  async deleteOrgUnit(businessId: string, id: string) {
+    await this.getOrgUnit(businessId, id);
+    return this.prisma.client.orgUnit.delete({ where: { id } });
+  }
+
+  // ─── Job Roles ───
+  async listJobRoles(businessId: string) {
+    return this.prisma.client.jobRole.findMany({
+      where: { businessId },
+      orderBy: { level: 'asc' },
+    });
+  }
+
+  async createJobRole(businessId: string, dto: CreateJobRoleDto) {
+    return this.prisma.client.jobRole.create({
+      data: {
+        businessId,
+        name: dto.name,
+        description: dto.description,
+        level: dto.level ?? 0,
+        permissions: dto.permissions ? (dto.permissions as any) : undefined,
+        defaultApprovalTier: dto.defaultApprovalTier ?? 0,
+        color: dto.color,
+      },
+    });
+  }
+
+  async getJobRole(businessId: string, id: string) {
+    const role = await this.prisma.client.jobRole.findFirst({
+      where: { id, businessId },
+    });
+    if (!role) throw new NotFoundException('Job role not found');
+    return role;
+  }
+
+  async updateJobRole(businessId: string, id: string, dto: UpdateJobRoleDto) {
+    await this.getJobRole(businessId, id);
+    return this.prisma.client.jobRole.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        description: dto.description,
+        level: dto.level,
+        permissions: dto.permissions ? (dto.permissions as any) : undefined,
+        defaultApprovalTier: dto.defaultApprovalTier,
+        color: dto.color,
+      },
+    });
+  }
+
+  async deleteJobRole(businessId: string, id: string) {
+    await this.getJobRole(businessId, id);
+    return this.prisma.client.jobRole.delete({ where: { id } });
+  }
+
+  // ─── Assignments ───
+  async listAssignments(businessId: string) {
+    return this.prisma.client.orgAssignment.findMany({
+      where: { businessId, endedAt: null },
+      include: {
+        orgUnit: true,
+        jobRole: true,
+        reportsTo: true,
+        membership: { include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createAssignment(businessId: string, dto: CreateAssignmentDto) {
+    const assignment = await this.prisma.client.orgAssignment.create({
+      data: {
+        businessId,
+        membershipId: dto.membershipId,
+        userId: dto.userId,
+        orgUnitId: dto.orgUnitId,
+        jobRoleId: dto.jobRoleId,
+        reportsToId: dto.reportsToId,
+        isPrimary: dto.isPrimary ?? true,
+      },
+      include: { jobRole: true },
+    });
+
+    // Sync JobRole permissions to Membership
+    if (dto.jobRoleId && assignment.jobRole) {
+      await this.prisma.client.membership.update({
+        where: { id: dto.membershipId },
+        data: {
+          permissionScopes: assignment.jobRole.permissions as any,
+          maxApprovalTier: assignment.jobRole.defaultApprovalTier,
+        },
+      });
+    }
+
+    return assignment;
+  }
+
+  async getAssignment(businessId: string, id: string) {
+    const a = await this.prisma.client.orgAssignment.findFirst({
+      where: { id, businessId },
+      include: {
+        orgUnit: true,
+        jobRole: true,
+        reportsTo: true,
+        membership: { include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } } },
+      },
+    });
+    if (!a) throw new NotFoundException('Assignment not found');
+    return a;
+  }
+
+  async updateAssignment(businessId: string, id: string, dto: UpdateAssignmentDto) {
+    const existing = await this.getAssignment(businessId, id);
+    const updated = await this.prisma.client.orgAssignment.update({
+      where: { id },
+      data: {
+        orgUnitId: dto.orgUnitId,
+        jobRoleId: dto.jobRoleId,
+        reportsToId: dto.reportsToId,
+        isPrimary: dto.isPrimary,
+        endedAt: dto.endedAt ? new Date(dto.endedAt) : undefined,
+      },
+      include: { jobRole: true },
+    });
+
+    // Sync JobRole permissions to Membership when role changes
+    if (dto.jobRoleId && updated.jobRole) {
+      await this.prisma.client.membership.update({
+        where: { id: existing.membershipId },
+        data: {
+          permissionScopes: updated.jobRole.permissions as any,
+          maxApprovalTier: updated.jobRole.defaultApprovalTier,
+        },
+      });
+    }
+
+    return updated;
+  }
+
+  async deleteAssignment(businessId: string, id: string) {
+    await this.getAssignment(businessId, id);
+    return this.prisma.client.orgAssignment.delete({ where: { id } });
+  }
+
+  // ─── Delegation Rules ───
+  async listDelegationRules(businessId: string) {
+    return this.prisma.client.delegationRule.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createDelegationRule(businessId: string, dto: CreateDelegationRuleDto) {
+    return this.prisma.client.delegationRule.create({
+      data: {
+        businessId,
+        delegatorId: dto.delegatorId,
+        delegateId: dto.delegateId,
+        scope: dto.scope,
+        maxTier: dto.maxTier,
+        activeUntil: dto.activeUntil ? new Date(dto.activeUntil) : undefined,
+        reason: dto.reason,
+      },
+    });
+  }
+
+  async getDelegationRule(businessId: string, id: string) {
+    const r = await this.prisma.client.delegationRule.findFirst({
+      where: { id, businessId },
+    });
+    if (!r) throw new NotFoundException('Delegation rule not found');
+    return r;
+  }
+
+  async updateDelegationRule(businessId: string, id: string, dto: UpdateDelegationRuleDto) {
+    await this.getDelegationRule(businessId, id);
+    return this.prisma.client.delegationRule.update({
+      where: { id },
+      data: {
+        delegatorId: dto.delegatorId,
+        delegateId: dto.delegateId,
+        scope: dto.scope,
+        maxTier: dto.maxTier,
+        activeUntil: dto.activeUntil ? new Date(dto.activeUntil) : undefined,
+        reason: dto.reason,
+        isActive: dto.isActive,
+      },
+    });
+  }
+
+  async deleteDelegationRule(businessId: string, id: string) {
+    await this.getDelegationRule(businessId, id);
+    return this.prisma.client.delegationRule.delete({ where: { id } });
+  }
+
+  // ─── Org Chart / Tree ───
+  async getOrgTree(businessId: string) {
+    const units = await this.prisma.client.orgUnit.findMany({
+      where: { businessId },
+      include: {
+        children: true,
+        assignments: {
+          where: { endedAt: null },
+          include: { jobRole: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+    const rootUnits = units.filter((u) => !u.parentId);
+    return { units, rootUnits };
+  }
+
+  // ─── Stats ───
+  async getStats(businessId: string) {
+    const [unitCount, roleCount, assignmentCount, delegationCount] = await Promise.all([
+      this.prisma.client.orgUnit.count({ where: { businessId } }),
+      this.prisma.client.jobRole.count({ where: { businessId } }),
+      this.prisma.client.orgAssignment.count({ where: { businessId, endedAt: null } }),
+      this.prisma.client.delegationRule.count({ where: { businessId, isActive: true } }),
+    ]);
+    return { unitCount, roleCount, assignmentCount, delegationCount };
+  }
+}

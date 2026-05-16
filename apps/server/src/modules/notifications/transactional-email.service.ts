@@ -9,7 +9,9 @@ import {
   bookingReminderTemplate,
   bookingRescheduledTemplate,
   bookingCancelledTemplate,
+  bookingCreatedTemplate,
   invoiceSentTemplate,
+  invoiceOverdueTemplate,
   paymentReceiptTemplate,
   orderConfirmedTemplate,
   orderShippedTemplate,
@@ -34,7 +36,9 @@ export type NotificationType =
   | 'booking_reminder'
   | 'booking_rescheduled'
   | 'booking_cancelled'
+  | 'booking_created'
   | 'invoice_sent'
+  | 'invoice_overdue'
   | 'payment_receipt'
   | 'order_confirmed'
   | 'order_shipped'
@@ -58,7 +62,9 @@ export interface NotificationPreferences {
   booking_reminder?: boolean;
   booking_rescheduled?: boolean;
   booking_cancelled?: boolean;
+  booking_created?: boolean;
   invoice_sent?: boolean;
+  invoice_overdue?: boolean;
   payment_receipt?: boolean;
   order_confirmed?: boolean;
   order_shipped?: boolean;
@@ -83,7 +89,9 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   booking_reminder: true,
   booking_rescheduled: true,
   booking_cancelled: true,
+  booking_created: true,
   invoice_sent: true,
+  invoice_overdue: true,
   payment_receipt: true,
   order_confirmed: true,
   order_shipped: true,
@@ -383,6 +391,18 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
             startTime: data.startTime,
           });
           break;
+        case 'booking_created':
+          rendered = bookingCreatedTemplate({
+            ...baseCtx,
+            serviceName: data.serviceName,
+            startTime: data.startTime,
+            endTime: data.endTime,
+            staffName: data.staffName,
+            bookingId: data.bookingId,
+            location: data.location,
+            businessUrl: data.businessUrl,
+          });
+          break;
         case 'invoice_sent':
           rendered = invoiceSentTemplate({
             ...baseCtx,
@@ -392,6 +412,17 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
             dueDate: data.dueDate,
             invoiceUrl: data.invoiceUrl,
             items: data.items,
+          });
+          break;
+        case 'invoice_overdue':
+          rendered = invoiceOverdueTemplate({
+            ...baseCtx,
+            invoiceNumber: data.invoiceNumber,
+            total: data.total,
+            currency: data.currency,
+            dueDate: data.dueDate,
+            invoiceUrl: data.invoiceUrl,
+            daysOverdue: data.daysOverdue,
           });
           break;
         case 'payment_receipt':

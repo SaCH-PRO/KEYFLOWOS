@@ -223,8 +223,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     { id: "nav-reports", label: "Reports", hint: "Analytics & KPIs", icon: BarChart3, onSelect: () => router.push("/app/reports") },
     { id: "nav-studio", label: "Studio", hint: "Business configuration", icon: Settings, onSelect: () => router.push("/app/settings") },
     { id: "nav-presence", label: "Presence", hint: "Online storefront & booking page", icon: Store, onSelect: () => router.push("/app/store") },
-    { id: "nav-learn", label: "Learn", hint: "MasterClass courses", icon: GraduationCap, onSelect: () => router.push("/app/learn") },
-    { id: "nav-community", label: "Community", hint: "Forum & founder circles", icon: Users, onSelect: () => router.push("/app/community") },
     { id: "nav-branding", label: "Branding", hint: "Profile, brand & identity", icon: User, onSelect: () => router.push("/app/profile") },
   ], [router]);
 

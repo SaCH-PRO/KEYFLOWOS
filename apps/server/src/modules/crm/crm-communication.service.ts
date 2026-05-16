@@ -362,8 +362,7 @@ export class CrmCommunicationService {
       if (!phone) throw new BadRequestException('Contact has no WhatsApp/phone number');
       try {
         const message = await this.whatsapp.sendMessage(input.businessId, {
-          toPhone: phone,
-          contactId: input.contactId,
+          to: phone,
           body,
         });
         return { ok: true, channel, message };

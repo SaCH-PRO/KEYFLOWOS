@@ -328,13 +328,7 @@ function InsightsTabInner({
             <h3 className="text-sm font-semibold text-foreground/90">Need an action across these {contacts.length} contacts?</h3>
             <p className="text-[11px] text-muted-foreground/70">KEY can score, segment, draft outreach, or trigger flows for everything you see here.</p>
           </div>
-          <AskKeyButton
-            variant="primary"
-            label="Ask KEY about this"
-            module="crm"
-            context={{ contactCount: contacts.length }}
-            prompt={`I'm looking at ${contacts.length} contacts in CRM insights. What's the most valuable next move?`}
-          />
+          {/* AskKeyButton removed — use global Command Palette (⌘K) instead */}
         </motion.div>
       </LazyWidget>
     </motion.div>

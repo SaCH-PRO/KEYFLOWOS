@@ -423,13 +423,24 @@ export class IdentityService {
   async listTeamMembers(businessId: string) {
     const members = await this.prisma.client.membership.findMany({
       where: { businessId },
-      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
+      include: {
+        user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } },
+        orgAssignments: {
+          where: { endedAt: null, isPrimary: true },
+          include: { orgUnit: true, jobRole: true },
+          take: 1,
+        },
+      },
       orderBy: { createdAt: 'asc' },
     });
     return members.map((m) => ({
       ...m,
       permissionScopes: this.resolveScopes(m),
       maxApprovalTier: this.resolveApprovalTier(m),
+      orgUnit: m.orgAssignments[0]?.orgUnit?.name ?? null,
+      jobRole: m.orgAssignments[0]?.jobRole?.name ?? null,
+      orgUnitId: m.orgAssignments[0]?.orgUnitId ?? null,
+      jobRoleId: m.orgAssignments[0]?.jobRoleId ?? null,
     }));
   }
 
@@ -1035,7 +1046,7 @@ export class IdentityService {
   }
 
   async getGuidanceSubProfile(businessId: string, subProfileName: string) {
-    let guidanceProfile = await this.prisma.client.businessGuidanceProfile.findUnique({
+    const guidanceProfile = await this.prisma.client.businessGuidanceProfile.findUnique({
       where: { businessId },
     });
 

@@ -580,7 +580,7 @@ export class CrmJourneyService {
 
     let nextBestAction: string;
     let suggestedMessage: string | undefined;
-    let confidence = 70;
+    let confidence: number;
 
     if (status === 'LEAD') {
       nextBestAction = 'Schedule a discovery call to understand their needs';

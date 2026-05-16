@@ -4,7 +4,8 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from '../subscriptions/plans';
 import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
 import { OutputTemplateService } from './output-template.service';
-import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider } from './model-gateway.service';
+import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider, GatewayRequest, GatewayResponse, StreamChunk } from './model-gateway.service';
+import OpenAI from 'openai';
 
 /**
  * responseMode controls quality directive injection and output validation:
@@ -19,6 +20,7 @@ type AiResponseMode = 'user_text' | 'structured_json';
 
 interface AiCallOptions {
   businessId: string;
+  userId?: string;
   feature: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   model?: string;
@@ -100,6 +102,25 @@ const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
   seo_content_brief: 'content-generation',
   seo_gap_analysis: 'reasoning',
   growth_insight: 'reasoning',
+  // Tracked modalities
+  conversation_handle: 'classification',
+  document_extract: 'extraction',
+  calendar_suggest: 'analysis',
+  semantic_embedding: 'extraction',
+  vision_extract: 'extraction',
+  vision_product: 'extraction',
+  vision_contact: 'extraction',
+  audio_tts: 'content-generation',
+  audio_stt: 'extraction',
+  flow_chat_stream: 'tool-calling',
+  feedback_loop: 'analysis',
+  pattern_detect: 'analysis',
+  profile_intel: 'extraction',
+  storefront_intel: 'reasoning',
+  calendar_insight: 'analysis',
+  revenue_action: 'reasoning',
+  note_summarize: 'summarization',
+  automation_generate: 'tool-calling',
 };
 
 @Injectable()
@@ -182,7 +203,7 @@ export class AiUsageService {
   }
 
   async callAi(options: AiCallOptions): Promise<AiCallResult> {
-    const { businessId, feature, maxTokens = 500, temperature = 0.7 } = options;
+    const { businessId, userId, feature, maxTokens = 500, temperature = 0.7 } = options;
     const outputCategory: OutputCategory = options.outputCategory || 'general';
 
     const isStructuredJson =
@@ -279,6 +300,7 @@ export class AiUsageService {
       await this.prisma.client.aiUsageLog.create({
         data: {
           businessId,
+          userId: userId || undefined,
           feature,
           model: result.model,
           provider: result.provider,
@@ -298,6 +320,8 @@ export class AiUsageService {
           },
         },
       });
+
+      await this.checkAlertThresholds(businessId, creditCost);
 
       return {
         content: result.content,
@@ -401,6 +425,7 @@ export class AiUsageService {
     try {
       budget = await this.gateway.getBudgetStatus(businessId);
     } catch {
+      /* intentionally empty */
     }
 
     return {
@@ -475,6 +500,7 @@ export class AiUsageService {
     try {
       budgetStatus = await this.gateway.getBudgetStatus(businessId);
     } catch {
+      /* intentionally empty */
     }
 
     const providerBudgetMap = new Map(
@@ -530,5 +556,480 @@ export class AiUsageService {
           : []),
       ],
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tracked wrapper methods — enforce rate limits, credit checks, and logging
+  // for AI modalities that cannot use callAi() (streaming, tool-calling, vision,
+  // audio, embeddings).
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Wraps gateway.complete() with rate limiting, credit enforcement, and usage
+   * logging. Use this for any service that needs tool-calling, JSON mode, or
+   * other gateway features not available through callAi().
+   */
+  async trackAndComplete(
+    businessId: string,
+    userId: string | undefined,
+    feature: string,
+    request: Omit<GatewayRequest, 'businessId' | 'taskCategory'> & { taskCategory?: TaskCategory },
+  ): Promise<GatewayResponse> {
+    this.checkRateLimit(businessId);
+
+    const creditCost = AI_CREDIT_COSTS[feature] || 1;
+    const canProceed = await this.checkCredits(businessId, creditCost);
+    if (!canProceed.allowed) {
+      throw new ForbiddenException(
+        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
+        `Upgrade your plan for more AI credits.`,
+      );
+    }
+
+    const taskCategory = this.resolveTaskCategory(feature, request.taskCategory);
+    const startTime = Date.now();
+
+    try {
+      const response = await this.gateway.complete({
+        ...request,
+        businessId,
+        taskCategory,
+      });
+
+      const latencyMs = Date.now() - startTime;
+
+      await this.prisma.client.aiUsageLog.create({
+        data: {
+          businessId,
+          userId: userId || undefined,
+          feature,
+          model: response.model,
+          provider: response.provider,
+          promptTokens: response.usage.promptTokens,
+          completionTokens: response.usage.completionTokens,
+          totalTokens: response.usage.totalTokens,
+          estimatedCost: Math.round(response.usage.estimatedCost * 10000) / 10000,
+          creditsUsed: creditCost,
+          latencyMs,
+          fallbackUsed: response.fallbackUsed,
+          fallbackProvider: response.fallbackProvider,
+          taskCategory,
+          metadata: {
+            maxTokens: request.maxTokens,
+            temperature: request.temperature,
+            toolCount: request.tools?.length,
+          },
+        },
+      });
+
+      await this.checkAlertThresholds(businessId, creditCost);
+      return response;
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
+      this.logger.error(`trackAndComplete failed for ${feature}: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Wraps gateway.streamComplete() with rate limiting, credit enforcement, and
+   * usage logging. Yields stream chunks transparently; accumulates usage from the
+   * final 'usage' chunk and writes one aiUsageLog row.
+   */
+  async *trackAndStream(
+    businessId: string,
+    userId: string | undefined,
+    feature: string,
+    request: Omit<GatewayRequest, 'businessId' | 'taskCategory'> & { taskCategory?: TaskCategory },
+  ): AsyncGenerator<StreamChunk> {
+    this.checkRateLimit(businessId);
+
+    const creditCost = AI_CREDIT_COSTS[feature] || 1;
+    const canProceed = await this.checkCredits(businessId, creditCost);
+    if (!canProceed.allowed) {
+      throw new ForbiddenException(
+        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
+        `Upgrade your plan for more AI credits.`,
+      );
+    }
+
+    const taskCategory = this.resolveTaskCategory(feature, request.taskCategory);
+    const startTime = Date.now();
+
+    let lastUsage: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost: number } | undefined;
+    let provider: string | undefined;
+    let model: string | undefined;
+    let fallbackUsed = false;
+    let fallbackProvider: string | undefined;
+
+    try {
+      const stream = this.gateway.streamComplete({
+        ...request,
+        businessId,
+        taskCategory,
+      });
+
+      for await (const chunk of stream) {
+        if (chunk.type === 'usage' && chunk.usage) {
+          lastUsage = chunk.usage;
+          if (chunk.provider) provider = chunk.provider;
+          if (chunk.model) model = chunk.model;
+        }
+        if (chunk.type === 'error') {
+          fallbackUsed = true;
+        }
+        yield chunk;
+      }
+
+      const latencyMs = Date.now() - startTime;
+
+      await this.prisma.client.aiUsageLog.create({
+        data: {
+          businessId,
+          userId: userId || undefined,
+          feature,
+          model: model || 'gpt-4o',
+          provider: provider || 'openai',
+          promptTokens: lastUsage?.promptTokens ?? 0,
+          completionTokens: lastUsage?.completionTokens ?? 0,
+          totalTokens: lastUsage?.totalTokens ?? 0,
+          estimatedCost: Math.round((lastUsage?.estimatedCost ?? 0) * 10000) / 10000,
+          creditsUsed: creditCost,
+          latencyMs,
+          fallbackUsed,
+          fallbackProvider: fallbackProvider || undefined,
+          taskCategory,
+          metadata: {
+            maxTokens: request.maxTokens,
+            temperature: request.temperature,
+            streamed: true,
+          },
+        },
+      });
+
+      await this.checkAlertThresholds(businessId, creditCost);
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
+      this.logger.error(`trackAndStream failed for ${feature}: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Wraps OpenAI embeddings API with rate limiting, credit enforcement, and
+   * usage logging.
+   */
+  async trackEmbedding(
+    businessId: string,
+    userId: string | undefined,
+    feature: string,
+    texts: string[],
+    model = 'text-embedding-3-small',
+  ): Promise<number[][]> {
+    this.checkRateLimit(businessId);
+
+    const creditCost = AI_CREDIT_COSTS[feature] || 1;
+    const canProceed = await this.checkCredits(businessId, creditCost);
+    if (!canProceed.allowed) {
+      throw new ForbiddenException(
+        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
+        `Upgrade your plan for more AI credits.`,
+      );
+    }
+
+    const startTime = Date.now();
+    const client = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+
+    try {
+      const response = await client.embeddings.create({ model, input: texts });
+      const latencyMs = Date.now() - startTime;
+
+      // Estimate tokens: ~1 token per 4 characters (rough heuristic)
+      const totalChars = texts.reduce((sum, t) => sum + t.length, 0);
+      const estimatedTokens = Math.ceil(totalChars / 4);
+      // text-embedding-3-small: $0.00002 per 1k tokens
+      const estimatedCost = (estimatedTokens / 1000) * 0.00002;
+
+      const embeddings = response.data.map(d => d.embedding);
+
+      await this.prisma.client.aiUsageLog.create({
+        data: {
+          businessId,
+          userId: userId || undefined,
+          feature,
+          model,
+          provider: 'openai',
+          promptTokens: estimatedTokens,
+          completionTokens: 0,
+          totalTokens: estimatedTokens,
+          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          creditsUsed: creditCost,
+          latencyMs,
+          taskCategory: 'extraction',
+          metadata: { batchSize: texts.length },
+        },
+      });
+
+      await this.checkAlertThresholds(businessId, creditCost);
+      return embeddings;
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
+      this.logger.error(`trackEmbedding failed for ${feature}: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Wraps OpenAI vision-capable chat completion with rate limiting, credit
+   * enforcement, and usage logging. Accepts messages with vision content arrays.
+   */
+  async trackVision(
+    businessId: string,
+    userId: string | undefined,
+    feature: string,
+    messages: Array<{ role: string; content: any }>,
+    maxTokens = 1200,
+    temperature = 0.2,
+    model = 'gpt-4o',
+  ): Promise<{ content: string | null; usage: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost: number } }> {
+    this.checkRateLimit(businessId);
+
+    const creditCost = AI_CREDIT_COSTS[feature] || 1;
+    const canProceed = await this.checkCredits(businessId, creditCost);
+    if (!canProceed.allowed) {
+      throw new ForbiddenException(
+        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
+        `Upgrade your plan for more AI credits.`,
+      );
+    }
+
+    const startTime = Date.now();
+    const client = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+
+    try {
+      const response = await client.chat.completions.create({
+        model,
+        messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+        max_tokens: maxTokens,
+        temperature,
+      });
+
+      const latencyMs = Date.now() - startTime;
+      const choice = response.choices[0];
+      const content = choice?.message?.content ?? null;
+      const usage = response.usage;
+
+      const promptTokens = usage?.prompt_tokens ?? 0;
+      const completionTokens = usage?.completion_tokens ?? 0;
+      const totalTokens = usage?.total_tokens ?? promptTokens + completionTokens;
+
+      // Vision model pricing
+      const costs: Record<string, { input: number; output: number }> = {
+        'gpt-4o': { input: 0.005, output: 0.015 },
+        'gpt-4o-mini': { input: 0.0004, output: 0.0016 },
+      };
+      const costRates = costs[model] || costs['gpt-4o'];
+      const estimatedCost = (promptTokens / 1000) * costRates.input + (completionTokens / 1000) * costRates.output;
+
+      await this.prisma.client.aiUsageLog.create({
+        data: {
+          businessId,
+          userId: userId || undefined,
+          feature,
+          model,
+          provider: 'openai',
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          creditsUsed: creditCost,
+          latencyMs,
+          taskCategory: 'extraction',
+          metadata: { maxTokens, temperature, vision: true },
+        },
+      });
+
+      await this.checkAlertThresholds(businessId, creditCost);
+      return { content, usage: { promptTokens, completionTokens, totalTokens, estimatedCost } };
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
+      this.logger.error(`trackVision failed for ${feature}: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Wraps OpenAI audio APIs (TTS and STT) with rate limiting, credit
+   * enforcement, and usage logging.
+   */
+  async trackAudio(
+    businessId: string,
+    userId: string | undefined,
+    feature: string,
+    mode: 'tts' | 'stt',
+    params: {
+      text?: string;
+      voice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'ash' | 'coral' | 'sage';
+      audioFile?: Buffer;
+      fileName?: string;
+      model?: string;
+    },
+  ): Promise<Buffer | string> {
+    this.checkRateLimit(businessId);
+
+    const creditCost = AI_CREDIT_COSTS[feature] || 1;
+    const canProceed = await this.checkCredits(businessId, creditCost);
+    if (!canProceed.allowed) {
+      throw new ForbiddenException(
+        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
+        `Upgrade your plan for more AI credits.`,
+      );
+    }
+
+    const startTime = Date.now();
+    const client = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+
+    try {
+      let result: Buffer | string;
+      let model = params.model || 'gpt-4o-mini-tts';
+      let estimatedCost = 0;
+
+      if (mode === 'tts') {
+        const response = await client.audio.speech.create({
+          model,
+          voice: params.voice || 'alloy',
+          input: params.text || '',
+        });
+        result = Buffer.from(await response.arrayBuffer());
+        // TTS: $0.015 per 1k characters (approx)
+        estimatedCost = ((params.text?.length || 0) / 1000) * 0.015;
+      } else {
+        const response = await client.audio.transcriptions.create({
+          model: params.model || 'whisper-1',
+          file: new File([params.audioFile! as unknown as BlobPart], params.fileName || 'audio.mp3', { type: 'audio/mp3' }),
+        });
+        result = response.text;
+        model = params.model || 'whisper-1';
+        // STT: $0.006 per minute (approx $0.0001 per second)
+        estimatedCost = 0.0001;
+      }
+
+      const latencyMs = Date.now() - startTime;
+
+      await this.prisma.client.aiUsageLog.create({
+        data: {
+          businessId,
+          userId: userId || undefined,
+          feature,
+          model,
+          provider: 'openai',
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          creditsUsed: creditCost,
+          latencyMs,
+          taskCategory: mode === 'tts' ? 'content-generation' : 'extraction',
+          metadata: { mode, voice: params.voice },
+        },
+      });
+
+      await this.checkAlertThresholds(businessId, creditCost);
+      return result;
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
+      this.logger.error(`trackAudio failed for ${feature}: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Alert thresholds
+  // ---------------------------------------------------------------------------
+
+  private async checkAlertThresholds(businessId: string, _creditCost: number): Promise<void> {
+    try {
+      const sub = await this.subscriptionsService.getActiveSubscription(businessId);
+      const limit = sub.limits.aiCreditsPerMonth;
+      if (limit === -1) return; // unlimited plan
+
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+
+      const usedAgg = await this.prisma.client.aiUsageLog.aggregate({
+        where: {
+          businessId,
+          createdAt: { gte: startOfMonth },
+        },
+        _sum: { creditsUsed: true },
+      });
+
+      const used = usedAgg._sum.creditsUsed ?? 0;
+      const pct = limit > 0 ? (used / limit) * 100 : 0;
+
+      // Depleted
+      if (used >= limit) {
+        const existing = await this.prisma.client.aiUsageAlert.findFirst({
+          where: { businessId, type: 'credit_depleted', notified: false },
+        });
+        if (!existing) {
+          await this.prisma.client.aiUsageAlert.create({
+            data: {
+              businessId,
+              type: 'credit_depleted',
+              threshold: 100,
+              metadata: { used, limit },
+            },
+          });
+        }
+        return;
+      }
+
+      // 80% threshold
+      if (pct >= 80) {
+        const existing = await this.prisma.client.aiUsageAlert.findFirst({
+          where: { businessId, type: 'budget_threshold', threshold: 80, notified: false },
+        });
+        if (!existing) {
+          await this.prisma.client.aiUsageAlert.create({
+            data: {
+              businessId,
+              type: 'budget_threshold',
+              threshold: 80,
+              metadata: { used, limit, pct: Math.round(pct) },
+            },
+          });
+        }
+      }
+
+      // 50% threshold
+      if (pct >= 50) {
+        const existing = await this.prisma.client.aiUsageAlert.findFirst({
+          where: { businessId, type: 'budget_threshold', threshold: 50, notified: false },
+        });
+        if (!existing) {
+          await this.prisma.client.aiUsageAlert.create({
+            data: {
+              businessId,
+              type: 'budget_threshold',
+              threshold: 50,
+              metadata: { used, limit, pct: Math.round(pct) },
+            },
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Alert threshold check failed: ${(err as Error).message}`);
+    }
   }
 }

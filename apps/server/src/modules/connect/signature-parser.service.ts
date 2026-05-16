@@ -88,7 +88,7 @@ export class SignatureParserService {
     let title: string | null = null;
     let company: string | null = null;
     for (const l of lines) {
-      if (!name && /^[A-Z][a-zA-Z'\-]+(\s+[A-Z][a-zA-Z'\-]+){1,3}$/.test(l)) {
+      if (!name && /^[A-Z][a-zA-Z'-]+(\s+[A-Z][a-zA-Z'-]+){1,3}$/.test(l)) {
         name = l;
         continue;
       }

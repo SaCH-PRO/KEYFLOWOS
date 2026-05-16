@@ -908,7 +908,7 @@ export class DocumentsService {
       };
     }
 
-    let remoteModifiedTime: string | null = null;
+    let remoteModifiedTime: string | null;
     let remoteName: string | null = inst.driveFileName;
     try {
       const file = await this.driveService.getFile(businessId, inst.driveFileId);

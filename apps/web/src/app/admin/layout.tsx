@@ -14,6 +14,7 @@ import {
   LayoutTemplate,
   Home,
   ExternalLink,
+  Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isSuperAdmin, refreshWorkspace } from "@/lib/workspace";
@@ -24,6 +25,7 @@ const navItems = [
   { label: "Users", href: "/admin/users", icon: Users },
   { label: "Businesses", href: "/admin/businesses", icon: Building2 },
   { label: "Analytics", href: "/admin/analytics", icon: Activity },
+  { label: "AI Usage", href: "/admin/ai-usage", icon: Brain },
   { label: "Events", href: "/admin/events", icon: Bell },
   { label: "System Health", href: "/admin/system", icon: Cpu },
   { label: "Feature Flags", href: "/admin/feature-flags", icon: Flag },
@@ -37,12 +39,20 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const check = async () => {
-      await refreshWorkspace();
+      // Check if admin local-auth token is present
+      const isAdminMode = typeof window !== "undefined" &&
+        window.localStorage.getItem("kf_auth_mode") === "admin";
+
+      if (!isAdminMode) {
+        // Try regular workspace refresh (Supabase token)
+        await refreshWorkspace();
+      }
+
       if (isSuperAdmin()) {
         setAllowed(true);
       } else {
         toast.error("Access denied: super admin only");
-        router.replace("/app");
+        router.replace("/admin/login");
       }
       setChecked(true);
     };

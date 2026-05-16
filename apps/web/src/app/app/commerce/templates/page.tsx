@@ -25,7 +25,6 @@ export default function DocumentTemplatesPage() {
 
   useEffect(() => {
     if (!businessId) return;
-    setLoading(true);
     fetchDocumentTemplates(businessId).then((res) => {
       if (res.data) {
         setTemplates(res.data.templates ?? []);
@@ -39,8 +38,8 @@ export default function DocumentTemplatesPage() {
     if (!businessId) return;
     setSaving(`${template.type}-${template.id}`);
     const body = template.type === 'invoice'
-      ? { invoiceTemplate: template.id as any }
-      : { quoteTemplate: template.id as any };
+      ? { invoiceTemplate: template.id as 'classic' | 'modern' | 'minimal' }
+      : { quoteTemplate: template.id as 'classic' | 'modern' | 'minimal' };
     const res = await setDocumentTemplate(body, businessId);
     setSaving(null);
     if (res.data) {
