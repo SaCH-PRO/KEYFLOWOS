@@ -138,4 +138,104 @@ export class EventStreamService implements OnModuleInit {
       details: payload.details,
     });
   }
+
+  @OnEvent('content_request.created')
+  onContentRequestCreated(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.created', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
+
+  @OnEvent('content_request.updated')
+  onContentRequestUpdated(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.updated', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
+
+  @OnEvent('content_request.submitted')
+  onContentRequestSubmitted(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.submitted', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
+
+  @OnEvent('content_request.assigned')
+  onContentRequestAssigned(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.assigned', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
+
+  @OnEvent('content_request.in_production')
+  onContentRequestInProduction(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.in_production', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
+
+  @OnEvent('content_request.internal_review')
+  onContentRequestInternalReview(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.internal_review', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
+
+  @OnEvent('content_request.user_review')
+  onContentRequestUserReview(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.user_review', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
+
+  @OnEvent('content_request.approved')
+  onContentRequestApproved(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.approved', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
+
+  @OnEvent('content_request.uploaded_to_drive')
+  onContentRequestUploaded(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string; fileCount?: number }) {
+    this.broadcast(payload.businessId, 'content_request.uploaded_to_drive', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+      fileCount: payload.fileCount,
+    });
+  }
+
+  @OnEvent('content_request.delivered')
+  onContentRequestDelivered(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.delivered', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
+
+  @OnEvent('content_request.cancelled')
+  onContentRequestCancelled(payload: { businessId: string; contentRequestId: string; status: string; businessGoal: string }) {
+    this.broadcast(payload.businessId, 'content_request.cancelled', {
+      contentRequestId: payload.contentRequestId,
+      status: payload.status,
+      businessGoal: payload.businessGoal,
+    });
+  }
 }

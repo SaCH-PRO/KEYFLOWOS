@@ -8,6 +8,8 @@ import { BusinessEventInterceptor } from './modules/business-events/business-eve
 import { EvidenceModule } from './modules/evidence/evidence.module';
 import { TaskAssignmentModule } from './modules/task-assignments/task-assignment.module';
 import { EventStreamModule } from './modules/event-stream/event-stream.module';
+import { ApprovalModule } from './modules/approvals/approval.module';
+import { ContentOpsModule } from './modules/content-ops/content-ops.module';
 import { EventBusModule } from './core/event-bus/event-bus.module';
 import { AuthModule } from './core/auth/auth.module';
 import { TrpcModule } from './trpc.module';
@@ -83,6 +85,8 @@ import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
     EvidenceModule,
     TaskAssignmentModule,
     EventStreamModule,
+    ApprovalModule,
+    ContentOpsModule,
 
     // Feature Modules
     IdentityModule,
