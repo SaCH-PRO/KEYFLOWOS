@@ -1,8 +1,3 @@
-tree 572b481ee224341cba41c436c989329e4b8576ea
-parent d6477d69e8573ec3ae169b7cfd8f8c0a345289d4
-author keyflowostt <54181748-keyflowostt@users.noreply.replit.com> 1775955965 +0000
-committer keyflowostt <54181748-keyflowostt@users.noreply.replit.com> 1775955965 +0000
-
 Refactor business builder card to improve organization and reduce complexity
 
 Extract constants and validation logic into a new file, clean up unused imports, and refactor the business builder card component to reduce its line count and improve maintainability.
