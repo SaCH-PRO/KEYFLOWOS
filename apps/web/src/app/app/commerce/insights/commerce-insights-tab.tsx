@@ -184,7 +184,7 @@ class CommerceInsightsErrorBoundary extends React.Component<
     return { hasError: true, error };
   }
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error("[CommerceInsightsTab] Render crash:", error, info.componentStack);
+    logError("[CommerceInsightsTab] Render crash", error);
   }
   render() {
     if (this.state.hasError) {

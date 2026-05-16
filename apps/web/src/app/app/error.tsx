@@ -1,11 +1,12 @@
 "use client";
+import { logError } from "@/lib/logger";
 
 import { useEffect } from "react";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
 
 export default function AppError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error("App error:", error);
+    logError("App error", error);
   }, [error]);
 
   return (

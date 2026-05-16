@@ -1,7 +1,8 @@
+import { getApiBase } from "@/lib/api-base";
 import type { Metadata, ResolvingMetadata } from "next";
 import { PresenceTracker } from "../../_lib/PresenceTracker";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE = getApiBase();
 
 type Props = {
   params: Promise<{ slug: string }>;

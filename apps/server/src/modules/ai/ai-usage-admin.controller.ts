@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Req, UseGuards, Inject, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Param, Query, Req, UseGuards, Inject, ForbiddenException, HttpException, HttpStatus, Header } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { AiUsageService } from './ai-usage.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -59,6 +59,7 @@ export class AiUsageAdminController {
   }
 
   @Get('platform-summary')
+  @Header('Cache-Control', 'max-age=30, stale-while-revalidate=60')
   async platformSummary(@Req() req: Request) {
     this.assertSuperAdmin(req);
 
@@ -136,6 +137,7 @@ export class AiUsageAdminController {
   }
 
   @Get('platform-alerts')
+  @Header('Cache-Control', 'max-age=30, stale-while-revalidate=60')
   async platformAlerts(
     @Req() req: Request,
     @Query('limit') limit?: string,
@@ -160,6 +162,7 @@ export class AiUsageAdminController {
   }
 
   @Get('health')
+  @Header('Cache-Control', 'no-store')
   async health(@Req() req: Request) {
     this.assertSuperAdmin(req);
 

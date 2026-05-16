@@ -265,8 +265,6 @@ export class WebhookDispatcherService {
     const signature = createHmac('sha256', webhook.secret).update(body).digest('hex');
     let lastStatusCode: number | null = null;
     let lastError: string | null = null;
-    let succeeded = false;
-
     for (let attempt = 1; attempt <= WebhookDispatcherService.MAX_RETRIES; attempt++) {
       try {
         const controller = new AbortController();
@@ -292,7 +290,6 @@ export class WebhookDispatcherService {
           if (attempt > 1) {
             this.logger.log(`Webhook ${webhook.id} succeeded on attempt ${attempt}`);
           }
-          succeeded = true;
           const log: WebhookDeliveryLog = {
             id: `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             webhookId: webhook.id,
@@ -350,7 +347,8 @@ export class WebhookDispatcherService {
 
   private sanitizeContact(contact: any) {
     if (!contact) return null;
-    const { businessId: _b, ...rest } = contact;
+    const { businessId: _businessId, ...rest } = contact;
+    void _businessId;
     return rest;
   }
 }

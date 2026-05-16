@@ -1,3 +1,4 @@
+import { getApiBase } from "@/lib/api-base";
 import { redirect } from "next/navigation";
 import PresenceRenderer from "../_components/presence-renderer";
 import { PresenceJsonLd } from "../_components/presence-jsonld";
@@ -6,7 +7,7 @@ import { PoweredByKeyFlow } from "../_components/powered-by-keyflow";
 import { WhatsAppShare } from "../_components/whatsapp-share";
 import CaseStudiesSection, { type PublicCaseStudy } from "../_components/case-studies-section";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE = getApiBase();
 const PUBLIC_BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? "";
 
 type Props = { params: Promise<{ slug: string }> };

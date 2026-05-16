@@ -1,7 +1,8 @@
+import { getApiBase } from "@/lib/api-base";
 import { notFound } from "next/navigation";
 import PresenceRenderer from "../../_components/presence-renderer";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE = getApiBase();
 
 type Props = { params: Promise<{ token: string }> };
 

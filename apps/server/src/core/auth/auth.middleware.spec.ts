@@ -15,7 +15,8 @@ function makeMiddleware(supabaseUser?: { id: string; email?: string } | null, ro
       },
     },
   };
-  return { mw: new AuthMiddleware(supabaseAuth, prisma), supabaseAuth, prisma };
+  const mockRedis = { get: () => Promise.resolve(null), set: () => Promise.resolve('OK') } as any;
+  return { mw: new AuthMiddleware(supabaseAuth, prisma, mockRedis), supabaseAuth, prisma };
 }
 
 function makeReq(overrides: Partial<Request> = {}): Request {
@@ -74,7 +75,8 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
     const prisma: any = { client: { user: { findUnique: vi.fn() } } };
-    const mw = new AuthMiddleware(supabaseAuth, prisma);
+    const mockRedis = { get: () => Promise.resolve(null), set: () => Promise.resolve('OK') } as any;
+    const mw = new AuthMiddleware(supabaseAuth, prisma, mockRedis);
     const req = makeReq({ headers: { authorization: 'Bearer x' } });
     await mw.use(req, res, next);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
@@ -92,7 +94,8 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
         user: { findUnique: vi.fn().mockRejectedValue(new Error('db down')) },
       },
     };
-    const mw = new AuthMiddleware(supabaseAuth, prisma);
+    const mockRedis = { get: () => Promise.resolve(null), set: () => Promise.resolve('OK') } as any;
+    const mw = new AuthMiddleware(supabaseAuth, prisma, mockRedis);
     const req = makeReq({ headers: { authorization: 'Bearer t' } });
     await mw.use(req, res, next);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request

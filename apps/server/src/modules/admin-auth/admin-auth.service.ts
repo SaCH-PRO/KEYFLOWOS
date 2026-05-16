@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { scrypt, timingSafeEqual } from 'crypto';
-import { createHmac } from 'crypto';
+import { buildAdminToken, verifyAdminToken } from '../../core/auth/admin-token.util';
+import type { Redis } from 'ioredis';
+import { Inject } from '@nestjs/common';
+import { REDIS_CLIENT } from '../../core/redis/redis.module';
 
 function getAdminJwtSecret(): string {
   return process.env.ADMIN_JWT_SECRET || '';
@@ -15,20 +18,24 @@ function getAdminEmail(): string {
   return process.env.ADMIN_EMAIL || '';
 }
 
-interface AdminTokenPayload {
+export interface AdminTokenPayload {
   sub: string;
   email: string;
   role: string;
   iat: number;
   exp: number;
   type: 'admin';
+  jti: string;
 }
 
 @Injectable()
 export class AdminAuthService {
   private readonly logger = new Logger(AdminAuthService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {}
 
   isConfigured(): boolean {
     return Boolean(getAdminJwtSecret() && getAdminPasswordHash() && getAdminEmail());
@@ -50,7 +57,6 @@ export class AdminAuthService {
       return null;
     }
 
-    // Look up the Prisma user to get the correct ID and role
     const dbUser = await this.prisma.client.user.findFirst({
       where: { email: { equals: getAdminEmail(), mode: 'insensitive' } },
       select: { id: true, email: true, role: true },
@@ -73,50 +79,32 @@ export class AdminAuthService {
     if (!secret) {
       throw new Error('ADMIN_JWT_SECRET not configured');
     }
-
-    const now = Math.floor(Date.now() / 1000);
-    const payload: AdminTokenPayload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      iat: now,
-      exp: now + 24 * 60 * 60, // 24 hours
-      type: 'admin',
-    };
-
-    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-    const signature = createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
-
-    return `${header}.${body}.${signature}`;
+    return buildAdminToken(user, secret);
   }
 
-  verifyToken(token: string): AdminTokenPayload | null {
+  async verifyToken(token: string): Promise<AdminTokenPayload | null> {
+    const verified = await verifyAdminToken(token, this.redis);
+    if (!verified) return null;
+
     const secret = getAdminJwtSecret();
     if (!secret) return null;
 
     const parts = token.split('.');
-    if (parts.length !== 3) return null;
-
-    const [header, body, signature] = parts;
-    const expectedSignature = createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
-
+    const body = parts[1];
     try {
-      if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-        return null;
-      }
+      return JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as AdminTokenPayload;
     } catch {
       return null;
     }
+  }
 
-    try {
-      const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as AdminTokenPayload;
-      if (payload.type !== 'admin') return null;
-      if (payload.exp * 1000 < Date.now()) return null;
-      return payload;
-    } catch {
-      return null;
-    }
+  async revokeToken(jti: string): Promise<void> {
+    const ttl = 24 * 60 * 60; // 24 hours
+    await this.redis.set(`admin:jti:${jti}`, '1', 'EX', ttl);
+  }
+
+  async revokeAllTokens(userId: string): Promise<void> {
+    await this.redis.set(`admin:user:${userId}:revokedAt`, String(Date.now()));
   }
 
   private verifyPassword(password: string, hash: string): Promise<boolean> {

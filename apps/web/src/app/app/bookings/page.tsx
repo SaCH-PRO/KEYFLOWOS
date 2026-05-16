@@ -245,7 +245,7 @@ export default function BookingsPage() {
         setError("Some data could not be loaded");
       }
     } catch (e) {
-      console.error("Failed to load bookings data:", e);
+      logError("Failed to load bookings data", e);
       setError("Failed to load data. Please try refreshing.");
     } finally {
       setLoading(false);

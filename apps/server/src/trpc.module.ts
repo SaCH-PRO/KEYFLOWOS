@@ -20,7 +20,8 @@ export class TrpcModule implements NestModule {
         trpcExpress.createExpressMiddleware({
           router: appRouter,
           createContext: ({ req }): AppContext => {
-            const { user, business } = req as any;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- bridging Express req augmentation to tRPC context
+            const { user, business } = req as { user?: any; business?: any };
             return {
               db,
               user,

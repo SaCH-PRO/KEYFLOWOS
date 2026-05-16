@@ -1,3 +1,4 @@
+import { getApiBase } from "@/lib/api-base";
 "use client";
 
 import Link from "next/link";
@@ -28,7 +29,7 @@ import {
 import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
 import { setStoredToken, setStoredBusinessId } from "@/lib/workspace";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE = getApiBase();
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
 

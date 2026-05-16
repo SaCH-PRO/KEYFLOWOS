@@ -1,3 +1,4 @@
+import { getApiBase } from "@/lib/api-base";
 "use client";
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
@@ -141,7 +142,7 @@ const TIMEZONES = [
   { value: "America/Barbados", label: "Barbados (AST)" },
 ];
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE = getApiBase();
 
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};

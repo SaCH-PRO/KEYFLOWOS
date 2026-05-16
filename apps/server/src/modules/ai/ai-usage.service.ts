@@ -297,8 +297,8 @@ export class AiUsageService {
         }
       }
 
-      await this.prisma.client.aiUsageLog.create({
-        data: {
+      this.persistUsageLog(
+        {
           businessId,
           userId: userId || undefined,
           feature,
@@ -319,9 +319,9 @@ export class AiUsageService {
             outputCategory,
           },
         },
-      });
-
-      await this.checkAlertThresholds(businessId, creditCost);
+        businessId,
+        creditCost,
+      ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
 
       return {
         content: result.content,
@@ -598,8 +598,8 @@ export class AiUsageService {
 
       const latencyMs = Date.now() - startTime;
 
-      await this.prisma.client.aiUsageLog.create({
-        data: {
+      this.persistUsageLog(
+        {
           businessId,
           userId: userId || undefined,
           feature,
@@ -620,9 +620,9 @@ export class AiUsageService {
             toolCount: request.tools?.length,
           },
         },
-      });
-
-      await this.checkAlertThresholds(businessId, creditCost);
+        businessId,
+        creditCost,
+      ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
       return response;
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
@@ -660,7 +660,6 @@ export class AiUsageService {
     let provider: string | undefined;
     let model: string | undefined;
     let fallbackUsed = false;
-    let fallbackProvider: string | undefined;
 
     try {
       const stream = this.gateway.streamComplete({
@@ -683,8 +682,8 @@ export class AiUsageService {
 
       const latencyMs = Date.now() - startTime;
 
-      await this.prisma.client.aiUsageLog.create({
-        data: {
+      this.persistUsageLog(
+        {
           businessId,
           userId: userId || undefined,
           feature,
@@ -697,7 +696,7 @@ export class AiUsageService {
           creditsUsed: creditCost,
           latencyMs,
           fallbackUsed,
-          fallbackProvider: fallbackProvider || undefined,
+          fallbackProvider: undefined,
           taskCategory,
           metadata: {
             maxTokens: request.maxTokens,
@@ -705,9 +704,9 @@ export class AiUsageService {
             streamed: true,
           },
         },
-      });
-
-      await this.checkAlertThresholds(businessId, creditCost);
+        businessId,
+        creditCost,
+      ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
       this.logger.error(`trackAndStream failed for ${feature}: ${(error as Error).message}`);
@@ -755,8 +754,8 @@ export class AiUsageService {
 
       const embeddings = response.data.map(d => d.embedding);
 
-      await this.prisma.client.aiUsageLog.create({
-        data: {
+      this.persistUsageLog(
+        {
           businessId,
           userId: userId || undefined,
           feature,
@@ -771,9 +770,9 @@ export class AiUsageService {
           taskCategory: 'extraction',
           metadata: { batchSize: texts.length },
         },
-      });
-
-      await this.checkAlertThresholds(businessId, creditCost);
+        businessId,
+        creditCost,
+      ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
       return embeddings;
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
@@ -837,8 +836,8 @@ export class AiUsageService {
       const costRates = costs[model] || costs['gpt-4o'];
       const estimatedCost = (promptTokens / 1000) * costRates.input + (completionTokens / 1000) * costRates.output;
 
-      await this.prisma.client.aiUsageLog.create({
-        data: {
+      this.persistUsageLog(
+        {
           businessId,
           userId: userId || undefined,
           feature,
@@ -853,9 +852,9 @@ export class AiUsageService {
           taskCategory: 'extraction',
           metadata: { maxTokens, temperature, vision: true },
         },
-      });
-
-      await this.checkAlertThresholds(businessId, creditCost);
+        businessId,
+        creditCost,
+      ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
       return { content, usage: { promptTokens, completionTokens, totalTokens, estimatedCost } };
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
@@ -925,8 +924,8 @@ export class AiUsageService {
 
       const latencyMs = Date.now() - startTime;
 
-      await this.prisma.client.aiUsageLog.create({
-        data: {
+      this.persistUsageLog(
+        {
           businessId,
           userId: userId || undefined,
           feature,
@@ -941,15 +940,60 @@ export class AiUsageService {
           taskCategory: mode === 'tts' ? 'content-generation' : 'extraction',
           metadata: { mode, voice: params.voice },
         },
-      });
-
-      await this.checkAlertThresholds(businessId, creditCost);
+        businessId,
+        creditCost,
+      ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
       return result;
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
       this.logger.error(`trackAudio failed for ${feature}: ${(error as Error).message}`);
       throw error;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Usage persistence — fire-and-forget with retry so AI responses are never
+  // blocked by logging hiccups.
+  // ---------------------------------------------------------------------------
+
+  private async persistUsageLog(
+    data: {
+      businessId: string;
+      userId?: string;
+      feature: string;
+      model?: string;
+      provider?: string;
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+      estimatedCost: number;
+      creditsUsed: number;
+      latencyMs?: number;
+      fallbackUsed?: boolean;
+      fallbackProvider?: string;
+      taskCategory: string;
+      metadata?: unknown;
+    },
+    businessId: string,
+    creditCost: number,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await this.prisma.client.aiUsageLog.create({ data: data as any });
+        await this.checkAlertThresholds(businessId, creditCost);
+        return;
+      } catch (err) {
+        this.logger.error(
+          `AI usage log attempt ${attempt + 1} failed for ${data.feature}: ${(err as Error).message}`,
+        );
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 100 * (attempt + 1)));
+        }
+      }
+    }
+    this.logger.error(
+      `CRITICAL: Failed to persist AI usage log after 3 attempts. Feature=${data.feature} business=${businessId}`,
+    );
   }
 
   // ---------------------------------------------------------------------------

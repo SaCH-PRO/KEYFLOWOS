@@ -11,8 +11,19 @@ const mockPrisma = {
   client: mockPrismaClient,
 };
 
-function createService(): AdminAuthService {
-  return new AdminAuthService(mockPrisma as any);
+function createMockRedis() {
+  const store = new Map<string, string>();
+  return {
+    get: vi.fn((key: string) => Promise.resolve(store.get(key) ?? null)),
+    set: vi.fn((key: string, value: string, _mode?: string, _ttl?: number) => {
+      store.set(key, value);
+      return Promise.resolve('OK');
+    }),
+  };
+}
+
+function createService(redis = createMockRedis()): AdminAuthService {
+  return new AdminAuthService(mockPrisma as any, redis as any);
 }
 
 describe('AdminAuthService', () => {
@@ -92,29 +103,97 @@ describe('AdminAuthService', () => {
   });
 
   describe('token round-trip', () => {
-    it('generates and verifies a valid token', () => {
-      process.env.ADMIN_JWT_SECRET = 'test-secret-32-bytes-long!!!!!'; 
+    it('generates and verifies a valid token', async () => {
+      process.env.ADMIN_JWT_SECRET = 'test-secret-32-bytes-long!!!!!';
 
       const token = service.generateToken({ id: 'u1', email: 'a@b.com', role: 'SUPER_ADMIN' });
-      const verified = service.verifyToken(token);
+      const verified = await service.verifyToken(token);
 
       expect(verified).not.toBeNull();
       expect(verified?.sub).toBe('u1');
       expect(verified?.role).toBe('SUPER_ADMIN');
+      expect(verified?.jti).toBeTruthy();
     });
 
-    it('rejects an invalid token', () => {
+    it('rejects an invalid token', async () => {
       process.env.ADMIN_JWT_SECRET = 'test-secret-32-bytes-long!!!!!';
-      const verified = service.verifyToken('invalid.token.here');
+      const verified = await service.verifyToken('invalid.token.here');
       expect(verified).toBeNull();
     });
 
-    it('rejects a tampered token', () => {
+    it('rejects a tampered token', async () => {
       process.env.ADMIN_JWT_SECRET = 'test-secret-32-bytes-long!!!!!';
       const token = service.generateToken({ id: 'u1', email: 'a@b.com', role: 'SUPER_ADMIN' });
       const tampered = token.slice(0, -5) + 'xxxxx';
-      const verified = service.verifyToken(tampered);
+      const verified = await service.verifyToken(tampered);
       expect(verified).toBeNull();
+    });
+
+    it('rejects an expired token', async () => {
+      process.env.ADMIN_JWT_SECRET = 'test-secret-32-bytes-long!!!!!';
+      const token = service.generateToken({ id: 'u1', email: 'a@b.com', role: 'SUPER_ADMIN' });
+
+      // Fast-forward time by mocking Date.now
+      const realNow = Date.now;
+      vi.spyOn(Date, 'now').mockReturnValue(realNow() + 25 * 60 * 60 * 1000); // +25h
+
+      const verified = await service.verifyToken(token);
+      expect(verified).toBeNull();
+
+      vi.restoreAllMocks();
+    });
+
+    it('rejects a token with wrong type claim', async () => {
+      process.env.ADMIN_JWT_SECRET = 'test-secret-32-bytes-long!!!!!';
+      const token = service.generateToken({ id: 'u1', email: 'a@b.com', role: 'SUPER_ADMIN' });
+
+      // Decode, mutate type, re-sign with same secret
+      const parts = token.split('.');
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      payload.type = 'user';
+      const newBody = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const { createHmac } = await import('crypto');
+      const newSig = createHmac('sha256', 'test-secret-32-bytes-long!!!!!').update(`${parts[0]}.${newBody}`).digest('base64url');
+      const mutated = `${parts[0]}.${newBody}.${newSig}`;
+
+      const verified = await service.verifyToken(mutated);
+      expect(verified).toBeNull();
+    });
+  });
+
+  describe('token revocation', () => {
+    it('rejects a revoked jti', async () => {
+      process.env.ADMIN_JWT_SECRET = 'test-secret-32-bytes-long!!!!!';
+      const redis = createMockRedis();
+      const svc = createService(redis);
+
+      const token = svc.generateToken({ id: 'u1', email: 'a@b.com', role: 'SUPER_ADMIN' });
+      const payload = await svc.verifyToken(token);
+      expect(payload).not.toBeNull();
+
+      await svc.revokeToken(payload!.jti);
+      expect(redis.set).toHaveBeenCalledWith(`admin:jti:${payload!.jti}`, '1', 'EX', expect.any(Number));
+
+      const afterRevoke = await svc.verifyToken(token);
+      expect(afterRevoke).toBeNull();
+    });
+
+    it('rejects tokens issued before a user-wide revocation', async () => {
+      process.env.ADMIN_JWT_SECRET = 'test-secret-32-bytes-long!!!!!';
+      const redis = createMockRedis();
+      const svc = createService(redis);
+
+      const oldToken = svc.generateToken({ id: 'u1', email: 'a@b.com', role: 'SUPER_ADMIN' });
+      await new Promise((r) => setTimeout(r, 10));
+      await svc.revokeAllTokens('u1');
+
+      const verifiedOld = await svc.verifyToken(oldToken);
+      expect(verifiedOld).toBeNull();
+
+      // A newly issued token should still be valid
+      const newToken = svc.generateToken({ id: 'u1', email: 'a@b.com', role: 'SUPER_ADMIN' });
+      const verifiedNew = await svc.verifyToken(newToken);
+      expect(verifiedNew).not.toBeNull();
     });
   });
 });

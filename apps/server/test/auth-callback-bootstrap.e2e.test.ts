@@ -12,6 +12,7 @@ import { AuthSecurityService } from '../src/modules/identity/auth-security.servi
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthMiddleware } from '../src/core/auth/auth.middleware';
 import { SupabaseAuthService } from '../src/core/auth/supabase-auth.service';
+import { REDIS_CLIENT } from '../src/core/redis/redis.module';
 
 // Server-side leg of the Google sign-in callback flow (task #310).
 // Exercises the real AuthMiddleware -> AuthGuard -> POST /identity/bootstrap
@@ -57,6 +58,7 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
         { provide: BusinessContextService, useValue: {} },
         { provide: AiUsageService, useValue: {} },
         { provide: AuthSecurityService, useValue: { enforce: vi.fn(async () => undefined), audit: vi.fn(async () => undefined) } },
+        { provide: REDIS_CLIENT, useValue: { get: vi.fn(async () => null), set: vi.fn(async () => 'OK') } },
       ],
     }).compile();
 

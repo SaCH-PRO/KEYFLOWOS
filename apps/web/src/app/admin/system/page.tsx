@@ -1,3 +1,4 @@
+import { getApiBase } from "@/lib/api-base";
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
@@ -21,7 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getAuthHeaders } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE = getApiBase();
 
 type CheckStatus = "pass" | "warn" | "fail";
 

@@ -33,12 +33,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint server
-        run: pnpm --filter server lint
-        continue-on-error: true
+        run: pnpm --filter server lint --max-warnings 1000
 
       - name: Lint web
-        run: pnpm --filter web lint
-        continue-on-error: true
+        run: pnpm --filter web lint --max-warnings 50
 
       - name: Type check server
         run: cd apps/server && npx tsc --noEmit
@@ -166,7 +164,6 @@ jobs:
 
       - name: Run server tests
         run: cd apps/server && pnpm test
-        continue-on-error: true
 
   # Production deployment (commented out until configured)
   # deploy:

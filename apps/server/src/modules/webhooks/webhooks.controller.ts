@@ -61,7 +61,7 @@ export class WebhooksController {
       throw new BadRequestException('Missing stripe-signature header');
     }
 
-    const rawBody = (req as any).rawBody;
+    const rawBody = (req as { rawBody?: Buffer }).rawBody;
     if (!rawBody) {
       this.logger.error('Stripe webhook called but rawBody is not available');
       throw new BadRequestException('Webhook payload unreadable');
@@ -70,9 +70,9 @@ export class WebhooksController {
     let event: Stripe.Event;
     try {
       event = this.stripe!.webhooks.constructEvent(rawBody, signature, webhookSecret);
-    } catch (err: any) {
-      this.logger.warn(`Stripe webhook signature verification failed: ${err.message}`);
-      throw new BadRequestException(`Webhook signature verification failed: ${err.message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`Stripe webhook signature verification failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new BadRequestException(`Webhook signature verification failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     this.logger.debug(`Stripe webhook received: ${event.type}`);

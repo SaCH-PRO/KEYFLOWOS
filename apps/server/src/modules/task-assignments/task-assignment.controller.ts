@@ -34,14 +34,14 @@ export class TaskAssignmentController {
   async assign(
     @Param('businessId') _businessId: string,
     @Body() body: AssignTaskDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() _req: ExpressRequest & { user?: { id: string } },
   ) {
     return this.service.assign({
       taskType: body.taskType as TaskType,
       taskId: body.taskId,
       assignableType: body.assignableType as AssignableType,
       assignableId: body.assignableId,
-      assignedBy: req.user?.id ?? 'system',
+      assignedBy: _req.user?.id ?? 'system',
       reason: body.reason,
     });
   }

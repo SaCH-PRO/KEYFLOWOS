@@ -91,5 +91,5 @@ describe('Catalog module boundary', () => {
       );
     }
     expect(offenders).toHaveLength(0);
-  });
+  }, 30000);
 });

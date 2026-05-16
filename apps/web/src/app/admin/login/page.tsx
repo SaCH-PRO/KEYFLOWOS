@@ -39,14 +39,14 @@ export default function AdminLoginPage() {
       return;
     }
 
-    // Store admin token in localStorage (same key as regular auth for simplicity)
-    localStorage.setItem("kf_token", res.data.accessToken);
-    localStorage.setItem("kf_user_cache", JSON.stringify(res.data.user));
+    // Store admin token under a dedicated key so it never collides with Supabase auth
+    localStorage.setItem("kf_admin_token", res.data.accessToken);
+    localStorage.setItem("kf_admin_user_cache", JSON.stringify(res.data.user));
     localStorage.setItem("kf_auth_mode", "admin");
 
     // Also mirror to cookie for SSR/edge middleware
-    document.cookie = `kf_token=${res.data.accessToken}; path=/; max-age=86400`;
-    document.cookie = `kf_user_cache=${encodeURIComponent(JSON.stringify(res.data.user))}; path=/; max-age=86400`;
+    document.cookie = `kf_admin_token=${res.data.accessToken}; path=/; max-age=86400`;
+    document.cookie = `kf_admin_user_cache=${encodeURIComponent(JSON.stringify(res.data.user))}; path=/; max-age=86400`;
     document.cookie = `kf_auth_mode=admin; path=/; max-age=86400`;
 
     router.replace("/admin");

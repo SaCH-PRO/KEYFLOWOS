@@ -12,6 +12,10 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
   private readonly logger = new Logger(AiUsageAlertSchedulerService.name);
   private intervalRef: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private failureCounts = new Map<string, number>();
+  private skipUntil = new Map<string, number>();
+  private readonly MAX_FAILURES = 3;
+  private readonly SKIP_DURATION_MS = 60 * 60 * 1000; // 1 hour
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -53,11 +57,23 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
 
       let dispatched = 0;
       for (const alert of unnotified) {
+        const skipTime = this.skipUntil.get(alert.id) ?? 0;
+        if (skipTime > Date.now()) {
+          this.logger.debug(`Skipping alert ${alert.id} due to previous failures`);
+          continue;
+        }
         try {
           await this.dispatchAlert(alert);
+          this.failureCounts.delete(alert.id);
           dispatched++;
         } catch (err) {
-          this.logger.error(`Failed to dispatch alert ${alert.id}: ${(err as Error).message}`);
+          const count = (this.failureCounts.get(alert.id) ?? 0) + 1;
+          this.failureCounts.set(alert.id, count);
+          this.logger.error(`Failed to dispatch alert ${alert.id} (attempt ${count}): ${(err as Error).message}`);
+          if (count >= this.MAX_FAILURES) {
+            this.skipUntil.set(alert.id, Date.now() + this.SKIP_DURATION_MS);
+            this.logger.warn(`Alert ${alert.id} exceeded max failures; skipping for 1 hour`);
+          }
         }
       }
 

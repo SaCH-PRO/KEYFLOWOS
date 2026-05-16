@@ -1,3 +1,4 @@
+import { getApiBase } from "@/lib/api-base";
 import { NextResponse } from "next/server";
 import { ensureValidWebEnv } from "@/lib/env";
 import { getReleaseVersion } from "@/lib/release-version";
@@ -24,7 +25,7 @@ async function getCommit(): Promise<string> {
 }
 
 function getApiBase(): string {
-  return process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
+  return getApiBase();
 }
 
 async function probeApi(apiBase: string): Promise<{ ok: boolean; status?: number; latencyMs: number; error?: string }> {

@@ -1,3 +1,4 @@
+import { getApiBase } from "@/lib/api-base";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -9,7 +10,7 @@ import { buildWhatsAppLink } from "@/lib/whatsapp";
 import { pickBusinessId } from "@/app/_lib/presence-sdk";
 import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE = getApiBase();
 
 type OrderData = {
   id: string;

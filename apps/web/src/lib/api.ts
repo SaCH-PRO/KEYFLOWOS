@@ -1,4 +1,13 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE = (() => {
+  const env = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (env) return env;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_API_BASE_URL is required in production. Set it in your environment or CI pipeline.',
+    );
+  }
+  return 'http://localhost:3001';
+})();
 const AI_SUGGEST_URL = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
 // One-shot reachability check: the first time a network error is observed
@@ -81,8 +90,25 @@ function buildHeaders(initHeaders?: HeadersInit) {
 
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
-  const token = window.localStorage?.getItem("kf_token");
+  // Admin tokens take precedence on admin routes; regular tokens are the default.
+  const adminToken = window.localStorage?.getItem("kf_admin_token");
+  const userToken = window.localStorage?.getItem("kf_token");
+  const token = adminToken ?? userToken;
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() =>
+    clearTimeout(timeoutId),
+  );
 }
 
 import { refreshAccessToken } from "./workspace";
@@ -92,7 +118,7 @@ import { refreshAccessToken } from "./workspace";
  * on 401 and retries the request once with the new token.
  */
 async function fetchWithRefresh(url: string, init: RequestInit): Promise<Response> {
-  let res = await fetch(url, init);
+  let res = await fetchWithTimeout(url, init);
   if (res.status === 401) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
@@ -100,7 +126,7 @@ async function fetchWithRefresh(url: string, init: RequestInit): Promise<Respons
         ...init,
         headers: buildHeaders(init.headers),
       };
-      res = await fetch(url, newInit);
+      res = await fetchWithTimeout(url, newInit);
     }
   }
   return res;
@@ -192,6 +218,10 @@ export async function apiDelete<T>(path: string, body?: unknown): Promise<ApiRes
   }
 }
 
+/**
+ * @deprecated Use `apiPost<T>({ path, body })` directly. This wrapper exists
+ * only for legacy callers and will be removed in a future refactor.
+ */
 export async function apiPostSimple<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
   return apiPost<T>({ path, body });
 }

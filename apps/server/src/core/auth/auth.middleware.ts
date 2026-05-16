@@ -3,6 +3,8 @@ import { NextFunction, Request, Response } from 'express';
 import { SupabaseAuthService } from './supabase-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { verifyAdminToken } from './admin-token.util';
+import { Redis } from 'ioredis';
+import { REDIS_CLIENT } from '../redis/redis.module';
 
 /**
  * Server-side authentication gate for every inbound request.
@@ -29,6 +31,7 @@ export class AuthMiddleware implements NestMiddleware {
   constructor(
     @Inject(SupabaseAuthService) private readonly supabaseAuth: SupabaseAuthService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   private getSupabaseAuth(): SupabaseAuthService {
@@ -64,7 +67,7 @@ export class AuthMiddleware implements NestMiddleware {
         );
       } else {
         // Fallback: try admin local-auth token (HMAC-JWT signed with ADMIN_JWT_SECRET)
-        const adminUser = verifyAdminToken(token);
+        const adminUser = await verifyAdminToken(token, this.redis);
         if (adminUser) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (req as any).user = adminUser;

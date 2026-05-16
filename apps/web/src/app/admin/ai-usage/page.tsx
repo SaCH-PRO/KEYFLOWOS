@@ -15,6 +15,8 @@ import {
 import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { DataTable } from "@/components/ui/data-table";
+// recharts is listed in next.config.ts experimental.optimizePackageImports,
+// so the full barrel import is tree-shaken automatically.
 import {
   BarChart,
   Bar,
@@ -110,7 +112,7 @@ function MetricCard({
 export default function AdminAiUsagePage() {
   const [summary, setSummary] = useState<PlatformSummary | null>(null);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -167,6 +169,29 @@ export default function AdminAiUsagePage() {
       {error && (
         <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
           {error}
+        </div>
+      )}
+
+      {loading && !summary && (
+        <div className="space-y-6 animate-pulse">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="rounded-2xl border border-border/70 bg-slate-950/70 p-4 h-24">
+                <div className="h-8 w-8 rounded-xl bg-slate-800 mb-2" />
+                <div className="h-4 w-24 bg-slate-800 rounded" />
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl border border-border/70 bg-slate-950/70 p-5 h-80">
+              <div className="h-4 w-32 bg-slate-800 rounded mb-4" />
+              <div className="h-64 bg-slate-800/50 rounded" />
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-slate-950/70 p-5 h-80">
+              <div className="h-4 w-32 bg-slate-800 rounded mb-4" />
+              <div className="h-64 bg-slate-800/50 rounded" />
+            </div>
+          </div>
         </div>
       )}
 

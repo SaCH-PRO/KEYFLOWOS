@@ -273,7 +273,7 @@ export function useContactsData() {
         }
       } catch (error: unknown) {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        console.error("Failed to load contacts", error);
+        logError("Failed to load contacts", error);
         setLoadError("Failed to load contacts. Please try again.");
       } finally {
         if (!signal.aborted) {
