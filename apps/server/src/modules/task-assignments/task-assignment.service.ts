@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BusinessEventService } from '../business-events/business-event.service';
@@ -27,6 +27,7 @@ export interface UnassignTaskInput {
 
 @Injectable()
 export class TaskAssignmentService {
+  private readonly logger = new Logger(TaskAssignmentService.name);
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BusinessEventService) private readonly events: BusinessEventService,
@@ -374,8 +375,8 @@ export class TaskAssignmentService {
           assignableId: input.assignableId,
         },
       });
-    } catch {
-      // best-effort
-    }
+    } catch (err) {
+        this.logger.warn(`Best-effort: ${err instanceof Error ? err.message : err}`);
+      }
   }
 }

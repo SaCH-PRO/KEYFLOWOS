@@ -74,6 +74,7 @@ export type ContactListOptions = {
   includeStats?: boolean;
   sortBy?: ContactSortBy;
   sortOrder?: 'asc' | 'desc';
+  minRevenue?: number;
   /**
    * When provided, applies M7 ownership/visibility scoping based on the
    * caller's effective CRM permissions. Server callers (cron, internal
@@ -219,6 +220,23 @@ export class CrmService {
       ? input.actorUserId
       : input.ownerId;
 
+    let revenueContactIds: string[] | undefined;
+    if (input.minRevenue && input.minRevenue > 0) {
+      const highRevContacts = await this.prisma.client.$queryRaw<Array<{ contact_id: string }>>`
+        SELECT i.contact_id
+        FROM invoices i
+        WHERE i.business_id = ${input.businessId}
+          AND i.status = 'PAID'
+          AND i.deleted_at IS NULL
+        GROUP BY i.contact_id
+        HAVING SUM(i.total) >= ${input.minRevenue}
+      `;
+      revenueContactIds = highRevContacts.map((r) => r.contact_id);
+      if (revenueContactIds.length === 0) {
+        return { contacts: [], total: 0, page: input.skip ? Math.floor(input.skip / (input.take ?? DEFAULT_PAGE_SIZE)) + 1 : 1, pageSize: input.take ?? DEFAULT_PAGE_SIZE, totalPages: 0 };
+      }
+    }
+
     const where: any = buildContactWhere(input.businessId, {
       status: input.status,
       search: input.search,
@@ -245,6 +263,10 @@ export class CrmService {
       favorite: input.favorite,
       includeArchived: input.includeArchived,
     });
+
+    if (revenueContactIds) {
+      where.id = { in: revenueContactIds };
+    }
     if (input.bestChannels && input.bestChannels.length > 0) {
       where.bestChannel = { in: input.bestChannels };
     }
@@ -1469,10 +1491,9 @@ export class CrmService {
           repointedCounts: { ...(stored as Record<string, unknown>), _revertReport: conflictReport } as Prisma.InputJsonValue,
         },
       });
-    } catch {
-      // Don't fail the user-visible revert because we couldn't persist the
-      // conflict report; the in-memory report is still returned and emitted.
-    }
+    } catch (err) {
+        this.logger.warn(`Don't fail the user-visible revert because we couldn't persist the: ${err instanceof Error ? err.message : err}`);
+      }
 
     const revertedAt = new Date().toISOString();
     await this.timeline.logEvent(

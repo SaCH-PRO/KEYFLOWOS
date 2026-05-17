@@ -133,9 +133,9 @@ export class SemanticMemoryService {
           metadata: { category: memory.category, key: memory.key, confidence: memory.confidence },
         });
         stored++;
-      } catch {
-        // skip on error
-      }
+      } catch (err) {
+          this.logger.warn(`On error: ${err instanceof Error ? err.message : err}`);
+        }
     }
 
     this.logger.log(`Backfilled ${stored} memories for ${businessId}`);

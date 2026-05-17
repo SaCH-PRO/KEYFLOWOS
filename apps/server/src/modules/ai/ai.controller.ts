@@ -28,6 +28,10 @@ import { JourneyOrchestratorService } from './journey-orchestrator.service';
 import { MorningBriefingService } from './morning-briefing.service';
 import { UnifiedInboxService } from './unified-inbox.service';
 import { GoalTrackerService } from './goal-tracker.service';
+import { WorkloadAggregatorService } from './workload-aggregator.service';
+import { TaskPrioritizerService } from './task-prioritizer.service';
+import { CapacityInsightService } from './capacity-insight.service';
+import { TaskRebalancerService } from './task-rebalancer.service';
 
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
@@ -76,6 +80,10 @@ export class AiController {
     @Inject(MorningBriefingService) private readonly morningBriefingSvc: MorningBriefingService,
     @Inject(UnifiedInboxService) private readonly inbox: UnifiedInboxService,
     @Inject(GoalTrackerService) private readonly goalTracker: GoalTrackerService,
+    @Inject(WorkloadAggregatorService) private readonly workload: WorkloadAggregatorService,
+    @Inject(TaskPrioritizerService) private readonly prioritizer: TaskPrioritizerService,
+    @Inject(CapacityInsightService) private readonly capacityInsight: CapacityInsightService,
+    @Inject(TaskRebalancerService) private readonly rebalancer: TaskRebalancerService,
   ) {}
 
   @Get('health')
@@ -1320,5 +1328,35 @@ export class AiController {
     @Param('goalId') goalId: string,
   ) {
     return this.goalTracker.suggestActions(businessId, goalId);
+  }
+
+  // === L4 Manager — Operations Dashboard AI Panel ===
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/workload')
+  @CrmRateLimit(30, 60_000)
+  async getWorkload(@Param('businessId') businessId: string) {
+    return this.workload.getWorkloadForBusiness(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/priorities')
+  @CrmRateLimit(30, 60_000)
+  async getPriorities(@Param('businessId') businessId: string) {
+    return this.prioritizer.getPrioritizedQueue(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/capacity-alerts')
+  @CrmRateLimit(30, 60_000)
+  async getCapacityAlerts(@Param('businessId') businessId: string) {
+    return this.capacityInsight.scanBusiness(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/rebalance')
+  @CrmRateLimit(10, 60_000)
+  async rebalance(@Param('businessId') businessId: string) {
+    return this.rebalancer.rebalanceBusiness(businessId);
   }
 }

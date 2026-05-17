@@ -129,7 +129,9 @@ function makeFileRef(bucket: string, key: string, client: S3Client): S3FileRef {
           new HeadObjectCommand({ Bucket: bucket, Key: key }),
         );
         return head.Metadata ?? {};
-      } catch {
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`Failed to read object metadata: ${(err as Error).message}`);
         return {};
       }
     },
@@ -377,6 +379,7 @@ export class ObjectStorageService {
     try {
       url = new URL(rawPath);
     } catch {
+      // not a valid URL, return as-is
       return rawPath;
     }
 

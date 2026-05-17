@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -7,6 +7,7 @@ import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
+import { StoreOrderService } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
 
 interface WipayCallbackParams {
@@ -34,6 +35,7 @@ export class PaymentsService {
     @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
     @Optional() @Inject(WiPayConnector) private readonly wipayConnector?: WiPayConnector,
     @Optional() @Inject(PayPalConnector) private readonly paypalConnector?: PayPalConnector,
+    @Optional() @Inject(forwardRef(() => StoreOrderService)) private readonly storeOrderService?: StoreOrderService,
   ) {}
 
   /**
@@ -105,6 +107,29 @@ export class PaymentsService {
     });
   }
 
+  /**
+   * When a payment webhook references an ID that is not an Invoice, it may
+   * be a MarketplaceOrder (storefront checkout). If so, call
+   * StoreOrderService to complete the checkout lifecycle atomically.
+   */
+  private async maybeCompleteStorefrontOrder(
+    orderId: string,
+    providerPaymentId: string,
+  ): Promise<boolean> {
+    if (!this.storeOrderService) return false;
+    const order = await this.prisma.client.marketplaceOrder.findUnique({
+      where: { id: orderId },
+      select: { id: true, paymentStatus: true },
+    });
+    if (!order) return false;
+    if (order.paymentStatus === 'PAID') {
+      this.logger.debug(`Storefront order ${orderId} already PAID; idempotent no-op`);
+      return true;
+    }
+    await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', providerPaymentId);
+    return true;
+  }
+
   private getPaypalClient(clientId?: string, clientSecret?: string): { client: Client; ordersController: OrdersController } | null {
     const id = clientId || process.env.PAYPAL_CLIENT_ID;
     const secret = clientSecret || process.env.PAYPAL_CLIENT_SECRET;
@@ -157,7 +182,7 @@ export class PaymentsService {
       });
     }
 
-    const stripePub = meta.stripePublishableKey || process.env.STRIPE_PUBLISHABLE_KEY;
+    const stripePub = meta.stripePublishableKey || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
     const stripeSecret = meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY;
     const stripeWh = meta.stripeWebhookSecret || process.env.STRIPE_WEBHOOK_SECRET;
     if (stripePub && stripeSecret && stripeWh) {

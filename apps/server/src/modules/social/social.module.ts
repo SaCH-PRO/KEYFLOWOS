@@ -5,10 +5,11 @@ import { SocialConnectionsService } from './social-connections.service';
 import { SocialPublishingService } from './social-publishing.service';
 import { SocialAnalyticsService } from './social-analytics.service';
 import { SocialSchedulerService } from './social-scheduler.service';
+import { SocialGapDetectorService } from './social-gap-detector.service';
 
 @Module({
   controllers: [SocialController],
-  providers: [SocialService, SocialConnectionsService, SocialPublishingService, SocialAnalyticsService, SocialSchedulerService],
-  exports: [SocialService, SocialConnectionsService, SocialPublishingService, SocialAnalyticsService, SocialSchedulerService],
+  providers: [SocialService, SocialConnectionsService, SocialPublishingService, SocialAnalyticsService, SocialSchedulerService, SocialGapDetectorService],
+  exports: [SocialService, SocialConnectionsService, SocialPublishingService, SocialAnalyticsService, SocialSchedulerService, SocialGapDetectorService],
 })
 export class SocialModule {}

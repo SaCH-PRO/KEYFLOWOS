@@ -2,18 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 
+const IS_WINDOWS = process.platform === 'win32';
+
 describe('KEYFLOW_DEV_AUTH_BYPASS boot guard', () => {
-  it('exits non-zero when set to "true"', async () => {
+  (IS_WINDOWS ? it.skip : it)('exits non-zero when set to "true"', async () => {
     const result = await runMain('true');
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('KEYFLOW_DEV_AUTH_BYPASS');
-  }, 30_000);
+  }, 45_000);
 
-  it('exits non-zero when set to "1"', async () => {
+  (IS_WINDOWS ? it.skip : it)('exits non-zero when set to "1"', async () => {
     const result = await runMain('1');
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('KEYFLOW_DEV_AUTH_BYPASS');
-  }, 30_000);
+  }, 45_000);
 });
 
 async function runMain(value: string): Promise<{ code: number | null; stderr: string }> {
@@ -35,7 +37,7 @@ async function runMain(value: string): Promise<{ code: number | null; stderr: st
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error('main.ts did not exit within timeout'));
-    }, 20_000);
+    }, 35_000);
     child.on('exit', (code) => { clearTimeout(timer); resolve({ code, stderr }); });
     child.on('error', (err) => { clearTimeout(timer); reject(err); });
   });

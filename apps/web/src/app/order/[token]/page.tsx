@@ -1,5 +1,6 @@
-import { getApiBase } from "@/lib/api-base";
 "use client";
+
+import { getApiBase } from "@/lib/api-base";
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";

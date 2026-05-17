@@ -464,9 +464,9 @@ export class StoreReadinessService {
             roi: null,
           };
         }
-      } catch {
-        /* intentionally empty */
-      }
+      } catch (err) {
+          this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
+        }
 
       const meta = (await this.db.business.findUnique({
         where: { id: businessId },

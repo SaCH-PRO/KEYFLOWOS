@@ -470,6 +470,7 @@ model Business {
   callLogs             CallLog[]
   approvalRequests     ApprovalRequest[]
   assets               Asset[]
+  authorityGrants      AuthorityGrant[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -484,6 +485,10 @@ model Membership {
 
   permissionScopes Json?    @map("permission_scopes")
   maxApprovalTier  Int      @default(0) @map("max_approval_tier")
+
+  // L4 Manager — capacity tracking
+  dailyCapacityHours Float? @default(8) @map("daily_capacity_hours")
+  skills Skill[]
 
   userId     String   @map("user_id")
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1736,6 +1741,11 @@ model StaffMember {
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
+  // L4 Manager — capacity tracking
+  maxHoursPerWeek Float? @default(40) @map("max_hours_per_week")
+  hourlyRate      Float? @map("hourly_rate")
+  skills Skill[]
+
   services       Service[]
   bookings       Booking[]
   availabilities Availability[]
@@ -1793,6 +1803,22 @@ model Availability {
 
   @@index([staffId])
   @@map("availabilities")
+}
+
+// L4 Manager — skill taxonomy for workload routing
+model Skill {
+  id          String @id @default(cuid())
+  name        String
+  category    String @default("general") // design, writing, video, sales, support, operations, finance, marketing
+  description String?
+
+  memberships Membership[]
+  staffMembers StaffMember[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([name])
+  @@map("skills")
 }
 
 model Booking {
@@ -5159,6 +5185,29 @@ model AutopilotSettings {
   @@map("autopilot_settings")
 }
 
+// L4 Manager — delegated authority for tier-4 autopilot actions
+model AuthorityGrant {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  grantorId    String   @map("grantor_id") // Membership ID who granted
+  granteeType  String   @map("grantee_type") // 'KEY' | 'USER'
+  granteeId    String   @map("grantee_id") // 'key_ai' or userId
+
+  scope        String   // 'tier4_financial' | 'tier4_publishing' | 'tier4_hiring' | 'tier4_operations'
+  maxAmount    Float?   @map("max_amount") // For financial scope: max $ amount
+  validFrom    DateTime @default(now()) @map("valid_from")
+  validUntil   DateTime? @map("valid_until")
+  revokedAt    DateTime? @map("revoked_at")
+
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([businessId])
+  @@index([granteeType, granteeId])
+  @@map("authority_grants")
+}
+
 model AgentTrigger {
   id           String   @id @default(cuid())
   businessId   String   @map("business_id")
@@ -7317,6 +7366,9 @@ model ContentRequest {
   deliveryFileIds   String[] @map("delivery_file_ids")
   approvalRequired  Boolean  @default(true) @map("approval_required")
   approvedBy        String?  @map("approved_by")
+
+  // L4 Manager — workload estimation
+  estimatedHours    Float?   @map("estimated_hours")
 
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")

@@ -26,6 +26,7 @@ import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
 import { PlanLimitGuard } from '../src/modules/subscriptions/plan-limit.guard';
 import { TeamAuditInterceptor } from '../src/core/interceptors/team-audit.interceptor';
 import { PublicRateLimitGuard } from '../src/core/guards/public-rate-limit.guard';
+import { REDIS_CLIENT } from '../src/core/redis/redis.module';
 
 interface QuoteRow {
   id: string;
@@ -138,6 +139,7 @@ describe('Commerce public quote e2e', () => {
         { provide: CatalogService, useValue: {} },
         { provide: PublicEventsService, useValue: {} },
         { provide: RevenuePostingService, useValue: {} },
+        { provide: REDIS_CLIENT, useValue: { get: vi.fn(), set: vi.fn(), del: vi.fn() } },
         CommerceService,
         { provide: RecurringInvoiceService, useValue: {} },
         { provide: ReceiptService, useValue: {} },

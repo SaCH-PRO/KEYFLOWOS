@@ -1,5 +1,6 @@
-import { getApiBase } from "@/lib/api-base";
 "use client";
+
+import { getApiBase } from "@/lib/api-base";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState, useCallback, useEffect } from "react";
+import { logError } from "@/lib/logger";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import {

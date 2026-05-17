@@ -24,10 +24,6 @@ async function getCommit(): Promise<string> {
   return (await getReleaseVersion()).short;
 }
 
-function getApiBase(): string {
-  return getApiBase();
-}
-
 async function probeApi(apiBase: string): Promise<{ ok: boolean; status?: number; latencyMs: number; error?: string }> {
   const startedAt = Date.now();
   const controller = new AbortController();

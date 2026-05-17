@@ -17,7 +17,7 @@ export interface GovernanceDecision {
 }
 
 export interface AutonomySettings {
-  mode: 'advisory' | 'assisted' | 'pro_auto' | 'restricted';
+  mode: 'advisory' | 'assisted' | 'pro_auto' | 'restricted' | 'autopilot';
   maxAutoTier: RiskTier;
   blockedTools: string[];
   blockedModules: string[];
@@ -100,8 +100,13 @@ export class GovernanceService {
 
     const auto = { allowed: true, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier };
 
+    // Tier 4 hard stop — unless L4 autopilot with authority grant
     if (tier === 4) {
-      return { ...auto, requiresAdminApproval: true, requiresFormalApproval: true, reason: 'Tier 4 action always requires admin-level approval — cannot be auto-approved' };
+      const hasGrant = await this.hasValidAuthorityGrant(businessId, toolName);
+      if (settings.autonomyLevel >= 5 && hasGrant && settings.approvedTools.includes(toolName)) {
+        return { ...auto, reason: `Tier 4 auto-approved (autopilot mode + authority grant)` };
+      }
+      return { ...auto, requiresAdminApproval: true, requiresFormalApproval: true, reason: 'Tier 4 action requires admin-level approval — enable autopilot mode with authority grant to bypass' };
     }
 
     // AutopilotSettings-based auto-approval overrides
@@ -133,10 +138,21 @@ export class GovernanceService {
   async evaluateAutoApproval(
     businessId: string,
     toolName: string,
-    opts?: { confidence?: number; timeoutHours?: number; role?: BusinessRole },
+    opts?: { confidence?: number; timeoutHours?: number; role?: BusinessRole; planStepId?: string },
   ): Promise<GovernanceDecision & { autoApproved: boolean }> {
     const decision = await this.evaluate(businessId, toolName, undefined, opts?.role);
     if (!decision.allowed) return { ...decision, autoApproved: false };
+
+    // Check if this step was pre-approved via aiApprovalItem
+    if (opts?.planStepId) {
+      const approvedItem = await this.prisma.client.aiApprovalItem.findFirst({
+        where: { planStepId: opts.planStepId, status: 'approved' },
+      });
+      if (approvedItem) {
+        return { ...decision, autoApproved: true, reason: 'Step pre-approved by user' };
+      }
+    }
+
     if (decision.requiresAdminApproval || decision.requiresFormalApproval) return { ...decision, autoApproved: false };
 
     const settings = await this.getAutonomySettings(businessId);
@@ -163,7 +179,7 @@ export class GovernanceService {
       if (typed) {
         return {
           mode: this.inferModeFromLevel(typed.autonomyLevel),
-          maxAutoTier: Math.max(1, Math.min(3, typed.autonomyLevel)) as RiskTier,
+          maxAutoTier: Math.max(1, Math.min(4, typed.autonomyLevel)) as RiskTier,
           blockedTools: typed.blockedTools,
           blockedModules: [],
           autonomyLevel: typed.autonomyLevel,
@@ -194,6 +210,7 @@ export class GovernanceService {
     if (level <= 0) return 'advisory';
     if (level <= 1) return 'assisted';
     if (level <= 3) return 'pro_auto';
+    if (level >= 5) return 'autopilot';
     return 'pro_auto';
   }
 
@@ -212,8 +229,8 @@ export class GovernanceService {
     const current = await this.getAutonomySettings(businessId);
     const merged = { ...current, ...updates };
 
-    if (typeof merged.maxAutoTier !== 'number' || merged.maxAutoTier < 1 || merged.maxAutoTier > 3) {
-      merged.maxAutoTier = Math.max(1, Math.min(3, Number(merged.maxAutoTier) || 1)) as RiskTier;
+    if (typeof merged.maxAutoTier !== 'number' || merged.maxAutoTier < 1 || merged.maxAutoTier > 4) {
+      merged.maxAutoTier = Math.max(1, Math.min(4, Number(merged.maxAutoTier) || 1)) as RiskTier;
     }
     await this.prisma.client.aiMemory.upsert({
       where: { businessId_category_key: { businessId, category: 'settings', key: 'autonomy' } },
@@ -342,7 +359,7 @@ export class GovernanceService {
       this.logger.warn(`Failed to log team activity for approval: ${e instanceof Error ? e.message : String(e)}`);
     });
 
-    return this.prisma.client.aiApprovalItem.update({
+    const updated = await this.prisma.client.aiApprovalItem.update({
       where: { id: approvalId },
       data: {
         status: resolution,
@@ -352,6 +369,16 @@ export class GovernanceService {
         resolution,
       },
     });
+
+    // If approved and linked to a plan step, update the step status so it can be executed
+    if (resolution === 'approved' && item.planStepId) {
+      await this.prisma.client.aiPlanStep.update({
+        where: { id: item.planStepId },
+        data: { status: 'pending' },
+      });
+    }
+
+    return updated;
   }
 
   async getPendingApprovals(businessId: string, limit = 20) {
@@ -408,6 +435,12 @@ export class GovernanceService {
             resolution: 'Auto-approved after timeout by autonomy level 3+',
           },
         });
+        if (item.planStepId) {
+          await this.prisma.client.aiPlanStep.update({
+            where: { id: item.planStepId },
+            data: { status: 'pending' },
+          });
+        }
         escalated++;
       } else {
         // Otherwise mark as escalated
@@ -423,6 +456,35 @@ export class GovernanceService {
     }
 
     return escalated;
+  }
+
+  private async hasValidAuthorityGrant(businessId: string, toolName: string): Promise<boolean> {
+    try {
+      const scope = this.inferAuthorityScope(toolName);
+      if (!scope) return false;
+
+      const grant = await this.prisma.client.authorityGrant.findFirst({
+        where: {
+          businessId,
+          granteeType: 'KEY',
+          granteeId: 'key_ai',
+          scope,
+          revokedAt: null,
+          validFrom: { lte: new Date() },
+          OR: [{ validUntil: null }, { validUntil: { gte: new Date() } }],
+        },
+      });
+      return !!grant;
+    } catch {
+      return false;
+    }
+  }
+
+  private inferAuthorityScope(toolName: string): string | null {
+    if (toolName.startsWith('marketing_send_') || toolName.startsWith('social_publish_')) return 'tier4_publishing';
+    if (toolName.startsWith('commerce_') || toolName.startsWith('approval_')) return 'tier4_financial';
+    if (toolName.startsWith('content_deliver_') || toolName.startsWith('content_upload_')) return 'tier4_operations';
+    return null;
   }
 
   private inferModule(toolName: string): string | null {

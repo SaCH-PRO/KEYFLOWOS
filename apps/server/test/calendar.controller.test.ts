@@ -13,6 +13,7 @@ import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
 import { KeyflowCommandService } from '../src/modules/keyflow-command/keyflow-command.service';
 import { CatalogService } from '../src/modules/catalog/catalog.service';
+import { REDIS_CLIENT } from '../src/core/redis/redis.module';
 
 class CalendarPrismaMock {
   client: any;
@@ -97,6 +98,7 @@ describe('BookingsController — Google Calendar two-way editing', () => {
         { provide: BookingOptimizerService, useValue: {} },
         { provide: SubscriptionsService, useValue: { checkLimit: vi.fn() } },
         { provide: CatalogService, useValue: {} },
+        { provide: REDIS_CLIENT, useValue: { get: vi.fn(async () => null), set: vi.fn(async () => 'OK'), pipeline: vi.fn(() => ({ exec: vi.fn(async () => []) })) } },
       ],
     }).compile();
 

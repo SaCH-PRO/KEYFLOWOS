@@ -778,9 +778,9 @@ export class BusinessMatchingService {
           ],
         },
       });
-    } catch {
-      /* intentionally empty */
-    }
+    } catch (err) {
+        this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
+      }
 
     const sourceSkills = new Set(from.skills.map((s) => s.toLowerCase()));
     const sharedSkills = to.skills.filter((s) => sourceSkills.has(s.toLowerCase())).slice(0, 3);

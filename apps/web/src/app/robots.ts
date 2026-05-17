@@ -1,13 +1,12 @@
-import { MetadataRoute } from "next";
+import type { MetadataRoute } from "next";
 
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: [
-      {
-        userAgent: "*",
-        disallow: ["/admin/", "/app/", "/api/", "/env-check", "/offline"],
-      },
-    ],
-    host: process.env.NEXT_PUBLIC_SITE_URL,
+    rules: {
+      userAgent: "*",
+      allow: "/",
+      disallow: ["/app/", "/admin/", "/api/", "/__api/"],
+    },
+    sitemap: `${process.env.NEXT_PUBLIC_SITE_URL ?? "https://keyflowos.com"}/sitemap.xml`,
   };
 }

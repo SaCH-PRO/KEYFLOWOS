@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -16,6 +16,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
  */
 @Injectable()
 export class CustomerReferralService {
+  private readonly logger = new Logger(CustomerReferralService.name);
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private codeFor(businessId: string, email: string): string {
@@ -78,9 +79,9 @@ export class CustomerReferralService {
         const next = { ...(contact.custom as Record<string, unknown> | null ?? {}), referralOwnerCode: code };
         await this.prisma.client.contact.update({ where: { id: contact.id }, data: { custom: next as never } });
       }
-    } catch {
-      // Non-fatal — minting the code does not depend on the contact write.
-    }
+    } catch (err) {
+        this.logger.warn(`— minting the code does not depend on the contact write.: ${err instanceof Error ? err.message : err}`);
+      }
 
     return {
       business: {

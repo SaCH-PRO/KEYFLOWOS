@@ -179,7 +179,7 @@ export class KeyCommandService {
         continue;
       }
       try {
-        const result = await toolFn(businessId, step.input);
+        const result = await toolFn(businessId, step.input, this.prisma.client);
         results.push(result);
       } catch (e) {
         results.push({ success: false, error: (e as Error).message });

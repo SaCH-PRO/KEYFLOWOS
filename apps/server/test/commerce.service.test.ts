@@ -76,6 +76,10 @@ class PrismaMock implements Partial<PrismaService> {
         return this.quotes.find((q) => q.id === where.id) || null;
       }),
     },
+    payment: {
+      count: vi.fn(() => 0),
+      create: vi.fn(({ data }: any) => ({ ...data, id: 'pay_1', createdAt: new Date() })),
+    },
   };
 }
 

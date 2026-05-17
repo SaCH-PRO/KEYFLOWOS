@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Sunrise, Zap, CheckCircle2, SkipForward, Loader2, TrendingUp, AlertCircle, DollarSign } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { apiGet, apiPostSimple } from "@/lib/api";
 
 interface BriefingCard {
   stepOrder: number;
@@ -13,7 +14,7 @@ interface BriefingCard {
   role: string;
   suggestedAction: string;
   toolName: string;
-  args: Record<string, any>;
+  args: Record<string, unknown>;
   oneClickApprove: boolean;
   module: string;
 }
@@ -45,10 +46,9 @@ export default function BriefingPage() {
   const load = useCallback(async () => {
     if (!businessId) return;
     try {
-      const res = await fetch(`/api/ai/businesses/${businessId}/briefing`);
-      const data = await res.json();
-      if (data && data.planId) {
-        setBriefing(data);
+      const res = await apiGet<BriefingData>(`/ai/businesses/${businessId}/briefing`);
+      if (res.data && res.data.planId) {
+        setBriefing(res.data);
       } else {
         setBriefing(null);
       }
@@ -67,8 +67,8 @@ export default function BriefingPage() {
     if (!businessId) return;
     setExecuting((prev) => new Set(prev).add(stepOrder));
     try {
-      const res = await fetch(`/api/ai/businesses/${businessId}/briefing/${planId}/execute-all`, { method: "POST" });
-      if (res.ok) {
+      const res = await apiPostSimple(`/ai/businesses/${businessId}/briefing/${planId}/execute-all`, {});
+      if (!res.error) {
         toast.success("Action executed");
         load();
       } else {
@@ -93,8 +93,8 @@ export default function BriefingPage() {
       return;
     }
     try {
-      const res = await fetch(`/api/ai/businesses/${businessId}/briefing/${briefing.planId}/execute-all`, { method: "POST" });
-      if (res.ok) {
+      const res = await apiPostSimple(`/ai/businesses/${businessId}/briefing/${briefing.planId}/execute-all`, {});
+      if (!res.error) {
         toast.success(`${approvable.length} actions executed`);
         load();
       } else {
@@ -108,7 +108,7 @@ export default function BriefingPage() {
   const skipBriefing = async () => {
     if (!briefing || !businessId) return;
     try {
-      await fetch(`/api/ai/businesses/${businessId}/briefing/${briefing.planId}/skip`, { method: "POST" });
+      await apiPostSimple(`/ai/businesses/${businessId}/briefing/${briefing.planId}/skip`, {});
       toast.info("Briefing skipped");
       setBriefing(null);
     } catch {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
+import { logError } from "@/lib/logger";
 import type { Contact } from "@/lib/client";
 import type { SmartSegment, ListTab, SortOption } from "../pipeline-toolbar";
 import {

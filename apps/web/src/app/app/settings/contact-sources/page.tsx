@@ -72,8 +72,8 @@ export default function ContactSourcesPage() {
 
   const refresh = useCallback(async (bid: string) => {
     const [s, a] = await Promise.all([
-      apiGet<SummaryResponse>(`/api/connect/businesses/${bid}/contact-sources/summary`),
-      apiGet<AuditEntry[]>(`/api/connect/businesses/${bid}/contact-sources/audit?limit=25`),
+      apiGet<SummaryResponse>(`/connect/businesses/${bid}/contact-sources/summary`),
+      apiGet<AuditEntry[]>(`/connect/businesses/${bid}/contact-sources/audit?limit=25`),
     ]);
     if (!s.error && s.data) setSummary(s.data);
     if (!a.error && a.data) setAudit(a.data);
@@ -107,8 +107,8 @@ export default function ContactSourcesPage() {
     try {
       const path =
         provider === "google"
-          ? `/api/connect/google/businesses/${businessId}/auth-url?service=contacts`
-          : `/api/connect/microsoft/businesses/${businessId}/auth-url`;
+          ? `/connect/google-suite/businesses/${businessId}/auth-url?service=contacts`
+          : `/connect/microsoft/businesses/${businessId}/auth-url`;
       const r = await apiGet<{ authUrl: string }>(path);
       if (!r.error && r.data?.authUrl) {
         window.location.href = r.data.authUrl;
@@ -125,7 +125,7 @@ export default function ContactSourcesPage() {
     setSyncing(true);
     try {
       const r = await apiPostSimple<Record<string, unknown>>(
-        `/api/connect/businesses/${businessId}/contact-sources/sync-all`,
+        `/connect/businesses/${businessId}/contact-sources/sync-all`,
         {},
       );
       if (!r.error) {
@@ -144,7 +144,7 @@ export default function ContactSourcesPage() {
     setSavingSig(true);
     try {
       const r = await apiPut<{ enabled: boolean }>(
-        `/api/connect/businesses/${businessId}/contact-sources/signature-parsing`,
+        `/connect/businesses/${businessId}/contact-sources/signature-parsing`,
         { enabled },
       );
       if (!r.error) {
@@ -159,7 +159,7 @@ export default function ContactSourcesPage() {
   const resyncSource = async (source: "google_contacts" | "outlook_contacts") => {
     if (!businessId) return;
     const r = await apiPostSimple<unknown>(
-      `/api/connect/businesses/${businessId}/contact-sources/${source}/resync`,
+      `/connect/businesses/${businessId}/contact-sources/${source}/resync`,
       {},
     );
     if (!r.error) {
@@ -179,7 +179,7 @@ export default function ContactSourcesPage() {
       return;
     }
     const r = await apiDelete<unknown>(
-      `/api/connect/businesses/${businessId}/contact-sources/${source}`,
+      `/connect/businesses/${businessId}/contact-sources/${source}`,
     );
     if (!r.error) {
       toast.success("Disconnected");
@@ -194,7 +194,7 @@ export default function ContactSourcesPage() {
     setTesting(true);
     try {
       const r = await apiPostSimple<unknown>(
-        `/api/connect/businesses/${businessId}/contact-sources/parse-signature`,
+        `/connect/businesses/${businessId}/contact-sources/parse-signature`,
         { emailBody: testBody },
       );
       setTestResult(r.data ?? r);

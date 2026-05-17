@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req, Res, Sse, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req, Res, Sse, UploadedFile, UseGuards, UseInterceptors, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Observable } from 'rxjs';
@@ -46,6 +46,7 @@ import type { Express } from 'express';
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
 export class CrmController {
+  private readonly logger = new Logger(CrmController.name);
   constructor(
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
@@ -187,9 +188,9 @@ export class CrmController {
     try {
       await this.crm.healthPing();
       dbOk = true;
-    } catch {
-      /* intentionally empty */
-    }
+    } catch (err) {
+        this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
+      }
     const cacheMetrics = this.crmStats.getCacheMetrics();
     const duration = Date.now() - start;
     return {
@@ -232,6 +233,7 @@ export class CrmController {
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: string,
     @Query('ownedByMe') ownedByMe?: string,
+    @Query('minRevenue') minRevenue?: string,
     @Req() req?: any,
   ) {
     const validSortBy = ['name', 'newest', 'oldest', 'revenue', 'score', 'lastInteraction'];
@@ -271,6 +273,7 @@ export class CrmController {
       includeStats: includeStats === 'true',
       sortBy: sortBy && validSortBy.includes(sortBy) ? sortBy as any : undefined,
       sortOrder: sortOrder && validSortOrder.includes(sortOrder) ? sortOrder as 'asc' | 'desc' : undefined,
+      minRevenue: minRevenue ? Number(minRevenue) : undefined,
     });
     })();
   }

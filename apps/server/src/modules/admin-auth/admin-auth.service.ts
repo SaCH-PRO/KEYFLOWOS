@@ -33,7 +33,7 @@ export class AdminAuthService {
   private readonly logger = new Logger(AdminAuthService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 

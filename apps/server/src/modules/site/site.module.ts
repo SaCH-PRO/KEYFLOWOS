@@ -27,7 +27,7 @@ import { CaseStudyService } from './case-study.service';
   imports: [
     PrismaModule,
     AiModule,
-    PaymentsModule,
+    forwardRef(() => PaymentsModule),
     NotificationsModule,
     CrmModule,
     CommerceModule,

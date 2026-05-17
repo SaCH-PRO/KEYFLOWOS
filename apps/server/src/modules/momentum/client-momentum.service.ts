@@ -555,9 +555,9 @@ export class ClientMomentumService {
           };
         }
       }
-    } catch {
-      // ignore invalid dates
-    }
+    } catch (err) {
+        this.logger.warn(`Invalid dates: ${err instanceof Error ? err.message : err}`);
+      }
     return null;
   }
 

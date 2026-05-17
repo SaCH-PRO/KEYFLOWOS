@@ -72,6 +72,8 @@ import { CalendarModule } from './modules/calendar/calendar.module';
 import { PublicEventsModule } from './modules/public-events/public-events.module';
 import { DirectoryModule } from './modules/directory/directory.module';
 import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
+import { AssetModule } from './modules/assets/asset.module';
+import { CallTaskModule } from './modules/call-tasks/call-task.module';
 
 @Module({
   imports: [
@@ -144,6 +146,8 @@ import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
     PublicEventsModule,
     DirectoryModule,
     AdminAuthModule,
+    AssetModule,
+    CallTaskModule,
   ],
   controllers: [AppController],
   providers: [

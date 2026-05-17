@@ -1,5 +1,6 @@
-import { getApiBase } from "@/lib/api-base";
 "use client";
+
+import { getApiBase } from "@/lib/api-base";
 
 import { useState, useCallback, useEffect } from "react";
 import {

@@ -22,7 +22,8 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@keyflow/ui": ["../../packages/ui/src"]
+      "@keyflow/ui": ["../../packages/ui/src"],
+      "@keyflow/shared": ["../../packages/shared/src"]
     }
   },
   "include": [

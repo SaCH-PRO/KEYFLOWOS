@@ -174,7 +174,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Governance check
-    const decision = await this.governance.evaluateAutoApproval(data.businessId, data.toolName, { confidence: 0.8 });
+    const decision = await this.governance.evaluateAutoApproval(data.businessId, data.toolName, { confidence: 0.8, planStepId: data.planContext?.planStepId });
     if (!decision.autoApproved) {
       await this.prisma.client.aiPlanStep.update({
         where: { id: data.stepId },

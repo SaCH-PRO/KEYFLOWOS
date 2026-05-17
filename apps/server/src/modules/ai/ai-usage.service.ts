@@ -424,9 +424,9 @@ export class AiUsageService {
     let budget: BudgetStatus | undefined;
     try {
       budget = await this.gateway.getBudgetStatus(businessId);
-    } catch {
-      /* intentionally empty */
-    }
+    } catch (err) {
+        this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
+      }
 
     return {
       currentPlan: sub.plan,
@@ -499,9 +499,9 @@ export class AiUsageService {
     let budgetStatus: BudgetStatus | undefined;
     try {
       budgetStatus = await this.gateway.getBudgetStatus(businessId);
-    } catch {
-      /* intentionally empty */
-    }
+    } catch (err) {
+        this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
+      }
 
     const providerBudgetMap = new Map(
       budgetStatus?.byProvider?.map(b => [b.provider, b]) || [],

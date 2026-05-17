@@ -5,6 +5,7 @@ import { CronSchedulerService } from './cron-scheduler.service';
 import { PlannerService } from './planner.service';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
 import { GovernanceService } from './governance.service';
+import { WorkloadAggregatorService } from './workload-aggregator.service';
 
 export interface BriefingCard {
   stepOrder: number;
@@ -39,6 +40,7 @@ export class MorningBriefingService implements OnModuleInit {
     @Inject(PlannerService) private readonly planner: PlannerService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
     @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(WorkloadAggregatorService) private readonly workload: WorkloadAggregatorService,
   ) {}
 
   onModuleInit() {
@@ -76,6 +78,7 @@ export class MorningBriefingService implements OnModuleInit {
       briefingModules.includes('projects') ? this.scanProjects(businessId) : [],
       this.scanPendingApprovals(businessId),
       this.scanFailedActions(businessId),
+      this.scanWorkload(businessId),
     ]);
 
     for (const result of scanResults) {
@@ -485,6 +488,50 @@ export class MorningBriefingService implements OnModuleInit {
         oneClickApprove: false,
         module: 'system',
       });
+    }
+
+    return cards;
+  }
+
+  private async scanWorkload(businessId: string): Promise<BriefingCard[]> {
+    const cards: BriefingCard[] = [];
+
+    try {
+      const report = await this.workload.getWorkloadForBusiness(businessId);
+
+      if (report.overloaded.length > 0) {
+        for (const entry of report.overloaded) {
+          cards.push({
+            stepOrder: cards.length + 1,
+            title: `${entry.userName} is overloaded (${entry.utilizationPercent}% capacity)`,
+            impact: entry.utilizationPercent > 150 ? 'HIGH' : 'MEDIUM',
+            impactScore: entry.utilizationPercent > 150 ? 40 : 30,
+            role: 'operations',
+            suggestedAction: `Redistribute ${entry.openTaskCount} open tasks to team members with capacity`,
+            toolName: 'fetch_project_status',
+            args: { userId: entry.userId },
+            oneClickApprove: false,
+            module: 'operations',
+          });
+        }
+      }
+
+      if (report.underutilized.length > 0) {
+        cards.push({
+          stepOrder: cards.length + 1,
+          title: `${report.underutilized.length} team member(s) have available capacity`,
+          impact: 'LOW',
+          impactScore: 15,
+          role: 'operations',
+          suggestedAction: 'Assign pending tasks to available team members',
+          toolName: 'fetch_project_status',
+          args: {},
+          oneClickApprove: false,
+          module: 'operations',
+        });
+      }
+    } catch (err: unknown) {
+      this.logger.warn(`Workload scan failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     return cards;

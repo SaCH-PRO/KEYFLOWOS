@@ -54,6 +54,11 @@ import { UnifiedInboxService } from './unified-inbox.service';
 import { JourneyOrchestratorService } from './journey-orchestrator.service';
 import { MorningBriefingService } from './morning-briefing.service';
 import { GoalTrackerService } from './goal-tracker.service';
+import { WorkloadAggregatorService } from './workload-aggregator.service';
+import { TaskPrioritizerService } from './task-prioritizer.service';
+import { CapacityInsightService } from './capacity-insight.service';
+import { TaskRebalancerService } from './task-rebalancer.service';
+import { ChaserService } from './chaser.service';
 
 @Module({
   imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule],
@@ -103,6 +108,11 @@ import { GoalTrackerService } from './goal-tracker.service';
     JourneyOrchestratorService,
     MorningBriefingService,
     GoalTrackerService,
+    WorkloadAggregatorService,
+    TaskPrioritizerService,
+    CapacityInsightService,
+    TaskRebalancerService,
+    ChaserService,
   ],
   exports: [
     ModelGatewayService,
@@ -147,6 +157,11 @@ import { GoalTrackerService } from './goal-tracker.service';
     JourneyOrchestratorService,
     MorningBriefingService,
     GoalTrackerService,
+    WorkloadAggregatorService,
+    TaskPrioritizerService,
+    CapacityInsightService,
+    TaskRebalancerService,
+    ChaserService,
   ],
 })
 export class AiModule {}

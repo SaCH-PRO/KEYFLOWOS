@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { MessageSquare, Mail, Phone, Instagram, Facebook, CheckCircle2, Loader2, Send, Filter, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { apiGet, apiPostSimple } from "@/lib/api";
 
 interface Thread {
   id: string;
@@ -64,9 +65,8 @@ export default function UnifiedInboxPage() {
       const params = new URLSearchParams();
       if (filterStatus) params.set("status", filterStatus);
       if (filterChannel) params.set("channel", filterChannel);
-      const res = await fetch(`/api/ai/businesses/${businessId}/inbox?${params}`);
-      const data = await res.json();
-      setThreads(data.threads ?? []);
+      const res = await apiGet<{ threads: Thread[] }>(`/ai/businesses/${businessId}/inbox?${params}`);
+      setThreads(res.data?.threads ?? []);
     } catch {
       toast.error("Failed to load inbox");
     } finally {
@@ -77,9 +77,8 @@ export default function UnifiedInboxPage() {
   const loadMessages = async (threadId: string) => {
     if (!businessId) return;
     try {
-      const res = await fetch(`/api/ai/businesses/${businessId}/inbox/${threadId}`);
-      const data = await res.json();
-      setMessages(data.messages ?? []);
+      const res = await apiGet<{ messages: ThreadMessage[] }>(`/ai/businesses/${businessId}/inbox/${threadId}`);
+      setMessages(res.data?.messages ?? []);
     } catch {
       toast.error("Failed to load messages");
     }
@@ -97,11 +96,7 @@ export default function UnifiedInboxPage() {
   const sendReply = async () => {
     if (!businessId || !selectedThread || !replyText.trim()) return;
     try {
-      await fetch(`/api/ai/businesses/${businessId}/inbox/${selectedThread.id}/reply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: replyText }),
-      });
+      await apiPostSimple(`/ai/businesses/${businessId}/inbox/${selectedThread.id}/reply`, { body: replyText });
       setReplyText("");
       await loadMessages(selectedThread.id);
       await loadThreads();
@@ -113,7 +108,7 @@ export default function UnifiedInboxPage() {
   const resolveThread = async () => {
     if (!businessId || !selectedThread) return;
     try {
-      await fetch(`/api/ai/businesses/${businessId}/inbox/${selectedThread.id}/resolve`, { method: "POST" });
+      await apiPostSimple(`/ai/businesses/${businessId}/inbox/${selectedThread.id}/resolve`, {});
       toast.success("Thread resolved");
       setSelectedThread(null);
       setMessages([]);

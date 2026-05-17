@@ -26,9 +26,9 @@ if (DSN) {
           if (body.password) body.password = '[REDACTED]';
           if (body.token) body.token = '[REDACTED]';
           event.request.data = JSON.stringify(body);
-        } catch {
-          // not JSON, leave as-is
-        }
+        } catch (err) {
+            console.error(`Not JSON, leave as-is:`, err);
+          }
       }
       return event;
     },

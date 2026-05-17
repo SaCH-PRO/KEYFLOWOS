@@ -80,9 +80,9 @@ export class StoreOrderRoutingListener {
           });
           contactId = contact?.id ?? null;
         }
-      } catch {
-        // best effort; do not block the failure event
-      }
+      } catch (err) {
+          this.logger.warn(`; do not block the failure event: ${err instanceof Error ? err.message : err}`);
+        }
       const failurePayload: StoreOrderRoutingFailedPayload = {
         businessId: payload.businessId,
         orderId,

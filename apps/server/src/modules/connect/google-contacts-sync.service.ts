@@ -229,9 +229,9 @@ export class GoogleContactsSyncService {
         },
         update: { metadata: merged as unknown as Prisma.InputJsonValue },
       });
-    } catch {
-      /* progress is best-effort */
-    }
+    } catch (err) {
+        this.logger.warn(`Progress is best-effort: ${err instanceof Error ? err.message : err}`);
+      }
   }
 
   async sync(businessId: string): Promise<{ imported: number; updated: number; matched: number; created: number; skipped: number; appliedRules: boolean }> {

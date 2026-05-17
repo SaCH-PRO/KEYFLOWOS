@@ -346,9 +346,9 @@ export class PayPalConnector implements IConnector, IPaymentGatewayConnector {
           const cap = (await capRes.json()) as { amount?: { currency_code?: string } };
           if (cap.amount?.currency_code) captureCurrency = cap.amount.currency_code.toUpperCase();
         }
-      } catch {
-        // fall back to USD if capture lookup fails
-      }
+      } catch (err) {
+          this.logger.debug(`Fall back to USD if capture lookup fails: ${err instanceof Error ? err.message : err}`);
+        }
       body.amount = { value: input.amount.toFixed(2), currency_code: captureCurrency };
     }
     if (input.reason) body.note_to_payer = input.reason.slice(0, 250);

@@ -79,9 +79,9 @@ function parseLooseJson<T>(content: string, fallback: T): T {
     const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const m = cleaned.match(/\{[\s\S]*\}/);
     if (m) return JSON.parse(m[0]) as T;
-  } catch {
-    /* swallow */
-  }
+  } catch (err) {
+      console.error(`Silent catch:`, err);
+    }
   return fallback;
 }
 

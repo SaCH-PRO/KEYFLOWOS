@@ -24,7 +24,7 @@ export class EvidencePredictionService {
     }
 
     // Fetch historical tasks with evidence data
-    let historical: Array<{ title: string; evidenceRequired: boolean; hasEvidence: boolean }> = [];
+    let historical: Array<{ title: string; evidenceRequired: boolean; hasEvidence: boolean }>;
 
     if (input.taskType === 'ContactTask') {
       const tasks = await this.prisma.client.contactTask.findMany({
@@ -37,7 +37,6 @@ export class EvidencePredictionService {
         where: { businessId, linkedType: 'ContactTask' },
         _count: { linkedId: true },
       });
-      const evidenceMap = new Map(evidenceCounts.map((e) => [e.linkedId, e._count.linkedId]));
       // We need task IDs for the evidence map, but groupBy doesn't give us titles.
       // Simpler approach: just use evidenceRequired flag as proxy
       historical = tasks.map((t) => ({

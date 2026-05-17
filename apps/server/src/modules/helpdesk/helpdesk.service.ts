@@ -1,9 +1,13 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
 export class HelpdeskService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
+  ) {}
 
   listTickets(businessId: string, orgUnitId?: string) {
     return this.prisma.client.supportTicket.findMany({
@@ -53,6 +57,12 @@ export class HelpdeskService {
         assignee: { select: { id: true, name: true, email: true } },
         orgUnit: { select: { id: true, name: true } },
       },
+    });
+    this.events.emit('supportTicket.created', {
+      ticket,
+      businessId,
+      contactId: body.contactId,
+      priority: body.priority || 'NORMAL',
     });
     return ticket;
   }

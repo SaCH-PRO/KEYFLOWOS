@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Target, Plus, TrendingUp, Calendar, Loader2, Zap, Trash2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { apiGet, apiPostSimple, apiDelete } from "@/lib/api";
 
 interface Goal {
   id: string;
@@ -75,9 +76,8 @@ export default function GoalsPage() {
   const load = useCallback(async () => {
     if (!businessId) return;
     try {
-      const res = await fetch(`/api/ai/businesses/${businessId}/goals`);
-      const data = await res.json();
-      setGoals(Array.isArray(data) ? data : []);
+      const res = await apiGet<Goal[]>(`/ai/businesses/${businessId}/goals`);
+      setGoals(Array.isArray(res.data) ? res.data : []);
     } catch {
       toast.error("Failed to load goals");
     } finally {
@@ -92,15 +92,11 @@ export default function GoalsPage() {
   const createGoal = async () => {
     if (!businessId || !form.title) return;
     try {
-      const res = await fetch(`/api/ai/businesses/${businessId}/goals`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          targetValue: form.targetValue ? parseFloat(form.targetValue) : undefined,
-        }),
+      const res = await apiPostSimple(`/ai/businesses/${businessId}/goals`, {
+        ...form,
+        targetValue: form.targetValue ? parseFloat(form.targetValue) : undefined,
       });
-      if (res.ok) {
+      if (!res.error) {
         toast.success("Goal created");
         setShowCreate(false);
         setForm({ title: "", description: "", category: "revenue", targetValue: "", unit: "dollars", deadline: "", role: "finance", autoActions: true });
@@ -116,8 +112,8 @@ export default function GoalsPage() {
   const deleteGoal = async (goalId: string) => {
     if (!businessId) return;
     try {
-      const res = await fetch(`/api/ai/businesses/${businessId}/goals/${goalId}`, { method: "DELETE" });
-      if (res.ok) {
+      const res = await apiDelete(`/ai/businesses/${businessId}/goals/${goalId}`);
+      if (!res.error) {
         toast.success("Goal deleted");
         load();
       } else {
@@ -131,8 +127,8 @@ export default function GoalsPage() {
   const updateProgress = async (goalId: string) => {
     if (!businessId) return;
     try {
-      const res = await fetch(`/api/ai/businesses/${businessId}/goals/${goalId}/progress`, { method: "POST" });
-      if (res.ok) {
+      const res = await apiPostSimple(`/ai/businesses/${businessId}/goals/${goalId}/progress`, {});
+      if (!res.error) {
         toast.success("Progress updated");
         load();
       } else {

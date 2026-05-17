@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   QuoteCreatedPayload,
@@ -23,6 +23,7 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 
 @Injectable()
 export class CommerceService {
+  private readonly logger = new Logger(CommerceService.name);
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
@@ -175,7 +176,7 @@ export class CommerceService {
   async createInvoice(input: {
     businessId: string;
     contactId?: string;
-    items: { description: string; quantity: number; unitPrice: number }[];
+    items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
     currency?: string;
     dueDate?: Date | string;
     taxRate?: number;
@@ -279,9 +280,9 @@ export class CommerceService {
           target === 'SENT' ? { sentAt: new Date() } : {},
         );
         updated++;
-      } catch {
-        // 409 illegal transition -> skip silently in bulk mode.
-      }
+      } catch (err) {
+          this.logger.warn(`409 illegal transition -> skip silently in bulk mode.: ${err instanceof Error ? err.message : err}`);
+        }
     }
     this.statsCache.invalidateCache(businessId);
     return { updated, action };
@@ -291,12 +292,23 @@ export class CommerceService {
     const where = { id: { in: ids }, businessId, deletedAt: null };
     let result: { count: number };
     switch (action) {
-      case 'send':
-        result = await this.prisma.client.quote.updateMany({
+      case 'send': {
+        // Mint viewTokens per-row so bulk-sent quotes have valid public links.
+        const candidates = await this.prisma.client.quote.findMany({
           where: { ...where, status: 'DRAFT' },
-          data: { status: 'SENT' },
+          select: { id: true, viewToken: true },
         });
+        let updatedCount = 0;
+        for (const q of candidates) {
+          const data: Record<string, any> = { status: 'SENT', sentAt: new Date() };
+          if (!q.viewToken) data.viewToken = this.generateQuoteToken();
+          await this.prisma.client.quote.update({ where: { id: q.id }, data });
+          updatedCount++;
+          this.events.emit('quote.sent', { quote: { id: q.id, ...data }, businessId } as QuoteSentPayload);
+        }
+        result = { count: updatedCount };
         break;
+      }
       case 'reject':
         result = await this.prisma.client.quote.updateMany({
           where: { ...where, status: { in: ['SENT'] } },
@@ -398,7 +410,7 @@ export class CommerceService {
   async markInvoicePaid(invoiceId: string, actorId?: string | null) {
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      select: { businessId: true, status: true },
+      select: { businessId: true, status: true, total: true, currency: true },
     });
     if (!existingInvoice) {
       throw new Error('Invoice not found');
@@ -425,6 +437,24 @@ export class CommerceService {
       invoice = await this.invoiceWorkflow.transition(invoiceId, 'PAID');
     }
     if (!invoice) throw new Error('Invoice not found');
+
+    // Create a Payment record if none exists so reconciliation math works.
+    const existingPayments = await this.prisma.client.payment.count({
+      where: { invoiceId },
+    });
+    if (existingPayments === 0) {
+      await this.prisma.client.payment.create({
+        data: {
+          businessId: existingInvoice.businessId,
+          invoiceId,
+          amount: existingInvoice.total,
+          currency: existingInvoice.currency,
+          status: 'COMPLETED',
+          method: 'MANUAL',
+          paidAt: new Date(),
+        },
+      });
+    }
 
     if (invoice.contactId) {
       await this.crm.logContactEvent({

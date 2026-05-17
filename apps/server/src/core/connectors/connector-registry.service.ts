@@ -263,9 +263,9 @@ export class ConnectorRegistryService {
 
     try {
       await connector.disconnect(businessId);
-    } catch {
-      /* intentionally empty */
-    }
+    } catch (err) {
+        this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
+      }
 
     return this.authenticateConnector(type, businessId);
   }

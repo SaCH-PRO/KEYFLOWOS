@@ -115,7 +115,7 @@ export default function AdminAiUsagePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -138,8 +138,30 @@ export default function AdminAiUsagePage() {
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    const run = async () => {
+      const [summaryRes, alertsRes] = await Promise.all([
+        apiGet<PlatformSummary>("/api/admin/ai-usage/platform-summary"),
+        apiGet<{ alerts: AlertItem[]; total: number }>("/api/admin/ai-usage/platform-alerts?limit=50"),
+      ]);
+
+      if (cancelled) return;
+
+      if (summaryRes.error || !summaryRes.data) {
+        setError(summaryRes.error ?? "Failed to load platform summary");
+      } else {
+        setSummary(summaryRes.data);
+      }
+
+      if (alertsRes.data) {
+        setAlerts(alertsRes.data.alerts);
+      }
+
+      setLoading(false);
+    };
+    run();
+    return () => { cancelled = true; };
+  }, []);
 
   const formatNumber = (n: number) =>
     new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n);
@@ -157,7 +179,7 @@ export default function AdminAiUsagePage() {
           </p>
         </div>
         <button
-          onClick={load}
+          onClick={refresh}
           disabled={loading}
           className="inline-flex items-center gap-2 rounded-xl border border-border/70 bg-slate-950/70 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
         >
@@ -315,7 +337,7 @@ export default function AdminAiUsagePage() {
                 { key: "businessId", header: "Business ID", width: "30%" },
                 { key: "credits", header: "Credits", width: "20%" },
                 { key: "calls", header: "Calls", width: "20%" },
-                { key: "cost", header: "Est. Cost", width: "20%", render: (row: any) => formatCurrency(row.cost) },
+                { key: "cost", header: "Est. Cost", width: "20%", render: (row: { cost: number }) => formatCurrency(row.cost) },
               ]}
               keyField="id"
               searchable
@@ -348,7 +370,7 @@ export default function AdminAiUsagePage() {
                 key: "status",
                 header: "Status",
                 width: "15%",
-                render: (row: any) => (
+                render: (row: { status: string }) => (
                   <span
                     className={cn(
                       "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",

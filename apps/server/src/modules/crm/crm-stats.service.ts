@@ -405,9 +405,9 @@ export class CrmStatsService {
         const p = (ins.payload ?? {}) as { sentiment?: string | null; intent?: string | null };
         aiRollupMap.set(ins.contactId, { sentiment: p.sentiment ?? null, intent: p.intent ?? null });
       }
-    } catch {
-      // ignore
-    }
+    } catch (err) {
+        this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
+      }
 
     const updates: { id: string; leadScore: number; lastInteractionAt: Date }[] = [];
     const withStats = contacts.map((contact) => {

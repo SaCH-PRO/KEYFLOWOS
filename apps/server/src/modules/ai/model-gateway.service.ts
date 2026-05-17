@@ -4,7 +4,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypt
 import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
 
-export type AiProvider = 'openai' | 'anthropic' | 'xai';
+export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi';
 
 export type TaskCategory =
   | 'extraction'
@@ -121,6 +121,7 @@ export interface BudgetCaps {
   monthlyOpenai?: number;
   monthlyAnthropic?: number;
   monthlyXai?: number;
+  monthlyKimi?: number;
 }
 
 export interface ProviderBudgetStatus {
@@ -146,6 +147,7 @@ export interface AiPreferences {
   byokOpenai?: string;
   byokAnthropic?: string;
   byokXai?: string;
+  byokKimi?: string;
   budgetCaps?: BudgetCaps;
 }
 
@@ -162,6 +164,9 @@ const TOKEN_COST_PER_1K: Record<string, { input: number; output: number }> = {
   'claude-3-5-haiku-20241022': { input: 0.001, output: 0.005 },
   'grok-2': { input: 0.005, output: 0.015 },
   'grok-2-mini': { input: 0.001, output: 0.005 },
+  'moonshot-v1-8k': { input: 0.003, output: 0.003 },
+  'moonshot-v1-32k': { input: 0.006, output: 0.006 },
+  'moonshot-v1-128k': { input: 0.012, output: 0.012 },
 };
 
 const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>> = {
@@ -322,8 +327,11 @@ export class ModelGatewayService {
     this.providerClients.set('xai', {
       configured: !!process.env.XAI_API_KEY,
     });
+    this.providerClients.set('kimi', {
+      configured: !!process.env.KIMI_API_KEY,
+    });
 
-    for (const provider of ['openai', 'anthropic', 'xai'] as AiProvider[]) {
+    for (const provider of ['openai', 'anthropic', 'xai', 'kimi'] as AiProvider[]) {
       this.providerMetrics.set(provider, {
         totalCalls: 0,
         totalErrors: 0,
@@ -574,6 +582,9 @@ export class ModelGatewayService {
         break;
       case 'xai':
         yield* this.streamXai(normalizedMessages, model, request, preferences.byokXai);
+        break;
+      case 'kimi':
+        yield* this.streamKimi(normalizedMessages, model, request, preferences.byokKimi);
         break;
       default:
         throw new Error(`Unsupported provider: ${provider}`);
@@ -865,9 +876,85 @@ export class ModelGatewayService {
     yield { type: 'done' };
   }
 
+  private async *streamKimi(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+    byokKey?: string,
+  ): AsyncGenerator<StreamChunk> {
+    const apiKey = byokKey || process.env.KIMI_API_KEY;
+    if (!apiKey) throw new Error('Kimi API key not configured');
+
+    const client = new OpenAI({
+      apiKey,
+      baseURL: 'https://api.moonshot.cn/v1',
+    });
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const stream = await client.chat.completions.create(params);
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+
+      if (delta?.content) {
+        yield { type: 'content_delta', content: delta.content };
+      }
+
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          yield {
+            type: 'tool_call_delta',
+            toolCall: {
+              index: tc.index,
+              id: tc.id,
+              name: tc.function?.name,
+              argumentsDelta: tc.function?.arguments,
+            },
+          };
+        }
+      }
+
+      if (chunk.usage) {
+        const promptTokens = chunk.usage.prompt_tokens ?? 0;
+        const completionTokens = chunk.usage.completion_tokens ?? 0;
+        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['moonshot-v1-8k'];
+        const estimatedCost =
+          (promptTokens / 1000) * costs.input +
+          (completionTokens / 1000) * costs.output;
+
+        yield {
+          type: 'usage',
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          },
+        };
+      }
+    }
+
+    yield { type: 'done' };
+  }
+
   private hasBudgetCaps(caps?: BudgetCaps): boolean {
     if (!caps) return false;
-    return !!(caps.monthlyOverall || caps.monthlyOpenai || caps.monthlyAnthropic || caps.monthlyXai);
+    return !!(caps.monthlyOverall || caps.monthlyOpenai || caps.monthlyAnthropic || caps.monthlyXai || caps.monthlyKimi);
   }
 
   private getProviderBudgetCap(provider: AiProvider, caps?: BudgetCaps): number | undefined {
@@ -876,6 +963,7 @@ export class ModelGatewayService {
       case 'openai': return caps.monthlyOpenai;
       case 'anthropic': return caps.monthlyAnthropic;
       case 'xai': return caps.monthlyXai;
+      case 'kimi': return caps.monthlyKimi;
       default: return undefined;
     }
   }
@@ -1006,6 +1094,9 @@ export class ModelGatewayService {
     if (provider === 'xai') {
       return !!(preferences.byokXai || process.env.XAI_API_KEY);
     }
+    if (provider === 'kimi') {
+      return !!(preferences.byokKimi || process.env.KIMI_API_KEY);
+    }
     return false;
   }
 
@@ -1062,13 +1153,15 @@ export class ModelGatewayService {
         return this.callAnthropic(normalizedMessages, model, request, preferences.byokAnthropic);
       case 'xai':
         return this.callXai(normalizedMessages, model, request, preferences.byokXai);
+      case 'kimi':
+        return this.callKimi(normalizedMessages, model, request, preferences.byokKimi);
       default:
         throw new Error(`Unsupported provider: ${provider}`);
     }
   }
 
   private normalizeMessages(messages: GatewayMessage[], provider: AiProvider): GatewayMessage[] {
-    if (provider === 'openai' || provider === 'xai') {
+    if (provider === 'openai' || provider === 'xai' || provider === 'kimi') {
       return messages;
     }
 
@@ -1340,6 +1433,68 @@ export class ModelGatewayService {
     };
   }
 
+  private async callKimi(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+    byokKey?: string,
+  ): Promise<Omit<GatewayResponse, 'provider' | 'model' | 'latencyMs' | 'fallbackUsed' | 'fallbackProvider'>> {
+    const apiKey = byokKey || process.env.KIMI_API_KEY;
+    if (!apiKey) throw new Error('Kimi API key not configured');
+
+    const client = new OpenAI({
+      apiKey,
+      baseURL: 'https://api.moonshot.cn/v1',
+    });
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const response = await client.chat.completions.create(params);
+
+    const choice = response.choices[0];
+    const promptTokens = response.usage?.prompt_tokens ?? 0;
+    const completionTokens = response.usage?.completion_tokens ?? 0;
+    const totalTokens = promptTokens + completionTokens;
+    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['moonshot-v1-8k'];
+    const estimatedCost =
+      (promptTokens / 1000) * costs.input +
+      (completionTokens / 1000) * costs.output;
+
+    const kimiToolCalls = choice?.message?.tool_calls
+      ?.filter(tc => tc.type === 'function')
+      .map(tc => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: {
+          name: tc.function.name,
+          arguments: tc.function.arguments,
+        },
+      }));
+
+    return {
+      content: choice?.message?.content ?? null,
+      toolCalls: kimiToolCalls && kimiToolCalls.length > 0 ? kimiToolCalls : undefined,
+      usage: {
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+      },
+    };
+  }
+
   async getPreferences(businessId: string): Promise<AiPreferences> {
     const cached = this.preferencesCache.get(businessId);
     if (cached && cached.expiresAt > Date.now()) {
@@ -1364,6 +1519,7 @@ export class ModelGatewayService {
         if (prefs.byokOpenai) prefs.byokOpenai = this.safeDecrypt(prefs.byokOpenai);
         if (prefs.byokAnthropic) prefs.byokAnthropic = this.safeDecrypt(prefs.byokAnthropic);
         if (prefs.byokXai) prefs.byokXai = this.safeDecrypt(prefs.byokXai);
+        if (prefs.byokKimi) prefs.byokKimi = this.safeDecrypt(prefs.byokKimi);
 
         this.preferencesCache.set(businessId, {
           data: prefs,

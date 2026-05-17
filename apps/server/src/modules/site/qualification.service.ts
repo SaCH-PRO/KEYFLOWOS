@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -21,6 +21,7 @@ export interface QualificationRecommendation {
 
 @Injectable()
 export class QualificationService {
+  private readonly logger = new Logger(QualificationService.name);
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CrmService) private readonly crm: CrmService,
@@ -275,9 +276,9 @@ export class QualificationService {
             },
           });
         }
-      } catch {
-        /* intentionally empty */
-      }
+      } catch (err) {
+          this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
+        }
     }
 
     return updated;

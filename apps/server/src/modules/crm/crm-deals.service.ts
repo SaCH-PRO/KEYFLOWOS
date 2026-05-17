@@ -272,6 +272,17 @@ export class CrmDealsService {
       title: updated.title,
     }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
 
+    this.events.emit('deal.updated', {
+      businessId: input.businessId,
+      dealId: updated.id,
+      contactId: deal.contactId,
+      stageId: updated.stageId,
+      value: updated.value,
+      daysInStage: updated.stageEnteredAt
+        ? Math.floor((Date.now() - new Date(updated.stageEnteredAt).getTime()) / 86400000)
+        : 0,
+    });
+
     return updated;
   }
 

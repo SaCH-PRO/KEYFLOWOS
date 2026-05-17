@@ -3,7 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMemoryService } from './ai-memory.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
-export type BusinessRole = 'sales' | 'finance' | 'support' | 'operations' | 'marketing' | 'general';
+export type BusinessRole = 'sales' | 'finance' | 'support' | 'operations' | 'marketing' | 'general' | 'operator';
 
 export interface RoleDefinition {
   id: BusinessRole;
@@ -69,9 +69,14 @@ const ROUTE_ROLE_MAP: Record<string, BusinessRole> = {
   // Marketing
   '/app/campaigns': 'marketing',
   '/app/content': 'marketing',
+  '/app/content-ops': 'marketing',
   '/app/social': 'marketing',
   '/app/store': 'marketing',
   '/app/seo': 'marketing',
+  '/app/call-tasks': 'operations',
+  '/app/evidence': 'operations',
+  '/app/approvals': 'operations',
+  '/app/assets': 'operations',
   // Support
   '/app/tickets': 'support',
   '/app/inbox': 'support',
@@ -101,6 +106,11 @@ const ITEM_TYPE_ROLE_MAP: Record<string, BusinessRole> = {
   campaign: 'marketing',
   post: 'marketing',
   product: 'marketing',
+  contentRequest: 'marketing',
+  callLog: 'operations',
+  evidence: 'operations',
+  approvalRequest: 'operations',
+  asset: 'operations',
   ticket: 'support',
   thread: 'support',
 };
@@ -113,6 +123,7 @@ const ROLE_SWITCH_KEYWORDS: Record<BusinessRole, RegExp> = {
   operations: /\b(book|schedule|appointment|calendar|slot|reschedule|no.show|availability|staff|task|project|milestone|deadline|when can i come)\b/i,
   marketing: /\b(campaign|email blast|newsletter|social|seo|content|ad|promotion|post|review|instagram|facebook)\b/i,
   general: /\b(overview|summary|status|how is everything|what's happening|business health|dashboard)\b/i,
+  operator: /\b(execute|run|do it|process|handle|complete|finish|work on|take care of|operate)\b/i,
 };
 
 const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
@@ -183,8 +194,8 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages scheduling, inventory, staff, tasks, ensures business runs smoothly day-to-day',
     tone: 'efficient, organized, direct, action-oriented',
     priorities: ['Fill calendar gaps', 'Manage staff schedules', 'Track inventory levels', 'Complete tasks on time', 'Optimize workflows'],
-    approvedTools: ['bookings_*', 'projects_*', 'create_task', 'schedule_action', 'tag_contact', 'fetch_schedule_health', 'fetch_project_status'],
-    blockedTools: ['commerce_delete_invoice', 'crm_delete_contact'],
+    approvedTools: ['bookings_*', 'projects_*', 'create_task', 'schedule_action', 'tag_contact', 'fetch_schedule_health', 'fetch_project_status', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*'],
+    blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'content_upload_deliverables', 'content_deliver_request', 'approval_decide_step'],
     maxRiskTier: 2,
     autonomyLevel: 3,
     checkIntervalMinutes: 60,
@@ -195,7 +206,8 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
 - No-shows must be followed up within 2 hours
 - Tasks should never be overdue for more than 24 hours
 - Always look for efficiency improvements
-- Staff schedules should be optimized for demand`,
+- Staff schedules should be optimized for demand
+- You can create and manage content requests, call tasks, evidence, and approval workflows`,
   },
   marketing: {
     id: 'marketing',
@@ -203,8 +215,8 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages campaigns, social media, content, SEO, lead generation, brand presence',
     tone: 'creative, engaging, brand-conscious, data-driven',
     priorities: ['Grow email list', 'Increase social engagement', 'Improve SEO rankings', 'Generate leads', 'Nurture existing contacts'],
-    approvedTools: ['marketing_*', 'social_*', 'seo_*', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign'],
-    blockedTools: ['marketing_send_campaign', 'social_publish_post'],
+    approvedTools: ['marketing_*', 'social_*', 'seo_*', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign', 'content_*', 'drive_*'],
+    blockedTools: ['marketing_send_campaign', 'social_publish_post', 'content_upload_deliverables', 'content_deliver_request'],
     maxRiskTier: 2,
     autonomyLevel: 2,
     checkIntervalMinutes: 240,
@@ -215,7 +227,8 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
 - Social posts should be engaging and on-brand
 - SEO content should target high-opportunity keywords
 - Always measure and report on campaign performance
-- Test different approaches and double down on what works`,
+- Test different approaches and double down on what works
+- You can create content requests and manage the content pipeline through delivery`,
   },
   general: {
     id: 'general',
@@ -223,8 +236,8 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'General-purpose assistant for queries, summaries, and cross-role coordination',
     tone: 'helpful, concise, professional',
     priorities: ['Answer questions accurately', 'Summarize business health', 'Coordinate between roles', 'Execute user requests'],
-    approvedTools: ['fetch_*', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'documents_list', 'keyflow_create_note'],
-    blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post'],
+    approvedTools: ['fetch_*', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'documents_list', 'keyflow_create_note', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list'],
+    blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request'],
     maxRiskTier: 1,
     autonomyLevel: 1,
     checkIntervalMinutes: 0,
@@ -234,7 +247,31 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
 - Always provide concise, accurate information
 - When a request spans multiple roles, identify which role is best suited
 - Never execute high-risk actions without explicit approval
-- Help the user understand their business health at a glance`,
+- Help the user understand their business health at a glance
+- You can look up content requests, call tasks, evidence, and approvals but cannot modify them`,
+  },
+  operator: {
+    id: 'operator',
+    name: 'KEY Operator',
+    description: 'AI worker that executes tasks across all modules — creates content, logs calls, submits evidence, manages approvals, and drives workflows end-to-end',
+    tone: 'efficient, precise, proactive',
+    priorities: ['Execute assigned tasks autonomously', 'Move content through production pipeline', 'Log call outcomes and schedule follow-ups', 'Submit and verify evidence', 'Create and manage approval requests', 'Create Drive folders and documents'],
+    approvedTools: ['content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_list', 'documents_list', 'keyflow_create_note'],
+    blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'enable_flow_with_approval', 'content_upload_deliverables', 'content_deliver_request', 'approval_decide_step'],
+    maxRiskTier: 3,
+    autonomyLevel: 3,
+    checkIntervalMinutes: 30,
+    greeting: "I'm on it.",
+    signOff: "— KEY",
+    systemPromptAddendum: `You are the KEY Operator — an AI worker that executes business tasks autonomously.
+- You can create content requests, assign them, and move them through the pipeline
+- You can schedule calls, log outcomes, and create follow-up tasks
+- You can submit and verify evidence
+- You can create approval requests (but not decide them — that's for humans)
+- You can create Drive folders and documents
+- You work within your authority: tier-1 auto-execute, tier-2 quick-confirm, tier-3 needs formal approval
+- Always confirm what you've done clearly and concisely
+- If a task is outside your authority, escalate to a human manager`,
   },
 };
 
@@ -291,7 +328,7 @@ export class RoleEngineService {
    */
   async detectRoleFromContext(ctx: RoleDetectionContext): Promise<BusinessRole> {
     const scores: Record<BusinessRole, number> = {
-      sales: 0, finance: 0, support: 0, operations: 0, marketing: 0, general: 0,
+      sales: 0, finance: 0, support: 0, operations: 0, marketing: 0, general: 0, operator: 0,
     };
 
     // 1. Route context — where is the user in the app?

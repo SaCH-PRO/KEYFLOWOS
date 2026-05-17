@@ -104,13 +104,10 @@ function fetchWithTimeout(
   init: RequestInit,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...init, signal: controller.signal }).finally(() =>
-    clearTimeout(timeoutId),
-  );
+  return fetchWithRetry(url, init, { timeoutMs, retries: 3 });
 }
 
+import { fetchWithRetry } from "./fetch-with-retry";
 import { refreshAccessToken } from "./workspace";
 
 /**

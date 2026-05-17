@@ -201,6 +201,12 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
+        this.events.emit('recurring_invoice.due', {
+          recurringInvoice: recurring,
+          businessId: recurring.businessId,
+          nextRunDate: recurring.nextRunDate,
+        });
+
         const invoice = await this.prisma.client.invoice.create({
           data: {
             businessId: recurring.businessId,

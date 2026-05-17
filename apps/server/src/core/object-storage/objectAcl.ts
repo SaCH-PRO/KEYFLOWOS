@@ -80,6 +80,7 @@ export async function getObjectAclPolicy(
   try {
     return JSON.parse(aclPolicy as string);
   } catch {
+    // ignore malformed ACL policy
     return null;
   }
 }

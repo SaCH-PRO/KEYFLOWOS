@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SocialConnectionsService } from './social-connections.service';
 
@@ -44,6 +44,7 @@ export interface AnalyticsOverview {
 
 @Injectable()
 export class SocialAnalyticsService {
+  private readonly logger = new Logger(SocialAnalyticsService.name);
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(SocialConnectionsService) private readonly connections: SocialConnectionsService,
@@ -121,8 +122,8 @@ export class SocialAnalyticsService {
             if (engagement.views) platformTotals[platform].views = (platformTotals[platform].views || 0) + engagement.views;
           }
         } catch (err) {
-          // silently skip failed engagement fetches
-        }
+            this.logger.warn(`Silently skip failed engagement fetches: ${err instanceof Error ? err.message : err}`);
+          }
       }
     }
 

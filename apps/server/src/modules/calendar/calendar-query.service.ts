@@ -608,9 +608,9 @@ function cryptoId(): string {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const c = require('node:crypto') as { randomUUID?: () => string };
     if (c.randomUUID) return c.randomUUID().replace(/-/g, '');
-  } catch {
-    /* ignore */
-  }
+  } catch (err) {
+      console.error(`Silent catch:`, err);
+    }
   return Math.random().toString(36).slice(2, 14) + Date.now().toString(36);
 }
 

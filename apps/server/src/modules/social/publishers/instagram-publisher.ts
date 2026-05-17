@@ -1,6 +1,8 @@
+import { Logger } from '@nestjs/common';
 import { BasePublisher, PublishResult, RecentPost } from './base-publisher';
 
 export class InstagramPublisher extends BasePublisher {
+  private readonly logger = new Logger(InstagramPublisher.name);
   platform = 'INSTAGRAM';
 
   async publish(connection: any, content: string, mediaUrls?: string[]): Promise<PublishResult> {
@@ -58,7 +60,9 @@ export class InstagramPublisher extends BasePublisher {
         const linkRes = await fetch(`https://graph.facebook.com/v19.0/${publishData.id}?fields=permalink&access_token=${accessToken}`);
         const linkData = await linkRes.json() as any;
         permalink = linkData?.permalink;
-      } catch { /* swallow */ }
+      } catch (err) {
+          this.logger.debug(`Silent catch: ${err instanceof Error ? err.message : err}`);
+        }
 
       return {
         platform: this.platform,

@@ -118,9 +118,9 @@ export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
       let parsed: Record<string, unknown> | null = null;
       try {
         parsed = JSON.parse(text);
-      } catch {
-        // non-JSON response (e.g. HTML form page) — that's still a real round trip
-      }
+      } catch (err) {
+          this.logger.debug(`Non-JSON response (e.g. HTML form page) — that's still a real round trip: ${err instanceof Error ? err.message : err}`);
+        }
       const message = (parsed?.message as string | undefined) ?? (parsed?.status as string | undefined) ?? null;
       // WiPay returns 200 with a JSON body even on validation failure. As long as
       // we got a structured response from their host, the credentials reached the

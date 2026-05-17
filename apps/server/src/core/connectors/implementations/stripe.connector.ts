@@ -28,12 +28,23 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
   ) {}
 
-  async authenticate(_businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
-    return { connected: !!process.env.STRIPE_SECRET_KEY };
+  async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    const meta = (business?.metaData as Record<string, unknown>) ?? {};
+    const connected = !!(meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY);
+    return { connected };
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
-    const hasStripe = !!process.env.STRIPE_SECRET_KEY;
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    const meta = (business?.metaData as Record<string, unknown>) ?? {};
+    const hasStripe = !!(meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY);
     const realStatus = hasStripe ? 'connected' : 'disconnected';
 
     const stored = await this.getConnectorStatus(businessId);
@@ -60,8 +71,13 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     };
   }
 
-  async isConnected(_businessId: string): Promise<boolean> {
-    return !!process.env.STRIPE_SECRET_KEY;
+  async isConnected(businessId: string): Promise<boolean> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    const meta = (business?.metaData as Record<string, unknown>) ?? {};
+    return !!(meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY);
   }
 
   async sync(businessId: string): Promise<ConnectorSyncResult> {
@@ -422,7 +438,9 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
           currency = (first.currency || 'usd').toUpperCase();
           description = first.description || '';
         }
-      } catch { /* ignore line item lookup failures */ }
+      } catch (err) {
+          this.logger.warn(`Line item lookup failures: ${err instanceof Error ? err.message : err}`);
+        }
       links.push({
         id: l.id,
         url: l.url,

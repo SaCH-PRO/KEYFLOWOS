@@ -3,6 +3,7 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 import { RegisterSW } from "@/components/register-sw";
 import { OfflineBanner } from "@/components/ui/offline-banner";
+import { WebVitals } from "@/components/web-vitals";
 
 export const metadata: Metadata = {
   title: "KEYFLOWOS",
@@ -51,6 +52,7 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className="overscroll-none">
+        <WebVitals />
         <RegisterSW />
         <OfflineBanner />
         <Providers>{children}</Providers>

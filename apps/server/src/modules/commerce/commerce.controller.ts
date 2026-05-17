@@ -427,7 +427,7 @@ export class CommerceController {
     @Param('businessId') businessId: string,
     @Body() body: {
       contactId?: string;
-      items: { description: string; quantity: number; unitPrice: number }[];
+      items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
       currency?: string;
       dueDate?: string;
       taxRate?: number;

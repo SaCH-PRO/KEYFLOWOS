@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -40,6 +40,7 @@ export interface FinanceAuditInput {
  */
 @Injectable()
 export class FinanceAuditService {
+  private readonly logger = new Logger(FinanceAuditService.name);
   constructor(private readonly prisma: PrismaService) {}
 
   async log(input: FinanceAuditInput): Promise<void> {
@@ -61,8 +62,8 @@ export class FinanceAuditService {
           meta: meta as Prisma.InputJsonValue,
         },
       });
-    } catch {
-      // Swallow — audit must never break the financial write path.
-    }
+    } catch (err) {
+        this.logger.warn(`— audit must never break the financial write path.: ${err instanceof Error ? err.message : err}`);
+      }
   }
 }

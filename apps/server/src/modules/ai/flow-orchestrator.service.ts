@@ -14,6 +14,12 @@ import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { RoleEngineService, BusinessRole, RoleDetectionContext } from './role-engine.service';
+import { ContentRequestService } from '../content-ops/content-request.service';
+import { CallLogService } from '../call-tasks/call-log.service';
+import { EvidenceService } from '../evidence/evidence.service';
+import { ApprovalRequestService } from '../approvals/approval-request.service';
+import { GoogleDriveService } from '../google-drive/google-drive.service';
+import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
@@ -155,6 +161,11 @@ You have 4 tool families at your disposal:
 - Marketing: create/send/list campaigns
 - Social: create/publish/list posts
 - Automations: create/list/toggle playbooks
+- Content Ops: create/list/assign/transition/submit/upload/deliver content requests
+- Call Tasks: create/list/log outcome/schedule follow-up calls
+- Evidence: submit/verify evidence linked to tasks and approvals
+- Approvals: create/list approval requests and decide steps
+- Drive: create folders and documents in Google Drive
 
 Your personality:
 - Warm, efficient, Caribbean-friendly
@@ -195,6 +206,12 @@ export class FlowOrchestratorService {
     @Inject(AiMessageSenderService) private readonly messageSender: AiMessageSenderService,
     @Inject(SemanticMemoryService) private readonly semanticMemory: SemanticMemoryService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
+    @Inject(ContentRequestService) private readonly contentRequest: ContentRequestService,
+    @Inject(CallLogService) private readonly callLog: CallLogService,
+    @Inject(EvidenceService) private readonly evidence: EvidenceService,
+    @Inject(ApprovalRequestService) private readonly approvalRequest: ApprovalRequestService,
+    @Inject(GoogleDriveService) private readonly drive: GoogleDriveService,
+    @Inject(TaskAssignmentService) private readonly taskAssignment: TaskAssignmentService,
   ) {}
 
   /**
@@ -1054,6 +1071,15 @@ export class FlowOrchestratorService {
             source: 'flow_ai',
           },
         });
+        // Auto-assign KEY to tasks it creates
+        await this.taskAssignment.assign({
+          taskType: 'ContactTask',
+          taskId: task.id,
+          assignableType: 'KEY',
+          assignableId: 'key_ai',
+          assignedBy: 'key_ai',
+          reason: 'Auto-assigned by KEY Operator',
+        }).catch(() => { /* ignore assignment errors */ });
         return { task, id: task.id };
       }
 
@@ -1809,6 +1835,15 @@ export class FlowOrchestratorService {
             source: 'flow_ai',
           },
         });
+        // Auto-assign KEY to tasks it creates
+        await this.taskAssignment.assign({
+          taskType: 'ContactTask',
+          taskId: task.id,
+          assignableType: 'KEY',
+          assignableId: 'key_ai',
+          assignedBy: 'key_ai',
+          reason: 'Auto-assigned by KEY Operator',
+        }).catch(() => { /* ignore assignment errors */ });
         return { id: task.id, title: task.title, contactId: task.contactId };
       }
 
@@ -2112,6 +2147,15 @@ export class FlowOrchestratorService {
             priority: args.priority ?? 'NORMAL',
           },
         });
+        // Auto-assign KEY to tasks it creates
+        await this.taskAssignment.assign({
+          taskType: 'ProjectTask',
+          taskId: task.id,
+          assignableType: 'KEY',
+          assignableId: 'key_ai',
+          assignedBy: 'key_ai',
+          reason: 'Auto-assigned by KEY Operator',
+        }).catch(() => { /* ignore assignment errors */ });
         return { task };
       }
 
@@ -2404,6 +2448,166 @@ export class FlowOrchestratorService {
         return { brief, message: 'Brief stub created. Use the SEO workspace to generate full AI brief.' };
       }
 
+      // === CONTENT OPS ===
+      case 'content_list_requests': {
+        const result = await this.contentRequest.listForBusiness(businessId, {
+          status: args.status,
+          limit: args.limit ?? 25,
+          offset: 0,
+        });
+        return { items: result.items, total: result.total };
+      }
+      case 'content_get_request': {
+        const request = await this.contentRequest.getById(args.requestId);
+        return { request };
+      }
+      case 'content_create_request': {
+        const request = await this.contentRequest.createRequest({
+          businessId,
+          requestedBy: 'key_ai',
+          source: 'flow_ai',
+          contentTypes: args.contentTypes,
+          businessGoal: args.businessGoal,
+          targetAudience: args.targetAudience ?? null,
+          offer: args.offer ?? null,
+          tone: args.tone ?? null,
+          dueDate: args.dueDate ?? null,
+          priority: args.priority ?? 'NORMAL',
+          approvalRequired: args.approvalRequired ?? true,
+        });
+        return { id: request.id, status: request.status };
+      }
+      case 'content_assign_request': {
+        await this.contentRequest.assignRequest(args.requestId, args.teamMemberIds, 'key_ai');
+        return { requestId: args.requestId, assignedTo: args.teamMemberIds };
+      }
+      case 'content_transition_status': {
+        await this.contentRequest.transitionStatus(args.requestId, args.newStatus, 'key_ai', args.comment);
+        return { requestId: args.requestId, newStatus: args.newStatus };
+      }
+      case 'content_submit_for_review': {
+        await this.contentRequest.submitForReview(args.requestId, 'key_ai', args.comment);
+        return { requestId: args.requestId, status: 'INTERNAL_REVIEW' };
+      }
+      case 'content_upload_deliverables': {
+        await this.contentRequest.uploadDeliverables(args.requestId, args.fileIds, args.folderId, 'key_ai');
+        return { requestId: args.requestId, uploaded: args.fileIds.length };
+      }
+      case 'content_deliver_request': {
+        await this.contentRequest.deliverRequest(args.requestId, 'key_ai');
+        return { requestId: args.requestId, status: 'DELIVERED' };
+      }
+
+      // === CALL TASKS ===
+      case 'call_list_tasks': {
+        const result = await this.callLog.listCalls(businessId, {
+          status: args.status,
+          callerId: args.callerId,
+          contactId: args.contactId,
+          limit: args.limit ?? 25,
+          offset: 0,
+        });
+        return { items: result.items, total: result.total };
+      }
+      case 'call_create_task': {
+        const log = await this.callLog.createCallLog({
+          businessId,
+          contactId: args.contactId,
+          callerId: args.callerId,
+          scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : undefined,
+          script: args.script ?? null,
+          notes: args.notes ?? null,
+        });
+        return { id: log.id, contactId: args.contactId };
+      }
+      case 'call_log_outcome': {
+        const completed = await this.callLog.completeCall(args.callLogId, {
+          outcome: args.outcome,
+          duration: args.duration ?? undefined,
+          notes: args.notes ?? undefined,
+        }, 'key_ai');
+        return { callLogId: args.callLogId, outcome: args.outcome };
+      }
+      case 'call_schedule_followup': {
+        const task = await this.callLog.createFollowUpTask(args.callLogId, {
+          title: args.title,
+          dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
+          priority: args.priority ?? 'NORMAL',
+          assigneeId: args.assigneeId,
+        }, 'key_ai');
+        return { taskId: task.id, title: args.title };
+      }
+
+      // === EVIDENCE ===
+      case 'evidence_list': {
+        const result = await this.evidence.listForBusiness(businessId, {
+          evidenceType: args.evidenceType,
+          limit: args.limit ?? 25,
+          offset: 0,
+        });
+        return { items: result.items, total: result.total };
+      }
+      case 'evidence_submit': {
+        const ev = await this.evidence.submit({
+          businessId,
+          evidenceType: args.evidenceType,
+          url: args.url,
+          storageKey: args.storageKey,
+          submittedBy: 'key_ai',
+          linkedType: args.linkedType,
+          linkedId: args.linkedId,
+          metadata: args.metadata ?? {},
+        });
+        return { id: ev.id, linkedType: args.linkedType, linkedId: args.linkedId };
+      }
+      case 'evidence_verify': {
+        await this.evidence.verify({ evidenceId: args.evidenceId, verifierId: 'key_ai' });
+        return { evidenceId: args.evidenceId, verified: true };
+      }
+
+      // === APPROVALS ===
+      case 'approval_list': {
+        const result = await this.approvalRequest.listForBusiness(businessId, {
+          status: args.status,
+          requestType: args.requestType,
+          limit: args.limit ?? 25,
+          offset: 0,
+        });
+        return { items: result.items, total: result.total };
+      }
+      case 'approval_create_request': {
+        const approval = await this.approvalRequest.createRequest({
+          businessId,
+          requestType: args.requestType,
+          requesterId: 'key_ai',
+          title: args.title,
+          description: args.description ?? null,
+          payload: args.payload ?? {},
+          threshold: args.threshold ?? undefined,
+          steps: args.steps,
+        });
+        return { id: approval.id, status: approval.status };
+      }
+      case 'approval_decide_step': {
+        const decision = await this.approvalRequest.decideStep({
+          approvalRequestId: args.approvalRequestId,
+          approverId: 'key_ai',
+          decision: args.decision,
+          comment: args.comment ?? null,
+        });
+        return { approvalRequestId: args.approvalRequestId, decision: args.decision, newStatus: decision?.status ?? 'unknown' };
+      }
+
+      // === DRIVE ===
+      case 'drive_create_folder': {
+        const folderId = await this.drive.createFolder(businessId, args.name, args.parentId);
+        return { folderId, name: args.name };
+      }
+      case 'drive_create_document': {
+        const documentId = await this.drive.createDoc(businessId, args.title, args.parentId);
+        return { documentId, title: args.title };
+      }
+
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -2433,6 +2637,36 @@ export class FlowOrchestratorService {
         return `Bulk-update ${args.ids?.length ?? 0} ${args.entityType}(s) to status "${args.newStatus}"`;
       case 'create_followup_queue':
         return `Create follow-up tasks for stale contacts (${args.staleDays ?? 14}+ days inactive)`;
+      case 'content_create_request':
+        return `Create content request: ${args.businessGoal}`;
+      case 'content_assign_request':
+        return `Assign content request ${args.requestId} to ${args.teamMemberIds?.length ?? 0} member(s)`;
+      case 'content_transition_status':
+        return `Transition content request ${args.requestId} to "${args.newStatus}"`;
+      case 'content_submit_for_review':
+        return `Submit content request ${args.requestId} for review`;
+      case 'content_upload_deliverables':
+        return `Upload ${args.fileIds?.length ?? 0} deliverable(s) to content request ${args.requestId}`;
+      case 'content_deliver_request':
+        return `Deliver content request ${args.requestId}`;
+      case 'call_create_task':
+        return `Schedule call to contact ${args.contactId}`;
+      case 'call_log_outcome':
+        return `Log call outcome: ${args.outcome}`;
+      case 'call_schedule_followup':
+        return `Schedule follow-up task from call ${args.callLogId}`;
+      case 'evidence_submit':
+        return `Submit ${args.evidenceType} evidence for ${args.linkedType} ${args.linkedId}`;
+      case 'evidence_verify':
+        return `Verify evidence ${args.evidenceId}`;
+      case 'approval_create_request':
+        return `Create ${args.requestType} approval request: ${args.title}`;
+      case 'approval_decide_step':
+        return `${args.decision === 'approve' ? 'Approve' : 'Reject'} approval request ${args.approvalRequestId}`;
+      case 'drive_create_folder':
+        return `Create Drive folder: ${args.name}`;
+      case 'drive_create_document':
+        return `Create Drive document: ${args.title}`;
       default:
         return `Execute ${toolName.replace(/_/g, ' ')}`;
     }
@@ -2472,6 +2706,36 @@ export class FlowOrchestratorService {
         return `Playbook "${result?.name ?? ''}" enabled.`;
       case 'update_status_with_confirmation':
         return `Updated ${result?.updatedCount ?? 0} ${result?.entityType ?? 'entity'}(s) to "${result?.newStatus ?? ''}".`;
+      case 'content_create_request':
+        return `Content request created (ID: ${result?.id ?? ''}, status: ${result?.status ?? 'DRAFT'}).`;
+      case 'content_assign_request':
+        return `Content request assigned to ${result?.assignedTo?.length ?? 0} member(s).`;
+      case 'content_transition_status':
+        return `Content request status updated to "${result?.newStatus ?? ''}".`;
+      case 'content_submit_for_review':
+        return `Content request submitted for review.`;
+      case 'content_upload_deliverables':
+        return `${result?.uploaded ?? 0} deliverable(s) uploaded.`;
+      case 'content_deliver_request':
+        return `Content request delivered.`;
+      case 'call_create_task':
+        return `Call scheduled (ID: ${result?.id ?? ''}).`;
+      case 'call_log_outcome':
+        return `Call outcome logged: ${result?.outcome ?? ''}.`;
+      case 'call_schedule_followup':
+        return `Follow-up task created: "${result?.title ?? ''}".`;
+      case 'evidence_submit':
+        return `Evidence submitted (ID: ${result?.id ?? ''}).`;
+      case 'evidence_verify':
+        return `Evidence verified.`;
+      case 'approval_create_request':
+        return `Approval request created (ID: ${result?.id ?? ''}, status: ${result?.status ?? ''}).`;
+      case 'approval_decide_step':
+        return `Approval ${result?.decision ?? ''}d. Request status: ${result?.newStatus ?? ''}.`;
+      case 'drive_create_folder':
+        return `Drive folder created: ${result?.name ?? ''}.`;
+      case 'drive_create_document':
+        return `Drive document created: ${result?.title ?? ''}.`;
       default:
         return 'Action completed.';
     }

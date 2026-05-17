@@ -1669,6 +1669,406 @@ export const FLOW_TOOLS: FlowTool[] = [
     },
     outputSchema: { type: 'object', description: 'Generated content brief', fields: { brief: { type: 'object', description: 'The content brief record' } } },
   },
+
+  // ================================================================
+  //  CONTENT OPS FAMILY — L3 Operator: content pipeline execution
+  // ================================================================
+  {
+    name: 'content_list_requests',
+    description: 'List content requests for the business with optional status filter. Returns pipeline items with status, priority, due date, and assignees.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status', enum: ['DRAFT', 'SUBMITTED', 'ASSIGNED', 'IN_PRODUCTION', 'INTERNAL_REVIEW', 'USER_REVIEW', 'APPROVED', 'UPLOADED_TO_DRIVE', 'DELIVERED'] },
+        limit: { type: 'number', description: 'Max results (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Content requests', fields: { items: { type: 'array', description: 'Content request rows' }, total: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'content_get_request',
+    description: 'Get a single content request by ID with full details including status history, assigned team members, and delivery package.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    parameters: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string', description: 'The content request ID' },
+      },
+      required: ['requestId'],
+    },
+    outputSchema: { type: 'object', description: 'Content request detail', fields: { request: { type: 'object', description: 'Full content request record' } } },
+  },
+  {
+    name: 'content_create_request',
+    description: 'Create a new content request — blog post, social content, email, video script, flyer, etc. Sets status to DRAFT.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    changedEntities: ['contentRequest'],
+    parameters: {
+      type: 'object',
+      properties: {
+        contentTypes: { type: 'array', description: 'Content types to create', items: { type: 'string' } },
+        businessGoal: { type: 'string', description: 'Business goal for this content (e.g. "Drive holiday bookings")' },
+        targetAudience: { type: 'string', description: 'Target audience description' },
+        offer: { type: 'string', description: 'Product or offer being promoted' },
+        tone: { type: 'string', description: 'Content tone', enum: ['professional', 'casual', 'urgent', 'playful', 'luxury'] },
+        dueDate: { type: 'string', description: 'Due date in ISO format' },
+        priority: { type: 'string', description: 'Priority', enum: ['LOW', 'NORMAL', 'HIGH', 'URGENT'] },
+        approvalRequired: { type: 'boolean', description: 'Whether approval is required before delivery (default true)' },
+      },
+      required: ['contentTypes', 'businessGoal'],
+    },
+    outputSchema: { type: 'object', description: 'Created content request', fields: { id: { type: 'string', description: 'Request ID' }, status: { type: 'string', description: 'Initial status' } } },
+  },
+  {
+    name: 'content_assign_request',
+    description: 'Assign a content request to team members and transition status to ASSIGNED.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    changedEntities: ['contentRequest'],
+    parameters: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string', description: 'Content request ID' },
+        teamMemberIds: { type: 'array', description: 'User IDs to assign', items: { type: 'string' } },
+      },
+      required: ['requestId', 'teamMemberIds'],
+    },
+    outputSchema: { type: 'object', description: 'Assignment result', fields: { requestId: { type: 'string', description: 'Request ID' }, assignedTo: { type: 'array', description: 'Assigned user IDs' } } },
+  },
+  {
+    name: 'content_transition_status',
+    description: 'Transition a content request to a new status (e.g. DRAFT → SUBMITTED → ASSIGNED → IN_PRODUCTION → INTERNAL_REVIEW → USER_REVIEW → APPROVED → UPLOADED_TO_DRIVE → DELIVERED).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    changedEntities: ['contentRequest'],
+    parameters: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string', description: 'Content request ID' },
+        newStatus: { type: 'string', description: 'Target status', enum: ['SUBMITTED', 'ASSIGNED', 'IN_PRODUCTION', 'INTERNAL_REVIEW', 'USER_REVIEW', 'APPROVED', 'UPLOADED_TO_DRIVE', 'DELIVERED', 'CANCELLED'] },
+        comment: { type: 'string', description: 'Optional transition comment' },
+      },
+      required: ['requestId', 'newStatus'],
+    },
+    outputSchema: { type: 'object', description: 'Transition result', fields: { requestId: { type: 'string', description: 'Request ID' }, newStatus: { type: 'string', description: 'New status' } } },
+  },
+  {
+    name: 'content_submit_for_review',
+    description: 'Submit a content request for internal review (transitions IN_PRODUCTION → INTERNAL_REVIEW).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    changedEntities: ['contentRequest'],
+    parameters: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string', description: 'Content request ID' },
+        comment: { type: 'string', description: 'Optional comment for reviewers' },
+      },
+      required: ['requestId'],
+    },
+    outputSchema: { type: 'object', description: 'Submit result', fields: { requestId: { type: 'string', description: 'Request ID' }, status: { type: 'string', description: 'New status' } } },
+  },
+  {
+    name: 'content_upload_deliverables',
+    description: 'Upload deliverable file IDs to a content request (requires APPROVED status). Transitions to UPLOADED_TO_DRIVE.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    changedEntities: ['contentRequest', 'contentDeliveryPackage'],
+    parameters: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string', description: 'Content request ID' },
+        fileIds: { type: 'array', description: 'Google Drive file IDs', items: { type: 'string' } },
+        folderId: { type: 'string', description: 'Google Drive folder ID' },
+      },
+      required: ['requestId', 'fileIds', 'folderId'],
+    },
+    outputSchema: { type: 'object', description: 'Upload result', fields: { requestId: { type: 'string', description: 'Request ID' }, uploaded: { type: 'number', description: 'Files uploaded' } } },
+  },
+  {
+    name: 'content_deliver_request',
+    description: 'Mark a content request as delivered (requires UPLOADED_TO_DRIVE status). Final step in the pipeline.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    changedEntities: ['contentRequest', 'contentDeliveryPackage'],
+    parameters: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string', description: 'Content request ID' },
+      },
+      required: ['requestId'],
+    },
+    outputSchema: { type: 'object', description: 'Delivery result', fields: { requestId: { type: 'string', description: 'Request ID' }, status: { type: 'string', description: 'New status' } } },
+  },
+
+  // ================================================================
+  //  CALL TASKS FAMILY — L3 Operator: call scheduling & logging
+  // ================================================================
+  {
+    name: 'call_list_tasks',
+    description: 'List call logs/tasks for the business with optional filters for status, caller, contact, and date range.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/call-tasks',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status', enum: ['scheduled', 'completed'] },
+        callerId: { type: 'string', description: 'Filter by caller user ID' },
+        contactId: { type: 'string', description: 'Filter by contact ID' },
+        limit: { type: 'number', description: 'Max results (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Call logs', fields: { items: { type: 'array', description: 'Call log rows' }, total: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'call_create_task',
+    description: 'Create a scheduled call task for a contact with script, notes, and optional link to an existing task.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/call-tasks',
+    changedEntities: ['callLog'],
+    parameters: {
+      type: 'object',
+      properties: {
+        contactId: { type: 'string', description: 'Contact ID to call' },
+        callerId: { type: 'string', description: 'User ID who will make the call' },
+        scheduledAt: { type: 'string', description: 'Scheduled date/time in ISO format' },
+        script: { type: 'string', description: 'Call script or talking points' },
+        notes: { type: 'string', description: 'Additional notes' },
+      },
+      required: ['contactId', 'callerId'],
+    },
+    outputSchema: { type: 'object', description: 'Created call task', fields: { id: { type: 'string', description: 'Call log ID' }, contactId: { type: 'string', description: 'Contact ID' } } },
+  },
+  {
+    name: 'call_log_outcome',
+    description: 'Log the outcome of a completed call — reached, no_answer, voicemail, wrong_number, callback_requested, not_interested.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/call-tasks',
+    changedEntities: ['callLog'],
+    parameters: {
+      type: 'object',
+      properties: {
+        callLogId: { type: 'string', description: 'Call log ID' },
+        outcome: { type: 'string', description: 'Call outcome', enum: ['reached', 'no_answer', 'voicemail', 'wrong_number', 'callback_requested', 'not_interested'] },
+        duration: { type: 'number', description: 'Call duration in seconds' },
+        notes: { type: 'string', description: 'Additional notes' },
+      },
+      required: ['callLogId', 'outcome'],
+    },
+    outputSchema: { type: 'object', description: 'Outcome logged', fields: { callLogId: { type: 'string', description: 'Call log ID' }, outcome: { type: 'string', description: 'Recorded outcome' } } },
+  },
+  {
+    name: 'call_schedule_followup',
+    description: 'Create a follow-up task from a completed call (e.g. callback_requested → schedule new call).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/call-tasks',
+    changedEntities: ['contactTask'],
+    parameters: {
+      type: 'object',
+      properties: {
+        callLogId: { type: 'string', description: 'Call log ID' },
+        title: { type: 'string', description: 'Follow-up task title' },
+        dueDate: { type: 'string', description: 'Due date in ISO format' },
+        priority: { type: 'string', description: 'Priority', enum: ['LOW', 'NORMAL', 'HIGH'] },
+        assigneeId: { type: 'string', description: 'User ID to assign follow-up to' },
+      },
+      required: ['callLogId', 'title'],
+    },
+    outputSchema: { type: 'object', description: 'Follow-up created', fields: { taskId: { type: 'string', description: 'Follow-up task ID' }, title: { type: 'string', description: 'Task title' } } },
+  },
+
+  // ================================================================
+  //  EVIDENCE FAMILY — L3 Operator: evidence submission & verification
+  // ================================================================
+  {
+    name: 'evidence_list',
+    description: 'List evidence records for the business with optional type filter.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/evidence',
+    parameters: {
+      type: 'object',
+      properties: {
+        evidenceType: { type: 'string', description: 'Filter by evidence type', enum: ['photo', 'file', 'signature', 'checklist', 'message', 'note', 'document'] },
+        limit: { type: 'number', description: 'Max results (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Evidence records', fields: { items: { type: 'array', description: 'Evidence rows' }, total: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'evidence_submit',
+    description: 'Submit evidence (photo, file, document, etc.) linked to a task, approval, or contact.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/evidence',
+    changedEntities: ['evidence'],
+    parameters: {
+      type: 'object',
+      properties: {
+        evidenceType: { type: 'string', description: 'Type of evidence', enum: ['photo', 'file', 'signature', 'checklist', 'message', 'note', 'document'] },
+        url: { type: 'string', description: 'Public URL of the evidence file' },
+        storageKey: { type: 'string', description: 'Storage key/path for the file' },
+        linkedType: { type: 'string', description: 'What this evidence is for', enum: ['ContactTask', 'ProjectTask', 'ApprovalRequest', 'Contact', 'CallLog'] },
+        linkedId: { type: 'string', description: 'ID of the linked item' },
+        metadata: { type: 'object', description: 'Optional metadata' },
+      },
+      required: ['evidenceType', 'url', 'storageKey', 'linkedType', 'linkedId'],
+    },
+    outputSchema: { type: 'object', description: 'Submitted evidence', fields: { id: { type: 'string', description: 'Evidence ID' }, linkedType: { type: 'string', description: 'Linked item type' }, linkedId: { type: 'string', description: 'Linked item ID' } } },
+  },
+  {
+    name: 'evidence_verify',
+    description: 'Verify a submitted evidence record (mark as verified).',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/evidence',
+    changedEntities: ['evidence'],
+    parameters: {
+      type: 'object',
+      properties: {
+        evidenceId: { type: 'string', description: 'Evidence ID to verify' },
+      },
+      required: ['evidenceId'],
+    },
+    outputSchema: { type: 'object', description: 'Verification result', fields: { evidenceId: { type: 'string', description: 'Evidence ID' }, verified: { type: 'boolean', description: 'Verification status' } } },
+  },
+
+  // ================================================================
+  //  APPROVALS FAMILY — L3 Operator: approval workflow execution
+  // ================================================================
+  {
+    name: 'approval_list',
+    description: 'List approval requests for the business with optional status and type filters.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/approvals',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status', enum: ['pending', 'approved', 'rejected', 'escalated', 'delegated'] },
+        requestType: { type: 'string', description: 'Filter by type', enum: ['quote_discount', 'expense', 'content_delivery', 'refund', 'po', 'time_off'] },
+        limit: { type: 'number', description: 'Max results (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Approval requests', fields: { items: { type: 'array', description: 'Approval request rows' }, total: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'approval_create_request',
+    description: 'Create an approval request (quote discount, expense, content delivery, refund, etc.) with multi-step approver chain.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/approvals',
+    changedEntities: ['approvalRequest'],
+    parameters: {
+      type: 'object',
+      properties: {
+        requestType: { type: 'string', description: 'Type of approval', enum: ['quote_discount', 'expense', 'content_delivery', 'refund', 'po', 'time_off'] },
+        title: { type: 'string', description: 'Approval title' },
+        description: { type: 'string', description: 'Detailed description' },
+        payload: { type: 'object', description: 'Structured data (e.g. { amount: 500, quoteId: "..." })' },
+        threshold: { type: 'number', description: 'Auto-approve if amount <= threshold' },
+        steps: { type: 'array', description: 'Approver chain [{ stepOrder, approverId }]', items: { type: 'object' } },
+      },
+      required: ['requestType', 'title', 'steps'],
+    },
+    outputSchema: { type: 'object', description: 'Created approval', fields: { id: { type: 'string', description: 'Approval request ID' }, status: { type: 'string', description: 'Initial status' } } },
+  },
+  {
+    name: 'approval_decide_step',
+    description: 'Approve or reject the current step of an approval request. Advances to next step or finalizes the request.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/approvals',
+    changedEntities: ['approvalRequest', 'approvalStep'],
+    parameters: {
+      type: 'object',
+      properties: {
+        approvalRequestId: { type: 'string', description: 'Approval request ID' },
+        decision: { type: 'string', description: 'Decision', enum: ['approve', 'reject'] },
+        comment: { type: 'string', description: 'Optional comment' },
+      },
+      required: ['approvalRequestId', 'decision'],
+    },
+    outputSchema: { type: 'object', description: 'Decision result', fields: { approvalRequestId: { type: 'string', description: 'Request ID' }, decision: { type: 'string', description: 'Recorded decision' }, newStatus: { type: 'string', description: 'Request status after decision' } } },
+  },
+
+  // ================================================================
+  //  DRIVE FAMILY — L3 Operator: Google Drive operations
+  // ================================================================
+  {
+    name: 'drive_create_folder',
+    description: 'Create a folder in Google Drive for the business. Returns the folder ID.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    changedEntities: [],
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Folder name' },
+        parentId: { type: 'string', description: 'Optional parent folder ID' },
+      },
+      required: ['name'],
+    },
+    outputSchema: { type: 'object', description: 'Created folder', fields: { folderId: { type: 'string', description: 'Drive folder ID' }, name: { type: 'string', description: 'Folder name' } } },
+  },
+  {
+    name: 'drive_create_document',
+    description: 'Create a Google Doc in Drive for the business. Returns the document ID.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/content-ops',
+    changedEntities: [],
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Document title' },
+        parentId: { type: 'string', description: 'Optional parent folder ID' },
+      },
+      required: ['title'],
+    },
+    outputSchema: { type: 'object', description: 'Created document', fields: { documentId: { type: 'string', description: 'Drive document ID' }, title: { type: 'string', description: 'Document title' } } },
+  },
 ];
 
 export function getOpenAiToolDefinitions() {

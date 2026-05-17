@@ -76,7 +76,6 @@ const nextConfig: NextConfig = {
     root: repoRoot,
   },
   allowedDevOrigins: buildAllowedDevOrigins(),
-  reactStrictMode: false,
   experimental: {
     optimizePackageImports: [
       "lucide-react",

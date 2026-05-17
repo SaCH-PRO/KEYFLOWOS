@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { logError } from "@/lib/logger";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar,

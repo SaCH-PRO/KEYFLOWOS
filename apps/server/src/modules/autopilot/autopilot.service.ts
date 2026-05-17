@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from '../crm/crm-timeline.service';
@@ -59,6 +59,7 @@ const SETUP_TASKS: Record<string, TaskTemplate[]> = {
 
 @Injectable()
 export class AutopilotService {
+  private readonly logger = new Logger(AutopilotService.name);
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
@@ -413,9 +414,9 @@ export class AutopilotService {
     const realTaskId = actionId.replace(/^(auto_|pending_|overdue_inv_|checkin_|nudge_|postbooking_|autowelcome_|stalenudge_)/, '');
     try {
       await this.updateTaskStatus(realTaskId, businessId, 'AUTO_EXECUTED', 'autopilot');
-    } catch {
-      // Action may not correspond to an AutopilotTask (CRM flow actions use synthetic IDs)
-    }
+    } catch (err) {
+        this.logger.warn(`Action may not correspond to an AutopilotTask (CRM flow actions use synthetic IDs): ${err instanceof Error ? err.message : err}`);
+      }
 
     return { success: true, eventLogged: !!contactId };
   }

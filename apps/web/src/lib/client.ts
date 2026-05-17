@@ -386,6 +386,7 @@ export async function fetchContacts(
     sortBy?: string;
     sortOrder?: "asc" | "desc";
     ownedByMe?: boolean;
+    minRevenue?: number;
     signal?: AbortSignal;
   },
 ): Promise<{ data: ContactListResponse | null; error: string | null }> {
@@ -408,6 +409,7 @@ export async function fetchContacts(
   if (opts?.bestTimeNow) params.set("bestTimeNow", "true");
   if (opts?.favorite !== undefined) params.set("favorite", String(opts.favorite));
   if (opts?.includeArchived) params.set("includeArchived", "true");
+  if (opts?.minRevenue) params.set("minRevenue", String(opts.minRevenue));
   if (opts?.skip !== undefined) params.set("skip", String(opts.skip));
   if (opts?.take !== undefined) params.set("take", String(opts.take));
   if (opts?.cursor) params.set("cursor", opts.cursor);
@@ -1825,7 +1827,7 @@ export async function createProduct(input: {
   currency?: string;
   description?: string;
   category?: string;
-  duration?: number | null;
+  duration?: number | null; // stored in seconds
   imageUrl?: string | null;
   sku?: string | null;
   isActive?: boolean;
@@ -13289,4 +13291,702 @@ export async function fetchOrgTree(businessId: string) {
 
 export async function fetchStructureStats(businessId: string) {
   return apiGetSimple<StructureStats>(`/structure/businesses/${encodeURIComponent(businessId)}/stats`);
+}
+
+// ─── Content Operations ──────────────────────────────────────────────────────
+
+export interface ContentRequest {
+  id: string;
+  businessId: string;
+  requestedBy: string;
+  source: string;
+  status: ContentRequestStatus;
+  contentTypes: string[];
+  businessGoal: string;
+  targetAudience?: string | null;
+  offer?: string | null;
+  productOrService?: string | null;
+  branch?: string | null;
+  tone?: string | null;
+  dueDate?: string | null;
+  priority: string;
+  requiredInputs: string[];
+  attachedAssetIds: string[];
+  assignedTeamMemberIds: string[];
+  googleDriveFolderId?: string | null;
+  deliveryFileIds: string[];
+  approvalRequired: boolean;
+  approvedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ContentRequestStatus =
+  | "draft"
+  | "submitted"
+  | "assigned"
+  | "in_production"
+  | "internal_review"
+  | "user_review"
+  | "approved"
+  | "uploaded_to_drive"
+  | "delivered"
+  | "cancelled";
+
+export interface ContentRequestPipeline {
+  counts: Record<ContentRequestStatus, number>;
+}
+
+export interface ContentDeliveryStatus {
+  requestId: string;
+  status: string;
+  packages: Array<{
+    id: string;
+    destinationType: string;
+    destinationFolderId: string;
+    status: string;
+    uploadedFileIds: string[];
+    deliveredAt?: string;
+  }>;
+}
+
+export async function fetchContentRequests(
+  businessId: string,
+  opts?: { status?: string; limit?: number; offset?: number }
+) {
+  const params = new URLSearchParams();
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.offset) params.set("offset", String(opts.offset));
+  return apiGetSimple<ContentRequest[]>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests?${params.toString()}`
+  );
+}
+
+export async function fetchContentRequestPipeline(businessId: string) {
+  return apiGetSimple<ContentRequestPipeline>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/pipeline`
+  );
+}
+
+export async function fetchContentRequest(businessId: string, requestId: string) {
+  return apiGetSimple<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}`
+  );
+}
+
+export async function createContentRequest(
+  businessId: string,
+  data: {
+    source: string;
+    contentTypes: string[];
+    businessGoal: string;
+    targetAudience?: string;
+    offer?: string;
+    productOrService?: string;
+    branch?: string;
+    tone?: string;
+    dueDate?: string;
+    priority?: string;
+    requiredInputs?: string[];
+    attachedAssetIds?: string[];
+    approvalRequired?: boolean;
+  }
+) {
+  return apiPostSimple<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests`,
+    data
+  );
+}
+
+export async function updateContentRequest(
+  businessId: string,
+  requestId: string,
+  data: Partial<Omit<ContentRequest, "id" | "businessId" | "createdAt" | "updatedAt">>
+) {
+  return apiPatch<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}`,
+    data
+  );
+}
+
+export async function submitContentRequest(businessId: string, requestId: string) {
+  return apiPostSimple<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/submit`,
+    {}
+  );
+}
+
+export async function assignContentRequest(
+  businessId: string,
+  requestId: string,
+  teamMemberIds: string[]
+) {
+  return apiPostSimple<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/assign`,
+    { teamMemberIds }
+  );
+}
+
+export async function startContentProduction(businessId: string, requestId: string) {
+  return apiPostSimple<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/start-production`,
+    {}
+  );
+}
+
+export async function submitForReview(
+  businessId: string,
+  requestId: string,
+  comment?: string
+) {
+  return apiPostSimple<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/submit-for-review`,
+    { comment }
+  );
+}
+
+export async function reviewContentRequest(
+  businessId: string,
+  requestId: string,
+  data: { approved: boolean; comment?: string }
+) {
+  return apiPostSimple<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/review`,
+    data
+  );
+}
+
+export async function uploadDeliverables(
+  businessId: string,
+  requestId: string,
+  data: { fileIds: string[]; comment?: string }
+) {
+  return apiPostSimple<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/upload-deliverables`,
+    data
+  );
+}
+
+export async function deliverContentRequest(businessId: string, requestId: string) {
+  return apiPostSimple<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/deliver`,
+    {}
+  );
+}
+
+export async function deleteContentRequest(businessId: string, requestId: string) {
+  return apiDelete<ContentRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}`
+  );
+}
+
+export async function createDriveFolder(
+  businessId: string,
+  requestId: string,
+  parentFolderId?: string
+) {
+  return apiPostSimple<{ folderId: string; folderUrl: string }>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/drive-folder`,
+    { parentFolderId }
+  );
+}
+
+export async function createDriveDoc(
+  businessId: string,
+  requestId: string,
+  title: string
+) {
+  return apiPostSimple<{ docId: string; docUrl: string }>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/drive-doc`,
+    { title }
+  );
+}
+
+export async function fetchContentDeliveryStatus(businessId: string, requestId: string) {
+  return apiGetSimple<ContentDeliveryStatus>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/delivery-status`
+  );
+}
+
+// ─── Approvals ───────────────────────────────────────────────────────────────
+
+export interface ApprovalRequest {
+  id: string;
+  businessId: string;
+  requestType: string;
+  requesterId: string;
+  title: string;
+  description?: string;
+  payload?: Record<string, unknown> | null;
+  status: string;
+  threshold?: number | null;
+  currentStep: number;
+  createdAt: string;
+  resolvedAt?: string | null;
+  resolution?: string | null;
+  steps?: ApprovalStep[];
+}
+
+export interface ApprovalStep {
+  id: string;
+  approvalRequestId: string;
+  stepOrder: number;
+  approverId: string;
+  status: string;
+  delegatedTo?: string | null;
+  decidedAt?: string | null;
+  decision?: string | null;
+  comment?: string | null;
+}
+
+export async function fetchApprovalRequests(
+  businessId: string,
+  opts?: { status?: string; limit?: number; offset?: number }
+) {
+  const params = new URLSearchParams();
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.offset) params.set("offset", String(opts.offset));
+  return apiGetSimple<{ items: ApprovalRequest[]; total: number; offset: number; limit: number }>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals?${params.toString()}`
+  );
+}
+
+export async function fetchPendingApprovalsForMe(businessId: string) {
+  return apiGetSimple<ApprovalRequest[]>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals/pending-for-me`
+  );
+}
+
+export async function fetchApprovalRequest(businessId: string, approvalId: string) {
+  return apiGetSimple<ApprovalRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals/${encodeURIComponent(approvalId)}`
+  );
+}
+
+export async function createApprovalRequest(
+  businessId: string,
+  data: {
+    requestType: string;
+    title: string;
+    description?: string;
+    payload?: Record<string, unknown>;
+    threshold?: number;
+    steps: { stepOrder: number; approverId: string }[];
+  }
+) {
+  return apiPostSimple<ApprovalRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals`,
+    data
+  );
+}
+
+export async function approveRequest(
+  businessId: string,
+  approvalId: string,
+  comment?: string
+) {
+  return apiPostSimple<ApprovalRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals/${encodeURIComponent(approvalId)}/approve`,
+    { comment }
+  );
+}
+
+export async function rejectRequest(
+  businessId: string,
+  approvalId: string,
+  reason?: string
+) {
+  return apiPostSimple<ApprovalRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals/${encodeURIComponent(approvalId)}/reject`,
+    { reason }
+  );
+}
+
+export async function delegateApproval(
+  businessId: string,
+  approvalId: string,
+  delegateTo: string
+) {
+  return apiPostSimple<ApprovalRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals/${encodeURIComponent(approvalId)}/delegate`,
+    { delegateTo }
+  );
+}
+
+export async function escalateApproval(businessId: string, approvalId: string) {
+  return apiPostSimple<ApprovalRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals/${encodeURIComponent(approvalId)}/escalate`,
+    {}
+  );
+}
+
+export async function deleteApprovalRequest(businessId: string, approvalId: string) {
+  return apiDelete<ApprovalRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals/${encodeURIComponent(approvalId)}`
+  );
+}
+
+// ─── Assets ──────────────────────────────────────────────────────────────────
+
+export interface Asset {
+  id: string;
+  businessId: string;
+  name: string;
+  type: string;
+  url: string;
+  storageKey: string;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  tags: string[];
+  folder: string;
+  permissions: string;
+  uploadedBy: string;
+  usageCount: number;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchAssets(
+  businessId: string,
+  opts?: { type?: string; folder?: string; tag?: string; search?: string }
+) {
+  const params = new URLSearchParams();
+  if (opts?.type) params.set("type", opts.type);
+  if (opts?.folder) params.set("folder", opts.folder);
+  if (opts?.tag) params.set("tag", opts.tag);
+  if (opts?.search) params.set("search", opts.search);
+  return apiGetSimple<Asset[]>(
+    `/businesses/${encodeURIComponent(businessId)}/assets?${params.toString()}`
+  );
+}
+
+export async function fetchAssetFolders(businessId: string) {
+  return apiGetSimple<string[]>(
+    `/businesses/${encodeURIComponent(businessId)}/assets/folders`
+  );
+}
+
+export async function fetchAsset(assetId: string) {
+  return apiGetSimple<Asset>(`/assets/${encodeURIComponent(assetId)}`);
+}
+
+export async function updateAsset(
+  assetId: string,
+  data: { name?: string; folder?: string; permissions?: string }
+) {
+  return apiPatch<Asset>(`/assets/${encodeURIComponent(assetId)}`, data);
+}
+
+export async function tagAsset(assetId: string, tag: string) {
+  return apiPostSimple<Asset>(`/assets/${encodeURIComponent(assetId)}/tag`, { tag });
+}
+
+export async function untagAsset(assetId: string, tag: string) {
+  return apiPostSimple<Asset>(`/assets/${encodeURIComponent(assetId)}/untag`, { tag });
+}
+
+export async function trackAssetUsage(
+  assetId: string,
+  data: { usedInType: string; usedInId: string }
+) {
+  return apiPostSimple<Asset>(`/assets/${encodeURIComponent(assetId)}/track-usage`, data);
+}
+
+export async function deleteAsset(assetId: string) {
+  return apiDelete<Asset>(`/assets/${encodeURIComponent(assetId)}`);
+}
+
+// ─── Evidence ────────────────────────────────────────────────────────────────
+
+export interface Evidence {
+  id: string;
+  businessId: string;
+  evidenceType: string;
+  url: string;
+  storageKey: string;
+  checksum?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  submittedBy: string;
+  submittedAt: string;
+  verifiedBy?: string | null;
+  verifiedAt?: string | null;
+  linkedType: string;
+  linkedId: string;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchEvidence(
+  businessId: string,
+  opts?: { evidenceType?: string; linkedType?: string; linkedId?: string }
+) {
+  const params = new URLSearchParams();
+  if (opts?.evidenceType) params.set("evidenceType", opts.evidenceType);
+  if (opts?.linkedType) params.set("linkedType", opts.linkedType);
+  if (opts?.linkedId) params.set("linkedId", opts.linkedId);
+  return apiGetSimple<Evidence[]>(
+    `/businesses/${encodeURIComponent(businessId)}/evidence?${params.toString()}`
+  );
+}
+
+export async function fetchEvidenceItem(evidenceId: string) {
+  return apiGetSimple<Evidence>(`/evidence/${encodeURIComponent(evidenceId)}`);
+}
+
+export async function submitEvidence(
+  businessId: string,
+  data: {
+    evidenceType: string;
+    linkedType: string;
+    linkedId: string;
+    url: string;
+    storageKey: string;
+    checksum?: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    metadata?: Record<string, unknown>;
+  }
+) {
+  return apiPostSimple<Evidence>(
+    `/businesses/${encodeURIComponent(businessId)}/evidence`,
+    data
+  );
+}
+
+export async function verifyEvidence(
+  evidenceId: string,
+  data: { verifierId: string }
+) {
+  return apiPostSimple<Evidence>(
+    `/evidence/${encodeURIComponent(evidenceId)}/verify`,
+    data
+  );
+}
+
+export async function checkTaskEvidence(linkedType: string, linkedId: string) {
+  return apiGetSimple<{ hasEvidence: boolean; evidence: Evidence[] }>(
+    `/evidence/check?linkedType=${encodeURIComponent(linkedType)}&linkedId=${encodeURIComponent(linkedId)}`
+  );
+}
+
+// ─── Call Tasks ──────────────────────────────────────────────────────────────
+
+export interface CallLog {
+  id: string;
+  businessId: string;
+  contactId: string;
+  taskId?: string | null;
+  callerId: string;
+  scheduledAt: string;
+  completedAt?: string | null;
+  duration?: number | null;
+  outcome?: string | null;
+  script?: string | null;
+  notes?: string | null;
+  recordingUrl?: string | null;
+  followUpTaskId?: string | null;
+  reminderMinutesBefore?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+
+// ─── Call Tasks ──────────────────────────────────────────────────────────────
+
+export interface CallLog {
+  id: string;
+  businessId: string;
+  contactId: string;
+  taskId?: string | null;
+  callerId: string;
+  scheduledAt: string;
+  completedAt?: string | null;
+  duration?: number | null;
+  outcome?: string | null;
+  script?: string | null;
+  notes?: string | null;
+  recordingUrl?: string | null;
+  followUpTaskId?: string | null;
+  reminderMinutesBefore?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchCallLogs(
+  businessId: string,
+  opts?: { contactId?: string; status?: string; date?: string }
+) {
+  const params = new URLSearchParams();
+  if (opts?.contactId) params.set("contactId", opts.contactId);
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.date) params.set("date", opts.date);
+  return apiGetSimple<CallLog[]>(
+    `/businesses/${encodeURIComponent(businessId)}/call-tasks?${params.toString()}`
+  );
+}
+
+export async function fetchScheduledCalls(businessId: string, date?: string) {
+  const params = date ? `?date=${encodeURIComponent(date)}` : "";
+  return apiGetSimple<CallLog[]>(
+    `/businesses/${encodeURIComponent(businessId)}/call-tasks/scheduled${params}`
+  );
+}
+
+export async function fetchCallLog(businessId: string, callId: string) {
+  return apiGetSimple<CallLog>(
+    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}`
+  );
+}
+
+export async function createCallTask(
+  businessId: string,
+  data: {
+    contactId: string;
+    scheduledAt: string;
+    script?: string;
+    notes?: string;
+    reminderMinutesBefore?: number;
+  }
+) {
+  return apiPostSimple<CallLog>(
+    `/businesses/${encodeURIComponent(businessId)}/call-tasks`,
+    data
+  );
+}
+
+export async function completeCallTask(
+  businessId: string,
+  callId: string,
+  data: {
+    outcome: string;
+    duration?: number;
+    notes?: string;
+    recordingUrl?: string;
+    followUpRequired?: boolean;
+  }
+) {
+  return apiPostSimple<CallLog>(
+    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}/complete`,
+    data
+  );
+}
+
+export async function createFollowUpCallTask(
+  businessId: string,
+  callId: string,
+  scheduledAt: string,
+  script?: string
+) {
+  return apiPostSimple<CallLog>(
+    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}/follow-up`,
+    { scheduledAt, script }
+  );
+}
+
+export async function updateCallTask(
+  businessId: string,
+  callId: string,
+  data: Partial<{
+    scheduledAt: string;
+    script: string;
+    notes: string;
+    reminderMinutesBefore: number;
+  }>
+) {
+  return apiPatch<CallLog>(
+    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}`,
+    data
+  );
+}
+
+export async function deleteCallTask(businessId: string, callId: string) {
+  return apiDelete<CallLog>(
+    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}`
+  );
+}
+
+
+// === L4 Manager — Operations Dashboard APIs ===
+
+export interface WorkloadEntry {
+  userId: string;
+  userName: string;
+  role: string;
+  totalAssignedHours: number;
+  calendarHours: number;
+  capacityHours: number;
+  utilizationPercent: number;
+  openTaskCount: number;
+  pendingApprovalCount: number;
+  contentRequestHours: number;
+  skills: string[];
+}
+
+export interface WorkloadReport {
+  businessId: string;
+  generatedAt: string;
+  entries: WorkloadEntry[];
+  overloaded: WorkloadEntry[];
+  underutilized: WorkloadEntry[];
+  totalCapacityHours: number;
+  totalAssignedHours: number;
+}
+
+export interface PrioritizedTask {
+  id: string;
+  type: string;
+  title: string;
+  businessId: string;
+  score: number;
+  revenueImpact: number;
+  deadlineProximity: number;
+  dependencyScore: number;
+  clientTierScore: number;
+  aiConfidence: number;
+  dueDate: string | null;
+  assignedTo: string[];
+  recommendedAction: string;
+}
+
+export interface CapacityAlert {
+  type: string;
+  severity: "high" | "medium" | "low";
+  businessId: string;
+  message: string;
+  affectedUserIds: string[];
+  affectedEntityIds: string[];
+  recommendedAction: string;
+}
+
+export interface RebalanceResult {
+  success: boolean;
+  transfers: Array<{
+    taskType: string;
+    taskId: string;
+    fromUserId: string;
+    toUserId: string;
+    reason: string;
+  }>;
+  errors: string[];
+}
+
+export async function fetchWorkload(businessId: string) {
+  return apiGetSimple<WorkloadReport>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/workload`);
+}
+
+export async function fetchPriorities(businessId: string) {
+  return apiGetSimple<PrioritizedTask[]>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/priorities`);
+}
+
+export async function fetchCapacityAlerts(businessId: string) {
+  return apiGetSimple<CapacityAlert[]>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/capacity-alerts`);
+}
+
+export async function rebalanceWorkload(businessId: string) {
+  return apiPostSimple<RebalanceResult>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/rebalance`, {});
 }
