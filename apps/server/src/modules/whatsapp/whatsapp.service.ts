@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { encryptToken, decryptToken } from '../../core/crypto/token-crypto';
 
 export interface WhatsAppMessage {
   to: string;
@@ -17,6 +18,31 @@ export interface WhatsAppConfig {
   fromNumber?: string;
 }
 
+/** Fields that should be encrypted at rest */
+const SENSITIVE_FIELDS: (keyof WhatsAppConfig)[] = ['authToken', 'accessToken', 'accountSid'];
+
+function encryptConfig(config: WhatsAppConfig): WhatsAppConfig {
+  const encrypted = { ...config };
+  for (const field of SENSITIVE_FIELDS) {
+    const value = encrypted[field];
+    if (value && typeof value === 'string') {
+      (encrypted as Record<string, string | undefined>)[field] = encryptToken(value) ?? undefined;
+    }
+  }
+  return encrypted;
+}
+
+function decryptConfig(config: WhatsAppConfig): WhatsAppConfig {
+  const decrypted = { ...config };
+  for (const field of SENSITIVE_FIELDS) {
+    const value = decrypted[field];
+    if (value && typeof value === 'string') {
+      (decrypted as Record<string, string | undefined>)[field] = decryptToken(value) ?? undefined;
+    }
+  }
+  return decrypted;
+}
+
 @Injectable()
 export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
@@ -31,7 +57,8 @@ export class WhatsAppService {
     if (!business?.metaData) return null;
     const meta = business.metaData as Record<string, unknown>;
     const wa = meta.whatsapp as WhatsAppConfig | undefined;
-    return wa ?? null;
+    if (!wa) return null;
+    return decryptConfig(wa);
   }
 
   async saveConfig(businessId: string, config: WhatsAppConfig): Promise<void> {
@@ -42,7 +69,7 @@ export class WhatsAppService {
     const meta = (business?.metaData as Record<string, unknown> | null) ?? {};
     await this.prisma.client.business.update({
       where: { id: businessId },
-      data: { metaData: { ...meta, whatsapp: config } },
+      data: { metaData: { ...meta, whatsapp: encryptConfig(config) } },
     });
   }
 

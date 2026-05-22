@@ -278,8 +278,8 @@ export class CrmDealsService {
       contactId: deal.contactId,
       stageId: updated.stageId,
       value: updated.value,
-      daysInStage: updated.stageEnteredAt
-        ? Math.floor((Date.now() - new Date(updated.stageEnteredAt).getTime()) / 86400000)
+      daysInStage: updated.lastStageChangedAt
+        ? Math.floor((Date.now() - new Date(updated.lastStageChangedAt).getTime()) / 86400000)
         : 0,
     });
 

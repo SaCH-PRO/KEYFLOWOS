@@ -82,12 +82,18 @@ function createMockApprovals() {
   };
 }
 
+function createMockContentInvoice() {
+  return {
+    generateInvoiceFromDelivery: vi.fn(async () => ({ id: 'inv_1', status: 'DRAFT' })),
+  };
+}
+
 describe('ContentRequestService', () => {
   it('creates a content request', async () => {
     const prisma = createMockPrisma();
     const emitter = createMockEmitter();
     const approvals = createMockApprovals();
-    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any);
+    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any, undefined);
 
     const result = await svc.createRequest({
       businessId: 'biz_1',
@@ -106,7 +112,7 @@ describe('ContentRequestService', () => {
     const prisma = createMockPrisma();
     const emitter = createMockEmitter();
     const approvals = createMockApprovals();
-    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any);
+    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any, undefined);
 
     const created = await svc.createRequest({
       businessId: 'biz_1',
@@ -145,7 +151,7 @@ describe('ContentRequestService', () => {
     const prisma = createMockPrisma();
     const emitter = createMockEmitter();
     const approvals = createMockApprovals();
-    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any);
+    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any, undefined);
 
     const created = await svc.createRequest({
       businessId: 'biz_1',
@@ -162,7 +168,7 @@ describe('ContentRequestService', () => {
     const prisma = createMockPrisma();
     const emitter = createMockEmitter();
     const approvals = createMockApprovals();
-    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any);
+    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any, undefined);
 
     const created = await svc.createRequest({
       businessId: 'biz_1',
@@ -188,7 +194,7 @@ describe('ContentRequestService', () => {
     const prisma = createMockPrisma();
     const emitter = createMockEmitter();
     const approvals = createMockApprovals();
-    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any);
+    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any, undefined);
 
     const created = await svc.createRequest({
       businessId: 'biz_1',
@@ -210,11 +216,40 @@ describe('ContentRequestService', () => {
     expect(result.status).toBe('delivered');
   });
 
+  it('auto-generates invoice on delivery when invoiceOnDelivery is true', async () => {
+    const prisma = createMockPrisma();
+    const emitter = createMockEmitter();
+    const approvals = createMockApprovals();
+    const contentInvoice = createMockContentInvoice();
+    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any, contentInvoice as any);
+
+    const created = await svc.createRequest({
+      businessId: 'biz_1',
+      requestedBy: 'user_1',
+      source: 'user_request',
+      contentTypes: ['blog_post'],
+      businessGoal: 'Increase traffic',
+      invoiceOnDelivery: true,
+    });
+
+    await svc.submitRequest(created.id, 'user_1');
+    await svc.assignRequest(created.id, ['writer_1'], 'user_1');
+    await svc.startProduction(created.id, 'writer_1');
+    await svc.submitForReview(created.id, 'writer_1');
+    await svc.reviewContent(created.id, 'submit_to_user', 'editor_1');
+    await svc.reviewContent(created.id, 'approve', 'user_1');
+    await svc.uploadDeliverables(created.id, ['file_1'], 'folder_1', 'user_1');
+    const result = await svc.deliverRequest(created.id, 'user_1');
+
+    expect(result.status).toBe('delivered');
+    expect(contentInvoice.generateInvoiceFromDelivery).toHaveBeenCalledWith(created.id, 'biz_1');
+  });
+
   it('gets pipeline', async () => {
     const prisma = createMockPrisma();
     const emitter = createMockEmitter();
     const approvals = createMockApprovals();
-    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any);
+    const svc = new ContentRequestService(prisma as any, emitter as any, approvals as any, undefined);
 
     await svc.createRequest({ businessId: 'biz_1', requestedBy: 'user_1', source: 'user_request', contentTypes: ['blog_post'], businessGoal: 'G1' });
     await svc.createRequest({ businessId: 'biz_1', requestedBy: 'user_1', source: 'user_request', contentTypes: ['social_post'], businessGoal: 'G2' });

@@ -1,5 +1,6 @@
 "use client";
 
+import { AddonPackGate } from "@/components/addon-pack-gate";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -133,7 +134,7 @@ const TREND_COLORS: Record<string, string> = {
   stable: "text-slate-400",
 };
 
-export default function SeoPage() {
+function SeoPage() {
   const router = useRouter();
   const [accessChecked, setAccessChecked] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
@@ -957,6 +958,25 @@ function ConnectorsTab({
         )}
       </div>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <AddonPackGate
+      pack="webPresencePack"
+      title="Web Presence Pack"
+      description="SEO operations, Google Search Console & Analytics connectors, content gap analysis, and AI-generated content briefs."
+      features={[
+        "SEO score dashboard with page indexing status",
+        "Google Search Console & GA4 data sync",
+        "Keyword ranking tracking with trend analysis",
+        "Auto-detected SEO issues with fix recommendations",
+        "AI-generated content briefs for target keywords",
+      ]}
+    >
+      <SeoPage />
+    </AddonPackGate>
   );
 }
 

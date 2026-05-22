@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GovernanceService } from './governance.service';
@@ -52,6 +53,20 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     this.pollInterval = setInterval(() => this.tick(), this.POLL_MS);
     this.logger.log(`Plan executor polling started every ${this.POLL_MS}ms`);
+  }
+
+  /**
+   * Immediately enqueue steps when a plan is approved.
+   * This eliminates the 30s polling delay for newly approved plans.
+   */
+  @OnEvent('plan.approved', { async: true })
+  async onPlanApproved(payload: { planId: string; businessId: string }): Promise<void> {
+    this.logger.log(`Plan ${payload.planId} approved — immediate execution triggered`);
+    try {
+      await this.enqueuePlanSteps(payload.planId, payload.businessId);
+    } catch (err) {
+      this.logger.error(`Immediate execution failed for plan ${payload.planId}: ${(err as Error).message}`);
+    }
   }
 
   onModuleDestroy() {
@@ -195,6 +210,10 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // After processing steps, check for newly unblocked steps (dependencies resolved)
+    // and enqueue them immediately without waiting for next poll
+    await this.enqueueUnblockedSteps(planId, businessId);
+
     // Check if plan is complete
     const updatedPlan = await this.prisma.client.aiPlan.findUnique({
       where: { id: planId },
@@ -231,6 +250,91 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
         detail: `Status: ${finalStatus}, completed: ${completed}, failed: ${failed}`,
         data: { planId, status: finalStatus, completed, failed },
       }).catch(() => {});
+    }
+  }
+
+  /**
+   * After steps complete, re-evaluate the plan to find steps whose
+   * dependencies are now satisfied and enqueue them immediately.
+   */
+  private async enqueueUnblockedSteps(planId: string, businessId: string): Promise<void> {
+    const plan = await this.prisma.client.aiPlan.findUnique({
+      where: { id: planId },
+      include: { steps: { orderBy: { order: 'asc' } } },
+    });
+    if (!plan || plan.status !== 'executing') return;
+
+    const steps = plan.steps as unknown as StepNode[];
+    const completedSteps = steps.filter((s) => s.status === 'completed').map((s) => s.id);
+    const failedSteps = steps.filter((s) => s.status === 'failed').map((s) => s.id);
+
+    for (const step of steps) {
+      if (step.status !== 'pending') continue;
+      if (step.scheduledAt && new Date(step.scheduledAt) > new Date()) continue;
+
+      const hasFailedDep = step.dependsOn.some((depId) => failedSteps.includes(depId));
+      if (hasFailedDep) {
+        await this.prisma.client.aiPlanStep.update({
+          where: { id: step.id },
+          data: { status: 'skipped', errorMessage: 'Skipped because a dependency failed' },
+        });
+        continue;
+      }
+
+      const depsMet = step.dependsOn.every((depId) => completedSteps.includes(depId));
+      if (!depsMet) continue;
+
+      // Dependency just resolved — enqueue this step now
+      const toolName = step.toolName ?? step.action;
+      const decision = await this.governance.evaluate(businessId, toolName);
+      if (!decision.allowed) {
+        await this.prisma.client.aiPlanStep.update({
+          where: { id: step.id },
+          data: { status: 'failed', errorMessage: decision.reason },
+        });
+        continue;
+      }
+
+      if (decision.requiresFormalApproval || decision.requiresAdminApproval) {
+        await this.governance.createApprovalItem(businessId, {
+          toolName,
+          title: `Plan step: ${step.action}`,
+          description: step.description ?? undefined,
+          inputPayload: step.inputPayload,
+          planId,
+          planStepId: step.id,
+        });
+        await this.prisma.client.aiPlanStep.update({
+          where: { id: step.id },
+          data: { status: 'awaiting_approval' },
+        });
+        continue;
+      }
+
+      try {
+        await this.queue.enqueuePlanStep(
+          {
+            planId,
+            stepId: step.id,
+            businessId,
+            toolName,
+            args: (step.inputPayload as Record<string, any>) ?? {},
+            order: step.order,
+            dependsOn: step.dependsOn,
+            retryCount: 2,
+            idempotencyKey: `plan:${planId}:step:${step.id}`,
+            planContext: { planId, planStepId: step.id },
+          },
+          { priority: step.riskTier <= 2 ? 3 : 5 },
+        );
+        await this.prisma.client.aiPlanStep.update({
+          where: { id: step.id },
+          data: { status: 'executing', startedAt: new Date() },
+        });
+        this.logger.log(`Enqueued unblocked step ${step.id} (${toolName}) for plan ${planId}`);
+      } catch (err) {
+        this.logger.error(`Failed to enqueue unblocked step ${step.id}: ${(err as Error).message}`);
+      }
     }
   }
 }

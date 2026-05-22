@@ -11,7 +11,7 @@ export const REDIS_CLIENT = Symbol('REDIS_CLIENT');
       useFactory: () => {
         const url = process.env.REDIS_URL ?? 'redis://localhost:6379';
         return new IORedis(url, {
-          maxRetriesPerRequest: 3,
+          maxRetriesPerRequest: null,
           enableReadyCheck: true,
           retryStrategy: (times: number) => {
             const delay = Math.min(times * 50, 2000);

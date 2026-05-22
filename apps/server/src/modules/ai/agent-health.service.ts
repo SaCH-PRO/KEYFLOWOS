@@ -142,6 +142,23 @@ export class AgentHealthService implements OnModuleInit, OnModuleDestroy {
       this.events.emit('plan.stalled', { planId: plan.id, businessId, objective: plan.objective });
     }
 
+    // Recover stuck steps (executing for >10 minutes with no completion signal)
+    const stuckSteps = await this.prisma.client.aiPlanStep.findMany({
+      where: {
+        plan: { businessId },
+        status: 'executing',
+        startedAt: { lt: tenMinutesAgo },
+      },
+      select: { id: true, planId: true, action: true },
+    });
+    for (const step of stuckSteps) {
+      await this.prisma.client.aiPlanStep.update({
+        where: { id: step.id },
+        data: { status: 'failed', errorMessage: 'Execution timeout — no completion signal received' },
+      });
+      this.logger.warn(`Stuck step ${step.id} (plan ${step.planId}) marked as failed`);
+    }
+
     // Check loop health
     const loopHealth = loopStats.map((loop) => {
       const lastRun = loop.lastRunAt;

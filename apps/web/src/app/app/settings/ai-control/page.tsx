@@ -37,36 +37,45 @@ const MODES: Array<{
   border: string;
 }> = [
   {
-    id: "advisory",
-    label: "Advisory",
-    description: "AI suggests actions but never executes automatically. All actions require manual approval.",
+    id: "assisted",
+    label: "Ask First",
+    description: "KEY spots work and asks 'Should I do this?' before every action. You're always in control.",
     icon: ShieldCheck,
     color: "text-emerald-400",
     bg: "bg-emerald-500/10",
     border: "border-emerald-500/30",
   },
   {
-    id: "assisted",
-    label: "Assisted",
-    description: "AI auto-executes low-risk actions (Tier 1). Everything else requires your confirmation.",
-    icon: Shield,
+    id: "pro_auto",
+    label: "Do & Tell",
+    description: "KEY handles safe actions immediately, then tells you what it did. Complex or risky actions still ask first.",
+    icon: Zap,
     color: "text-blue-400",
     bg: "bg-blue-500/10",
     border: "border-blue-500/30",
   },
   {
-    id: "pro_auto",
-    label: "Pro Auto",
-    description: "AI auto-executes up to Tier 2 actions. High-risk and admin actions still need approval.",
-    icon: Zap,
+    id: "autopilot",
+    label: "Full Autopilot",
+    description: "KEY operates autonomously within authority grants. You get a daily digest of everything it handled.",
+    icon: Sparkles,
     color: "text-amber-400",
     bg: "bg-amber-500/10",
     border: "border-amber-500/30",
   },
   {
+    id: "advisory",
+    label: "Advisory Only",
+    description: "KEY suggests actions but never executes. All work requires your manual approval.",
+    icon: Shield,
+    color: "text-muted-foreground",
+    bg: "bg-muted",
+    border: "border-border/30",
+  },
+  {
     id: "restricted",
-    label: "Restricted",
-    description: "AI is completely locked. All actions are blocked and require admin intervention.",
+    label: "Paused",
+    description: "KEY is completely paused. No actions, no suggestions. Emergency stop mode.",
     icon: Lock,
     color: "text-red-400",
     bg: "bg-red-500/10",
@@ -150,6 +159,25 @@ export default function AiControlCenterPage() {
       }
     } catch {
       toast.error("Failed to update max tier");
+    } finally {
+      setSaving(false);
+    }
+  }, [settings]);
+
+  const handlePauseKey = useCallback(async () => {
+    const biz = getStoredBusinessId();
+    if (!biz || !settings) return;
+    setSaving(true);
+    try {
+      const res = await updateAiGovernance(biz, { mode: "restricted" });
+      if (res.data) {
+        setSettings(res.data);
+        toast.success("KEY paused for 1 hour. All autonomous execution stopped.");
+      } else {
+        toast.error(res.error || "Failed to pause");
+      }
+    } catch {
+      toast.error("Failed to pause KEY");
     } finally {
       setSaving(false);
     }
@@ -256,6 +284,22 @@ export default function AiControlCenterPage() {
               })}
             </div>
           </div>
+
+          {settings.mode !== "restricted" && (
+            <div className="border-t border-border/20 pt-6">
+              <button
+                onClick={handlePauseKey}
+                disabled={saving}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400 hover:bg-red-500/15 transition-all disabled:opacity-50"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                Pause KEY — Stop all autonomous execution
+              </button>
+              <p className="text-[10px] text-muted-foreground/50 mt-1.5 text-center">
+                Emergency stop. Resume anytime by selecting a mode above.
+              </p>
+            </div>
+          )}
 
           <div className="border-t border-border/20 pt-6">
             <h2 className="text-sm font-semibold text-foreground/80 mb-3">Max Auto-Execution Tier</h2>

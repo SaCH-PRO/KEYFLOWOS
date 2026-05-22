@@ -146,7 +146,7 @@ export function CockpitKeyPanel({
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                onClick={() => router.push("/app/control-tower")}
+                onClick={() => router.push("/app/keyflow-command")}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] text-white text-sm font-medium hover:opacity-90 transition-opacity"
               >
                 <CheckCircle2 className="w-4 h-4" />

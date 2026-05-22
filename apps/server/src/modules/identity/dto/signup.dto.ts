@@ -34,6 +34,11 @@ export class SignupDto {
   @IsOptional()
   @MaxLength(30)
   phone?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(32)
+  referralCode?: string;
 }
 
 export class ResendVerificationDto {

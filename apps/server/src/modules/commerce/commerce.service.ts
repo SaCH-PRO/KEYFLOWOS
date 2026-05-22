@@ -449,9 +449,10 @@ export class CommerceService {
           invoiceId,
           amount: existingInvoice.total,
           currency: existingInvoice.currency,
-          status: 'COMPLETED',
+          status: 'SUCCESSFUL',
+          provider: 'manual',
+          providerPaymentId: `manual_${invoiceId}_${Date.now()}`,
           method: 'MANUAL',
-          paidAt: new Date(),
         },
       });
     }

@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CallTaskController } from './call-task.controller';
 import { CallLogService } from './call-log.service';
+import { CallScriptService } from './call-script.service';
 
 describe('CallTaskController', () => {
   function createMockService(): CallLogService {
     return {
       createCallLog: vi.fn(async (input) => ({ id: 'cl_1', ...input, createdAt: new Date() })),
-      getCallLog: vi.fn(async (id) => ({ id, businessId: 'biz_1', callerId: 'user_1', createdAt: new Date() })),
+      getCallLog: vi.fn(async (id) => ({ id, businessId: 'biz_1', callerId: 'user_1', contactId: 'c1', createdAt: new Date() })),
       listCalls: vi.fn(async () => ({ items: [], total: 0, offset: 0, limit: 50 })),
       updateCallLog: vi.fn(async (id, data) => ({ id, ...data, createdAt: new Date() })),
       completeCall: vi.fn(async (id, data) => ({ id, ...data, completedAt: new Date() })),
@@ -17,9 +18,22 @@ describe('CallTaskController', () => {
     } as any;
   }
 
+  function createMockScriptService(): CallScriptService {
+    return {
+      generateScript: vi.fn(async () => ({
+        greeting: 'Hi there!',
+        talkingPoints: ['How are you?', 'Wanted to follow up'],
+        ask: 'Are you ready to move forward?',
+        close: 'Thanks for your time!',
+        durationEstimate: 5,
+      })),
+    } as any;
+  }
+
   it('creates a call log', async () => {
     const svc = createMockService();
-    const ctrl = new CallTaskController(svc);
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.create('biz_1', {
       businessId: 'biz_1',
@@ -34,7 +48,8 @@ describe('CallTaskController', () => {
 
   it('lists calls', async () => {
     const svc = createMockService();
-    const ctrl = new CallTaskController(svc);
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.list('biz_1', {} as any);
     expect(result.total).toBe(0);
@@ -43,7 +58,8 @@ describe('CallTaskController', () => {
 
   it('gets call by id', async () => {
     const svc = createMockService();
-    const ctrl = new CallTaskController(svc);
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.getById('cl_1');
     expect(result.id).toBe('cl_1');
@@ -51,7 +67,8 @@ describe('CallTaskController', () => {
 
   it('updates a call', async () => {
     const svc = createMockService();
-    const ctrl = new CallTaskController(svc);
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.update('cl_1', { notes: 'Updated' });
     expect(svc.updateCallLog).toHaveBeenCalledWith('cl_1', { notes: 'Updated' });
@@ -59,7 +76,8 @@ describe('CallTaskController', () => {
 
   it('completes a call', async () => {
     const svc = createMockService();
-    const ctrl = new CallTaskController(svc);
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.complete('cl_1', {
       outcome: 'reached',
@@ -71,7 +89,8 @@ describe('CallTaskController', () => {
 
   it('creates follow-up task', async () => {
     const svc = createMockService();
-    const ctrl = new CallTaskController(svc);
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.createFollowUp('cl_1', {
       title: 'Send email',
@@ -82,7 +101,8 @@ describe('CallTaskController', () => {
 
   it('deletes a call', async () => {
     const svc = createMockService();
-    const ctrl = new CallTaskController(svc);
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.delete('cl_1');
     expect(result.success).toBe(true);
@@ -90,7 +110,8 @@ describe('CallTaskController', () => {
 
   it('gets scheduled calls for today', async () => {
     const svc = createMockService();
-    const ctrl = new CallTaskController(svc);
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
 
     await ctrl.getScheduledToday('biz_1', 'user_1');
     expect(svc.getScheduledCalls).toHaveBeenCalledWith('biz_1', 'user_1', expect.any(Date));
@@ -98,9 +119,29 @@ describe('CallTaskController', () => {
 
   it('creates from next action', async () => {
     const svc = createMockService();
-    const ctrl = new CallTaskController(svc);
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.createFromNextAction('biz_1', 'c1', {}, { user: { id: 'user_1' } } as any);
     expect(svc.createFromContactNextAction).toHaveBeenCalledWith('c1', 'user_1', undefined);
+  });
+
+  it('generates a call script', async () => {
+    const svc = createMockService();
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
+
+    const result = await ctrl.generateScript('biz_1', 'cl_1', { user: { id: 'user_1' } } as any);
+    expect(scriptSvc.generateScript).toHaveBeenCalledWith('biz_1', 'cl_1', 'c1');
+    expect(result.greeting).toBe('Hi there!');
+  });
+
+  it('auto-generates script when creating from next action if requested', async () => {
+    const svc = createMockService();
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
+
+    await ctrl.createFromNextAction('biz_1', 'c1', { autoGenerateScript: true }, { user: { id: 'user_1' } } as any);
+    expect(scriptSvc.generateScript).toHaveBeenCalledWith('biz_1', 'cl_2', 'c1');
   });
 });

@@ -171,6 +171,8 @@ export class JourneyOrchestratorService implements OnModuleInit {
         data: { status: 'approved' },
       });
       this.logger.log(`Auto-approved plan ${planResult.id} for journey ${template.key}`);
+      // Trigger immediate execution — no 30s polling delay
+      this.events.emit('plan.approved', { planId: planResult.id, businessId });
     }
 
     this.events.emit('journey.started', {

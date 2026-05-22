@@ -29,10 +29,17 @@ function createMockDeliveryService(): any {
   };
 }
 
+function createMockContentInvoiceService(): any {
+  return {
+    generateInvoiceFromDelivery: async () => ({ id: 'inv_1', status: 'DRAFT' }),
+  };
+}
+
 describe('ContentOpsController', () => {
   const contentRequests = createMockContentRequestService();
   const delivery = createMockDeliveryService();
-  const controller = new ContentOpsController(contentRequests, delivery);
+  const contentInvoice = createMockContentInvoiceService();
+  const controller = new ContentOpsController(contentRequests, delivery, contentInvoice);
 
   it('creates a content request', async () => {
     const result = await controller.create('biz_1', {

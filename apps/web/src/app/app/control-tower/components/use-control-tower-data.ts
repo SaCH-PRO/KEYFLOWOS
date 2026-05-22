@@ -150,7 +150,7 @@ function buildActionSet(p: ControlTowerPriority, _snap: BusinessGraphSnapshot | 
       key: "approve",
       toolName: "_navigate",
       label: "Review & Approve",
-      args: { route: "/app/control-tower#tower-approvals" },
+      args: { route: "/app/keyflow-command#tower-approvals" },
       tier: 0,
       variant: "primary",
     });

@@ -411,15 +411,17 @@ export class PaymentsService {
       return;
     }
 
+    const providerPaymentId: string = obj.id || eventId || `stripe_${invoiceId}_${Date.now()}`;
+
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
     });
     if (!invoice) {
+      const completed = await this.maybeCompleteStorefrontOrder(invoiceId, providerPaymentId);
+      if (completed) return;
       this.logger.warn(`Stripe ${eventType} references unknown invoice ${invoiceId}`);
       return;
     }
-
-    const providerPaymentId: string = obj.id || eventId || `stripe_${invoiceId}_${Date.now()}`;
     const existing = await this.prisma.client.payment.findUnique({
       where: { providerPaymentId },
     }).catch(() => null);
@@ -833,14 +835,27 @@ export class PaymentsService {
 
     const link = await this.resolvePaypalInvoiceId(resource);
     if (!link) {
-      this.logger.warn(`PayPal capture ${captureId} could not be linked to a local invoice; skipping persist`);
+      const orderId: string | undefined =
+        resource?.custom_id ||
+        resource?.invoice_id ||
+        resource?.purchase_units?.[0]?.custom_id ||
+        resource?.purchase_units?.[0]?.reference_id;
+      if (orderId) {
+        const completed = await this.maybeCompleteStorefrontOrder(orderId, captureId);
+        if (completed) return;
+      }
+      this.logger.warn(`PayPal capture ${captureId} could not be linked to a local invoice or storefront order; skipping persist`);
       return;
     }
 
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: link.invoiceId },
     });
-    if (!invoice) return;
+    if (!invoice) {
+      const completed = await this.maybeCompleteStorefrontOrder(link.invoiceId, captureId);
+      if (completed) return;
+      return;
+    }
 
     const amount = Number(resource?.amount?.value ?? invoice.total);
     const currency = (resource?.amount?.currency_code || invoice.currency || 'USD').toUpperCase();
@@ -1022,9 +1037,18 @@ export class PaymentsService {
       include: { business: { select: { metaData: true } } },
     });
 
+    let order: { id: string; businessId: string; currency: string; total: number; paymentStatus: string } | null = null;
     if (!invoice) {
-      return { success: false, message: 'Invoice not found' };
+      order = await this.prisma.client.marketplaceOrder.findUnique({
+        where: { id: order_id },
+        select: { id: true, businessId: true, currency: true, total: true, paymentStatus: true },
+      });
+      if (!order) {
+        return { success: false, message: 'Invoice not found' };
+      }
     }
+
+    const businessId = invoice?.businessId ?? order!.businessId;
 
     // Signature verification is mandatory — a callback with no hash, or
     // missing the fields needed to compute one, is treated as forged. This
@@ -1060,7 +1084,7 @@ export class PaymentsService {
         'wipay',
         transaction_id,
         status,
-        invoice.businessId,
+        businessId,
       );
       if (!fresh) {
         return { success: true, invoiceId: order_id, message: 'Duplicate callback ignored' };
@@ -1071,6 +1095,14 @@ export class PaymentsService {
 
     if (isSuccessful) {
       try {
+        if (order) {
+          // Storefront checkout path
+          if (order.paymentStatus !== 'PAID' && this.storeOrderService) {
+            await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', transaction_id);
+          }
+          return { success: true, invoiceId: order_id, message: 'Payment successful' };
+        }
+
         const existingPayment = await this.prisma.client.payment.findUnique({
           where: { providerPaymentId: transaction_id || `wipay_${order_id}_${Date.now()}` },
         });
@@ -1079,20 +1111,20 @@ export class PaymentsService {
           await this.createPaymentWithPosting({
             provider: 'wipay',
             providerPaymentId: transaction_id || `wipay_${order_id}_${Date.now()}`,
-            amount: parseFloat(total || String(invoice.total)),
-            currency: invoice.currency,
+            amount: parseFloat(total || String(invoice!.total)),
+            currency: invoice!.currency,
             status: 'SUCCESSFUL',
             invoiceId: order_id,
-            businessId: invoice.businessId,
+            businessId: invoice!.businessId,
           });
 
           await this.invoiceWorkflow.reconcileFromPayments(order_id).catch((e) => {
             this.logger.warn(`WiPay reconcile failed for invoice ${order_id}: ${e instanceof Error ? e.message : e}`);
           });
 
-          this.wipayConnector?.emitPaymentReceived(invoice.businessId, {
-            amount: parseFloat(total || String(invoice.total)),
-            currency: invoice.currency,
+          this.wipayConnector?.emitPaymentReceived(invoice!.businessId, {
+            amount: parseFloat(total || String(invoice!.total)),
+            currency: invoice!.currency,
             invoiceId: order_id,
             externalId: transaction_id,
           }).catch((e) => this.logger.warn(`WiPay connector event emission failed: ${e.message}`));
@@ -1107,25 +1139,31 @@ export class PaymentsService {
     }
 
     try {
-      await this.prisma.client.payment.create({
-        data: {
-          provider: 'wipay',
-          providerPaymentId: transaction_id || `wipay_fail_${order_id}_${Date.now()}`,
-          amount: parseFloat(total || String(invoice.total)),
-          currency: invoice.currency,
-          status: 'FAILED',
-          invoiceId: order_id,
-          businessId: invoice.businessId,
-        },
-      });
+      if (order) {
+        if (order.paymentStatus !== 'FAILED' && this.storeOrderService) {
+          await this.storeOrderService.updatePaymentStatus(order.id, 'FAILED', transaction_id);
+        }
+      } else {
+        await this.prisma.client.payment.create({
+          data: {
+            provider: 'wipay',
+            providerPaymentId: transaction_id || `wipay_fail_${order_id}_${Date.now()}`,
+            amount: parseFloat(total || String(invoice!.total)),
+            currency: invoice!.currency,
+            status: 'FAILED',
+            invoiceId: order_id,
+            businessId: invoice!.businessId,
+          },
+        });
 
-      this.wipayConnector?.emitPaymentFailed(invoice.businessId, {
-        amount: parseFloat(total || String(invoice.total)),
-        currency: invoice.currency,
-        error: `WiPay payment status: ${status}`,
-        invoiceId: order_id,
-        externalId: transaction_id,
-      }).catch((e) => this.logger.warn(`WiPay connector event emission failed: ${e.message}`));
+        this.wipayConnector?.emitPaymentFailed(invoice!.businessId, {
+          amount: parseFloat(total || String(invoice!.total)),
+          currency: invoice!.currency,
+          error: `WiPay payment status: ${status}`,
+          invoiceId: order_id,
+          externalId: transaction_id,
+        }).catch((e) => this.logger.warn(`WiPay connector event emission failed: ${e.message}`));
+      }
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`Failed to record failed WiPay payment: ${errMsg}`);

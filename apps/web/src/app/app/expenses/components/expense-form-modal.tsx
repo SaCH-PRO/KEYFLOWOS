@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { X, Upload, Image as ImageIcon, Repeat, DollarSign, FileText, Store, Tag, Calendar, CreditCard, FolderKanban, Users, Briefcase } from "lucide-react";
+import { X, Upload, Image as ImageIcon, Repeat, DollarSign, FileText, Store, Tag, Calendar, CreditCard, FolderKanban, Users, Briefcase, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Expense,
@@ -10,6 +10,7 @@ import {
   PAYMENT_METHODS,
   createExpense,
   updateExpense,
+  extractReceipt,
 } from "@/lib/client";
 import { useUpload } from "@/hooks/use-upload";
 import { API_BASE } from "@/lib/api";
@@ -72,6 +73,8 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
     } catch (_err) { toast.error("Failed to save expense"); }
   };
 
+  const [extracting, setExtracting] = useState(false);
+
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -92,6 +95,36 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
         toast.error("Failed to upload receipt");
       }
     } catch (_err) { toast.error("Failed to upload receipt"); }
+  };
+
+  const handleExtractReceipt = async () => {
+    if (!formData.receiptUrl) return;
+    setExtracting(true);
+    try {
+      const res = await extractReceipt(businessId, { url: formData.receiptUrl, filename: "receipt.jpg" });
+      if (res.error) {
+        toast.error(res.error);
+        setExtracting(false);
+        return;
+      }
+      const data = res.data;
+      if (data?.invoiceData) {
+        const inv = data.invoiceData;
+        setFormData(prev => ({
+          ...prev,
+          description: inv.lineItems?.[0]?.description || prev.description,
+          amount: String(inv.total || inv.subtotal || prev.amount),
+          vendor: inv.contactName || prev.vendor,
+          date: inv.issueDate ? inv.issueDate.split("T")[0] : prev.date,
+        }));
+        toast.success(`Receipt extracted (${Math.round((data.confidence || 0) * 100)}% confidence)`);
+      } else {
+        toast.info("Could not extract data from receipt");
+      }
+    } catch (_err) {
+      toast.error("Extraction failed");
+    }
+    setExtracting(false);
   };
 
   const selectedCategory = categories.find(c => c.id === formData.categoryId);
@@ -224,17 +257,27 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
 
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Receipt</label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <label className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""} bg-white/5 border border-border/60 hover:bg-white/10`}>
                 <Upload className="w-4 h-4" />{uploading ? "Uploading..." : "Upload Receipt"}
                 <input type="file" accept="image/*,.pdf" onChange={handleReceiptUpload} className="hidden" />
               </label>
               {formData.receiptUrl && (
-                <div className="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded-lg">
-                  <ImageIcon className="w-3.5 h-3.5" />
-                  <span className="truncate max-w-[150px]">Receipt attached</span>
-                  <button onClick={() => setFormData(prev => ({ ...prev, receiptUrl: "" }))} className="text-muted-foreground hover:text-red-400 ml-1"><X className="w-3 h-3" /></button>
-                </div>
+                <>
+                  <div className="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded-lg">
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    <span className="truncate max-w-[150px]">Receipt attached</span>
+                    <button onClick={() => setFormData(prev => ({ ...prev, receiptUrl: "" }))} className="text-muted-foreground hover:text-red-400 ml-1"><X className="w-3 h-3" /></button>
+                  </div>
+                  <button
+                    onClick={handleExtractReceipt}
+                    disabled={extracting}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-border/60 bg-card/50 hover:bg-card/80 transition-colors disabled:opacity-50"
+                  >
+                    {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    {extracting ? "Extracting…" : "Extract with AI"}
+                  </button>
+                </>
               )}
             </div>
             {!formData.receiptUrl && (

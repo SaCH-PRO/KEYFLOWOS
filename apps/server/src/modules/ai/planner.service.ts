@@ -259,8 +259,13 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
       urgency: plan.urgency,
       modules: plan.modules,
       maxRiskTier: plan.maxRiskTier,
+      startedAt: plan.startedAt,
+      completedAt: plan.completedAt,
+      createdAt: plan.createdAt,
       steps: plan.steps.map(s => ({
+        id: s.id,
         order: s.order,
+        status: s.status,
         toolName: s.toolName,
         module: s.module,
         action: s.action,
@@ -269,7 +274,11 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
         requiresApproval: s.requiresApproval,
         dependsOn: s.dependsOn,
         inputPayload: s.inputPayload as Record<string, any> | null,
+        outputResult: s.outputResult as Record<string, any> | null,
+        errorMessage: s.errorMessage,
         expectedBenefit: s.expectedBenefit,
+        startedAt: s.startedAt,
+        completedAt: s.completedAt,
       })),
     };
   }
@@ -309,11 +318,13 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
       }
     }
 
-    return this.prisma.client.aiPlan.update({
+    const updated = await this.prisma.client.aiPlan.update({
       where: { id: planId },
       data: { status: 'approved' },
       include: { steps: { orderBy: { order: 'asc' } } },
     });
+
+    return updated;
   }
 
   async updatePlanStatus(planId: string, businessId: string, status: string) {

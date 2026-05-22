@@ -5,7 +5,7 @@ import { getApiBase } from "@/lib/api-base";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "../motion-shim";
 import {
   Layers,
   Mail,

@@ -23,6 +23,7 @@ import { AccountantExportService } from './accountant-export.service';
 import { FinanceIntelligenceService } from './finance-intelligence.service';
 import { AccountantExportEmailService } from './accountant-export-email.service';
 import { ObjectStorageService } from '../../core/object-storage';
+import { PostingService, type PostingInput } from './posting.service';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -47,8 +48,69 @@ export class FinanceController {
     @Inject(AccountantExportService) private readonly accountantExport: AccountantExportService,
     @Inject(FinanceIntelligenceService) private readonly intel: FinanceIntelligenceService,
     @Inject(AccountantExportEmailService) private readonly accountantExportEmail: AccountantExportEmailService,
+    @Inject(PostingService) private readonly posting: PostingService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
+
+  // ---------- Manual Journal Entries ----------
+  @Post('journal-entries')
+  async createJournalEntry(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      date: string;
+      description: string;
+      reference?: string;
+      notes?: string;
+      entries: Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>;
+    },
+    @Req() req: Request,
+  ) {
+    const userId = (req as any).user?.id as string | undefined;
+    const totalDebit = body.entries.reduce((sum, e) => sum + (e.debit ?? 0), 0);
+    const input: PostingInput = {
+      businessId,
+      type: 'ADJUSTMENT',
+      date: new Date(body.date),
+      amount: totalDebit,
+      description: body.description,
+      reference: body.reference ?? null,
+      notes: body.notes ?? null,
+      entries: body.entries.map((e) => ({
+        accountId: e.accountId,
+        debit: e.debit ?? 0,
+        credit: e.credit ?? 0,
+        memo: e.memo,
+      })),
+      createdById: userId ?? null,
+    };
+    return this.posting.post(input);
+  }
+
+  @Get('journal-entries')
+  async listJournalEntries(
+    @Param('businessId') businessId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('accountId') accountId?: string,
+  ) {
+    const where: any = { businessId, type: 'ADJUSTMENT' };
+    if (from || to) {
+      where.date = {};
+      if (from) where.date.gte = new Date(from);
+      if (to) where.date.lte = new Date(to);
+    }
+    const transactions = await this.prisma.client.financialTransaction.findMany({
+      where,
+      orderBy: { date: 'desc' },
+      include: {
+        entries: {
+          include: { account: { select: { id: true, name: true, type: true, code: true } } },
+        },
+        contact: { select: { id: true, displayName: true } },
+      },
+    });
+    return { items: transactions };
+  }
 
   private async ensureAccess(userId: string, businessId: string) {
     const biz = await this.prisma.client.business.findFirst({

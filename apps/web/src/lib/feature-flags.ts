@@ -25,7 +25,11 @@ export type DormantFeatureFlagKey =
   | "supplier"
   | "contentScheduler"
   | "marketplaceBrowsing"
-  | "gamificationBadges";
+  | "agencyPack"
+  | "compliancePack"
+  | "webPresencePack"
+  | "salesPack"
+  | "blueprintPostOnboard";
 
 export type FeatureFlagMap = Readonly<Record<DormantFeatureFlagKey, boolean>>;
 
@@ -47,7 +51,11 @@ const RAW_OVERRIDES: Readonly<Record<DormantFeatureFlagKey, string | undefined>>
   supplier: process.env.NEXT_PUBLIC_FF_SUPPLIER,
   contentScheduler: process.env.NEXT_PUBLIC_FF_CONTENT_SCHEDULER,
   marketplaceBrowsing: process.env.NEXT_PUBLIC_FF_MARKETPLACE_BROWSING,
-  gamificationBadges: process.env.NEXT_PUBLIC_FF_GAMIFICATION_BADGES,
+  agencyPack: process.env.NEXT_PUBLIC_FF_AGENCY_PACK,
+  compliancePack: process.env.NEXT_PUBLIC_FF_COMPLIANCE_PACK,
+  webPresencePack: process.env.NEXT_PUBLIC_FF_WEB_PRESENCE_PACK,
+  salesPack: process.env.NEXT_PUBLIC_FF_SALES_PACK,
+  blueprintPostOnboard: process.env.NEXT_PUBLIC_FF_BLUEPRINT_POST_ONBOARD,
 };
 
 function defaultForEnvironment(): boolean {
@@ -77,5 +85,9 @@ export const DORMANT_FEATURE_FLAG_KEYS: ReadonlyArray<DormantFeatureFlagKey> = O
   "supplier",
   "contentScheduler",
   "marketplaceBrowsing",
-  "gamificationBadges",
+  "agencyPack",
+  "compliancePack",
+  "webPresencePack",
+  "salesPack",
+  "blueprintPostOnboard",
 ]);

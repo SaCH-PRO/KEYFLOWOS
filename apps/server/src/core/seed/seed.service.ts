@@ -1,5 +1,7 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
+import { IdentityService } from '../../modules/identity/identity.service';
 import { DOCUMENT_CATEGORIES, DOCUMENT_TYPES } from '../../modules/documents/document-taxonomy';
 
 @Injectable()
@@ -8,6 +10,8 @@ export class SeedService implements OnApplicationBootstrap {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(SupabaseAdminService) private readonly supabaseAdmin: SupabaseAdminService,
+    @Inject(IdentityService) private readonly identity: IdentityService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -16,6 +20,7 @@ export class SeedService implements OnApplicationBootstrap {
     await this.seedCohorts();
     await this.seedDocumentTaxonomy();
     await this.seedSuperAdmin();
+    await this.seedDevUser();
     // Dev auth bypass profile seeding was removed in the Tier 2 auth hardening
     // pass. Old dev profile rows in the DB are harmless (no real Supabase
     // identity backs them, so nobody can authenticate as them) but can be
@@ -44,6 +49,64 @@ export class SeedService implements OnApplicationBootstrap {
       this.logger.log(`Promoted ${SUPER_ADMIN_EMAIL} to SUPER_ADMIN`);
     } catch (e) {
       this.logger.warn('Super admin seed failed: ' + (e as Error).message);
+    }
+  }
+
+  private async seedDevUser() {
+    if (process.env.NODE_ENV !== 'development') return;
+    const DEV_EMAIL = 'dev@keyflow.local';
+    const DEV_PASSWORD = 'keyflowdev123';
+    try {
+      // Skip if Supabase admin is not configured
+      if (!this.supabaseAdmin.isConfigured()) {
+        this.logger.warn('Supabase admin not configured — skipping dev user seed');
+        return;
+      }
+      // Check if dev user already exists in Prisma
+      const existingLocalUser = await this.prisma.client.user.findUnique({
+        where: { email: DEV_EMAIL },
+        select: { id: true },
+      });
+      if (existingLocalUser) {
+        this.logger.log(`Dev user (${DEV_EMAIL}) already exists — skipping seed`);
+        return;
+      }
+      // Check if dev user exists in Supabase ( orphaned — no local row )
+      const existingAuthUser = await this.supabaseAdmin.findUserByEmail(DEV_EMAIL);
+      let supabaseUserId: string;
+      if (existingAuthUser) {
+        supabaseUserId = existingAuthUser.id;
+        this.logger.log(`Dev user exists in Supabase auth; reusing id=${supabaseUserId}`);
+      } else {
+        // Create fresh Supabase auth user (auto-confirmed)
+        const newUser = await this.supabaseAdmin.createUser({
+          email: DEV_EMAIL,
+          password: DEV_PASSWORD,
+          emailConfirm: true,
+          userMetadata: { full_name: 'Dev User', first_name: 'Dev', last_name: 'User' },
+        });
+        supabaseUserId = newUser.id;
+        this.logger.log(`Created dev user in Supabase auth (id=${supabaseUserId})`);
+      }
+      // Bootstrap Prisma User + Business + Membership
+      const { user, business } = await this.identity.bootstrapUser({
+        userId: supabaseUserId,
+        email: DEV_EMAIL,
+        name: 'Dev User',
+        firstName: 'Dev',
+        lastName: 'User',
+      });
+      this.logger.log(
+        `============================================================\n` +
+        `  DEV USER READY  \n` +
+        `  Email:    ${DEV_EMAIL}\n` +
+        `  Password: ${DEV_PASSWORD}\n` +
+        `  User ID:  ${user.id}\n` +
+        `  Business: ${business.name} (${business.id})\n` +
+        `============================================================`,
+      );
+    } catch (e) {
+      this.logger.warn('Dev user seed failed: ' + (e as Error).message);
     }
   }
 

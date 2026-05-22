@@ -6,6 +6,8 @@ import {
   BookingConfirmedPayload,
   BookingCancelledPayload,
   BookingRescheduledPayload,
+  BookingCompletedPayload,
+  BookingNoShowPayload,
   ContactCreatedPayload,
   ContactDeletedPayload,
   ContactImportedPayload,
@@ -14,6 +16,8 @@ import {
   InvoicePaidPayload,
   InvoiceStatusPayload,
   PaymentReceivedPayload,
+  PaymentFailedPayload,
+  QuoteSentPayload,
   SequenceStepDuePayload,
   SequenceStepFailedPayload,
   ExpenseCreatedPayload,
@@ -41,6 +45,9 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
     this.reminderInterval = setInterval(() => {
       this.handleBookingReminders().catch((e) =>
         this.logger.error(`Booking reminder cron failed: ${(e as Error).message}`),
+      );
+      this.handleInvoiceDueSoonReminders().catch((e) =>
+        this.logger.error(`Invoice due-soon cron failed: ${(e as Error).message}`),
       );
     }, 60 * 60 * 1000);
   }
@@ -538,5 +545,135 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
     } catch (e) {
       this.logger.error(`Booking reminder cron failed: ${(e as Error).message}`);
     }
+  }
+
+  async handleInvoiceDueSoonReminders() {
+    try {
+      const now = new Date();
+      const windowStart = new Date(now.getTime() + 23 * 60 * 60 * 1000);
+      const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000);
+
+      const invoices = await this.prisma.client.invoice.findMany({
+        where: {
+          status: 'SENT',
+          deletedAt: null,
+          dueDate: { gte: windowStart, lt: windowEnd },
+        },
+        include: {
+          contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+          items: { select: { description: true, quantity: true, unitPrice: true, total: true } },
+        },
+      });
+
+      for (const inv of invoices) {
+        const dedupeKey = `due-soon_${inv.id}`;
+        const alreadySent = await this.prisma.client.customerNotificationLog.findFirst({
+          where: {
+            businessId: inv.businessId,
+            type: 'invoice_due_soon',
+            messageId: dedupeKey,
+            status: { in: ['SENT', 'QUEUED'] },
+          },
+        });
+        if (alreadySent) continue;
+
+        const base = appUrl();
+        const invoiceUrl = base ? `${base}/invoices/${inv.id}` : undefined;
+
+        await this.sendCustomerNotification(inv.businessId, 'invoice_due_soon', inv.contact, {
+          invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
+          total: inv.total,
+          currency: inv.currency,
+          dueDate: inv.dueDate,
+          invoiceUrl,
+        }, dedupeKey);
+      }
+
+      if (invoices.length > 0) {
+        this.logger.log(`Processed ${invoices.length} invoice due-soon reminders`);
+      }
+    } catch (e) {
+      this.logger.error(`Invoice due-soon cron failed: ${(e as Error).message}`);
+    }
+  }
+
+  @OnEvent('booking.completed')
+  async handleBookingCompletedCustomerNotif(payload: BookingCompletedPayload) {
+    const booking = payload.booking;
+    const service = await this.prisma.client.service.findUnique({ where: { id: booking.serviceId } }).catch(() => null);
+    const staff = booking.staffId
+      ? await this.prisma.client.staffMember.findUnique({ where: { id: booking.staffId } }).catch(() => null)
+      : null;
+    await this.sendCustomerNotification(payload.businessId, 'booking_completed', payload.contact, {
+      serviceName: service?.name ?? 'Appointment',
+      startTime: booking.startTime,
+      staffName: staff?.name,
+      bookingId: booking.id,
+    });
+  }
+
+  @OnEvent('booking.no_show')
+  async handleBookingNoShowCustomerNotif(payload: BookingNoShowPayload) {
+    const booking = payload.booking;
+    const service = await this.prisma.client.service.findUnique({ where: { id: booking.serviceId } }).catch(() => null);
+    const staff = booking.staffId
+      ? await this.prisma.client.staffMember.findUnique({ where: { id: booking.staffId } }).catch(() => null)
+      : null;
+    const base = appUrl();
+    const rescheduleUrl = base ? `${base}/bookings/${booking.id}/reschedule` : undefined;
+    await this.sendCustomerNotification(payload.businessId, 'booking_no_show', payload.contact, {
+      serviceName: service?.name ?? 'Appointment',
+      startTime: booking.startTime,
+      staffName: staff?.name,
+      bookingId: booking.id,
+      rescheduleUrl,
+    });
+  }
+
+  @OnEvent('quote.sent')
+  async handleQuoteSentCustomerNotif(payload: QuoteSentPayload) {
+    const quote = payload.quote as any;
+    const base = appUrl();
+    const quoteUrl = base ? `${base}/quotes/${quote.id}` : undefined;
+    await this.sendCustomerNotification(payload.businessId, 'quote_sent', quote.contact, {
+      quoteNumber: quote.quoteNumber ?? quote.id.slice(-6).toUpperCase(),
+      total: quote.total,
+      currency: quote.currency ?? 'TTD',
+      items: quote.items?.map((i: any) => ({
+        description: i.description ?? 'Item',
+        quantity: i.quantity ?? 1,
+        unitPrice: i.unitPrice ?? 0,
+        total: i.total ?? 0,
+      })),
+      quoteUrl,
+      expiryDate: quote.expiryDate,
+    });
+  }
+
+  @OnEvent('payment.failed')
+  async handlePaymentFailedCustomerNotif(payload: PaymentFailedPayload) {
+    if (!payload.invoiceId) return;
+    const inv = await this.prisma.client.invoice
+      .findFirst({
+        where: { id: payload.invoiceId, businessId: payload.businessId, deletedAt: null },
+        include: { contact: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      })
+      .catch(() => null);
+    if (!inv?.contact?.email) return;
+    const base = appUrl();
+    const retryUrl = base ? `${base}/invoices/${inv.id}/pay` : undefined;
+    await this.sendCustomerNotification(
+      payload.businessId,
+      'payment_failed',
+      inv.contact,
+      {
+        invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
+        total: payload.amount ?? inv.total,
+        currency: payload.currency ?? inv.currency,
+        retryUrl,
+        errorMessage: payload.error,
+      },
+      `payment-failed_${inv.id}`,
+    );
   }
 }

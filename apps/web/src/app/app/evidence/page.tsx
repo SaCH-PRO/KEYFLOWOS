@@ -1,6 +1,8 @@
 "use client";
 
+import { AddonPackGate } from "@/components/addon-pack-gate";
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   ClipboardCheck,
@@ -9,6 +11,7 @@ import {
   CheckCircle2,
   Shield,
   X,
+  Eye,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import {
@@ -18,7 +21,8 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId, getCachedUser } from "@/lib/workspace";
 
-export default function EvidencePage() {
+function EvidencePage() {
+  const router = useRouter();
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -149,15 +153,23 @@ export default function EvidencePage() {
                 )}
                 <div className="mt-3 flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">By {e.submittedBy.slice(0, 8)}</span>
-                  {!e.verifiedAt && (
+                  <div className="flex items-center gap-1">
                     <button
-                      onClick={() => setShowVerify(e.id)}
-                      className="inline-flex items-center gap-1 px-3 py-1 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 transition-colors"
+                      onClick={() => router.push(`/app/evidence/${e.id}`)}
+                      className="p-1.5 rounded hover:bg-muted transition-colors"
                     >
-                      <Shield className="w-3 h-3" />
-                      Verify
+                      <Eye className="w-4 h-4 text-muted-foreground" />
                     </button>
-                  )}
+                    {!e.verifiedAt && (
+                      <button
+                        onClick={() => setShowVerify(e.id)}
+                        className="inline-flex items-center gap-1 px-3 py-1 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 transition-colors"
+                      >
+                        <Shield className="w-3 h-3" />
+                        Verify
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -198,5 +210,24 @@ export default function EvidencePage() {
         </div>
       )}
     </WorkspaceShell>
+  );
+}
+
+export default function Page() {
+  return (
+    <AddonPackGate
+      pack="compliancePack"
+      title="Compliance Pack"
+      description="Audit trails, verification logs, and evidence management for regulated industries that need defensible records."
+      features={[
+        "Tamper-evident audit trails for every business action",
+        "Document verification with checksum hashing",
+        "Compliance-ready export for auditors and regulators",
+        "Linked evidence across contacts, invoices, and bookings",
+        "Chain-of-custody tracking for sensitive records",
+      ]}
+    >
+      <EvidencePage />
+    </AddonPackGate>
   );
 }

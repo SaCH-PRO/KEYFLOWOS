@@ -22,6 +22,7 @@ import {
   RefreshCw,
   BarChart3,
   Flag,
+  Receipt,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import {
@@ -63,6 +64,7 @@ export default function OperationsPage() {
   const [rebalancing, setRebalancing] = useState(false);
   const [stats, setStats] = useState({
     contentPending: 0,
+    contentInvoiced: 0,
     approvalsPending: 0,
     callsToday: 0,
     evidencePending: 0,
@@ -77,6 +79,7 @@ export default function OperationsPage() {
       const today = new Date().toISOString().split("T")[0];
       const [
         contentRes,
+        deliveredRes,
         approvalsRes,
         myApprovalsRes,
         callsRes,
@@ -88,6 +91,7 @@ export default function OperationsPage() {
         aiPendingRes,
       ] = await Promise.all([
         fetchContentRequests(businessId, { status: "in_production" }),
+        fetchContentRequests(businessId, { status: "delivered" }),
         fetchApprovalRequests(businessId, { status: "pending" }),
         fetchPendingApprovalsForMe(businessId).catch(() => ({ data: [] })),
         fetchScheduledCalls(businessId, today),
@@ -100,6 +104,7 @@ export default function OperationsPage() {
       ]);
 
       const content = contentRes.data ?? [];
+      const delivered = deliveredRes.data ?? [];
       const approvals = approvalsRes.data?.items ?? [];
       const myApprs = myApprovalsRes.data ?? [];
       const calls = callsRes.data ?? [];
@@ -117,6 +122,7 @@ export default function OperationsPage() {
       setAiApprovalsPending(aiPendingRes.data?.length ?? 0);
       setStats({
         contentPending: content.length,
+        contentInvoiced: delivered.filter((r) => r.invoiceId).length,
         approvalsPending: approvals.length,
         callsToday: calls.length,
         evidencePending: evidence.length,
@@ -221,6 +227,13 @@ export default function OperationsPage() {
                   <span className="text-sm font-medium">Evidence Pending</span>
                 </div>
                 <div className="text-2xl font-bold mt-1">{stats.evidencePending}</div>
+              </div>
+              <div className="border rounded-xl p-4 bg-emerald-50/50">
+                <div className="flex items-center gap-2 text-emerald-700">
+                  <Receipt className="w-4 h-4" />
+                  <span className="text-sm font-medium">Content Invoiced</span>
+                </div>
+                <div className="text-2xl font-bold mt-1">{stats.contentInvoiced}</div>
               </div>
             </div>
 

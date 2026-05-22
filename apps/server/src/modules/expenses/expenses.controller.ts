@@ -5,11 +5,13 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { Response } from 'express';
+import { DocumentIntelligenceService } from '../ai/document-intelligence.service';
 
 @Controller('expenses')
 export class ExpensesController {
   constructor(
     @Inject(ExpensesService) private readonly expenses: ExpensesService,
+    @Inject(DocumentIntelligenceService) private readonly docIntel: DocumentIntelligenceService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -271,5 +273,22 @@ export class ExpensesController {
     @Param('budgetId') budgetId: string,
   ) {
     return this.expenses.deleteBudget(businessId, budgetId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
+  @Post('businesses/:businessId/expenses/extract-receipt')
+  async extractReceipt(
+    @Param('businessId') businessId: string,
+    @Body() body: { url: string; filename?: string },
+  ) {
+    const result = await this.docIntel.extractFromDocument({
+      businessId,
+      source: 'expense_receipt_upload',
+      mimeType: 'image/jpeg',
+      url: body.url,
+      filename: body.filename || 'receipt.jpg',
+    });
+    return result;
   }
 }

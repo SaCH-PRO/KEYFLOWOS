@@ -1,5 +1,6 @@
 "use client";
 
+import { AddonPackGate } from "@/components/addon-pack-gate";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -22,6 +23,7 @@ import {
   AlertTriangle,
   Package,
   X,
+  Receipt,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import {
@@ -74,7 +76,7 @@ const CONTENT_TYPE_ICONS: Record<string, React.ReactNode> = {
   press_release: <FileText className="w-4 h-4" />,
 };
 
-export default function ContentOpsPage() {
+function ContentOpsPage() {
   const router = useRouter();
   const [requests, setRequests] = useState<ContentRequest[]>([]);
   const [pipeline, setPipeline] = useState<Record<string, number>>({});
@@ -153,6 +155,7 @@ export default function ContentOpsPage() {
         priority: (fd.get("priority") as string) || "normal",
         dueDate: (fd.get("dueDate") as string) || undefined,
         approvalRequired: true,
+        invoiceOnDelivery: fd.get("invoiceOnDelivery") === "on",
       });
       toast.success("Content request created");
       setShowCreate(false);
@@ -429,6 +432,18 @@ export default function ContentOpsPage() {
                   />
                 </div>
               </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="invoiceOnDelivery"
+                  id="invoiceOnDelivery"
+                  className="rounded border-gray-300"
+                />
+                <label htmlFor="invoiceOnDelivery" className="text-sm flex items-center gap-1.5">
+                  <Receipt className="w-3.5 h-3.5 text-muted-foreground" />
+                  Auto-generate invoice on delivery
+                </label>
+              </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
@@ -451,5 +466,24 @@ export default function ContentOpsPage() {
         </div>
       )}
     </WorkspaceShell>
+  );
+}
+
+export default function Page() {
+  return (
+    <AddonPackGate
+      pack="agencyPack"
+      title="Agency Pack"
+      description="Content request pipeline, deliverable tracking, and client approval workflows built for agencies managing creative production at scale."
+      features={[
+        "Content request intake with briefs, priorities, and due dates",
+        "10-step production pipeline from draft to delivery",
+        "Google Drive folder and document auto-generation",
+        "Client review & approval workflow integration",
+        "Auto-invoice generation on content delivery",
+      ]}
+    >
+      <ContentOpsPage />
+    </AddonPackGate>
   );
 }

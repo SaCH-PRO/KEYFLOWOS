@@ -614,3 +614,74 @@ html {
     border-color: hsl(var(--kf-accent1) / 0.15);
   }
 }
+
+/* ---------- Auth page CSS animations (replaces framer-motion for lighter dev builds) ---------- */
+@keyframes kf-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes kf-slide-in-left {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes kf-slide-in-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes kf-slide-in-up-sm {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes kf-height-open {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 200px; }
+}
+
+@keyframes kf-height-close {
+  from { opacity: 1; max-height: 200px; }
+  to { opacity: 0; max-height: 0; }
+}
+
+.animate-kf-fade-in {
+  animation: kf-fade-in 0.5s ease-out forwards;
+}
+
+.animate-kf-slide-in-left {
+  animation: kf-slide-in-left 0.6s ease-out forwards;
+}
+
+.animate-kf-slide-in-up {
+  animation: kf-slide-in-up 0.5s ease-out forwards;
+}
+
+.animate-kf-slide-in-up-sm {
+  animation: kf-slide-in-up-sm 0.4s ease-out forwards;
+}
+
+.animate-kf-delay-1 { animation-delay: 0.1s; opacity: 0; }
+.animate-kf-delay-2 { animation-delay: 0.2s; opacity: 0; }
+.animate-kf-delay-3 { animation-delay: 0.3s; opacity: 0; }
+.animate-kf-delay-4 { animation-delay: 0.4s; opacity: 0; }
+.animate-kf-delay-5 { animation-delay: 0.5s; opacity: 0; }
+.animate-kf-delay-6 { animation-delay: 0.6s; opacity: 0; }
+
+.kf-form-transition {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.kf-form-enter {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.kf-form-exit {
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  position: absolute;
+  width: 100%;
+}

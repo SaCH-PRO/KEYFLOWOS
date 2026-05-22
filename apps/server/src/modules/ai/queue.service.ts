@@ -9,6 +9,7 @@ import { GovernanceService } from './governance.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { UndoService } from './undo.service';
 import { AgentStateMachineService } from './agent-state-machine.service';
+import { ActionDispatcherService } from './action-dispatcher.service';
 
 export interface PlanStepJob {
   planId: string;
@@ -50,6 +51,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(UndoService) private readonly undoService: UndoService,
     @Inject(AgentStateMachineService) private readonly stateMachine: AgentStateMachineService,
+    @Inject(ActionDispatcherService) private readonly actionDispatcher: ActionDispatcherService,
   ) {
     this.planQueue = new Queue<PlanStepJob>('ai-plan-steps', { connection: redis });
     this.cronQueue = new Queue<CronTriggerJob>('ai-cron-triggers', { connection: redis });
@@ -185,49 +187,32 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      const result = await this.flowOrchestrator.executeToolDirectly(
-        data.businessId,
-        data.toolName,
-        data.args,
-        data.planContext,
-      );
+      // Route through ActionDispatcher for unified execution (circuit breaker, retry, idempotency, audit)
+      const dispatchResult = await this.actionDispatcher.dispatch({
+        businessId: data.businessId,
+        toolName: data.toolName,
+        args: data.args,
+        idempotencyKey: data.idempotencyKey,
+        planId: data.planId,
+        planStepId: data.stepId,
+        source: 'plan_worker',
+        retryCount: data.retryCount ?? 2,
+        background: true,
+      });
 
       const durationMs = Date.now() - startTime;
+
+      if (!dispatchResult.success) {
+        throw new Error(dispatchResult.error ?? `Tool ${data.toolName} failed`);
+      }
+
+      const result = dispatchResult.result;
 
       // Update step
       await this.prisma.client.aiPlanStep.update({
         where: { id: data.stepId },
         data: { status: 'completed', outputResult: result as any, completedAt: new Date() },
       });
-
-      // Log execution
-      await this.executionLog.log({
-        businessId: data.businessId,
-        action: `tool:${data.toolName}`,
-        toolName: data.toolName,
-        mode: 'autonomous',
-        actor: 'ai',
-        success: true,
-        durationMs,
-        inputSummary: data.args,
-        outputSummary: result,
-        planId: data.planId,
-        planStepId: data.stepId,
-      }).catch(() => {});
-
-      // Register for undo
-      if (result?.id || result?.entityId) {
-        const entityType = this.inferEntityType(data.toolName);
-        if (entityType) {
-          await this.undoService.registerAction({
-            businessId: data.businessId,
-            actionType: data.toolName,
-            entityType,
-            entityId: result.id ?? result.entityId,
-            originalPayload: data.args,
-          }).catch(() => {});
-        }
-      }
 
       // Emit event
       this.events.emit('action.executed', {
@@ -259,20 +244,6 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         where: { id: data.stepId },
         data: { status: 'failed', errorMessage: errorMsg },
       });
-
-      await this.executionLog.log({
-        businessId: data.businessId,
-        action: `tool:${data.toolName}`,
-        toolName: data.toolName,
-        mode: 'autonomous',
-        actor: 'ai',
-        success: false,
-        durationMs,
-        inputSummary: data.args,
-        outputSummary: { error: errorMsg },
-        planId: data.planId,
-        planStepId: data.stepId,
-      }).catch(() => {});
 
       this.events.emit('action.failed', {
         businessId: data.businessId,

@@ -19,6 +19,7 @@ import {
   DollarSign,
   Globe,
   Lightbulb,
+  Calculator,
 } from "lucide-react";
 import type { ProfileBusinessData } from "./profile-types";
 
@@ -583,6 +584,31 @@ export function OverviewTab({
           </div>
         </div>
       )}
+
+      <div
+        className="rounded-xl p-4"
+        style={{
+          background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.05), hsl(var(--kf-success) / 0.03))",
+          border: "1px solid hsl(var(--kf-accent1) / 0.1)",
+        }}
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <DollarSign className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span className="text-xs font-semibold">Pricing Calculator</span>
+        </div>
+        <p className="text-[10px] mb-3" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          Most Caribbean service providers undercharge by 30-50%. Calculate what you should actually be charging based on your real costs, taxes, and profit goals.
+        </p>
+        <button
+          onClick={() => onNavigateTab("pricing")}
+          className="w-full flex items-center justify-center gap-1 text-xs font-medium py-2 rounded-lg transition-colors"
+          style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}
+        >
+          <Calculator className="w-3.5 h-3.5" />
+          Calculate your rates
+          <ArrowRight className="w-3 h-3" />
+        </button>
+      </div>
 
       <div
         className="rounded-xl p-4"

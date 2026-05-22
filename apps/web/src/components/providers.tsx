@@ -7,7 +7,6 @@ import { ThemeColorsProvider } from "@/lib/theme-context";
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
 import { useSuppressTurbopackHmrFactoryError } from "@/components/dev-hmr-error-suppressor";
 import { ComposeProvider } from "@/components/email/compose-context";
-import { ComposeFab } from "@/components/email/compose-fab";
 
 export function Providers({ children }: { children: ReactNode }) {
   // Dev-only: suppress the recurring Turbopack jsx-dev-runtime HMR
@@ -37,7 +36,6 @@ export function Providers({ children }: { children: ReactNode }) {
         />
         <ComposeProvider>
           {children}
-          <ComposeFab />
         </ComposeProvider>
       </ThemeColorsProvider>
     </ThemeProvider>

@@ -89,6 +89,7 @@ export class IdentitySignupService {
     company?: string;
     phone?: string;
     requestOrigin?: string | null;
+    referralCode?: string;
   }): Promise<SignupOutcome> {
     if (!this.supabaseAdmin.isConfigured()) {
       const missing = this.supabaseAdmin.describeMissingConfig();

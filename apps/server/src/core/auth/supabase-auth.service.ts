@@ -1,5 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
+import { jwtVerify, errors as JoseErrors } from 'jose';
+
+interface JwtPayload {
+  sub?: string;
+  email?: string;
+  role?: string;
+  user_metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 @Injectable()
 export class SupabaseAuthService {
@@ -21,17 +30,65 @@ export class SupabaseAuthService {
     return this.client;
   }
 
+  private getJwtSecret(): Uint8Array | null {
+    const secret = process.env.SUPABASE_JWT_SECRET;
+    if (!secret) return null;
+    return new TextEncoder().encode(secret);
+  }
+
+  private async verifyLocal(token: string): Promise<JwtPayload | null> {
+    const secret = this.getJwtSecret();
+    if (!secret) return null;
+    try {
+      const { payload } = await jwtVerify(token, secret, {
+        algorithms: ['HS256'],
+        clockTolerance: 60,
+      });
+      return payload as JwtPayload;
+    } catch (err) {
+      if (err instanceof JoseErrors.JWSSignatureVerificationFailed) {
+        this.logger.debug('Local JWT verification: signature invalid');
+      } else if (err instanceof JoseErrors.JWTExpired) {
+        this.logger.debug('Local JWT verification: token expired');
+      } else {
+        this.logger.debug(`Local JWT verification failed: ${(err as Error).message}`);
+      }
+      return null;
+    }
+  }
+
+  private buildUserFromPayload(payload: JwtPayload): User {
+    return {
+      id: payload.sub ?? '',
+      email: payload.email ?? '',
+      role: payload.role ?? '',
+      user_metadata: payload.user_metadata ?? {},
+      app_metadata: {},
+      aud: 'authenticated',
+      created_at: '',
+    } as User;
+  }
+
   /**
    * Resolve a Supabase access token to a verified user.
    *
-   * SECURITY: this method *only* trusts tokens that Supabase confirms with a
-   * valid signature. Earlier versions had a "decode JWT locally" fallback for
-   * dev convenience that effectively let any well-formed JWT through; that
-   * was a critical authentication bypass and has been removed (ported from
-   * develop 1c7e6f93).
+   * When SUPABASE_JWT_SECRET is configured, tokens are verified locally
+   * using HMAC-SHA256 signature validation (faster, works offline).
+   * Otherwise we round-trip to Supabase auth.getUser() (requires network).
+   *
+   * SECURITY: local verification uses the exact same secret Supabase uses
+   * to sign tokens, so a forged signature is cryptographically infeasible.
    */
   async getUserFromToken(token?: string): Promise<User | null> {
     if (!token) return null;
+
+    // Primary path: local verification with SUPABASE_JWT_SECRET
+    const localPayload = await this.verifyLocal(token);
+    if (localPayload?.sub) {
+      return this.buildUserFromPayload(localPayload);
+    }
+
+    // Fallback: round-trip to Supabase (when JWT secret is not configured)
     const supabase = this.supabase;
     if (!supabase) return null;
 

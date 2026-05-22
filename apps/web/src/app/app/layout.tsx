@@ -10,6 +10,7 @@ import { NotesQueryParamTrigger } from "@/components/keyflow/notes-query-param-t
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 import { MobileFab } from "@/components/ui/mobile-fab";
+import { CelebrationListener } from "@/components/ui/celebration-listener";
 import { RequireAuth } from "@/components/require-auth";
 import { KeyAgent } from "@/components/key";
 import { DesktopSidebar } from "@/components/layout/desktop-sidebar";
@@ -105,6 +106,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <PlanLimitDialog planLimit={layout.planLimitHit} onClose={layout.clearPlanLimit} />
       <KeyflowOSStoreDrawer open={layout.kfStoreOpen} onClose={() => layout.setKfStoreOpen(false)} />
       <KeyAgent currentModule={layout.copilotModule} />
+      <CelebrationListener />
       <MobileFab />
     </div>
   );

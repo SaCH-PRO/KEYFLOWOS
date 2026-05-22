@@ -64,4 +64,8 @@ export class CreateContentRequestDto {
   @IsBoolean()
   @IsOptional()
   approvalRequired?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  invoiceOnDelivery?: boolean;
 }

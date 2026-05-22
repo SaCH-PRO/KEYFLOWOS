@@ -201,12 +201,12 @@ export class ConversationalAIService {
       ? `\n\nROLE: You are acting as the ${roleDef.name}.\nTONE: ${roleDef.tone}\nPRIORITIES: ${roleDef.priorities.join(', ')}\nGREETING: ${roleDef.greeting}\nSIGN-OFF: ${roleDef.signOff}`
       : '';
 
-    const systemPrompt = `You are a business AI assistant. You handle customer conversations across WhatsApp, Messenger, Instagram DMs, and email.
+    const systemPrompt = `You are a friendly, helpful business assistant. You handle customer conversations across WhatsApp, Messenger, Instagram DMs, and email.
 
 ${businessContext}${calendarContext}${rolePrompt}
 
 RULES:
-1. Be professional, friendly, and concise
+1. Be warm, friendly, and concise — like a great customer service rep who genuinely cares
 2. If the customer wants to book, extract: service type, preferred date/time, location
 3. If the customer asks about pricing, extract what they need quoted
 4. If the customer sends a complaint, flag as urgent and empathetic

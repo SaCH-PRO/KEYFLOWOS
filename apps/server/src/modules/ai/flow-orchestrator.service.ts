@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
@@ -16,10 +17,12 @@ import { SemanticMemoryService } from './semantic-memory.service';
 import { RoleEngineService, BusinessRole, RoleDetectionContext } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService } from '../call-tasks/call-log.service';
+import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
+
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
@@ -156,29 +159,36 @@ You have 4 tool families at your disposal:
 
 **CRUD** (standard data operations):
 - CRM: search/create/update/list/delete contacts, add notes and tasks
-- Commerce: create/list invoices, quotes, products; mark invoices paid
+- Commerce: create/list/update/send invoices, quotes, products; mark invoices paid
 - Bookings: create/list/reschedule/cancel bookings, list services
-- Marketing: create/send/list campaigns
-- Social: create/publish/list posts
+- Marketing: create/update/send/list campaigns
+- Social: create/update/publish/list posts
 - Automations: create/list/toggle playbooks
 - Content Ops: create/list/assign/transition/submit/upload/deliver content requests
-- Call Tasks: create/list/log outcome/schedule follow-up calls
+- Call Tasks: create/list/log outcome/schedule follow-up calls, generate AI call scripts
 - Evidence: submit/verify evidence linked to tasks and approvals
 - Approvals: create/list approval requests and decide steps
 - Drive: create folders and documents in Google Drive
+- Calendar: create/list events, check scheduling conflicts
+- Time Tracking: start/stop timers, log time entries
+- Helpdesk: create/list/update support tickets
+- Finance: view receivables aging, customer balances, finance action items
+- Projects: create/update/complete/delete project tasks
 
 Your personality:
-- Warm, efficient, Caribbean-friendly
-- Speak naturally and conversationally
+- Warm, approachable, and genuinely helpful — like a trusted teammate who happens to be great with business ops
+- Speak naturally and conversationally, not like a corporate chatbot
+- Use a friendly, encouraging tone. Celebrate wins with the user.
 - Always use TTD currency unless the user specifies otherwise
-- Be concise in your confirmations (e.g. "Done! Created invoice #INV-001 for $500 TTD for John Smith.")
-- When you create or update something, confirm what you did clearly
-- If you need information to complete a task, ask for it specifically
+- Be concise but warm in your confirmations (e.g. "All done! 🎉 Created invoice #INV-001 for $500 TTD for John Smith. Need anything else?")
+- When you create or update something, confirm what you did clearly and ask if they need help with what's next
+- If you need information to complete a task, ask for it specifically and explain why it helps
 
 Important rules:
 - Always use function calling tools to take actions — never pretend to take an action
 - When you've completed an action, briefly confirm what was done
 - If you cannot find a contact by name, search for them first before creating an invoice or booking
+- When searching for a contact by name returns multiple matches (disambiguationNeeded: true), ALWAYS ask the user which specific contact they mean before proceeding with any action
 - For dates/times, use the current date context and interpret relative dates (e.g. "tomorrow at 2pm")
 - Prefer Read tools when the user asks questions about their business health or status
 - Use Draft tools to generate content the user can review before sending
@@ -206,13 +216,31 @@ export class FlowOrchestratorService {
     @Inject(AiMessageSenderService) private readonly messageSender: AiMessageSenderService,
     @Inject(SemanticMemoryService) private readonly semanticMemory: SemanticMemoryService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
-    @Inject(ContentRequestService) private readonly contentRequest: ContentRequestService,
-    @Inject(CallLogService) private readonly callLog: CallLogService,
-    @Inject(EvidenceService) private readonly evidence: EvidenceService,
-    @Inject(ApprovalRequestService) private readonly approvalRequest: ApprovalRequestService,
-    @Inject(GoogleDriveService) private readonly drive: GoogleDriveService,
-    @Inject(TaskAssignmentService) private readonly taskAssignment: TaskAssignmentService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
+
+  // Lazy resolvers to avoid circular module dependencies
+  private getContentRequest() {
+    return this.moduleRef.get(ContentRequestService, { strict: false });
+  }
+  private getCallLog() {
+    return this.moduleRef.get(CallLogService, { strict: false });
+  }
+  private getCallScript() {
+    return this.moduleRef.get(CallScriptService, { strict: false });
+  }
+  private getEvidence() {
+    return this.moduleRef.get(EvidenceService, { strict: false });
+  }
+  private getApprovalRequest() {
+    return this.moduleRef.get(ApprovalRequestService, { strict: false });
+  }
+  private getDrive() {
+    return this.moduleRef.get(GoogleDriveService, { strict: false });
+  }
+  private getTaskAssignment() {
+    return this.moduleRef.get(TaskAssignmentService, { strict: false });
+  }
 
   /**
    * Build the "Blueprint" section of the system prompt. Reads from the
@@ -994,7 +1022,7 @@ export class FlowOrchestratorService {
           select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true, displayName: true },
           take: 10,
         });
-        return { contacts, count: contacts.length };
+        return { contacts, count: contacts.length, disambiguationNeeded: contacts.length > 1 };
       }
 
       case 'crm_list_contacts': {
@@ -1072,7 +1100,7 @@ export class FlowOrchestratorService {
           },
         });
         // Auto-assign KEY to tasks it creates
-        await this.taskAssignment.assign({
+        await this.getTaskAssignment().assign({
           taskType: 'ContactTask',
           taskId: task.id,
           assignableType: 'KEY',
@@ -1197,19 +1225,73 @@ export class FlowOrchestratorService {
       }
 
       case 'bookings_create_booking': {
+        // Validate contact exists
+        const contact = await this.prisma.client.contact.findFirst({
+          where: { id: args.contactId, businessId, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true, displayName: true },
+        });
+        if (!contact) {
+          throw new BadRequestException('Contact not found. Please search for the contact first.');
+        }
+
+        // Disambiguation check: if other contacts have same/similar name, warn
+        const similarContacts = await this.prisma.client.contact.findMany({
+          where: {
+            businessId,
+            deletedAt: null,
+            id: { not: args.contactId },
+            OR: [
+              { firstName: { equals: contact.firstName ?? '', mode: 'insensitive' } },
+              { lastName: { equals: contact.lastName ?? '', mode: 'insensitive' } },
+              { displayName: { equals: contact.displayName ?? '', mode: 'insensitive' } },
+            ],
+          },
+          select: { id: true, firstName: true, lastName: true, displayName: true, email: true },
+          take: 5,
+        });
+        if (similarContacts.length > 0) {
+          const names = similarContacts.map(c => c.displayName || `${c.firstName} ${c.lastName}`).filter(Boolean).join(', ');
+          throw new BadRequestException(
+            `Multiple contacts with similar names found (${names}). Please confirm which contact you want to book for.`
+          );
+        }
+
+        // Availability validation
+        const startTime = new Date(args.startTime);
+        const endTime = new Date(args.endTime);
+        const overlapWhere: Record<string, unknown> = {
+          businessId,
+          status: { not: 'CANCELLED' },
+          OR: [
+            { startTime: { lte: endTime }, endTime: { gte: startTime } },
+          ],
+        };
+        if (args.staffId) {
+          overlapWhere.staffId = args.staffId;
+        }
+        const overlapping = await this.prisma.client.booking.findFirst({
+          where: overlapWhere,
+          select: { id: true, startTime: true, endTime: true },
+        });
+        if (overlapping) {
+          throw new BadRequestException(
+            `Time slot conflicts with existing booking (${overlapping.startTime.toISOString()} - ${overlapping.endTime.toISOString()}). Please choose a different time.`
+          );
+        }
+
         const booking = await this.prisma.client.booking.create({
           data: {
             businessId,
             contactId: args.contactId,
             serviceId: args.serviceId ?? null,
             staffId: args.staffId ?? null,
-            startTime: new Date(args.startTime),
-            endTime: new Date(args.endTime),
+            startTime,
+            endTime,
             notes: args.notes ?? null,
             status: 'CONFIRMED',
           },
         });
-        return { booking, id: booking.id };
+        return { booking, id: booking.id, contactName: contact.displayName || `${contact.firstName} ${contact.lastName}` };
       }
 
       case 'bookings_reschedule_booking': {
@@ -1836,7 +1918,7 @@ export class FlowOrchestratorService {
           },
         });
         // Auto-assign KEY to tasks it creates
-        await this.taskAssignment.assign({
+        await this.getTaskAssignment().assign({
           taskType: 'ContactTask',
           taskId: task.id,
           assignableType: 'KEY',
@@ -2148,7 +2230,7 @@ export class FlowOrchestratorService {
           },
         });
         // Auto-assign KEY to tasks it creates
-        await this.taskAssignment.assign({
+        await this.getTaskAssignment().assign({
           taskType: 'ProjectTask',
           taskId: task.id,
           assignableType: 'KEY',
@@ -2450,7 +2532,7 @@ export class FlowOrchestratorService {
 
       // === CONTENT OPS ===
       case 'content_list_requests': {
-        const result = await this.contentRequest.listForBusiness(businessId, {
+        const result = await this.getContentRequest().listForBusiness(businessId, {
           status: args.status,
           limit: args.limit ?? 25,
           offset: 0,
@@ -2458,11 +2540,11 @@ export class FlowOrchestratorService {
         return { items: result.items, total: result.total };
       }
       case 'content_get_request': {
-        const request = await this.contentRequest.getById(args.requestId);
+        const request = await this.getContentRequest().getById(args.requestId);
         return { request };
       }
       case 'content_create_request': {
-        const request = await this.contentRequest.createRequest({
+        const request = await this.getContentRequest().createRequest({
           businessId,
           requestedBy: 'key_ai',
           source: 'flow_ai',
@@ -2478,29 +2560,29 @@ export class FlowOrchestratorService {
         return { id: request.id, status: request.status };
       }
       case 'content_assign_request': {
-        await this.contentRequest.assignRequest(args.requestId, args.teamMemberIds, 'key_ai');
+        await this.getContentRequest().assignRequest(args.requestId, args.teamMemberIds, 'key_ai');
         return { requestId: args.requestId, assignedTo: args.teamMemberIds };
       }
       case 'content_transition_status': {
-        await this.contentRequest.transitionStatus(args.requestId, args.newStatus, 'key_ai', args.comment);
+        await this.getContentRequest().transitionStatus(args.requestId, args.newStatus, 'key_ai', args.comment);
         return { requestId: args.requestId, newStatus: args.newStatus };
       }
       case 'content_submit_for_review': {
-        await this.contentRequest.submitForReview(args.requestId, 'key_ai', args.comment);
+        await this.getContentRequest().submitForReview(args.requestId, 'key_ai', args.comment);
         return { requestId: args.requestId, status: 'INTERNAL_REVIEW' };
       }
       case 'content_upload_deliverables': {
-        await this.contentRequest.uploadDeliverables(args.requestId, args.fileIds, args.folderId, 'key_ai');
+        await this.getContentRequest().uploadDeliverables(args.requestId, args.fileIds, args.folderId, 'key_ai');
         return { requestId: args.requestId, uploaded: args.fileIds.length };
       }
       case 'content_deliver_request': {
-        await this.contentRequest.deliverRequest(args.requestId, 'key_ai');
+        await this.getContentRequest().deliverRequest(args.requestId, 'key_ai');
         return { requestId: args.requestId, status: 'DELIVERED' };
       }
 
       // === CALL TASKS ===
       case 'call_list_tasks': {
-        const result = await this.callLog.listCalls(businessId, {
+        const result = await this.getCallLog().listCalls(businessId, {
           status: args.status,
           callerId: args.callerId,
           contactId: args.contactId,
@@ -2510,7 +2592,7 @@ export class FlowOrchestratorService {
         return { items: result.items, total: result.total };
       }
       case 'call_create_task': {
-        const log = await this.callLog.createCallLog({
+        const log = await this.getCallLog().createCallLog({
           businessId,
           contactId: args.contactId,
           callerId: args.callerId,
@@ -2521,15 +2603,26 @@ export class FlowOrchestratorService {
         return { id: log.id, contactId: args.contactId };
       }
       case 'call_log_outcome': {
-        const completed = await this.callLog.completeCall(args.callLogId, {
+        const completed = await this.getCallLog().completeCall(args.callLogId, {
           outcome: args.outcome,
           duration: args.duration ?? undefined,
           notes: args.notes ?? undefined,
         }, 'key_ai');
         return { callLogId: args.callLogId, outcome: args.outcome };
       }
+      case 'call_generate_script': {
+        const script = await this.getCallScript().generateScript(businessId, args.callLogId, args.contactId);
+        return {
+          callLogId: args.callLogId,
+          greeting: script.greeting,
+          talkingPoints: script.talkingPoints,
+          ask: script.ask,
+          close: script.close,
+          durationEstimate: script.durationEstimate,
+        };
+      }
       case 'call_schedule_followup': {
-        const task = await this.callLog.createFollowUpTask(args.callLogId, {
+        const task = await this.getCallLog().createFollowUpTask(args.callLogId, {
           title: args.title,
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           priority: args.priority ?? 'NORMAL',
@@ -2540,7 +2633,7 @@ export class FlowOrchestratorService {
 
       // === EVIDENCE ===
       case 'evidence_list': {
-        const result = await this.evidence.listForBusiness(businessId, {
+        const result = await this.getEvidence().listForBusiness(businessId, {
           evidenceType: args.evidenceType,
           limit: args.limit ?? 25,
           offset: 0,
@@ -2548,7 +2641,7 @@ export class FlowOrchestratorService {
         return { items: result.items, total: result.total };
       }
       case 'evidence_submit': {
-        const ev = await this.evidence.submit({
+        const ev = await this.getEvidence().submit({
           businessId,
           evidenceType: args.evidenceType,
           url: args.url,
@@ -2561,13 +2654,13 @@ export class FlowOrchestratorService {
         return { id: ev.id, linkedType: args.linkedType, linkedId: args.linkedId };
       }
       case 'evidence_verify': {
-        await this.evidence.verify({ evidenceId: args.evidenceId, verifierId: 'key_ai' });
+        await this.getEvidence().verify({ evidenceId: args.evidenceId, verifierId: 'key_ai' });
         return { evidenceId: args.evidenceId, verified: true };
       }
 
       // === APPROVALS ===
       case 'approval_list': {
-        const result = await this.approvalRequest.listForBusiness(businessId, {
+        const result = await this.getApprovalRequest().listForBusiness(businessId, {
           status: args.status,
           requestType: args.requestType,
           limit: args.limit ?? 25,
@@ -2576,7 +2669,7 @@ export class FlowOrchestratorService {
         return { items: result.items, total: result.total };
       }
       case 'approval_create_request': {
-        const approval = await this.approvalRequest.createRequest({
+        const approval = await this.getApprovalRequest().createRequest({
           businessId,
           requestType: args.requestType,
           requesterId: 'key_ai',
@@ -2589,7 +2682,7 @@ export class FlowOrchestratorService {
         return { id: approval.id, status: approval.status };
       }
       case 'approval_decide_step': {
-        const decision = await this.approvalRequest.decideStep({
+        const decision = await this.getApprovalRequest().decideStep({
           approvalRequestId: args.approvalRequestId,
           approverId: 'key_ai',
           decision: args.decision,
@@ -2600,12 +2693,312 @@ export class FlowOrchestratorService {
 
       // === DRIVE ===
       case 'drive_create_folder': {
-        const folderId = await this.drive.createFolder(businessId, args.name, args.parentId);
+        const folderId = await this.getDrive().createFolder(businessId, args.name, args.parentId);
         return { folderId, name: args.name };
       }
       case 'drive_create_document': {
-        const documentId = await this.drive.createDoc(businessId, args.title, args.parentId);
+        const documentId = await this.getDrive().createDoc(businessId, args.title, args.parentId);
         return { documentId, title: args.title };
+      }
+
+      // === CALENDAR ===
+      case 'calendar_list_events': {
+        const where: any = { businessId };
+        if (args.startDate) where.startAt = { gte: new Date(args.startDate) };
+        if (args.endDate) where.startAt = { ...(where.startAt ?? {}), lte: new Date(args.endDate) };
+        if (args.module) where.module = args.module;
+        if (args.status) where.status = args.status;
+        const events = await this.prisma.client.calendarEvent.findMany({
+          where,
+          orderBy: { startAt: 'asc' },
+          take: args.limit ?? 25,
+        });
+        return { events, count: events.length };
+      }
+      case 'calendar_create_event': {
+        const event = await this.prisma.client.calendarEvent.create({
+          data: {
+            businessId,
+            title: args.title,
+            description: args.description ?? null,
+            startAt: new Date(args.startAt),
+            endAt: args.endAt ? new Date(args.endAt) : null,
+            allDay: args.allDay ?? false,
+            type: args.type ?? 'OTHER',
+            module: 'GENERAL',
+            priority: args.priority ?? 'NORMAL',
+            color: args.color ?? null,
+            sourceType: 'MANUAL',
+            sourceId: businessId,
+            status: 'SCHEDULED',
+          },
+        });
+        return { id: event.id, title: event.title, startAt: event.startAt };
+      }
+      case 'calendar_check_conflicts': {
+        const startAt = new Date(args.startAt);
+        const endAt = new Date(args.endAt);
+        const conflicts = await this.prisma.client.calendarEvent.findMany({
+          where: {
+            businessId,
+            status: { not: 'CANCELLED' },
+            startAt: { lt: endAt },
+            endAt: { gt: startAt },
+          },
+          orderBy: { startAt: 'asc' },
+          take: 10,
+        });
+        return { hasConflict: conflicts.length > 0, conflicts };
+      }
+
+      // === TIME TRACKING ===
+      case 'time_start_timer': {
+        const entry = await this.prisma.client.timeEntry.create({
+          data: {
+            businessId,
+            description: args.description,
+            startTime: new Date(),
+            projectId: args.projectId ?? null,
+            taskId: args.taskId ?? null,
+            hourlyRate: args.hourlyRate ?? null,
+            billable: true,
+            userId: 'key_ai',
+          },
+        });
+        return { id: entry.id, startTime: entry.startTime };
+      }
+      case 'time_stop_timer': {
+        const entry = await this.prisma.client.timeEntry.findFirst({
+          where: { id: args.timeEntryId, businessId, endTime: null },
+        });
+        if (!entry) throw new Error('No running timer found for this time entry');
+        const now = new Date();
+        const durationMs = now.getTime() - entry.startTime.getTime();
+        const durationMinutes = Math.round(durationMs / 60000);
+        const updated = await this.prisma.client.timeEntry.update({
+          where: { id: args.timeEntryId },
+          data: { endTime: now, durationMinutes },
+        });
+        return { id: updated.id, durationMinutes };
+      }
+      case 'time_log_entry': {
+        const start = new Date(args.startTime);
+        const end = new Date(args.endTime);
+        const durationMinutes = args.durationMinutes ?? Math.round((end.getTime() - start.getTime()) / 60000);
+        const entry = await this.prisma.client.timeEntry.create({
+          data: {
+            businessId,
+            description: args.description,
+            startTime: start,
+            endTime: end,
+            durationMinutes,
+            projectId: args.projectId ?? null,
+            taskId: args.taskId ?? null,
+            hourlyRate: args.hourlyRate ?? null,
+            billable: args.billable ?? true,
+            userId: 'key_ai',
+          },
+        });
+        return { id: entry.id, durationMinutes };
+      }
+
+      // === HELPDESK ===
+      case 'helpdesk_list_tickets': {
+        const where: any = { businessId, deletedAt: null };
+        if (args.status) where.status = args.status;
+        if (args.priority) where.priority = args.priority;
+        const tickets = await this.prisma.client.supportTicket.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          take: args.limit ?? 25,
+          include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+        });
+        return { tickets, count: tickets.length };
+      }
+      case 'helpdesk_create_ticket': {
+        const ticket = await this.prisma.client.supportTicket.create({
+          data: {
+            businessId,
+            title: args.title,
+            description: args.description ?? null,
+            contactId: args.contactId ?? null,
+            priority: args.priority ?? 'NORMAL',
+            source: args.source ?? 'MANUAL',
+            status: 'OPEN',
+          },
+        });
+        return { id: ticket.id, title: ticket.title, status: ticket.status };
+      }
+      case 'helpdesk_update_ticket': {
+        const updateData: Record<string, any> = {};
+        if (args.status !== undefined) updateData.status = args.status;
+        if (args.priority !== undefined) updateData.priority = args.priority;
+        if (args.assignedToId !== undefined) updateData.assignedToId = args.assignedToId;
+        const ticket = await this.prisma.client.supportTicket.update({
+          where: { id: args.ticketId, businessId },
+          data: updateData,
+        });
+        return { id: ticket.id, status: ticket.status };
+      }
+
+      // === FINANCE ===
+      case 'finance_view_receivables': {
+        const asOf = args.asOfDate ? new Date(args.asOfDate) : new Date();
+        const outstanding = await this.prisma.client.invoice.findMany({
+          where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE'] } },
+          include: { contact: { select: { firstName: true, lastName: true } } },
+        });
+        const buckets = { current: 0, overdue1_30: 0, overdue31_60: 0, overdue61_90: 0, overdue90plus: 0 };
+        for (const inv of outstanding) {
+          const due = inv.dueDate ? new Date(inv.dueDate) : null;
+          if (!due) { buckets.current += Number(inv.total); continue; }
+          const daysOverdue = Math.floor((asOf.getTime() - due.getTime()) / 86400000);
+          if (daysOverdue <= 0) buckets.current += Number(inv.total);
+          else if (daysOverdue <= 30) buckets.overdue1_30 += Number(inv.total);
+          else if (daysOverdue <= 60) buckets.overdue31_60 += Number(inv.total);
+          else if (daysOverdue <= 90) buckets.overdue61_90 += Number(inv.total);
+          else buckets.overdue90plus += Number(inv.total);
+        }
+        const totalOutstanding = outstanding.reduce((sum, inv) => sum + Number(inv.total), 0);
+        return { totalOutstanding, ...buckets, invoices: outstanding.map(i => ({ id: i.id, number: i.invoiceNumber, total: Number(i.total), contact: i.contact })) };
+      }
+      case 'finance_customer_balance': {
+        const [invoicedAgg, paidAgg, invoices] = await Promise.all([
+          this.prisma.client.invoice.aggregate({
+            where: { businessId, contactId: args.contactId, deletedAt: null },
+            _sum: { total: true },
+            _count: true,
+          }),
+          this.prisma.client.invoice.aggregate({
+            where: { businessId, contactId: args.contactId, deletedAt: null, status: 'PAID' },
+            _sum: { total: true },
+          }),
+          this.prisma.client.invoice.findMany({
+            where: { businessId, contactId: args.contactId, deletedAt: null },
+            select: { id: true, invoiceNumber: true, status: true, total: true },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          }),
+        ]);
+        const totalInvoiced = Number(invoicedAgg._sum.total ?? 0);
+        const totalPaid = Number(paidAgg._sum.total ?? 0);
+        return {
+          contactId: args.contactId,
+          totalInvoiced,
+          totalPaid,
+          outstanding: totalInvoiced - totalPaid,
+          invoiceCount: invoicedAgg._count,
+          recentInvoices: invoices,
+        };
+      }
+      case 'finance_list_action_items': {
+        const where: any = { businessId };
+        if (args.severity) where.severity = args.severity;
+        const items = await this.prisma.client.financeActionItem.findMany({
+          where,
+          orderBy: [{ severity: 'asc' }, { createdAt: 'desc' }],
+          take: args.limit ?? 25,
+        });
+        return { items, total: items.length };
+      }
+
+      // === PROJECT UPDATES ===
+      case 'projects_update_task': {
+        const updateData: Record<string, any> = {};
+        if (args.title !== undefined) updateData.title = args.title;
+        if (args.dueDate !== undefined) updateData.dueDate = new Date(args.dueDate);
+        if (args.priority !== undefined) updateData.priority = args.priority;
+        if (args.isCompleted !== undefined) updateData.isCompleted = args.isCompleted;
+        const task = await this.prisma.client.projectTask.update({
+          where: { id: args.taskId, businessId },
+          data: updateData,
+        });
+        return { id: task.id, title: task.title };
+      }
+      case 'projects_delete_task': {
+        await this.prisma.client.projectTask.update({
+          where: { id: args.taskId, businessId },
+          data: { deletedAt: new Date() },
+        });
+        return { success: true, deletedId: args.taskId };
+      }
+
+      // === COMMERCE UPDATES ===
+      case 'commerce_update_invoice': {
+        const updateData: Record<string, any> = {};
+        if (args.status !== undefined) {
+          updateData.status = args.status;
+          if (args.status === 'PAID') updateData.paidAt = new Date();
+        }
+        if (args.dueDate !== undefined) updateData.dueDate = new Date(args.dueDate);
+        if (args.notes !== undefined) updateData.notes = args.notes;
+        const invoice = await this.prisma.client.invoice.update({
+          where: { id: args.invoiceId, businessId },
+          data: updateData,
+        });
+        return { id: invoice.id, status: invoice.status };
+      }
+      case 'commerce_update_product': {
+        const updateData: Record<string, any> = {};
+        if (args.name !== undefined) updateData.name = args.name;
+        if (args.price !== undefined) updateData.price = args.price;
+        if (args.description !== undefined) updateData.description = args.description;
+        if (args.category !== undefined) updateData.category = args.category;
+        if (args.isActive !== undefined) updateData.isActive = args.isActive;
+        const product = await this.catalog.updateProduct({ businessId, productId: args.productId, ...updateData });
+        return { id: product.id, name: product.name, fieldsUpdated: Object.keys(updateData) };
+      }
+      case 'commerce_send_invoice': {
+        const invoice = await this.prisma.client.invoice.findFirst({
+          where: { id: args.invoiceId, businessId },
+          include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+        });
+        if (!invoice) throw new Error('Invoice not found');
+        if (!invoice.contact?.email) throw new Error('Contact has no email address');
+        const updated = await this.prisma.client.invoice.update({
+          where: { id: args.invoiceId },
+          data: { status: 'SENT', sentAt: new Date() },
+        });
+        // Log activity
+        await this.prisma.client.activity.create({
+          data: {
+            businessId,
+            module: 'commerce',
+            action: 'invoice_sent',
+            entityType: 'invoice',
+            entityId: invoice.id,
+            title: `Invoice ${invoice.invoiceNumber} sent to ${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`,
+            tone: 'success',
+          },
+        });
+        return { id: updated.id, status: updated.status };
+      }
+
+      // === MARKETING/SOCIAL UPDATES ===
+      case 'marketing_update_campaign': {
+        const updateData: Record<string, any> = {};
+        if (args.name !== undefined) updateData.name = args.name;
+        if (args.subject !== undefined) updateData.subject = args.subject;
+        if (args.body !== undefined) updateData.body = args.body;
+        if (args.scheduledAt !== undefined) updateData.scheduledAt = new Date(args.scheduledAt);
+        const campaign = await this.prisma.client.emailCampaign.update({
+          where: { id: args.campaignId, businessId },
+          data: updateData,
+        });
+        return { id: campaign.id, name: campaign.name };
+      }
+      case 'social_update_post': {
+        const updateData: Record<string, any> = {};
+        if (args.content !== undefined) updateData.content = args.content;
+        if (args.scheduledFor !== undefined) {
+          updateData.scheduledAt = new Date(args.scheduledFor);
+          updateData.status = 'SCHEDULED';
+        }
+        const post = await this.prisma.client.socialPost.update({
+          where: { id: args.postId, businessId },
+          data: updateData,
+        });
+        return { id: post.id, status: post.status };
       }
 
       default:
@@ -2653,6 +3046,8 @@ export class FlowOrchestratorService {
         return `Schedule call to contact ${args.contactId}`;
       case 'call_log_outcome':
         return `Log call outcome: ${args.outcome}`;
+      case 'call_generate_script':
+        return `Generate call script for call ${args.callLogId}`;
       case 'call_schedule_followup':
         return `Schedule follow-up task from call ${args.callLogId}`;
       case 'evidence_submit':
@@ -2667,6 +3062,40 @@ export class FlowOrchestratorService {
         return `Create Drive folder: ${args.name}`;
       case 'drive_create_document':
         return `Create Drive document: ${args.title}`;
+      case 'calendar_create_event':
+        return `Create calendar event: ${args.title}`;
+      case 'calendar_check_conflicts':
+        return `Check calendar conflicts for ${args.startAt} - ${args.endAt}`;
+      case 'time_start_timer':
+        return `Start timer: ${args.description}`;
+      case 'time_stop_timer':
+        return `Stop timer (ID: ${args.timeEntryId})`;
+      case 'time_log_entry':
+        return `Log time entry: ${args.description}`;
+      case 'helpdesk_create_ticket':
+        return `Create support ticket: ${args.title}`;
+      case 'helpdesk_update_ticket':
+        return `Update ticket ${args.ticketId} (${args.status ? `status → ${args.status}` : ''}${args.priority ? `priority → ${args.priority}` : ''})`;
+      case 'finance_view_receivables':
+        return 'View accounts receivable aging report';
+      case 'finance_customer_balance':
+        return `View customer balance (ID: ${args.contactId})`;
+      case 'finance_list_action_items':
+        return 'List finance action items';
+      case 'projects_update_task':
+        return `Update project task ${args.taskId}`;
+      case 'projects_delete_task':
+        return `Delete project task ${args.taskId}`;
+      case 'commerce_update_invoice':
+        return `Update invoice ${args.invoiceId}`;
+      case 'commerce_update_product':
+        return `Update product ${args.productId}`;
+      case 'commerce_send_invoice':
+        return `Send invoice ${args.invoiceId} to customer`;
+      case 'marketing_update_campaign':
+        return `Update campaign ${args.campaignId}`;
+      case 'social_update_post':
+        return `Update social post ${args.postId}`;
       default:
         return `Execute ${toolName.replace(/_/g, ' ')}`;
     }
@@ -2679,7 +3108,7 @@ export class FlowOrchestratorService {
       case 'commerce_create_invoice':
         return `Invoice ${result?.invoiceNumber ?? ''} created.`;
       case 'bookings_create_booking':
-        return `Booking confirmed (ID: ${result?.id ?? ''}).`;
+        return `Booking confirmed for ${result?.contactName ?? 'contact'} (ID: ${result?.id ?? ''}).`;
       case 'marketing_send_campaign':
         return `Campaign sent successfully.`;
       case 'social_publish_post':
@@ -2722,6 +3151,8 @@ export class FlowOrchestratorService {
         return `Call scheduled (ID: ${result?.id ?? ''}).`;
       case 'call_log_outcome':
         return `Call outcome logged: ${result?.outcome ?? ''}.`;
+      case 'call_generate_script':
+        return `Call script generated for call ${result?.callLogId ?? ''}.`;
       case 'call_schedule_followup':
         return `Follow-up task created: "${result?.title ?? ''}".`;
       case 'evidence_submit':
@@ -2736,6 +3167,40 @@ export class FlowOrchestratorService {
         return `Drive folder created: ${result?.name ?? ''}.`;
       case 'drive_create_document':
         return `Drive document created: ${result?.title ?? ''}.`;
+      case 'calendar_create_event':
+        return `Calendar event created: ${result?.title ?? ''}.`;
+      case 'calendar_check_conflicts':
+        return result?.hasConflict ? `Found ${result?.conflicts?.length ?? 0} conflict(s).` : 'No conflicts found.';
+      case 'time_start_timer':
+        return `Timer started (ID: ${result?.id ?? ''}).`;
+      case 'time_stop_timer':
+        return `Timer stopped. Duration: ${result?.durationMinutes ?? 0} minutes.`;
+      case 'time_log_entry':
+        return `Time entry logged: ${result?.durationMinutes ?? 0} minutes.`;
+      case 'helpdesk_create_ticket':
+        return `Support ticket created: ${result?.title ?? ''} (${result?.status ?? ''}).`;
+      case 'helpdesk_update_ticket':
+        return `Ticket updated. Status: ${result?.status ?? ''}.`;
+      case 'finance_view_receivables':
+        return `AR Report: $${result?.totalOutstanding ?? 0} outstanding. Current: $${result?.current ?? 0}, 1-30d: $${result?.overdue1_30 ?? 0}, 31-60d: $${result?.overdue31_60 ?? 0}, 61-90d: $${result?.overdue61_90 ?? 0}, 90d+: $${result?.overdue90plus ?? 0}.`;
+      case 'finance_customer_balance':
+        return `Customer balance: $${result?.outstanding ?? 0} outstanding ($${result?.totalInvoiced ?? 0} invoiced, $${result?.totalPaid ?? 0} paid).`;
+      case 'finance_list_action_items':
+        return `Found ${result?.total ?? 0} finance action item(s).`;
+      case 'projects_update_task':
+        return `Project task updated: ${result?.title ?? ''}.`;
+      case 'projects_delete_task':
+        return `Project task deleted.`;
+      case 'commerce_update_invoice':
+        return `Invoice updated. Status: ${result?.status ?? ''}.`;
+      case 'commerce_update_product':
+        return `Product updated: ${result?.fieldsUpdated?.join(', ') ?? 'fields'} changed.`;
+      case 'commerce_send_invoice':
+        return `Invoice sent. Status: ${result?.status ?? ''}.`;
+      case 'marketing_update_campaign':
+        return `Campaign updated: ${result?.name ?? ''}.`;
+      case 'social_update_post':
+        return `Social post updated. Status: ${result?.status ?? ''}.`;
       default:
         return 'Action completed.';
     }

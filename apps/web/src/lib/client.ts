@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, emitUnauthorizedEvent, type PlanLimitError } from "./api";
-import { refreshAccessToken } from "./workspace";
+import { refreshAccessToken, getStoredBusinessId } from "./workspace";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 
@@ -2445,6 +2445,7 @@ export async function bootstrapIdentity(input: {
   phone?: string;
   avatarUrl?: string;
   company?: string;
+  referralCode?: string;
 }): Promise<BootstrapIdentityResult> {
   try {
     const res = await fetch(`${API_BASE}/identity/bootstrap`, {
@@ -2524,6 +2525,7 @@ export async function identitySignup(input: {
   username?: string;
   company?: string;
   phone?: string;
+  referralCode?: string;
 }) {
   return apiPost<SignupResponse>({
     path: `/identity/signup`,
@@ -3491,91 +3493,6 @@ export async function fetchCockpitSummary(businessId?: string) {
     `/flow/businesses/${encodeURIComponent(bid)}/cockpit`,
     cockpitSummarySchema,
   );
-}
-
-export interface Achievement {
-  id: string;
-  title: string;
-  description: string;
-  icon: string;
-  achieved: boolean;
-  achievedAt?: string;
-  category: 'setup' | 'sales' | 'growth' | 'engagement' | 'mastery';
-  xpReward: number;
-}
-
-export interface Challenge {
-  id: string;
-  title: string;
-  description: string;
-  icon: string;
-  progress: number;
-  target: number;
-  expiresAt?: string;
-  xpReward: number;
-  type: 'daily' | 'weekly' | 'monthly';
-}
-
-export interface GamificationStats {
-  level: number;
-  currentXp: number;
-  xpToNextLevel: number;
-  totalXp: number;
-  streakDays: number;
-  dailyTasksCompleted?: number;
-  achievements: Achievement[];
-  challenges: Challenge[];
-  recentXpGains: { action: string; xp: number; timestamp: string }[];
-}
-
-const gamificationStatsSchema = z.object({
-  level: z.number(),
-  currentXp: z.number(),
-  xpToNextLevel: z.number(),
-  totalXp: z.number(),
-  streakDays: z.number(),
-  achievements: z.array(z.object({
-    id: z.string(),
-    title: z.string(),
-    description: z.string(),
-    icon: z.string(),
-    achieved: z.boolean(),
-    achievedAt: z.string().optional(),
-    category: z.enum(['setup', 'sales', 'growth', 'engagement', 'mastery']),
-    xpReward: z.number(),
-  })),
-  challenges: z.array(z.object({
-    id: z.string(),
-    title: z.string(),
-    description: z.string(),
-    icon: z.string(),
-    progress: z.number(),
-    target: z.number(),
-    expiresAt: z.string().optional(),
-    xpReward: z.number(),
-    type: z.enum(['daily', 'weekly', 'monthly']),
-  })),
-  recentXpGains: z.array(z.object({
-    action: z.string(),
-    xp: z.number(),
-    timestamp: z.string(),
-  })),
-});
-
-export async function fetchGamificationStats(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiGet(
-    `/gamification/businesses/${encodeURIComponent(bid)}/stats`,
-    gamificationStatsSchema,
-  );
-}
-
-export async function updateStreak(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiPost<{ streakDays: number }>({
-    path: `/gamification/businesses/${encodeURIComponent(bid)}/streak`,
-    body: {},
-  });
 }
 
 export type AutopilotTask = {
@@ -4699,6 +4616,7 @@ export interface StorefrontConfig {
     currencyDisplay?: string;
     taxRate?: number;
   };
+  customDomain?: string;
   contactOptions?: {
     whatsappNumber?: string;
     email?: string;
@@ -5578,7 +5496,7 @@ export interface AiExecutionStats {
 }
 
 export interface AiAutonomySettings {
-  mode: 'advisory' | 'assisted' | 'pro_auto' | 'restricted';
+  mode: 'advisory' | 'assisted' | 'pro_auto' | 'autopilot' | 'restricted';
   maxAutoTier: number;
   blockedTools: string[];
   blockedModules: string[];
@@ -5970,6 +5888,33 @@ export interface ProAutoInsight {
 
 export async function fetchProAutoInsights(businessId: string): Promise<ApiResult<{ insights: ProAutoInsight[] }>> {
   return apiGetSimple<{ insights: ProAutoInsight[] }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/monitoring/insights`);
+}
+
+export interface ChatSuggestion {
+  id: string;
+  category: string;
+  title: string;
+  message: string;
+  actions: Array<{ label: string; value: string; toolName?: string; args?: Record<string, any> }>;
+  severity: 'critical' | 'warning' | 'opportunity' | 'info';
+  metric?: string;
+  createdAt: string;
+}
+
+export async function fetchSuggestions(businessId: string): Promise<ApiResult<ChatSuggestion[]>> {
+  return apiGetSimple<ChatSuggestion[]>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/suggestions`);
+}
+
+export async function refreshSuggestions(businessId: string): Promise<ApiResult<{ suggestions: ChatSuggestion[]; count: number }>> {
+  return apiPostSimple<{ suggestions: ChatSuggestion[]; count: number }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/suggestions/refresh`, {});
+}
+
+export async function dismissSuggestion(businessId: string, suggestionId: string): Promise<ApiResult<{ dismissed: boolean }>> {
+  return apiPostSimple<{ dismissed: boolean }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/suggestions/${encodeURIComponent(suggestionId)}/dismiss`, {});
+}
+
+export async function blockSuggestionCategory(businessId: string, category: string): Promise<ApiResult<{ blocked: boolean }>> {
+  return apiPostSimple<{ blocked: boolean }>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/suggestions/${encodeURIComponent(category)}/block`, {});
 }
 
 export interface WorkspaceRecommendation {
@@ -12624,6 +12569,53 @@ export async function archiveFinanceCoa(businessId: string, id: string) {
   return apiDelete<ChartOfAccountRow>(`${finBase(businessId)}/chart-of-accounts/${encodeURIComponent(id)}`);
 }
 
+export interface JournalEntryRow {
+  id: string;
+  date: string;
+  description: string;
+  reference?: string | null;
+  notes?: string | null;
+  amount: number;
+  currency: string;
+  status: string;
+  entries: Array<{
+    id: string;
+    accountId: string;
+    account: { id: string; name: string; type: string; code?: string };
+    debit: number;
+    credit: number;
+    memo?: string | null;
+  }>;
+  contact?: { id: string; displayName: string } | null;
+  createdAt: string;
+}
+
+export async function fetchJournalEntries(businessId: string, params?: { from?: string; to?: string; accountId?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.from) qs.append('from', params.from);
+  if (params?.to) qs.append('to', params.to);
+  if (params?.accountId) qs.append('accountId', params.accountId);
+  const query = qs.toString() ? `?${qs.toString()}` : '';
+  return apiGetSimple<{ items: JournalEntryRow[] }>(`${finBase(businessId)}/journal-entries${query}`);
+}
+
+export async function createJournalEntry(businessId: string, body: {
+  date: string;
+  description: string;
+  reference?: string;
+  notes?: string;
+  entries: Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>;
+}) {
+  return apiPost<JournalEntryRow>({ path: `${finBase(businessId)}/journal-entries`, body });
+}
+
+export async function extractReceipt(businessId: string, body: { url: string; filename?: string }) {
+  return apiPost<{ documentType: string; invoiceData?: { total: number; subtotal: number; currency: string; lineItems: Array<{ description: string; quantity: number; unitPrice: number; total: number }>; contactName?: string; issueDate?: string }; confidence: number; rawText?: string }>({
+    path: `/expenses/businesses/${encodeURIComponent(businessId)}/expenses/extract-receipt`,
+    body,
+  });
+}
+
 export async function fetchTaxRates(businessId: string) {
   return apiGetSimple<{ items: TaxRateRow[] }>(`${finBase(businessId)}/tax-rates`);
 }
@@ -13317,6 +13309,8 @@ export interface ContentRequest {
   deliveryFileIds: string[];
   approvalRequired: boolean;
   approvedBy?: string | null;
+  invoiceOnDelivery?: boolean;
+  invoiceId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -13391,6 +13385,7 @@ export async function createContentRequest(
     requiredInputs?: string[];
     attachedAssetIds?: string[];
     approvalRequired?: boolean;
+    invoiceOnDelivery?: boolean;
   }
 ) {
   return apiPostSimple<ContentRequest>(
@@ -13478,6 +13473,13 @@ export async function deliverContentRequest(businessId: string, requestId: strin
 export async function deleteContentRequest(businessId: string, requestId: string) {
   return apiDelete<ContentRequest>(
     `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}`
+  );
+}
+
+export async function generateInvoiceFromContentRequest(businessId: string, requestId: string) {
+  return apiPostSimple<Invoice>(
+    `/businesses/${encodeURIComponent(businessId)}/content-requests/${encodeURIComponent(requestId)}/generate-invoice`,
+    {}
   );
 }
 
@@ -13628,6 +13630,22 @@ export async function deleteApprovalRequest(businessId: string, approvalId: stri
   );
 }
 
+export async function cancelApprovalRequest(businessId: string, approvalId: string) {
+  return apiDelete<ApprovalRequest>(
+    `/businesses/${encodeURIComponent(businessId)}/approvals/${encodeURIComponent(approvalId)}/cancel`
+  );
+}
+
+export async function approveApprovalRequest(id: string, _approverId: string) {
+  const businessId = getStoredBusinessId() ?? DEFAULT_BUSINESS_ID;
+  return approveRequest(businessId, id);
+}
+
+export async function rejectApprovalRequest(id: string, _approverId: string) {
+  const businessId = getStoredBusinessId() ?? DEFAULT_BUSINESS_ID;
+  return rejectRequest(businessId, id);
+}
+
 // ─── Assets ──────────────────────────────────────────────────────────────────
 
 export interface Asset {
@@ -13699,6 +13717,29 @@ export async function deleteAsset(assetId: string) {
   return apiDelete<Asset>(`/assets/${encodeURIComponent(assetId)}`);
 }
 
+export async function fetchAssetById(_businessId: string, assetId: string) {
+  return fetchAsset(assetId);
+}
+
+export async function createAsset(
+  businessId: string,
+  data: {
+    name: string;
+    type: string;
+    url: string;
+    storageKey: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    folder?: string;
+    tags?: string[];
+  }
+) {
+  return apiPostSimple<Asset>(
+    `/businesses/${encodeURIComponent(businessId)}/assets`,
+    data
+  );
+}
+
 // ─── Evidence ────────────────────────────────────────────────────────────────
 
 export interface Evidence {
@@ -13736,6 +13777,10 @@ export async function fetchEvidence(
 
 export async function fetchEvidenceItem(evidenceId: string) {
   return apiGetSimple<Evidence>(`/evidence/${encodeURIComponent(evidenceId)}`);
+}
+
+export async function fetchEvidenceById(_businessId: string, evidenceId: string) {
+  return fetchEvidenceItem(evidenceId);
 }
 
 export async function submitEvidence(
@@ -13843,6 +13888,10 @@ export async function fetchCallLog(businessId: string, callId: string) {
   );
 }
 
+export async function fetchCallLogById(businessId: string, callId: string) {
+  return fetchCallLog(businessId, callId);
+}
+
 export async function createCallTask(
   businessId: string,
   data: {
@@ -13874,6 +13923,30 @@ export async function completeCallTask(
     `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}/complete`,
     data
   );
+}
+
+export async function generateCallScript(
+  businessId: string,
+  callId: string
+): Promise<{
+  greeting: string;
+  talkingPoints: string[];
+  ask: string;
+  close: string;
+  durationEstimate: number;
+}> {
+  const res = await apiPostSimple<{
+    greeting: string;
+    talkingPoints: string[];
+    ask: string;
+    close: string;
+    durationEstimate: number;
+  }>(
+    `/businesses/${encodeURIComponent(businessId)}/calls/${encodeURIComponent(callId)}/generate-script`,
+    {}
+  );
+  if (res.error) throw new Error(res.error);
+  return res.data!;
 }
 
 export async function createFollowUpCallTask(
@@ -13989,4 +14062,222 @@ export async function fetchCapacityAlerts(businessId: string) {
 
 export async function rebalanceWorkload(businessId: string) {
   return apiPostSimple<RebalanceResult>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/rebalance`, {});
+}
+
+
+// === L4 Manager — AI Settings APIs ===
+
+const skillSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  category: z.string(),
+  description: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+});
+
+export type Skill = z.infer<typeof skillSchema>;
+
+const authorityGrantSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  grantorId: z.string(),
+  granteeType: z.enum(["KEY", "USER"]),
+  granteeId: z.string(),
+  scope: z.enum(["tier4_financial", "tier4_publishing", "tier4_operations"]),
+  maxAmount: z.number().nullable().optional(),
+  validFrom: z.string(),
+  validUntil: z.string().nullable().optional(),
+  revokedAt: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+});
+
+export type AuthorityGrant = z.infer<typeof authorityGrantSchema>;
+
+const teamCapacityMemberSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.enum(["membership", "staff"]),
+  dailyCapacityHours: z.number().nullable().optional(),
+  maxHoursPerWeek: z.number().nullable().optional(),
+  hourlyRate: z.number().nullable().optional(),
+  skills: z.array(z.object({ id: z.string(), name: z.string(), category: z.string() })),
+  utilizationPercent: z.number(),
+  assignedHours: z.number(),
+});
+
+export type TeamCapacityMember = z.infer<typeof teamCapacityMemberSchema>;
+
+const workloadConfigSchema = z.object({
+  capacityHours: z.number(),
+  skills: z.array(skillSchema),
+  authorityGrants: z.array(authorityGrantSchema),
+});
+
+export type WorkloadConfig = z.infer<typeof workloadConfigSchema>;
+
+export async function fetchAiSettings(businessId: string): Promise<ApiResult<WorkloadConfig>> {
+  return apiGet(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/workload-config`, workloadConfigSchema);
+}
+
+export async function updateAiSettings(
+  businessId: string,
+  membershipId: string,
+  data: { dailyCapacityHours?: number; skillIds?: string[] },
+): Promise<ApiResult<{ membership: unknown }>> {
+  return apiPatch(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/workload-config/${encodeURIComponent(membershipId)}`, data);
+}
+
+export async function updateStaffAiSettings(
+  businessId: string,
+  staffId: string,
+  data: { maxHoursPerWeek?: number; hourlyRate?: number },
+): Promise<ApiResult<{ staff: unknown }>> {
+  return apiPatch(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/staff-workload-config/${encodeURIComponent(staffId)}`, data);
+}
+
+export async function fetchSkills(businessId: string): Promise<ApiResult<Skill[]>> {
+  return apiGet(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/skills`, z.array(skillSchema), []);
+}
+
+export async function createSkill(
+  businessId: string,
+  data: { name: string; category?: string; description?: string },
+): Promise<ApiResult<Skill>> {
+  return apiPost<Skill>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/skills`,
+    body: data,
+  });
+}
+
+export async function deleteSkill(businessId: string, id: string): Promise<ApiResult<{ deleted: boolean }>> {
+  return apiDelete(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/skills/${encodeURIComponent(id)}`);
+}
+
+export async function assignSkillToMembership(
+  businessId: string,
+  membershipId: string,
+  skillId: string,
+): Promise<ApiResult<{ success: boolean }>> {
+  return apiPost<{ success: boolean }>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/memberships/${encodeURIComponent(membershipId)}/skills/${encodeURIComponent(skillId)}`,
+    body: {},
+  });
+}
+
+export async function removeSkillFromMembership(
+  businessId: string,
+  membershipId: string,
+  skillId: string,
+): Promise<ApiResult<{ success: boolean }>> {
+  return apiDelete(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/memberships/${encodeURIComponent(membershipId)}/skills/${encodeURIComponent(skillId)}`);
+}
+
+export async function assignSkillToStaff(
+  businessId: string,
+  staffId: string,
+  skillId: string,
+): Promise<ApiResult<{ success: boolean }>> {
+  return apiPost<{ success: boolean }>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/staff/${encodeURIComponent(staffId)}/skills/${encodeURIComponent(skillId)}`,
+    body: {},
+  });
+}
+
+export async function removeSkillFromStaff(
+  businessId: string,
+  staffId: string,
+  skillId: string,
+): Promise<ApiResult<{ success: boolean }>> {
+  return apiDelete(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/staff/${encodeURIComponent(staffId)}/skills/${encodeURIComponent(skillId)}`);
+}
+
+export async function fetchAuthorityGrants(businessId: string): Promise<ApiResult<AuthorityGrant[]>> {
+  return apiGet(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/authority-grants`, z.array(authorityGrantSchema), []);
+}
+
+export async function createAuthorityGrant(
+  businessId: string,
+  data: {
+    grantorId?: string;
+    granteeType: "KEY" | "USER";
+    granteeId: string;
+    scope: "tier4_financial" | "tier4_publishing" | "tier4_operations";
+    maxAmount?: number;
+    validFrom?: string;
+    validUntil?: string;
+  },
+): Promise<ApiResult<AuthorityGrant>> {
+  return apiPost<AuthorityGrant>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/authority-grants`,
+    body: data,
+  });
+}
+
+export async function revokeAuthorityGrant(businessId: string, id: string): Promise<ApiResult<{ grant: AuthorityGrant }>> {
+  return apiDelete(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/authority-grants/${encodeURIComponent(id)}`);
+}
+
+export async function fetchTeamCapacity(businessId: string): Promise<ApiResult<TeamCapacityMember[]>> {
+  return apiGet(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/team-capacity`, z.array(teamCapacityMemberSchema), []);
+}
+
+// === Cross-Business Intelligence ===
+
+const businessMetricSnapshotSchema = z.object({
+  businessId: z.string(),
+  businessName: z.string(),
+  contactCount: z.number(),
+  totalRevenue: z.number(),
+  invoiceCount: z.number(),
+  paidInvoiceCount: z.number(),
+  overdueInvoiceCount: z.number(),
+  totalOverdueAmount: z.number(),
+  bookingCount: z.number(),
+  upcomingBookingCount: z.number(),
+  quoteCount: z.number(),
+  sentQuoteCount: z.number(),
+  openDealCount: z.number(),
+  dealValue: z.number(),
+  contentRequestCount: z.number(),
+  contentDeliveredCount: z.number(),
+  taskCount: z.number(),
+  completedTaskCount: z.number(),
+  callCount: z.number(),
+  completedCallCount: z.number(),
+  avgInvoiceValue: z.number(),
+  avgDealValue: z.number(),
+  collectionRate: z.number(),
+});
+
+export type BusinessMetricSnapshot = z.infer<typeof businessMetricSnapshotSchema>;
+
+const crossBusinessBenchmarkSchema = z.object({
+  metric: z.string(),
+  userAvg: z.number(),
+  userMax: z.number(),
+  userMin: z.number(),
+  userMedian: z.number(),
+});
+
+export type CrossBusinessBenchmark = z.infer<typeof crossBusinessBenchmarkSchema>;
+
+const crossBusinessIntelligenceSchema = z.object({
+  businesses: z.array(businessMetricSnapshotSchema),
+  benchmarks: z.array(crossBusinessBenchmarkSchema),
+  aggregated: z.object({
+    totalRevenue: z.number(),
+    totalContacts: z.number(),
+    totalDeals: z.number(),
+    totalBookings: z.number(),
+    totalContentDelivered: z.number(),
+    avgCollectionRate: z.number(),
+    avgDealSize: z.number(),
+  }),
+  insights: z.array(z.string()),
+});
+
+export type CrossBusinessIntelligence = z.infer<typeof crossBusinessIntelligenceSchema>;
+
+export async function fetchCrossBusinessIntelligence(): Promise<ApiResult<CrossBusinessIntelligence>> {
+  return apiGet(`/ai/intelligence/cross-business`, crossBusinessIntelligenceSchema);
 }

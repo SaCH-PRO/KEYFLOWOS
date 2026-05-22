@@ -16,6 +16,7 @@ import {
   Settings,
   Shield,
   LogOut,
+  Calculator,
 } from "lucide-react";
 import { NewEntityMenu } from "./new-entity-menu";
 import { MODE_LABELS, type DisclosureMode } from "@/lib/disclosure-mode";
@@ -321,6 +322,15 @@ export function AppHeader({
               >
                 <User className="w-3.5 h-3.5 text-muted-foreground" />
                 My Profile
+              </Link>
+              <Link
+                href="/app/profile?tab=pricing"
+                onClick={() => setUserMenuOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-foreground/80 hover:bg-muted transition-colors min-h-[44px]"
+                role="menuitem"
+              >
+                <Calculator className="w-3.5 h-3.5 text-muted-foreground" />
+                Pricing Calculator
               </Link>
               <Link
                 href="/app/settings"

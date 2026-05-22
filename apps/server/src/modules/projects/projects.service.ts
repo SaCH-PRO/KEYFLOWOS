@@ -281,6 +281,157 @@ export class ProjectsService {
     return task;
   }
 
+  async updateTaskStatus(businessId: string, taskId: string, status: string, position?: number) {
+    const task = await this.prisma.client.projectTask.findFirst({
+      where: { id: taskId, businessId },
+    });
+    if (!task) throw new NotFoundException('Task not found');
+
+    const data: Record<string, unknown> = { status };
+    if (status === 'DONE') data.isCompleted = true;
+    else if (task.isCompleted && status !== 'DONE') data.isCompleted = false;
+    if (position !== undefined) data.position = position;
+
+    return this.prisma.client.projectTask.update({ where: { id: taskId }, data });
+  }
+
+  async reorderTasks(businessId: string, projectId: string, updates: { taskId: string; status: string; position: number }[]) {
+    const taskIds = updates.map(u => u.taskId);
+    const tasks = await this.prisma.client.projectTask.findMany({
+      where: { id: { in: taskIds }, projectId, businessId },
+      select: { id: true },
+    });
+    if (tasks.length !== taskIds.length) {
+      throw new BadRequestException('Some tasks do not belong to this project');
+    }
+
+    const results = [];
+    for (const update of updates) {
+      const data: Record<string, unknown> = { status: update.status, position: update.position };
+      if (update.status === 'DONE') data.isCompleted = true;
+      else data.isCompleted = false;
+      const result = await this.prisma.client.projectTask.update({
+        where: { id: update.taskId },
+        data,
+      });
+      results.push(result);
+    }
+    return results;
+  }
+
+  async getProjectBudget(projectId: string, businessId: string) {
+    const project = await this.prisma.client.project.findFirst({
+      where: { id: projectId, businessId },
+      include: {
+        tasks: { where: { deletedAt: null } },
+        timeEntries: { where: { billable: true, billed: false } },
+        milestones: true,
+      },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    const expenses = await this.prisma.client.expense.findMany({
+      where: { projectId, businessId, deletedAt: null },
+    });
+
+    const timeCost = project.timeEntries.reduce((sum, e) =>
+      sum + ((e.durationMinutes ?? 0) / 60) * (e.hourlyRate ?? project.hourlyRate ?? 0), 0);
+    const expenseCost = expenses.reduce((sum: number, e: { amount: number }) => sum + e.amount, 0);
+    const totalCost = timeCost + expenseCost;
+    const budgetAmount = project.budgetAmount ?? 0;
+    const budgetHours = project.budgetHours ?? 0;
+    const trackedHours = project.tasks.reduce((sum, t) => sum + (t.trackedHours ?? 0), 0);
+
+    return {
+      projectId: project.id,
+      budgetAmount,
+      budgetHours,
+      totalCost,
+      timeCost,
+      expenseCost,
+      trackedHours,
+      remainingBudget: Math.max(0, budgetAmount - totalCost),
+      percentUsed: budgetAmount > 0 ? Math.round((totalCost / budgetAmount) * 100) : 0,
+      percentHoursUsed: budgetHours > 0 ? Math.round((trackedHours / budgetHours) * 100) : 0,
+      status: budgetAmount > 0 && totalCost > budgetAmount ? 'OVER_BUDGET'
+        : budgetAmount > 0 && totalCost > budgetAmount * 0.9 ? 'AT_RISK'
+        : budgetAmount > 0 && totalCost > budgetAmount * 0.75 ? 'WARNING'
+        : 'HEALTHY',
+    };
+  }
+
+  async getProjectTimeline(projectId: string, businessId: string) {
+    const project = await this.prisma.client.project.findFirst({
+      where: { id: projectId, businessId },
+      include: {
+        tasks: {
+          where: { deletedAt: null },
+          orderBy: [{ status: 'asc' }, { position: 'asc' }],
+        },
+        milestones: { orderBy: { dueDate: 'asc' } },
+      },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+    return project;
+  }
+
+  async createMilestone(projectId: string, businessId: string, data: {
+    title: string;
+    description?: string;
+    amount?: number;
+    dueDate?: string;
+  }) {
+    const project = await this.prisma.client.project.findFirst({
+      where: { id: projectId, businessId },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    return this.prisma.client.projectMilestone.create({
+      data: {
+        projectId,
+        title: data.title,
+        description: data.description,
+        amount: data.amount,
+        dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+      },
+    });
+  }
+
+  async updateMilestone(milestoneId: string, projectId: string, businessId: string, data: {
+    title?: string;
+    description?: string;
+    amount?: number;
+    dueDate?: string | null;
+    completedAt?: string | null;
+    invoiceId?: string | null;
+  }) {
+    const milestone = await this.prisma.client.projectMilestone.findFirst({
+      where: { id: milestoneId, project: { id: projectId, businessId } },
+    });
+    if (!milestone) throw new NotFoundException('Milestone not found');
+
+    return this.prisma.client.projectMilestone.update({
+      where: { id: milestoneId },
+      data: {
+        ...(data.title !== undefined && { title: data.title }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.amount !== undefined && { amount: data.amount }),
+        ...(data.dueDate !== undefined && { dueDate: data.dueDate ? new Date(data.dueDate) : null }),
+        ...(data.completedAt !== undefined && { completedAt: data.completedAt ? new Date(data.completedAt) : null }),
+        ...(data.invoiceId !== undefined && { invoiceId: data.invoiceId }),
+      },
+    });
+  }
+
+  async deleteMilestone(milestoneId: string, projectId: string, businessId: string) {
+    const milestone = await this.prisma.client.projectMilestone.findFirst({
+      where: { id: milestoneId, project: { id: projectId, businessId } },
+    });
+    if (!milestone) throw new NotFoundException('Milestone not found');
+    await this.prisma.client.projectMilestone.delete({ where: { id: milestoneId } });
+    return { deleted: true };
+  }
+
   async deleteTask(businessId: string, taskId: string) {
     const result = await this.prisma.client.projectTask.update({
       where: { id: taskId, businessId },

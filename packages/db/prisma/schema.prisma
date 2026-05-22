@@ -20,6 +20,10 @@ model User {
   phone     String?
   avatarUrl String? @map("avatar_url")
   role      String  @default("USER") // USER | SUPER_ADMIN
+  referralCode String? @unique @map("referral_code")
+  referredByUserId String? @map("referred_by_user_id")
+  referredBy    User?   @relation("UserReferrals", fields: [referredByUserId], references: [id])
+  referralsMade User[]  @relation("UserReferrals")
 
   businesses Membership[]
   sessions   Session[]
@@ -284,6 +288,10 @@ model Business {
   // Keyflow Command notes (polymorphic notes attached to any module item)
   keyflowNotes         KeyflowNote[]
 
+  // Freelancer Hardening (Phases 2-6)
+  retainerAgreements   RetainerAgreement[]
+  portalAccessTokens   PortalAccess[]
+
   // Unified Communications Engine
   channelConnections   ChannelConnection[]
   outboundContent      OutboundContent[]
@@ -471,6 +479,7 @@ model Business {
   approvalRequests     ApprovalRequest[]
   assets               Asset[]
   authorityGrants      AuthorityGrant[]
+  timeEntries          TimeEntry[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -1635,6 +1644,7 @@ model Invoice {
   depositForBooking Booking? @relation("BookingDepositInvoice")
   quote    Quote?    @relation(fields: [quoteId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
   quoteId  String?   @unique @map("quote_id")
+  contentRequest ContentRequest?
 
   campaignId String?       @map("campaign_id")
   campaign   EmailCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
@@ -1646,6 +1656,8 @@ model Invoice {
   recurringInvoiceId String?           @map("recurring_invoice_id")
   recurringInvoice   RecurringInvoice? @relation(fields: [recurringInvoiceId], references: [id], onDelete: SetNull)
   receiptSentAt      DateTime?         @map("receipt_sent_at")
+
+  timeEntries TimeEntry[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -2274,14 +2286,24 @@ model Project {
   // Time tracking
   hourlyRate  Float?   @map("hourly_rate")
 
+  // Scheduling & Budgeting (Phase 2/5)
+  startDate    DateTime? @map("start_date")
+  endDate      DateTime? @map("end_date")
+  budgetAmount Float?    @map("budget_amount")
+  budgetHours  Float?    @map("budget_hours")
+
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   tasks      ProjectTask[]
+  milestones ProjectMilestone[]
+  changeOrders ChangeOrder[]
 
   contactId  String?  @map("contact_id")
   invoiceId  String?  @map("invoice_id")
   bookingId  String?  @map("booking_id")
   dueDate    DateTime? @map("due_date")
+
+  timeEntries TimeEntry[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -2302,6 +2324,12 @@ model ProjectTask {
   sortOrder   Int      @default(0) @map("sort_order")
   assigneeId  String?  @map("assignee_id")
 
+  // Kanban / Gantt (Phase 2)
+  status      String   @default("TODO") // TODO, IN_PROGRESS, REVIEW, DONE, BLOCKED
+  position    Int      @default(0)      // for DnD ordering within a column
+  startDate   DateTime? @map("start_date")
+  endDate     DateTime? @map("end_date")
+
   // Time tracking
   estimatedHours Float?  @map("estimated_hours")
   trackedHours   Float   @default(0) @map("tracked_hours")
@@ -2319,9 +2347,48 @@ model ProjectTask {
   /// Phase 0: evidence requirement for task completion
   evidenceRequired Boolean @default(false) @map("evidence_required")
 
+  timeEntries TimeEntry[]
+
   @@index([projectId])
   @@index([businessId])
+  @@index([projectId, status])
+  @@index([projectId, position])
   @@map("project_tasks")
+}
+
+model TimeEntry {
+  id          String    @id @default(cuid())
+  description String?
+  startTime   DateTime  @map("start_time")
+  endTime     DateTime? @map("end_time")
+  durationMinutes Int?  @map("duration_minutes")
+
+  billable Boolean @default(true)
+  billed   Boolean @default(false)
+  hourlyRate Float? @map("hourly_rate")
+
+  userId     String @map("user_id")
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  projectId String? @map("project_id")
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  taskId String? @map("task_id")
+  task   ProjectTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  invoiceId String? @map("invoice_id")
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, userId])
+  @@index([businessId, projectId])
+  @@index([businessId, billable, billed])
+  @@index([businessId, startTime])
+  @@map("time_entries")
 }
 
 model ProjectTemplate {
@@ -5113,10 +5180,12 @@ model AiExecutionLog {
   nextStepSuggested Json? @map("next_step_suggested")
   replanRequired Boolean @default(false) @map("replan_required")
   role         String?
+  idempotencyKey String?   @unique @map("idempotency_key")
 
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([businessId, createdAt])
+  @@index([businessId, idempotencyKey])
   @@index([businessId, module])
   @@index([businessId, toolName])
   @@index([planId])
@@ -7370,6 +7439,10 @@ model ContentRequest {
   // L4 Manager — workload estimation
   estimatedHours    Float?   @map("estimated_hours")
 
+  invoiceOnDelivery Boolean  @default(false) @map("invoice_on_delivery")
+  invoiceId         String?  @unique @map("invoice_id")
+  invoice           Invoice? @relation(fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
@@ -7503,4 +7576,126 @@ model Asset {
   @@index([businessId, folder])
   @@index([businessId, createdAt])
   @@map("assets")
+}
+
+
+/// Phase 2/3: Project milestones for milestone billing
+model ProjectMilestone {
+  id          String   @id @default(cuid())
+  projectId   String   @map("project_id")
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  amount      Float?
+  dueDate     DateTime? @map("due_date")
+  completedAt DateTime? @map("completed_at")
+  invoiceId   String?   @map("invoice_id")
+  sortOrder   Int       @default(0) @map("sort_order")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt      @map("updated_at")
+
+  @@index([projectId])
+  @@index([projectId, dueDate])
+  @@map("project_milestones")
+}
+
+/// Phase 3: Retainer agreements for recurring client work
+model RetainerAgreement {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  contactId     String   @map("contact_id")
+  name          String
+  monthlyAmount Float    @map("monthly_amount")
+  startDate     DateTime @map("start_date")
+  endDate       DateTime? @map("end_date")
+  includedHours Float?   @map("included_hours")
+  rolloverHours Boolean  @default(false) @map("rollover_hours")
+  rolloverCap   Float?   @map("rollover_cap")
+  status        String   @default("ACTIVE") // ACTIVE, PAUSED, EXPIRED, CANCELLED
+
+  periods       RetainerPeriod[]
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([contactId])
+  @@map("retainer_agreements")
+}
+
+/// Phase 3: Retainer billing periods
+model RetainerPeriod {
+  id            String   @id @default(cuid())
+  retainerId    String   @map("retainer_id")
+  retainer      RetainerAgreement @relation(fields: [retainerId], references: [id], onDelete: Cascade)
+
+  periodStart   DateTime @map("period_start")
+  periodEnd     DateTime @map("period_end")
+  hoursUsed     Float    @default(0) @map("hours_used")
+  hoursBilled   Float    @default(0) @map("hours_billed")
+  amountBilled  Float    @default(0) @map("amount_billed")
+  status        String   @default("PENDING") // PENDING, INVOICED, PAID
+  invoiceId     String?  @map("invoice_id")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  @@index([retainerId])
+  @@index([retainerId, periodStart])
+  @@index([retainerId, status])
+  @@map("retainer_periods")
+}
+
+/// Phase 4: Client portal access tokens
+model PortalAccess {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  contactId   String   @map("contact_id")
+  token       String   @unique
+  expiresAt   DateTime @map("expires_at")
+  enabled     Boolean  @default(true)
+  settings    Json?    // { invoices: true, projects: true, documents: true, bookings: true }
+
+  lastAccessedAt DateTime? @map("last_accessed_at")
+  accessCount    Int       @default(0) @map("access_count")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([token])
+  @@index([contactId])
+  @@map("portal_access")
+}
+
+/// Phase 6: Change orders for scope management
+model ChangeOrder {
+  id              String   @id @default(cuid())
+  projectId       String   @map("project_id")
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title           String
+  description     String?
+  originalScope   String?  @map("original_scope")
+  newScope        String?  @map("new_scope")
+  additionalAmount Float?  @map("additional_amount")
+  additionalHours Float?   @map("additional_hours")
+  status          String   @default("DRAFT") // DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, INVOICED
+  approvedBy      String?  @map("approved_by")
+  approvedAt      DateTime? @map("approved_at")
+  invoiceId       String?  @map("invoice_id")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+
+  @@index([projectId])
+  @@index([projectId, status])
+  @@map("change_orders")
 }

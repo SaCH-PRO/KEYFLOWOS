@@ -55,7 +55,7 @@ async function generateTowerSuggestions(context: ModuleContext): Promise<AiSugge
       description: `${data.pendingApprovals} AI-proposed actions need your decision.`,
       priority: "high",
       actionLabel: "Review actions",
-      actionKey: "navigate:/app/control-tower",
+      actionKey: "navigate:/app/keyflow-command",
 
     });
   }

@@ -23,7 +23,6 @@ const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
     "/app/commerce",          // Revenue
     "/app/crm/pipeline",      // Contacts
     "/app/bookings",          // Bookings
-    "/app/calendar",          // Calendar
     "/app/store",             // Storefront
     "/app/profile",           // Profile
     "/app/settings",          // Settings
@@ -33,7 +32,6 @@ const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
     "/app/commerce",          // Revenue
     "/app/crm/pipeline",      // Contacts
     "/app/bookings",          // Bookings
-    "/app/calendar",          // Calendar
     "/app/automations",       // Flows
     "/app/projects",          // Projects
     "/app/inbox",             // Inbox
@@ -55,9 +53,9 @@ const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
  *  These labels must match the `label` field in workspacesNav exactly.
  */
 export const MODE_WORKSPACE_ITEMS: Record<DisclosureMode, string[]> = {
-  startup: ["Revenue", "Contacts", "Bookings", "Calendar"],
-  growth: ["Revenue", "Contacts", "Bookings", "Calendar", "Flows", "Projects", "Inbox", "Content", "Helpdesk", "Structure"],
-  enterprise: ["Revenue", "Contacts", "Bookings", "Calendar", "Flows", "Projects", "Inbox", "Content", "Helpdesk", "Structure"],
+  startup: ["Revenue", "Contacts", "Bookings"],
+  growth: ["Revenue", "Contacts", "Bookings", "Flows", "Projects", "Inbox", "Content", "Reports", "Expenses", "Finance", "Helpdesk", "Structure"],
+  enterprise: ["Revenue", "Contacts", "Bookings", "Flows", "Projects", "Inbox", "Content", "Reports", "Expenses", "Finance", "Helpdesk", "Structure"],
 };
 
 /** Which studio nav items are shown per mode.

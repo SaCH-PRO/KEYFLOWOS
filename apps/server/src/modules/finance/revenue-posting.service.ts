@@ -75,7 +75,7 @@ export class RevenuePostingService {
   }
 
   private db(opts: PostingOpts): Prisma.TransactionClient {
-    return (opts.tx ?? this.prisma.client) as Prisma.TransactionClient;
+    return (opts.tx ?? this.prisma.client) as unknown as Prisma.TransactionClient;
   }
 
   private async getBasis(

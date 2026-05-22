@@ -24,6 +24,15 @@ import {
   ArrowUp,
   ArrowDown,
   CornerDownLeft,
+  Wrench,
+  HelpCircle,
+  LifeBuoy,
+  BookOpen,
+  MessageSquare,
+  Moon,
+  Sun,
+  Copy,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { universalSearch, UniversalSearchResult } from "@/lib/client";
@@ -240,6 +249,42 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     );
   }, [NAV_ACTIONS, query]);
 
+  const UTILITY_ACTIONS: Action[] = useMemo(() => [
+    { id: "toggle-theme", label: "Toggle Theme", hint: "Switch light / dark mode", icon: Moon, onSelect: () => {
+      const html = document.documentElement;
+      const current = html.classList.contains("dark");
+      html.classList.toggle("dark", !current);
+      localStorage.setItem("theme", current ? "light" : "dark");
+    }},
+    { id: "copy-url", label: "Copy Page URL", hint: "Copy current page link", icon: Copy, onSelect: () => {
+      navigator.clipboard.writeText(window.location.href).catch(() => {});
+    }},
+    { id: "refresh-data", label: "Refresh Data", hint: "Reload dashboard data", icon: RotateCcw, onSelect: () => {
+      window.dispatchEvent(new CustomEvent("kf:refresh"));
+    }},
+  ], [router]);
+
+  const filteredUtility = useMemo(() => {
+    if (!query) return UTILITY_ACTIONS;
+    return UTILITY_ACTIONS.filter(
+      (a) => fuzzyMatch(a.label, query) || fuzzyMatch(a.hint || "", query),
+    );
+  }, [UTILITY_ACTIONS, query]);
+
+  const HELP_ACTIONS: Action[] = useMemo(() => [
+    { id: "help-center", label: "Help Center", hint: "Browse guides & documentation", icon: BookOpen, onSelect: () => router.push("/app/help") },
+    { id: "keyboard-shortcuts", label: "Keyboard Shortcuts", hint: "View all available shortcuts", icon: MessageSquare, onSelect: () => router.push("/app/help/shortcuts") },
+    { id: "contact-support", label: "Contact Support", hint: "Get help from the Keyflow team", icon: LifeBuoy, onSelect: () => window.open("mailto:support@keyflowos.com", "_blank") },
+    { id: "whats-new", label: "What’s New", hint: "Latest features & updates", icon: HelpCircle, onSelect: () => router.push("/app/help/whats-new") },
+  ], [router]);
+
+  const filteredHelp = useMemo(() => {
+    if (!query) return HELP_ACTIONS;
+    return HELP_ACTIONS.filter(
+      (a) => fuzzyMatch(a.label, query) || fuzzyMatch(a.hint || "", query),
+    );
+  }, [HELP_ACTIONS, query]);
+
   const filteredRecent = useMemo(() => {
     if (query) return [];
     return recentItems;
@@ -278,6 +323,12 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     }
     for (const a of filteredNav) {
       items.push({ type: "nav", id: a.id, onSelect: () => { a.onSelect(); onClose(); } });
+    }
+    for (const a of filteredUtility) {
+      items.push({ type: "utility", id: a.id, onSelect: () => { a.onSelect(); onClose(); } });
+    }
+    for (const a of filteredHelp) {
+      items.push({ type: "help", id: a.id, onSelect: () => { a.onSelect(); onClose(); } });
     }
     return items;
   }, [hasSearch, searching, searchResults, filteredRecent, filteredQuick, filteredNav, handleNavigate, onClose]);
@@ -494,6 +545,78 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                       )}
                       <ArrowRight className="w-4 h-4 text-muted-foreground" />
                     </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {filteredUtility.length > 0 && (
+            <div>
+              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2 border-t border-border/40 mt-1">
+                <Wrench className="w-3 h-3" />
+                Actions
+              </div>
+              {filteredUtility.map((action) => {
+                const idx = getNextIdx();
+                const ActionIcon = action.icon;
+                return (
+                  <button
+                    key={action.id}
+                    data-idx={idx}
+                    onClick={() => {
+                      action.onSelect();
+                      onClose();
+                    }}
+                    className={cn(
+                      "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
+                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      {ActionIcon && <ActionIcon className="w-4 h-4 text-muted-foreground" />}
+                      <div>
+                        <div className="text-foreground">{action.label}</div>
+                        {action.hint && <div className="text-[11px] text-muted-foreground">{action.hint}</div>}
+                      </div>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {filteredHelp.length > 0 && (
+            <div>
+              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2 border-t border-border/40 mt-1">
+                <HelpCircle className="w-3 h-3" />
+                Help
+              </div>
+              {filteredHelp.map((action) => {
+                const idx = getNextIdx();
+                const HelpIcon = action.icon;
+                return (
+                  <button
+                    key={action.id}
+                    data-idx={idx}
+                    onClick={() => {
+                      action.onSelect();
+                      onClose();
+                    }}
+                    className={cn(
+                      "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
+                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      {HelpIcon && <HelpIcon className="w-4 h-4 text-muted-foreground" />}
+                      <div>
+                        <div className="text-foreground">{action.label}</div>
+                        {action.hint && <div className="text-[11px] text-muted-foreground">{action.hint}</div>}
+                      </div>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-muted-foreground" />
                   </button>
                 );
               })}

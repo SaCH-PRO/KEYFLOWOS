@@ -43,6 +43,10 @@ import {
   fetchActionQueue,
   resolveAiApproval,
   fetchProAutoInsights,
+  fetchSuggestions,
+  dismissSuggestion,
+  blockSuggestionCategory,
+  type ChatSuggestion,
   fetchProfileStatus,
   sendProfileChat,
   confirmProfileExtractions,
@@ -450,6 +454,8 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
   const [stats, setStats] = useState<AiExecutionStats | null>(null);
   const [insights, setInsights] = useState<ProAutoInsight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<ChatSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [profileStatus, setProfileStatus] = useState<ProfileStatus | null>(null);
   const [profileMode, setProfileMode] = useState(false);
@@ -570,6 +576,19 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     } catch {
     } finally {
       setInsightsLoading(false);
+    }
+  }, []);
+
+  const loadSuggestions = useCallback(async () => {
+    const biz = getStoredBusinessId();
+    if (!biz) return;
+    setSuggestionsLoading(true);
+    try {
+      const res = await fetchSuggestions(biz);
+      if (res.data) setSuggestions(res.data);
+    } catch {
+    } finally {
+      setSuggestionsLoading(false);
     }
   }, []);
 
@@ -1205,6 +1224,63 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                             </button>
                           )}
                         </div>
+
+                        {suggestions.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-2">
+                              Suggestions from KEY
+                            </p>
+                            <div className="space-y-2">
+                              {suggestions.map((suggestion) => {
+                                const config = SEVERITY_CONFIG[suggestion.severity];
+                                const SevIcon = config.icon;
+                                return (
+                                  <div
+                                    key={suggestion.id}
+                                    className={`p-3 rounded-xl border ${config.border} ${config.bg}`}
+                                  >
+                                    <div className="flex items-start gap-2 mb-2">
+                                      <SevIcon className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${config.color}`} />
+                                      <div className="flex-1 min-w-0">
+                                        <p className={`text-xs font-medium ${config.color} leading-snug`}>{suggestion.title}</p>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">{suggestion.message}</p>
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {suggestion.actions.map((action) => (
+                                        <button
+                                          key={action.value}
+                                          onClick={async () => {
+                                            if (action.value === "dismiss") {
+                                              await dismissSuggestion(getStoredBusinessId()!, suggestion.id);
+                                              setSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
+                                            } else if (action.value === "block") {
+                                              await blockSuggestionCategory(getStoredBusinessId()!, suggestion.category);
+                                              setSuggestions((prev) => prev.filter((s) => s.category !== suggestion.category));
+                                            } else if (action.toolName) {
+                                              handleSend(`${action.label} for ${suggestion.title.toLowerCase()}`);
+                                              await dismissSuggestion(getStoredBusinessId()!, suggestion.id);
+                                              setSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
+                                            } else {
+                                              handleSend(action.label);
+                                            }
+                                          }}
+                                          className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-colors ${
+                                            action.value === "dismiss" || action.value === "block"
+                                              ? "bg-muted/50 text-muted-foreground hover:bg-muted"
+                                              : "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20"
+                                          }`}
+                                        >
+                                          {action.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
 
                         {displayInsights.length > 0 && (
                           <div>

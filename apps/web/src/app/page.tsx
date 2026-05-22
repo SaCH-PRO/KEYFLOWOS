@@ -16,6 +16,11 @@ import {
   Play,
   TrendingUp,
   Sparkles,
+  Lock,
+  ShieldCheck,
+  Globe,
+  Server,
+  Quote,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -151,7 +156,7 @@ export default function Home() {
 
         <motion.div
           initial="hidden" whileInView="visible" viewport={{ once: true, margin: "-50px" }} variants={stagger}
-          className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-24"
+          className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-16"
         >
           {STATS.map(({ value, label }) => (
             <motion.div key={label} variants={fadeUp} transition={{ duration: 0.4 }}
@@ -160,6 +165,52 @@ export default function Home() {
               <p className="text-xs sm:text-sm text-[hsl(30_10%_45%)] mt-1">{label}</p>
             </motion.div>
           ))}
+        </motion.div>
+
+        {/* Trust badges */}
+        <motion.div
+          initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger}
+          className="flex flex-wrap justify-center gap-3 sm:gap-4 mb-24"
+        >
+          {[
+            { icon: Lock, label: "SSL Encrypted" },
+            { icon: ShieldCheck, label: "Secure Payments" },
+            { icon: Globe, label: "Caribbean-Native" },
+            { icon: Server, label: "99.9% Uptime" },
+          ].map(({ icon: Icon, label }) => (
+            <motion.div key={label} variants={fadeUp} transition={{ duration: 0.3 }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/[0.06] bg-white/[0.02] text-xs sm:text-sm text-[hsl(30_10%_55%)]">
+              <Icon className="w-3.5 h-3.5 text-[hsl(24_95%_53%)]" />
+              {label}
+            </motion.div>
+          ))}
+        </motion.div>
+      </section>
+
+      {/* Testimonials */}
+      <section className="relative z-10 max-w-6xl mx-auto px-5 sm:px-8 pb-24">
+        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, margin: "-80px" }} variants={stagger}>
+          <motion.div variants={fadeUp} transition={{ duration: 0.5 }} className="text-center mb-12">
+            <p className="text-xs font-semibold uppercase tracking-widest text-[hsl(24_95%_53%)] mb-3">Loved by founders</p>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-3">What entrepreneurs say</h2>
+          </motion.div>
+          <div className="grid md:grid-cols-3 gap-5">
+            {[
+              { quote: "KeyFlowOS cut my daily admin from 3 hours to 15 minutes. The AI autopilot handles follow-ups I used to forget.", author: "Sarah M.", role: "Spa Owner, Port of Spain" },
+              { quote: "Finally — invoicing that understands TTD and Caribbean payment methods. My clients pay faster and I reconcile automatically.", author: "David K.", role: "Consultant, Barbados" },
+              { quote: "I booked 40% more appointments in my first month just by having a proper online booking page. Game changer.", author: "Aisha R.", role: "Stylist, Kingston" },
+            ].map((t, i) => (
+              <motion.div key={i} variants={fadeUp} transition={{ duration: 0.4 }}
+                className="p-6 rounded-2xl border border-white/[0.06] bg-white/[0.02]">
+                <Quote className="w-6 h-6 text-[hsl(24_95%_53%)] mb-3" />
+                <p className="text-sm text-[hsl(30_10%_70%)] leading-relaxed mb-4">{t.quote}</p>
+                <div>
+                  <p className="text-sm font-semibold">{t.author}</p>
+                  <p className="text-xs text-[hsl(30_10%_45%)]">{t.role}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
         </motion.div>
       </section>
 

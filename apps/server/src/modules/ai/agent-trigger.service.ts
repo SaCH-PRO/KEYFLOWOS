@@ -130,6 +130,8 @@ export class AgentTriggerService implements OnModuleInit {
               data: { status: 'approved' },
             });
             this.logger.log(`Auto-approved plan ${plan.id} for trigger ${trigger.id}`);
+            // Trigger immediate execution — no 30s polling delay
+            this.events.emit('plan.approved', { planId: plan.id, businessId });
           }
         }
 

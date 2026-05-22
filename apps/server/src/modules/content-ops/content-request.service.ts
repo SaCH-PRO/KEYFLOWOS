@@ -1,7 +1,8 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
+import { ContentInvoiceService } from './content-invoice.service';
 
 export interface CreateContentRequestInput {
   businessId: string;
@@ -19,6 +20,7 @@ export interface CreateContentRequestInput {
   requiredInputs?: string[];
   attachedAssetIds?: string[];
   approvalRequired?: boolean;
+  invoiceOnDelivery?: boolean;
 }
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
@@ -42,6 +44,7 @@ export class ContentRequestService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly emitter: EventEmitter2,
     @Inject(ApprovalRequestService) private readonly approvals: ApprovalRequestService,
+    @Optional() @Inject(ContentInvoiceService) private readonly contentInvoice?: ContentInvoiceService,
   ) {}
 
   async createRequest(input: CreateContentRequestInput) {
@@ -65,6 +68,7 @@ export class ContentRequestService {
         assignedTeamMemberIds: [],
         deliveryFileIds: [],
         approvalRequired: input.approvalRequired ?? true,
+        invoiceOnDelivery: input.invoiceOnDelivery ?? false,
       },
     });
 
@@ -307,7 +311,28 @@ export class ContentRequestService {
       data: { status: 'delivered', deliveredAt: new Date(), userNotified: true },
     });
 
-    this.emitEvent(request.businessId, 'content_request.delivered', updated, { actorId });
+    let invoice = null;
+    if (request.invoiceOnDelivery && this.contentInvoice) {
+      try {
+        invoice = await this.contentInvoice.generateInvoiceFromDelivery(requestId, request.businessId);
+      } catch (err) {
+        this.logger.warn(`Auto-invoice generation failed: ${(err as Error).message}`);
+      }
+    }
+
+    this.emitEvent(request.businessId, 'content_request.delivered', updated, { actorId, invoiceId: invoice?.id ?? null });
+
+    if (invoice) {
+      this.emitter.emit('content.delivered', {
+        businessId: request.businessId,
+        contentRequestId: request.id,
+        status: updated.status,
+        businessGoal: request.businessGoal,
+        invoiceId: invoice.id,
+        actorId,
+      });
+    }
+
     return updated;
   }
 

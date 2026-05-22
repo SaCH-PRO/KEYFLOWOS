@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Banknote, BarChart3, BookOpen, Calculator, Landmark,
   LayoutDashboard, Receipt, Settings as SettingsIcon, TrendingUp,
-  Wallet, Zap,
+  Wallet, Zap, ArrowRightLeft,
 } from "lucide-react";
 
 /**
@@ -25,6 +25,7 @@ const TABS = [
   { href: "/app/finance/expenses",       label: "Money Out",      icon: Receipt },
   { href: "/app/finance/cashflow",       label: "Cashflow",       icon: Banknote },
   { href: "/app/finance/accounts",       label: "Accounts",       icon: Wallet },
+  { href: "/app/finance/journal",        label: "Journal",        icon: ArrowRightLeft },
   { href: "/app/finance/reconciliation", label: "Reconciliation", icon: BookOpen },
   { href: "/app/finance/reports",        label: "Reports",        icon: BarChart3 },
   { href: "/app/finance/tax",            label: "Tax",            icon: Calculator },

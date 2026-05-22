@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   Request,
+  BadRequestException,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -20,6 +21,7 @@ import {
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { CallLogService } from './call-log.service';
+import { CallScriptService } from './call-script.service';
 import { CreateCallLogDto } from './dto/create-call-log.dto';
 import { UpdateCallLogDto } from './dto/update-call-log.dto';
 import { CompleteCallDto } from './dto/complete-call.dto';
@@ -29,7 +31,10 @@ import { ListCallsQueryDto } from './dto/list-calls-query.dto';
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard, ModuleScopeGuard)
 export class CallTaskController {
-  constructor(private readonly callLogs: CallLogService) {}
+  constructor(
+    private readonly callLogs: CallLogService,
+    private readonly callScripts: CallScriptService,
+  ) {}
 
   @Post('businesses/:businessId/calls')
   @RateLimit(20, 60_000)
@@ -128,19 +133,54 @@ export class CallTaskController {
     return this.callLogs.getScheduledCalls(businessId, callerId, new Date());
   }
 
+  @Post('businesses/:businessId/calls/:callId/generate-script')
+  @RateLimit(20, 60_000)
+  @RequireModuleScope('crm', 'write')
+  async generateScript(
+    @Param('businessId') businessId: string,
+    @Param('callId') callId: string,
+    @Request() req: ExpressRequest & { user?: { id: string } },
+  ) {
+    const callLog = await this.callLogs.getCallLog(callId);
+    if (!callLog.contactId) {
+      throw new BadRequestException('Call log has no contact');
+    }
+    return this.callScripts.generateScript(
+      businessId,
+      callId,
+      callLog.contactId,
+    );
+  }
+
   @Post('businesses/:businessId/contacts/:contactId/calls/from-next-action')
   @RateLimit(20, 60_000)
   @RequireModuleScope('crm', 'write')
   async createFromNextAction(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
-    @Body() body: { callerId?: string; script?: string },
+    @Body() body: { callerId?: string; script?: string; autoGenerateScript?: boolean },
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
-    return this.callLogs.createFromContactNextAction(
+    const callLog = await this.callLogs.createFromContactNextAction(
       contactId,
       body.callerId ?? req.user?.id ?? 'system',
       body.script,
     );
+
+    if (body.autoGenerateScript && callLog.contactId) {
+      try {
+        await this.callScripts.generateScript(
+          businessId,
+          callLog.id,
+          callLog.contactId,
+        );
+        const updated = await this.callLogs.getCallLog(callLog.id);
+        return updated;
+      } catch {
+        // Auto-generation failed, return the call log without script
+      }
+    }
+
+    return callLog;
   }
 }

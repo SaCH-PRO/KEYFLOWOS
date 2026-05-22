@@ -395,7 +395,7 @@ export function ExecutionLog({ businessId, onExecutionStatsChange }: ExecutionLo
                               const routeMap: Record<string, string> = {
                                 invoice: "/app/invoices",
                                 client: "/app/clients",
-                                booking: "/app/calendar",
+                                booking: "/app/bookings",
                                 quote: "/app/quotes",
                                 project: "/app/projects",
                               };

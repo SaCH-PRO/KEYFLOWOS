@@ -143,6 +143,9 @@ export class MorningBriefingService implements OnModuleInit {
       cardCount: topCards.length,
     });
 
+    // Trigger immediate execution — briefing plans are pre-approved
+    this.events.emit('plan.approved', { planId: plan.id, businessId });
+
     return result;
   }
 

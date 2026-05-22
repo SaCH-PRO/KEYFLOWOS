@@ -137,6 +137,7 @@ export class IdentityController {
         company: body.company,
         phone: body.phone,
         requestOrigin: origin,
+        referralCode: body.referralCode,
       });
       await this.authSec.audit({
         event: 'signup',
@@ -639,6 +640,25 @@ export class IdentityController {
       phone: body.phone,
       avatarUrl: body.avatarUrl,
       company: body.company,
+      referralCode: body.referralCode,
     });
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('referral')
+  async getReferral(@CurrentUser() user: AuthenticatedUser) {
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    const me = await this.prisma.client.user.findUnique({
+      where: { id: user.id },
+      select: { referralCode: true, referredByUserId: true },
+    });
+    if (!me) throw new UnauthorizedException('User not found');
+    const count = await this.prisma.client.user.count({ where: { referredByUserId: user.id } });
+    return {
+      code: me.referralCode,
+      link: `${process.env.NEXT_PUBLIC_SITE_URL ?? 'https://keyflowos.com'}/auth/signup?ref=${me.referralCode ?? ''}`,
+      referrals: count,
+      referredBy: me.referredByUserId,
+    };
   }
 }

@@ -10,6 +10,7 @@ import {
   Search,
   Trash2,
   Eye,
+  Pencil,
   Folder,
   Tag,
   X,
@@ -25,6 +26,7 @@ import {
   updateAsset,
   tagAsset,
   untagAsset,
+  createAsset,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
@@ -46,6 +48,8 @@ export default function AssetsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [newTag, setNewTag] = useState("");
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const businessId = getStoredBusinessId();
 
@@ -114,6 +118,36 @@ export default function AssetsPage() {
     }
   };
 
+  const handleUpload = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!businessId) return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    setUploading(true);
+    try {
+      await createAsset(businessId, {
+        name: fd.get("name") as string,
+        type: (fd.get("type") as string) || "other",
+        url: (fd.get("url") as string) || "",
+        storageKey: (fd.get("storageKey") as string) || "",
+        mimeType: (fd.get("mimeType") as string) || undefined,
+        sizeBytes: fd.get("sizeBytes") ? Number(fd.get("sizeBytes")) : undefined,
+        folder: (fd.get("folder") as string) || undefined,
+        tags: (fd.get("tags") as string)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      });
+      toast.success("Asset created");
+      setShowUpload(false);
+      load();
+    } catch {
+      toast.error("Failed to create asset");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const types = ["image", "video", "document", "audio", "other"];
 
   return (
@@ -124,6 +158,13 @@ export default function AssetsPage() {
             <h1 className="text-2xl font-bold tracking-tight">Asset Library</h1>
             <p className="text-muted-foreground mt-1">Manage images, videos, documents, and files</p>
           </div>
+          <button
+            onClick={() => setShowUpload(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Upload Asset
+          </button>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -192,8 +233,17 @@ export default function AssetsPage() {
                     <span className="font-medium text-sm truncate max-w-[180px]">{asset.name}</span>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => setEditingAsset(asset)} className="p-1 rounded hover:bg-muted">
+                    <button
+                      onClick={() => router.push(`/app/assets/${asset.id}`)}
+                      className="p-1 rounded hover:bg-muted transition-colors"
+                    >
                       <Eye className="w-4 h-4 text-muted-foreground" />
+                    </button>
+                    <button
+                      onClick={() => setEditingAsset(asset)}
+                      className="p-1 rounded hover:bg-muted transition-colors"
+                    >
+                      <Pencil className="w-4 h-4 text-muted-foreground" />
                     </button>
                     <button onClick={() => handleDelete(asset.id)} className="p-1 rounded hover:bg-red-50">
                       <Trash2 className="w-4 h-4 text-red-500" />
@@ -264,6 +314,67 @@ export default function AssetsPage() {
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setEditingAsset(null)} className="px-4 py-2 rounded-lg border hover:bg-muted transition-colors">Cancel</button>
                 <button type="submit" className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Upload modal */}
+      {showUpload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-background rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">Upload Asset</h2>
+              <button onClick={() => setShowUpload(false)} className="p-1 rounded hover:bg-muted">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleUpload} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Name *</label>
+                <input name="name" required className="w-full px-3 py-2 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="Asset name" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Type</label>
+                <select name="type" className="w-full px-3 py-2 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20">
+                  <option value="image">Image</option>
+                  <option value="video">Video</option>
+                  <option value="document">Document</option>
+                  <option value="audio">Audio</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">URL *</label>
+                <input name="url" required className="w-full px-3 py-2 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="https://..." />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Storage Key *</label>
+                <input name="storageKey" required className="w-full px-3 py-2 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="path/to/file.ext" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">MIME Type</label>
+                <input name="mimeType" className="w-full px-3 py-2 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="image/png" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Size (bytes)</label>
+                <input name="sizeBytes" type="number" className="w-full px-3 py-2 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="0" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Folder</label>
+                <input name="folder" className="w-full px-3 py-2 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="default" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Tags (comma-separated)</label>
+                <input name="tags" className="w-full px-3 py-2 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="tag1, tag2" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowUpload(false)} className="px-4 py-2 rounded-lg border hover:bg-muted transition-colors">Cancel</button>
+                <button type="submit" disabled={uploading} className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50">
+                  {uploading && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Create Asset
+                </button>
               </div>
             </form>
           </div>

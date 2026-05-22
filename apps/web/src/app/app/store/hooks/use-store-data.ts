@@ -389,6 +389,9 @@ export function useStoreData() {
 
   function handleConfigChange(section: string, updates: Record<string, unknown>) {
     setStorefrontConfig((prev) => {
+      if (section === "__root") {
+        return { ...prev, ...updates };
+      }
       if (ARRAY_CONFIG_KEYS.has(section)) {
         return { ...prev, [section]: updates };
       }

@@ -7,6 +7,7 @@ import { Zap, RefreshCw, Rocket, TrendingUp, Building2, X } from "lucide-react";
 import { useControlTowerData } from "../control-tower/components/use-control-tower-data";
 import { CommandEntry } from "../control-tower/components/command-entry";
 import { DoItForMePanel } from "../control-tower/components/do-it-for-me-panel";
+import { MorningBriefing } from "../control-tower/components/morning-briefing";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { GettingStartedChecklist } from "@/components/ui/getting-started-checklist";
 import { CockpitHero } from "./components/cockpit-hero";
@@ -15,6 +16,7 @@ import { CockpitFlowVisual } from "./components/cockpit-flow-visual";
 import { CockpitKeyPanel } from "./components/cockpit-key-panel";
 import { CockpitPriorities } from "./components/cockpit-priorities";
 import { CockpitBottomSection } from "./components/cockpit-bottom-section";
+import { TodaysPlanCard } from "./components/todays-plan-card";
 import {
   hasChosenMode,
   setDisclosureMode,
@@ -125,18 +127,20 @@ export default function KeyflowCommandPage() {
           </div>
         )}
 
+        {/* Morning Briefing */}
+        {d.businessId && <MorningBriefing businessId={d.businessId} />}
+
         {/* Getting Started (new users) */}
         <GettingStartedChecklist
           businessName={d.data?.snapshot?.business?.name}
-          hasServices={false}
           hasBookings={(db?.upcomingBookings ?? 0) > 0}
-          hasContacts={false}
-          hasBusinessHours={false}
-          storeEnabled={false}
         />
 
         {/* Business Flow Visual */}
         <CockpitFlowVisual />
+
+        {/* Today's AI Plan */}
+        {d.businessId && <TodaysPlanCard businessId={d.businessId} />}
 
         {/* Stats Row */}
         <CockpitStatsRow

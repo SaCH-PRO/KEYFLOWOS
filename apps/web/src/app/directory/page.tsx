@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
   MapPin,
@@ -10,66 +10,38 @@ import {
   ArrowRight,
   Sparkles,
   Layers,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  Globe,
 } from "lucide-react";
 
-const CATEGORIES = ["All", "Beauty", "Health", "Food", "Services", "Retail"];
+interface DirectoryBusiness {
+  slug: string;
+  name: string;
+  logoUrl: string | null;
+  tagline: string | null;
+  headline: string | null;
+  industry: string | null;
+  city: string | null;
+  country: string | null;
+  website: string | null;
+  publishedAt: string | null;
+}
 
-const MOCK_BUSINESSES = [
-  {
-    slug: "island-glow-spa",
-    name: "Island Glow Spa",
-    logoUrl: null,
-    tagline: "Radiant skin, island soul",
-    category: "Beauty",
-    city: "Port of Spain",
-    country: "Trinidad & Tobago",
-  },
-  {
-    slug: "coconut-cove-barbers",
-    name: "Coconut Cove Barbers",
-    logoUrl: null,
-    tagline: "Sharp cuts by the shore",
-    category: "Services",
-    city: "Scarborough",
-    country: "Trinidad & Tobago",
-  },
-  {
-    slug: "spice-isle-kitchen",
-    name: "Spice Isle Kitchen",
-    logoUrl: null,
-    tagline: "Authentic Grenadian flavours",
-    category: "Food",
-    city: "St. George's",
-    country: "Grenada",
-  },
-  {
-    slug: "reef-wellness",
-    name: "Reef & Wellness",
-    logoUrl: null,
-    tagline: "Healing from the sea",
-    category: "Health",
-    city: "Bridgetown",
-    country: "Barbados",
-  },
-  {
-    slug: "sunset-boutique",
-    name: "Sunset Boutique",
-    logoUrl: null,
-    tagline: "Island fashion finds",
-    category: "Retail",
-    city: "Kingston",
-    country: "Jamaica",
-  },
-  {
-    slug: "tropical-twist-salon",
-    name: "Tropical Twist Salon",
-    logoUrl: null,
-    tagline: "Braids, beauty & beyond",
-    category: "Beauty",
-    city: "Castries",
-    country: "St. Lucia",
-  },
-];
+interface DirectoryFilters {
+  industries: { value: string; count: number }[];
+  cities: { value: string; count: number }[];
+}
+
+interface DirectoryResponse {
+  items: DirectoryBusiness[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  filters: DirectoryFilters;
+}
 
 const fadeUp = { hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0 } };
 const stagger = { visible: { transition: { staggerChildren: 0.08 } } };
@@ -77,24 +49,54 @@ const stagger = { visible: { transition: { staggerChildren: 0.08 } } };
 export default function DirectoryPage() {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [activeCity, setActiveCity] = useState("All");
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<DirectoryResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filtered = useMemo(() => {
-    let items = [...MOCK_BUSINESSES];
-    if (activeCategory !== "All") {
-      items = items.filter((b) => b.category === activeCategory);
+  const fetchDirectory = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("pageSize", "24");
+      if (search.trim()) params.set("q", search.trim());
+      if (activeCategory !== "All") params.set("industry", activeCategory);
+      if (activeCity !== "All") params.set("city", activeCity);
+
+      const res = await fetch(`/site/presence/directory?${params.toString()}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`Failed to load directory (${res.status})`);
+      const json: DirectoryResponse = await res.json();
+      setData(json);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load directory");
+    } finally {
+      setLoading(false);
     }
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      items = items.filter(
-        (b) =>
-          b.name.toLowerCase().includes(q) ||
-          b.tagline.toLowerCase().includes(q) ||
-          b.city.toLowerCase().includes(q) ||
-          b.category.toLowerCase().includes(q)
-      );
-    }
-    return items;
-  }, [search, activeCategory]);
+  }, [search, activeCategory, activeCity, page]);
+
+  useEffect(() => {
+    fetchDirectory();
+  }, [fetchDirectory]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [search, activeCategory, activeCity]);
+
+  const categories = useMemo(() => {
+    if (!data?.filters.industries) return ["All"];
+    return ["All", ...data.filters.industries.map((i) => i.value)];
+  }, [data?.filters.industries]);
+
+  const cities = useMemo(() => {
+    if (!data?.filters.cities) return ["All"];
+    return ["All", ...data.filters.cities.map((c) => c.value)];
+  }, [data?.filters.cities]);
 
   return (
     <div className="relative min-h-screen bg-[hsl(20_14%_4%)] text-[hsl(30_20%_98%)] overflow-hidden">
@@ -182,7 +184,7 @@ export default function DirectoryPage() {
           initial="hidden"
           animate="visible"
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="max-w-2xl mx-auto mb-10"
+          className="max-w-2xl mx-auto mb-6"
         >
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-[hsl(30_10%_40%)]" />
@@ -196,14 +198,15 @@ export default function DirectoryPage() {
           </div>
         </motion.div>
 
+        {/* Industry filters */}
         <motion.div
           variants={fadeUp}
           initial="hidden"
           animate="visible"
           transition={{ duration: 0.5, delay: 0.3 }}
-          className="flex flex-wrap justify-center gap-2 mb-12"
+          className="flex flex-wrap justify-center gap-2 mb-3"
         >
-          {CATEGORIES.map((cat) => (
+          {categories.map((cat) => (
             <button
               key={cat}
               onClick={() => setActiveCategory(cat)}
@@ -218,29 +221,121 @@ export default function DirectoryPage() {
           ))}
         </motion.div>
 
-        {filtered.length === 0 ? (
+        {/* City filters */}
+        {cities.length > 1 && (
+          <motion.div
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
+            transition={{ duration: 0.5, delay: 0.35 }}
+            className="flex flex-wrap justify-center gap-2 mb-10"
+          >
+            {cities.map((city) => (
+              <button
+                key={city}
+                onClick={() => setActiveCity(city)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                  activeCity === city
+                    ? "bg-[hsl(173_58%_39%/0.2)] border border-[hsl(173_58%_39%/0.4)] text-[hsl(173_58%_60%)]"
+                    : "bg-white/[0.03] border border-white/[0.06] text-[hsl(30_10%_45%)] hover:text-[hsl(30_20%_85%)] hover:bg-white/[0.06]"
+                }`}
+              >
+                {city}
+              </button>
+            ))}
+          </motion.div>
+        )}
+
+        {/* Results count */}
+        {data && !loading && (
+          <p className="text-center text-sm text-[hsl(30_10%_40%)] mb-6">
+            Showing {data.items.length} of {data.total} businesses
+            {data.pageCount > 1 && ` · Page ${data.page} of ${data.pageCount}`}
+          </p>
+        )}
+
+        {/* Loading */}
+        {loading && (
+          <div className="flex flex-col items-center justify-center py-20">
+            <Loader2 className="w-10 h-10 text-[hsl(24_95%_53%)] animate-spin mb-4" />
+            <p className="text-sm text-[hsl(30_10%_45%)]">Loading businesses...</p>
+          </div>
+        )}
+
+        {/* Error */}
+        {!loading && error && (
+          <div className="text-center py-20">
+            <Store className="w-12 h-12 text-[hsl(30_10%_30%)] mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-[hsl(30_20%_85%)] mb-2">
+              Could not load directory
+            </h3>
+            <p className="text-sm text-[hsl(30_10%_45%)] mb-4">{error}</p>
+            <button
+              onClick={fetchDirectory}
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-[hsl(24_95%_53%)] to-[hsl(24_95%_45%)] hover:brightness-110 transition-all"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        {/* Empty */}
+        {!loading && !error && data?.items.length === 0 && (
           <div className="text-center py-20">
             <Store className="w-12 h-12 text-[hsl(30_10%_30%)] mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-[hsl(30_20%_85%)] mb-2">
               No businesses found
             </h3>
             <p className="text-sm text-[hsl(30_10%_45%)]">
-              Try adjusting your search or category filter.
+              Try adjusting your search or filters.
             </p>
           </div>
-        ) : (
+        )}
+
+        {/* Grid */}
+        {!loading && !error && data && data.items.length > 0 && (
           <motion.ul
             variants={stagger}
             initial="hidden"
             animate="visible"
             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
           >
-            {filtered.map((business) => (
-              <motion.li key={business.slug} variants={fadeUp} transition={{ duration: 0.4 }}>
-                <BusinessCard business={business} />
-              </motion.li>
-            ))}
+            <AnimatePresence mode="popLayout">
+              {data.items.map((business) => (
+                <motion.li
+                  key={business.slug}
+                  variants={fadeUp}
+                  transition={{ duration: 0.4 }}
+                  layout
+                >
+                  <BusinessCard business={business} />
+                </motion.li>
+              ))}
+            </AnimatePresence>
           </motion.ul>
+        )}
+
+        {/* Pagination */}
+        {data && data.pageCount > 1 && !loading && (
+          <div className="flex items-center justify-center gap-3 mt-12">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="p-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[hsl(30_10%_55%)] hover:text-[hsl(30_20%_85%)] hover:bg-white/[0.06] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <span className="text-sm text-[hsl(30_10%_55%)]">
+              Page {page} of {data.pageCount}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(data.pageCount, p + 1))}
+              disabled={page >= data.pageCount}
+              className="p-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[hsl(30_10%_55%)] hover:text-[hsl(30_20%_85%)] hover:bg-white/[0.06] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
         )}
       </main>
 
@@ -289,11 +384,7 @@ export default function DirectoryPage() {
   );
 }
 
-function BusinessCard({
-  business,
-}: {
-  business: (typeof MOCK_BUSINESSES)[number];
-}) {
+function BusinessCard({ business }: { business: DirectoryBusiness }) {
   const location = [business.city, business.country]
     .filter(Boolean)
     .join(", ");
@@ -317,17 +408,19 @@ function BusinessCard({
           <h3 className="truncate text-base font-semibold text-[hsl(30_20%_98%)] group-hover:text-[hsl(24_95%_63%)] transition-colors">
             {business.name}
           </h3>
-          <p className="mt-0.5 text-sm text-[hsl(30_10%_45%)]">
-            {business.tagline}
+          <p className="mt-0.5 text-sm text-[hsl(30_10%_45%)] line-clamp-2">
+            {business.tagline || business.headline || ""}
           </p>
         </div>
       </div>
 
       <div className="mt-auto space-y-4">
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[hsl(30_10%_55%)]">
-            {business.category}
-          </span>
+          {business.industry && (
+            <span className="rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[hsl(30_10%_55%)]">
+              {business.industry}
+            </span>
+          )}
           {location && (
             <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[hsl(30_10%_55%)]">
               <MapPin className="w-3 h-3" />
@@ -336,13 +429,26 @@ function BusinessCard({
           )}
         </div>
 
-        <Link
-          href={`/book/${business.slug}`}
-          className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-[hsl(24_95%_53%)] to-[hsl(24_95%_45%)] hover:brightness-110 transition-all shadow-lg shadow-orange-500/10"
-        >
-          Book Now
-          <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/site/${business.slug}`}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-[hsl(24_95%_53%)] to-[hsl(24_95%_45%)] hover:brightness-110 transition-all shadow-lg shadow-orange-500/10"
+          >
+            Visit
+            <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+          </Link>
+          {business.website && (
+            <a
+              href={business.website}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[hsl(30_10%_55%)] hover:text-[hsl(30_20%_85%)] hover:bg-white/[0.06] transition-all"
+              title="External website"
+            >
+              <Globe className="w-4 h-4" />
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+// framer-motion removed — using CSS animations for lighter auth pages
 import {
   Layers,
   Mail,
@@ -90,6 +90,16 @@ export default function LoginForm() {
   const [resending, setResending] = useState(false);
   const [resendNote, setResendNote] = useState<string | null>(null);
 
+  // Capture referral code from URL
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (ref?.trim()) {
+      window.localStorage.setItem("kf_referral_code", ref.trim().toUpperCase());
+    }
+  }, []);
+
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
@@ -119,9 +129,11 @@ export default function LoginForm() {
         setStoredRefreshToken(result.data.refreshToken);
       }
       const draft = JSON.parse(window.localStorage.getItem("kf_profile_draft") || "{}");
+      const referralCode = window.localStorage.getItem("kf_referral_code") || undefined;
       const bootstrap = await bootstrapIdentity({
         email, firstName: draft.firstName, lastName: draft.lastName,
         phone: draft.phone, company: draft.company, username: draft.username,
+        referralCode,
       });
       if (bootstrap.data?.business?.id) {
         setStoredBusinessId(bootstrap.data.business.id);
@@ -186,7 +198,7 @@ export default function LoginForm() {
       </div>
 
       <div className="hidden lg:flex flex-col justify-center flex-1 relative z-10 px-12 xl:px-20">
-        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6 }}>
+        <div className="animate-kf-slide-in-left">
           <div className="flex items-center gap-3 mb-8">
             <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-gradient-to-br from-[hsl(24_95%_53%)] to-[hsl(173_58%_39%)]">
               <Layers className="w-5.5 h-5.5 text-white" />
@@ -205,12 +217,9 @@ export default function LoginForm() {
 
           <div className="grid grid-cols-2 gap-4 max-w-lg">
             {FEATURES.map(({ icon: Icon, label, desc }, i) => (
-              <motion.div
+              <div
                 key={label}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 + i * 0.1 }}
-                className="flex items-start gap-3 p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm"
+                className={`flex items-start gap-3 p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm animate-kf-slide-in-up-sm animate-kf-delay-${Math.min(i + 3, 6)}`}
               >
                 <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-[hsl(24_95%_53%/0.1)] flex-shrink-0">
                   <Icon className="w-4.5 h-4.5 text-[hsl(24_95%_53%)]" />
@@ -219,19 +228,14 @@ export default function LoginForm() {
                   <p className="text-sm font-semibold text-[hsl(30_20%_98%)]">{label}</p>
                   <p className="text-xs text-[hsl(30_10%_50%)] mt-0.5">{desc}</p>
                 </div>
-              </motion.div>
+              </div>
             ))}
           </div>
-        </motion.div>
+        </div>
       </div>
 
       <div className="flex-1 lg:max-w-[520px] flex items-center justify-center relative z-10 px-5 py-8">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="w-full max-w-[400px]"
-        >
+        <div className="w-full max-w-[400px] animate-kf-slide-in-up animate-kf-delay-1">
           <div className="lg:hidden flex items-center gap-2.5 mb-8 justify-center">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br from-[hsl(24_95%_53%)] to-[hsl(173_58%_39%)]">
               <Layers className="w-5 h-5 text-white" />
@@ -250,15 +254,9 @@ export default function LoginForm() {
             </p>
           </div>
 
-          <AnimatePresence mode="wait">
+          <div className="relative">
             {mode === "forgot" && resetSent ? (
-              <motion.div
-                key="reset-sent"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                className="rounded-2xl p-6 flex flex-col items-center gap-5 border border-white/[0.08] bg-white/[0.03] backdrop-blur-2xl"
-              >
+              <div className="rounded-2xl p-6 flex flex-col items-center gap-5 border border-white/[0.08] bg-white/[0.03] backdrop-blur-2xl animate-kf-slide-in-up-sm">
                 <div className="w-16 h-16 rounded-full flex items-center justify-center bg-[hsl(24_95%_53%/0.1)]">
                   <Mail className="w-7 h-7 text-[hsl(24_95%_53%)]" />
                 </div>
@@ -273,31 +271,35 @@ export default function LoginForm() {
                 >
                   Back to sign in
                 </button>
-              </motion.div>
+              </div>
             ) : (
-              <motion.form
-                key="form"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
+              <form
                 onSubmit={onSubmit}
-                className="rounded-2xl p-6 flex flex-col gap-4 border border-white/[0.08] bg-white/[0.03] backdrop-blur-2xl"
+                className="rounded-2xl p-6 flex flex-col gap-4 border border-white/[0.08] bg-white/[0.03] backdrop-blur-2xl animate-kf-slide-in-up-sm"
               >
-                <AnimatePresence>
+                <div className="flex flex-col gap-3 overflow-hidden">
                   {banner && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                      className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-sm bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-sm bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-kf-slide-in-up-sm">
                       <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                       {banner}
-                    </motion.div>
+                    </div>
                   )}
                   {error && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                      className="flex flex-col gap-2 px-3.5 py-2.5 rounded-xl text-sm bg-red-500/10 text-red-400 border border-red-500/20">
+                    <div className="flex flex-col gap-2 px-3.5 py-2.5 rounded-xl text-sm bg-red-500/10 text-red-400 border border-red-500/20 animate-kf-slide-in-up-sm">
                       <div className="flex items-center gap-2.5">
                         <AlertCircle className="w-4 h-4 flex-shrink-0" />
                         <span className="flex-1">{error}</span>
                       </div>
+                      {error?.toLowerCase().includes("don't match") && (
+                        <div className="pl-6.5">
+                          <Link
+                            href="/auth/signup"
+                            className="text-xs font-medium text-[hsl(24_95%_63%)] hover:text-[hsl(24_95%_73%)] transition-colors"
+                          >
+                            Don't have an account? Create one →
+                          </Link>
+                        </div>
+                      )}
                       {needsVerification && (
                         <div className="flex flex-col gap-1 pl-6.5">
                           <button
@@ -314,9 +316,9 @@ export default function LoginForm() {
                           )}
                         </div>
                       )}
-                    </motion.div>
+                    </div>
                   )}
-                </AnimatePresence>
+                </div>
 
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-medium text-[hsl(30_10%_55%)]">Email</label>
@@ -408,14 +410,14 @@ export default function LoginForm() {
                     </p>
                   </>
                 )}
-              </motion.form>
+              </form>
             )}
-          </AnimatePresence>
+          </div>
 
           <p className="text-center text-xs mt-6 text-[hsl(30_10%_25%)]">
             KeyFlowOS — Your business, on autopilot.
           </p>
-        </motion.div>
+        </div>
       </div>
     </div>
   );

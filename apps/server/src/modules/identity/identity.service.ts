@@ -723,6 +723,7 @@ export class IdentityService {
             lastName: oldUser.lastName ?? input.lastName?.trim() ?? null,
             phone: oldUser.phone ?? input.phone?.trim() ?? null,
             avatarUrl: oldUser.avatarUrl ?? input.avatarUrl?.trim() ?? null,
+            referralCode: await this.generateReferralCode(),
           },
         });
 
@@ -764,6 +765,23 @@ export class IdentityService {
     }
   }
 
+  private async generateReferralCode(): Promise<string> {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code: string;
+    let attempts = 0;
+    do {
+      code = '';
+      for (let i = 0; i < 8; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const existing = await this.prisma.client.user.findUnique({ where: { referralCode: code }, select: { id: true } });
+      if (!existing) return code;
+      attempts++;
+    } while (attempts < 10);
+    // Fallback with timestamp suffix if collisions persist
+    return code + Date.now().toString(36).slice(-4).toUpperCase();
+  }
+
   async bootstrapUser(input: {
     userId: string;
     email: string;
@@ -774,6 +792,7 @@ export class IdentityService {
     phone?: string;
     avatarUrl?: string;
     company?: string;
+    referralCode?: string;
   }) {
     if (input.username) {
       const usernameInUse = await this.prisma.client.user.findFirst({
@@ -790,6 +809,15 @@ export class IdentityService {
     const existingUser = await this.prisma.client.user.findUnique({ where: { id: input.userId } });
     let user;
 
+    let referredByUserId: string | undefined;
+    if (input.referralCode && input.referralCode.trim()) {
+      const referrer = await this.prisma.client.user.findUnique({
+        where: { referralCode: input.referralCode.trim().toUpperCase() },
+        select: { id: true },
+      });
+      if (referrer) referredByUserId = referrer.id;
+    }
+
     if (existingUser) {
       const updateData: Record<string, unknown> = {};
       if (input.firstName && !existingUser.firstName) updateData.firstName = input.firstName.trim();
@@ -798,6 +826,12 @@ export class IdentityService {
       if (input.avatarUrl && !existingUser.avatarUrl) updateData.avatarUrl = input.avatarUrl.trim();
       if (desiredName && !existingUser.name) {
         updateData.name = desiredName.trim();
+      }
+      if (!existingUser.referralCode) {
+        updateData.referralCode = await this.generateReferralCode();
+      }
+      if (referredByUserId && !existingUser.referredByUserId) {
+        updateData.referredByUserId = referredByUserId;
       }
 
       if (Object.keys(updateData).length > 0) {
@@ -835,6 +869,8 @@ export class IdentityService {
               email: input.email,
               name: desiredName?.trim() ?? input.email,
               role: 'USER',
+              referralCode: await this.generateReferralCode(),
+              referredByUserId,
               ...userData,
             },
           });

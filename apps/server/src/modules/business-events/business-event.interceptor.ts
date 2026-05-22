@@ -3,6 +3,7 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
+  Inject,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
@@ -28,8 +29,8 @@ export const SkipBusinessEvent = () =>
 @Injectable()
 export class BusinessEventInterceptor implements NestInterceptor {
   constructor(
-    private readonly resilient: ResilientEmitterService,
-    private readonly reflector: Reflector,
+    @Inject(ResilientEmitterService) private readonly resilient: ResilientEmitterService,
+    @Inject(Reflector) private readonly reflector: Reflector,
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {

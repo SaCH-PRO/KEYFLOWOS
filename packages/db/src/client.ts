@@ -2,6 +2,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { softDelete } from "./middleware/soft-delete";
+import { tokenEncryptionExtension } from "./middleware/token-encryption";
 
 // Tenant isolation support via AsyncLocalStorage (injected at runtime by apps/server)
 let _tenantContextProvider: { getCurrentBusinessId: () => string | undefined } | undefined;
@@ -110,7 +111,7 @@ const tenantIsolationExtension = Prisma.defineExtension({
 // Create and configure Prisma client with soft delete extension
 // If adapter is null (no DATABASE_URL), the client still works for type-generation
 // but will throw on actual queries — which is the correct fail-fast behavior.
-export const db = new PrismaClient({ adapter }).$extends(softDeleteExtension).$extends(defaultTakeExtension).$extends(tenantIsolationExtension);
+export const db = new PrismaClient({ adapter }).$extends(softDeleteExtension).$extends(defaultTakeExtension).$extends(tenantIsolationExtension).$extends(tokenEncryptionExtension);
 
 /**
  * Health-check the database connection.

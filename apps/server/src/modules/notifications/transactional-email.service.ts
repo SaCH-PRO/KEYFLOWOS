@@ -10,9 +10,13 @@ import {
   bookingRescheduledTemplate,
   bookingCancelledTemplate,
   bookingCreatedTemplate,
+  bookingCompletedTemplate,
+  bookingNoShowTemplate,
   invoiceSentTemplate,
   invoiceOverdueTemplate,
+  invoiceDueSoonTemplate,
   paymentReceiptTemplate,
+  paymentFailedTemplate,
   orderConfirmedTemplate,
   orderShippedTemplate,
   orderDeliveredTemplate,
@@ -29,6 +33,7 @@ import {
   quoteRejectedOwnerTemplate,
   quoteAcceptedCustomerTemplate,
   quoteRejectedCustomerTemplate,
+  quoteSentTemplate,
 } from './email-templates';
 
 export type NotificationType =
@@ -37,9 +42,13 @@ export type NotificationType =
   | 'booking_rescheduled'
   | 'booking_cancelled'
   | 'booking_created'
+  | 'booking_completed'
+  | 'booking_no_show'
   | 'invoice_sent'
   | 'invoice_overdue'
+  | 'invoice_due_soon'
   | 'payment_receipt'
+  | 'payment_failed'
   | 'order_confirmed'
   | 'order_shipped'
   | 'order_delivered'
@@ -55,7 +64,8 @@ export type NotificationType =
   | 'quote_accepted_owner'
   | 'quote_rejected_owner'
   | 'quote_accepted_customer'
-  | 'quote_rejected_customer';
+  | 'quote_rejected_customer'
+  | 'quote_sent';
 
 export interface NotificationPreferences {
   booking_confirmed?: boolean;
@@ -63,9 +73,13 @@ export interface NotificationPreferences {
   booking_rescheduled?: boolean;
   booking_cancelled?: boolean;
   booking_created?: boolean;
+  booking_completed?: boolean;
+  booking_no_show?: boolean;
   invoice_sent?: boolean;
   invoice_overdue?: boolean;
+  invoice_due_soon?: boolean;
   payment_receipt?: boolean;
+  payment_failed?: boolean;
   order_confirmed?: boolean;
   order_shipped?: boolean;
   order_delivered?: boolean;
@@ -82,6 +96,7 @@ export interface NotificationPreferences {
   quote_rejected_owner?: boolean;
   quote_accepted_customer?: boolean;
   quote_rejected_customer?: boolean;
+  quote_sent?: boolean;
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -90,9 +105,13 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   booking_rescheduled: true,
   booking_cancelled: true,
   booking_created: true,
+  booking_completed: true,
+  booking_no_show: true,
   invoice_sent: true,
   invoice_overdue: true,
+  invoice_due_soon: true,
   payment_receipt: true,
+  payment_failed: true,
   order_confirmed: true,
   order_shipped: true,
   order_delivered: true,
@@ -109,6 +128,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   quote_rejected_owner: true,
   quote_accepted_customer: true,
   quote_rejected_customer: true,
+  quote_sent: true,
 };
 
 const QUEUE_DRAIN_INTERVAL_MS = 5 * 60 * 1000;
@@ -594,6 +614,56 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
             rejectedAt: data.rejectedAt,
             reason: data.reason,
             quoteUrl: data.quoteUrl,
+          });
+          break;
+        case 'quote_sent':
+          rendered = quoteSentTemplate({
+            ...baseCtx,
+            quoteNumber: data.quoteNumber,
+            total: data.total,
+            currency: data.currency,
+            items: data.items,
+            quoteUrl: data.quoteUrl,
+            expiryDate: data.expiryDate,
+          });
+          break;
+        case 'booking_completed':
+          rendered = bookingCompletedTemplate({
+            ...baseCtx,
+            serviceName: data.serviceName,
+            startTime: data.startTime,
+            staffName: data.staffName,
+            bookingId: data.bookingId,
+          });
+          break;
+        case 'booking_no_show':
+          rendered = bookingNoShowTemplate({
+            ...baseCtx,
+            serviceName: data.serviceName,
+            startTime: data.startTime,
+            staffName: data.staffName,
+            bookingId: data.bookingId,
+            rescheduleUrl: data.rescheduleUrl,
+          });
+          break;
+        case 'payment_failed':
+          rendered = paymentFailedTemplate({
+            ...baseCtx,
+            invoiceNumber: data.invoiceNumber,
+            total: data.total,
+            currency: data.currency,
+            retryUrl: data.retryUrl,
+            errorMessage: data.errorMessage,
+          });
+          break;
+        case 'invoice_due_soon':
+          rendered = invoiceDueSoonTemplate({
+            ...baseCtx,
+            invoiceNumber: data.invoiceNumber,
+            total: data.total,
+            currency: data.currency,
+            dueDate: data.dueDate,
+            invoiceUrl: data.invoiceUrl,
           });
           break;
         default:

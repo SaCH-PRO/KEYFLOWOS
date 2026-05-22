@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
-export default function SiteAliasRedirect() {
+export default function IntakeRedirect() {
   redirect("/app/presence");
 }

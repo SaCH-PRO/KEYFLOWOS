@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AiController } from './ai.controller';
+import { AiSettingsController } from './ai-settings.controller';
+import { AiSettingsService } from './ai-settings.service';
 import { AiUsageAdminController } from './ai-usage-admin.controller';
 import { AiUsageAlertSchedulerService } from './ai-usage-alert-scheduler.service';
 import { AgentController } from './agent.controller';
@@ -34,6 +36,8 @@ import { AutopilotRulesService } from './autopilot-rules.service';
 import { PlanExecutorService } from './plan-executor.service';
 import { FeedbackLoopService } from './feedback-loop.service';
 import { ActionDispatcherService } from './action-dispatcher.service';
+import { ProactiveSuggestionService } from './proactive-suggestion.service';
+import { WorkflowTemplateService } from './workflow-template.service';
 import { AgentTriggerService } from './agent-trigger.service';
 import { AgentHealthService } from './agent-health.service';
 import { AgentBusService } from './agent-bus.service';
@@ -59,10 +63,12 @@ import { TaskPrioritizerService } from './task-prioritizer.service';
 import { CapacityInsightService } from './capacity-insight.service';
 import { TaskRebalancerService } from './task-rebalancer.service';
 import { ChaserService } from './chaser.service';
+import { CrossBusinessIntelligenceService } from './cross-business-intelligence.service';
+import { AiIntelligenceController } from './ai-intelligence.controller';
 
 @Module({
   imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule],
-  controllers: [AiController, OutputTemplateController, FlowController, GraphActionsController, AiUsageAdminController],
+  controllers: [AiController, AiSettingsController, OutputTemplateController, FlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController],
   providers: [
     AiListener,
     ModelGatewayService,
@@ -88,6 +94,8 @@ import { ChaserService } from './chaser.service';
     PlanExecutorService,
     FeedbackLoopService,
     ActionDispatcherService,
+    ProactiveSuggestionService,
+    WorkflowTemplateService,
     AgentTriggerService,
     AgentHealthService,
     AgentBusService,
@@ -112,7 +120,9 @@ import { ChaserService } from './chaser.service';
     TaskPrioritizerService,
     CapacityInsightService,
     TaskRebalancerService,
+    AiSettingsService,
     ChaserService,
+    CrossBusinessIntelligenceService,
   ],
   exports: [
     ModelGatewayService,
@@ -137,6 +147,8 @@ import { ChaserService } from './chaser.service';
     PlanExecutorService,
     FeedbackLoopService,
     ActionDispatcherService,
+    ProactiveSuggestionService,
+    WorkflowTemplateService,
     AgentTriggerService,
     AgentHealthService,
     AgentBusService,

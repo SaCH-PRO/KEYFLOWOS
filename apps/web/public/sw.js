@@ -1,6 +1,28 @@
-const SHELL_CACHE = 'kf-shell-v1';
-const STATIC_CACHE = 'kf-static-v1';
-const API_CACHE = 'kf-api-v1';
+/* If running on localhost, install a no-op SW — Turbopack chunks change on every
+ * restart and caching them causes ChunkLoadError / 404 for dynamically imported pages. */
+const IS_LOCALHOST =
+  self.location.hostname === 'localhost' ||
+  self.location.hostname === '127.0.0.1';
+
+if (IS_LOCALHOST) {
+  self.addEventListener('install', (event) => {
+    self.skipWaiting();
+  });
+  self.addEventListener('activate', (event) => {
+    event.waitUntil(
+      self.clients.claim().then(function() {
+        // Unregister ourselves immediately so we never intercept requests
+        return self.registration.unregister();
+      })
+    );
+  });
+  // No fetch listener — we want the browser to handle everything normally
+} else {
+  /* ========== PRODUCTION SERVICE WORKER ========== */
+
+  const SHELL_CACHE = 'kf-shell-v3';
+  const STATIC_CACHE = 'kf-static-v3';
+  const API_CACHE = 'kf-api-v3';
 
 const DB_NAME = 'kf-sync-queue';
 const DB_STORE = 'requests';
@@ -128,8 +150,28 @@ function isStaticAsset(url) {
   );
 }
 
+function isNextInternal(url) {
+  /* Next.js internal assets — never cache. In dev (Turbopack) chunk hashes
+   * change on every restart; caching them causes ChunkLoadError / 404. */
+  return url.pathname.startsWith('/_next/static/chunks/') ||
+    url.pathname.startsWith('/_next/static/css/') ||
+    url.pathname.startsWith('/_next/static/media/') ||
+    url.pathname.startsWith('/_next/static/webpack/') ||
+    url.searchParams.has('_rsc');
+}
+
+function isDevOrigin(url) {
+  return url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.hostname.endsWith('.local');
+}
+
 function isApiRequest(url) {
   return url.pathname.startsWith('/api/') || url.pathname.startsWith('/__api/');
+}
+
+function isAuthPage(url) {
+  return url.pathname.startsWith('/auth/');
 }
 
 async function cacheFirst(request, cacheName) {
@@ -213,34 +255,46 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  /* Static assets → cache-first */
-  if (isStaticAsset(url)) {
+  /* Next.js internal (chunks, RSC, etc.) → always fetch fresh */
+  if (isNextInternal(url)) {
+    return;
+  }
+
+  /* Static assets → cache-first (skip in dev to avoid stale Turbopack chunks) */
+  if (isStaticAsset(url) && !isDevOrigin(url)) {
     event.respondWith(cacheFirst(request, STATIC_CACHE));
     return;
   }
 
   /* Navigation / app shell */
   if (request.mode === 'navigate') {
-    event.respondWith(
-      caches.match(request).then((cached) => {
-        if (cached) return cached;
+    /* Never cache auth pages — always fetch fresh to avoid stale login forms */
+    if (isAuthPage(url)) {
+      event.respondWith(
+        fetch(request).catch(() =>
+          caches.match(request).then((r) => r || new Response('Offline', { status: 503 }))
+        )
+      );
+      return;
+    }
 
-        return fetch(request)
-          .then((response) => {
-            if (response && response.status === 200) {
-              const clone = response.clone();
-              caches.open(SHELL_CACHE).then((c) => c.put(request, clone));
-            }
-            return response;
-          })
-          .catch(() => {
-            return (
-              caches.match('/app') ||
-              caches.match('/') ||
-              new Response('Offline', { status: 503 })
-            );
-          });
-      })
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(SHELL_CACHE).then((c) => c.put(request, clone));
+          }
+          return response;
+        })
+        .catch(() => {
+          return (
+            caches.match(request) ||
+            caches.match('/app') ||
+            caches.match('/') ||
+            new Response('Offline', { status: 503 })
+          );
+        })
     );
     return;
   }
@@ -291,3 +345,5 @@ self.addEventListener('message', (event) => {
     event.waitUntil(processQueue());
   }
 });
+
+} /* end production else block */

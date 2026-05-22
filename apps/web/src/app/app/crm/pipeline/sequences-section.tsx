@@ -220,10 +220,7 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
         className="rounded-2xl border border-border/50 bg-card overflow-hidden"
       >
         <div
-          role="button"
-          tabIndex={0}
           onClick={() => setExpanded(!expanded)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
           className="w-full flex items-center gap-3 p-4 hover:bg-white/[0.02] transition-colors cursor-pointer"
         >
           <div className="p-2 rounded-xl bg-gradient-to-br from-purple-500/15 to-purple-500/5">

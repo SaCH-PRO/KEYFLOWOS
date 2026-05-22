@@ -15,6 +15,8 @@ export interface DispatchContext {
   planStepId?: string;
   source?: string;
   retryCount?: number;
+  /** When true, suppresses confirmation UI callbacks (used by background workers) */
+  background?: boolean;
 }
 
 export interface DispatchResult {
@@ -115,6 +117,7 @@ export class ActionDispatcherService {
             planId: ctx.planId,
             planStepId: ctx.planStepId,
             riskTier: decision.tier,
+            idempotencyKey: ctx.idempotencyKey,
           },
         );
 
@@ -163,6 +166,7 @@ export class ActionDispatcherService {
         planId: ctx.planId,
         planStepId: ctx.planStepId,
         riskTier: decision.tier,
+        idempotencyKey: ctx.idempotencyKey,
       },
     );
 
@@ -236,12 +240,14 @@ export class ActionDispatcherService {
 
   private async findIdempotentExecution(businessId: string, key: string): Promise<{ success: boolean; result?: any; error?: string } | null> {
     const log = await this.prisma.client.aiExecutionLog.findFirst({
-      where: { businessId, action: { startsWith: 'tool:' } },
+      where: { businessId, idempotencyKey: key },
       orderBy: { createdAt: 'desc' },
-      take: 1,
     });
-    // Note: true idempotency would require storing the idempotency key on the log record.
-    // For now we rely on callers to use deterministic keys for short windows.
-    return null;
+    if (!log) return null;
+    return {
+      success: log.success,
+      result: log.outputSummary ?? undefined,
+      error: log.errorMessage ?? undefined,
+    };
   }
 }

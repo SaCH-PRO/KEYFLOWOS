@@ -1,11 +1,9 @@
-// @keyflow:dormant — documents module, gated by featureFlags.documents (KEY-9 cleanup target).
 "use client";
 
 import Link from "next/link";
 import { ArrowRight, FileText, HardDrive, FolderOpen } from "lucide-react";
-import { DormantRoute } from "@/components/dormant-route";
 
-function DocumentsPageInner() {
+export default function DocumentsPage() {
   return (
     <div className="space-y-6 max-w-5xl mx-auto p-4">
       <div className="flex items-center gap-3">
@@ -55,13 +53,5 @@ function DocumentsPageInner() {
         </Link>
       </div>
     </div>
-  );
-}
-
-export default function DocumentsPage() {
-  return (
-    <DormantRoute featureKey="nav.workspaces.documents" title="Documents">
-      <DocumentsPageInner />
-    </DormantRoute>
   );
 }

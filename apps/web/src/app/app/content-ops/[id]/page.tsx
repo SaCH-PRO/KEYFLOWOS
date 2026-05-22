@@ -28,6 +28,7 @@ import {
   Upload,
   FolderOpen,
   FilePlus,
+  Receipt,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import {
@@ -46,6 +47,7 @@ import {
   createDriveDoc,
   fetchContentDeliveryStatus,
   ContentDeliveryStatus,
+  generateInvoiceFromContentRequest,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
@@ -193,6 +195,10 @@ export default function ContentRequestDetailPage() {
         case "deliver":
           await deliverContentRequest(businessId, requestId);
           toast.success("Delivered to client");
+          break;
+        case "generate_invoice":
+          await generateInvoiceFromContentRequest(businessId, requestId);
+          toast.success("Invoice generated");
           break;
         case "drive_folder":
           const folderRes = await createDriveFolder(businessId, requestId);
@@ -520,6 +526,35 @@ export default function ContentRequestDetailPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Invoice */}
+            {req.invoiceId && (
+              <div className="border rounded-xl p-4">
+                <h3 className="text-sm font-medium mb-3">Invoice</h3>
+                <div className="flex items-center gap-2 text-sm">
+                  <Receipt className="w-4 h-4 text-green-500" />
+                  <span className="text-muted-foreground">Invoice ID</span>
+                  <span className="ml-auto font-mono text-xs">{req.invoiceId.slice(0, 12)}...</span>
+                </div>
+              </div>
+            )}
+            {req.status === "delivered" && !req.invoiceId && (
+              <div className="border rounded-xl p-4">
+                <h3 className="text-sm font-medium mb-3">Invoice</h3>
+                <button
+                  onClick={() => handleAction("generate_invoice")}
+                  disabled={!!actionLoading}
+                  className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg border hover:bg-muted transition-colors text-sm"
+                >
+                  {actionLoading === "generate_invoice" ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Receipt className="w-4 h-4" />
+                  )}
+                  Generate Invoice
+                </button>
               </div>
             )}
 

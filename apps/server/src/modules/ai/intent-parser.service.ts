@@ -112,6 +112,20 @@ const AVAILABLE_TOOLS = [
   'marketplace_list_listings', 'marketplace_list_orders',
   // CRUD family — Store
   'store_list_products', 'store_list_recent_orders',
+  // Calendar
+  'calendar_list_events', 'calendar_create_event', 'calendar_check_conflicts',
+  // Time tracking
+  'time_start_timer', 'time_stop_timer', 'time_log_entry',
+  // Helpdesk
+  'helpdesk_list_tickets', 'helpdesk_create_ticket', 'helpdesk_update_ticket',
+  // Finance
+  'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items',
+  // Project updates
+  'projects_update_task', 'projects_delete_task',
+  // Commerce updates
+  'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice',
+  // Marketing/Social updates
+  'marketing_update_campaign', 'social_update_post',
 ];
 
 @Injectable()

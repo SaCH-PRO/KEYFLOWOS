@@ -103,16 +103,29 @@ function OverviewBody({ businessId }: { businessId: string }) {
           </div>
         </div>
 
-        <div className="rounded-xl border border-border/40 bg-card/40 p-4">
-          <h2 className="text-sm font-semibold mb-3">Runway & risk</h2>
-          <div className="space-y-2 text-sm">
-            <Row label="Cash runway">{runwayLabel}</Row>
-            <Row label="Overdue">{formatCurrency(data.overdueInvoices, currency)} <span className="text-muted-foreground">({data.overdueInvoiceCount})</span></Row>
-            <Row label="Pending actions">{data.pendingActionCount}</Row>
+        <div className="rounded-xl border border-border/40 bg-card/40 p-4 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold mb-3">Runway & risk</h2>
+            <div className="space-y-2 text-sm">
+              <Row label="Cash runway">{runwayLabel}</Row>
+              <Row label="Overdue">{formatCurrency(data.overdueInvoices, currency)} <span className="text-muted-foreground">({data.overdueInvoiceCount})</span></Row>
+              <Row label="Pending actions">{data.pendingActionCount}</Row>
+            </div>
+            <Link href="/app/finance/tax" className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
+              Open Tax centre <ArrowUpRight className="w-3 h-3" />
+            </Link>
           </div>
-          <Link href="/app/finance/tax" className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
-            Open Tax centre <ArrowUpRight className="w-3 h-3" />
-          </Link>
+          <div className="pt-3 border-t border-border/30">
+            <h2 className="text-sm font-semibold mb-2">Recurring revenue</h2>
+            <p className="text-xs text-muted-foreground mb-2">
+              {data.billsDueCount > 0
+                ? `${data.billsDueCount} active recurring schedule${data.billsDueCount === 1 ? "" : "s"}`
+                : "No recurring schedules yet"}
+            </p>
+            <Link href="/app/commerce?tab=recurring" className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
+              Manage recurring <ArrowUpRight className="w-3 h-3" />
+            </Link>
+          </div>
         </div>
       </div>
     </div>

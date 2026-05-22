@@ -951,3 +951,133 @@ export function verificationEmailTemplate(ctx: VerificationEmailContext): {
 
   return { subject, html, text };
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW TEMPLATES — Customer notification gaps (Phase 1.5 of 9/10 Experience Upgrade)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function bookingCompletedTemplate(ctx: TemplateContext & {
+  serviceName: string;
+  startTime: Date | string;
+  staffName?: string;
+  bookingId: string;
+}): { subject: string; html: string } {
+  const subject = `Thank you for visiting ${ctx.businessName}`;
+  const body = [
+    heading('Thank You!'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Thank you for choosing ${ctx.businessName}. We hope you enjoyed your ${ctx.serviceName} appointment.`),
+    detailTable([
+      detailRow('Service', ctx.serviceName),
+      detailRow('Date', formatDate(ctx.startTime)),
+      ctx.staffName ? detailRow('With', ctx.staffName) : '',
+      detailRow('Reference', ctx.bookingId.slice(-8).toUpperCase()),
+    ].join('')),
+    paragraph('We would love to see you again. Feel free to book your next appointment anytime.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function bookingNoShowTemplate(ctx: TemplateContext & {
+  serviceName: string;
+  startTime: Date | string;
+  staffName?: string;
+  bookingId: string;
+  rescheduleUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `We missed you — ${ctx.businessName}`;
+  const body = [
+    heading('You Missed Your Appointment'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`We noticed you were not able to make it to your ${ctx.serviceName} appointment scheduled for ${formatDate(ctx.startTime)}.`),
+    detailTable([
+      detailRow('Service', ctx.serviceName),
+      detailRow('Scheduled', `${formatDate(ctx.startTime)} at ${formatTime(ctx.startTime)}`),
+      ctx.staffName ? detailRow('With', ctx.staffName) : '',
+      detailRow('Reference', ctx.bookingId.slice(-8).toUpperCase()),
+    ].join('')),
+    paragraph('Life happens — no worries at all. If you would like to reschedule, just tap the button below.'),
+    ctx.rescheduleUrl ? ctaButton('Reschedule Appointment', ctx.rescheduleUrl) : '',
+    paragraph('If you have any questions, reply to this email or give us a call.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function quoteSentTemplate(ctx: TemplateContext & {
+  quoteNumber: string;
+  total: number;
+  currency: string;
+  items?: { description: string; quantity: number; unitPrice: number; total: number }[];
+  quoteUrl?: string;
+  expiryDate?: Date | string | null;
+}): { subject: string; html: string } {
+  const subject = `Quote ${ctx.quoteNumber} from ${ctx.businessName}`;
+  const itemRows = ctx.items?.map(item =>
+    detailRow(
+      `${item.description} &times; ${item.quantity}`,
+      formatCurrency(item.total, ctx.currency),
+    ),
+  ).join('') ?? '';
+  const body = [
+    heading('Your Quote is Ready'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Thank you for your interest. Here is the quote you requested from ${ctx.businessName}.`),
+    detailTable([
+      detailRow('Quote #', ctx.quoteNumber),
+      itemRows,
+      detailRow('Total', `<strong>${formatCurrency(ctx.total, ctx.currency)}</strong>`),
+      ctx.expiryDate ? detailRow('Valid Until', formatDate(ctx.expiryDate)) : '',
+    ].join('')),
+    ctx.quoteUrl ? ctaButton('View & Accept Quote', ctx.quoteUrl) : '',
+    paragraph('If you have any questions about this quote, just reply to this email.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function paymentFailedTemplate(ctx: TemplateContext & {
+  invoiceNumber: string;
+  total: number;
+  currency: string;
+  retryUrl?: string;
+  errorMessage?: string;
+}): { subject: string; html: string } {
+  const subject = `Payment failed for Invoice ${ctx.invoiceNumber}`;
+  const body = [
+    heading('Payment Could Not Be Processed'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`We were unable to process your payment for Invoice ${ctx.invoiceNumber}.`),
+    ctx.errorMessage ? paragraph(`Reason: ${ctx.errorMessage}`) : '',
+    detailTable([
+      detailRow('Invoice #', ctx.invoiceNumber),
+      detailRow('Amount', formatCurrency(ctx.total, ctx.currency)),
+    ].join('')),
+    paragraph('No worries — this happens sometimes. You can try again using the button below.'),
+    ctx.retryUrl ? ctaButton('Retry Payment', ctx.retryUrl, '#ef4444') : '',
+    paragraph('If you need help, just reply to this email or contact us directly.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function invoiceDueSoonTemplate(ctx: TemplateContext & {
+  invoiceNumber: string;
+  total: number;
+  currency: string;
+  dueDate: Date | string;
+  invoiceUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Reminder: Invoice ${ctx.invoiceNumber} is due soon`;
+  const body = [
+    heading('Payment Reminder'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`This is a friendly reminder that Invoice ${ctx.invoiceNumber} from ${ctx.businessName} is due on ${formatDate(ctx.dueDate)}.`),
+    detailTable([
+      detailRow('Invoice #', ctx.invoiceNumber),
+      detailRow('Amount Due', formatCurrency(ctx.total, ctx.currency)),
+      detailRow('Due Date', formatDate(ctx.dueDate)),
+    ].join('')),
+    ctx.invoiceUrl ? ctaButton('Pay Now', ctx.invoiceUrl) : '',
+    paragraph('Thank you for your business. If you have already paid, please disregard this reminder.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}

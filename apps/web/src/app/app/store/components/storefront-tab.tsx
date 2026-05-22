@@ -16,6 +16,7 @@ import {
   Star,
   HelpCircle,
   Settings,
+  Code,
 } from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { StoreSettings } from "./store-settings";
@@ -29,6 +30,8 @@ import { FaqManager } from "./faq-manager";
 import { PolicyEditor } from "./policy-editor";
 import { FontBrandingPanel } from "./font-branding-panel";
 import { StoreSettingsPanel } from "./store-settings-panel";
+import { CustomDomainPanel } from "./custom-domain-panel";
+import { WidgetEmbedPanel } from "./widget-embed-panel";
 import type { Service, Product, StorefrontConfig } from "@/lib/client";
 import Image from "next/image";
 
@@ -309,6 +312,29 @@ export function StorefrontTab({
             onSlugChange={onSlugChange}
             onSaveSlug={onSaveSlug}
             slugSaving={slugSaving}
+          />
+        </AccordionSection>
+        <AccordionSection
+          title="Custom Domain"
+          subtitle="Connect your own domain to your storefront"
+          icon={Globe}
+          accentColor={pc}
+        >
+          <CustomDomainPanel
+            businessId={businessId}
+            domain={storefrontConfig.customDomain || ""}
+            onChange={(domain) => onConfigChange("__root", { customDomain: domain })}
+          />
+        </AccordionSection>
+        <AccordionSection
+          title="Embed Widgets"
+          subtitle="Add booking, cart & payment forms to any website"
+          icon={Code}
+          accentColor={pc}
+        >
+          <WidgetEmbedPanel
+            slug={slug || currentSlug || ""}
+            primaryColor={businessData?.primaryColor || "#f97316"}
           />
         </AccordionSection>
       </AccordionGroup>

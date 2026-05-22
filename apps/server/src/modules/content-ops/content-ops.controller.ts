@@ -17,6 +17,7 @@ import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { ContentRequestService } from './content-request.service';
 import { ContentDeliveryService } from './content-delivery.service';
+import { ContentInvoiceService } from './content-invoice.service';
 import { CreateContentRequestDto } from './dto/create-content-request.dto';
 import { UpdateContentRequestDto } from './dto/update-content-request.dto';
 import { ContentReviewDto } from './dto/content-review.dto';
@@ -28,6 +29,7 @@ export class ContentOpsController {
   constructor(
     private readonly contentRequests: ContentRequestService,
     private readonly delivery: ContentDeliveryService,
+    private readonly contentInvoice: ContentInvoiceService,
   ) {}
 
   @Post('businesses/:businessId/content-requests')
@@ -162,6 +164,15 @@ export class ContentOpsController {
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
     return this.contentRequests.deliverRequest(requestId, req.user?.id ?? 'system');
+  }
+
+  @Post('businesses/:businessId/content-requests/:requestId/generate-invoice')
+  @RateLimit(20, 60_000)
+  async generateInvoice(
+    @Param('businessId') businessId: string,
+    @Param('requestId') requestId: string,
+  ) {
+    return this.contentInvoice.generateInvoiceFromDelivery(requestId, businessId);
   }
 
   @Delete('businesses/:businessId/content-requests/:requestId')

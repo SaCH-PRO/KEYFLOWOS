@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import compression from 'compression';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import type { Request, Response, NextFunction } from 'express';
 import { Server } from 'http';
 import { GlobalHttpExceptionFilter } from './core/filters/http-exception.filter';
 import { allowedCorsOrigins } from './core/config/runtime-urls';
@@ -74,6 +75,32 @@ export function configureNestApp(app: INestApplication): void {
   const allowedOrigins = allowedCorsOrigins();
 
   const isProduction = process.env.NODE_ENV === 'production';
+
+  // Public widget routes (storefront, bookings, payments, webhooks) must be
+  // accessible from any origin because they are embedded in third-party sites.
+  // This middleware runs before the global CORS and sets permissive headers
+  // for public paths only. Authenticated routes still use the strict allow-list.
+  const PUBLIC_ROUTE_PREFIXES = [
+    '/site/storefront/public',
+    '/bookings/public',
+    '/payments/create-checkout',
+    '/webhooks',
+    '/widgets',
+  ];
+
+  expressApp.use((req: Request, res: Response, next: NextFunction) => {
+    const isPublic = PUBLIC_ROUTE_PREFIXES.some((p) => req.path.startsWith(p));
+    if (isPublic) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-business-id');
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+    }
+    next();
+  });
 
   app.enableCors({
     origin: isProduction

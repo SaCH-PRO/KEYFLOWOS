@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
@@ -32,6 +33,9 @@ import { WorkloadAggregatorService } from './workload-aggregator.service';
 import { TaskPrioritizerService } from './task-prioritizer.service';
 import { CapacityInsightService } from './capacity-insight.service';
 import { TaskRebalancerService } from './task-rebalancer.service';
+import { UndoService } from './undo.service';
+import { ProactiveSuggestionService } from './proactive-suggestion.service';
+import { WorkflowTemplateService } from './workflow-template.service';
 
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
@@ -84,6 +88,10 @@ export class AiController {
     @Inject(TaskPrioritizerService) private readonly prioritizer: TaskPrioritizerService,
     @Inject(CapacityInsightService) private readonly capacityInsight: CapacityInsightService,
     @Inject(TaskRebalancerService) private readonly rebalancer: TaskRebalancerService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(UndoService) private readonly undoService: UndoService,
+    @Inject(ProactiveSuggestionService) private readonly suggestions: ProactiveSuggestionService,
+    @Inject(WorkflowTemplateService) private readonly workflows: WorkflowTemplateService,
   ) {}
 
   @Get('health')
@@ -323,7 +331,101 @@ export class AiController {
   ) {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required to approve plans');
-    return this.planner.approvePlan(planId, businessId, userId);
+    const result = await this.planner.approvePlan(planId, businessId, userId);
+    // Trigger immediate execution — no 30s polling delay
+    this.events.emit('plan.approved', { planId, businessId });
+    return result;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/plans/:planId/steps/:stepId/undo')
+  async undoPlanStep(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+    @Param('stepId') stepId: string,
+    @Body() body: { undoId?: string },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const step = await this.prisma.client.aiPlanStep.findFirst({
+      where: { id: stepId, planId, plan: { businessId } },
+    });
+    if (!step) throw new BadRequestException('Step not found');
+    if (step.status !== 'completed') throw new BadRequestException('Only completed steps can be undone');
+
+    if (!body.undoId) {
+      // Try to find the most recent undoable action for this step
+      const recent = await this.undoService.getRecentActions(businessId);
+      const match = recent.find((a) => a.createdAt > new Date(Date.now() - 60 * 1000)); // within last minute
+      if (!match) throw new BadRequestException('Undo window expired or no undoable action found');
+      const result = await this.undoService.undo(match.id, req.user?.id);
+      if (result.success) {
+        await this.prisma.client.aiPlanStep.update({
+          where: { id: stepId },
+          data: { status: 'failed', errorMessage: 'Undone by user' },
+        });
+      }
+      return result;
+    }
+
+    const result = await this.undoService.undo(body.undoId, req.user?.id);
+    if (result.success) {
+      await this.prisma.client.aiPlanStep.update({
+        where: { id: stepId },
+        data: { status: 'failed', errorMessage: 'Undone by user' },
+      });
+    }
+    return result;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/workflows')
+  async listWorkflows() {
+    return this.workflows.getTemplates();
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/workflows/:templateKey/instantiate')
+  async instantiateWorkflow(
+    @Param('businessId') businessId: string,
+    @Param('templateKey') templateKey: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() body: { contactId?: string; projectId?: string; amount?: number },
+  ) {
+    const result = await this.workflows.instantiateWorkflow(businessId, templateKey, req.user?.id, body);
+    return result;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/suggestions')
+  async getSuggestions(@Param('businessId') businessId: string) {
+    return this.suggestions.getPendingSuggestions(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/suggestions/refresh')
+  async refreshSuggestions(@Param('businessId') businessId: string) {
+    const suggestions = await this.suggestions.generateSuggestions(businessId);
+    return { suggestions, count: suggestions.length };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/suggestions/:suggestionId/dismiss')
+  async dismissSuggestion(
+    @Param('businessId') businessId: string,
+    @Param('suggestionId') suggestionId: string,
+  ) {
+    await this.suggestions.dismissSuggestion(businessId, suggestionId);
+    return { dismissed: true };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/suggestions/:category/block')
+  async blockSuggestionCategory(
+    @Param('businessId') businessId: string,
+    @Param('category') category: string,
+  ) {
+    await this.suggestions.blockCategory(businessId, category);
+    return { blocked: true };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

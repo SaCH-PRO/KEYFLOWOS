@@ -13,6 +13,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
+import { apiGet } from "@/lib/api";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 interface ChecklistItem {
   id: string;
@@ -25,28 +27,56 @@ interface ChecklistItem {
 
 interface GettingStartedChecklistProps {
   businessName?: string;
-  hasServices: boolean;
   hasBookings: boolean;
-  hasContacts: boolean;
-  hasBusinessHours: boolean;
-  storeEnabled: boolean;
   onDismiss?: () => void;
+}
+
+interface SetupStatus {
+  products?: boolean;
+  businessHours?: boolean;
+  contacts?: boolean;
+  storefront?: boolean;
+  profile?: boolean;
+  completedCount?: number;
+  totalSteps?: number;
+  percentage?: number;
 }
 
 export function GettingStartedChecklist({
   businessName,
-  hasServices,
   hasBookings,
-  hasContacts,
-  hasBusinessHours,
-  storeEnabled,
   onDismiss,
 }: GettingStartedChecklistProps) {
+  const [hasServices, setHasServices] = useState(false);
+  const [hasContacts, setHasContacts] = useState(false);
+  const [hasBusinessHours, setHasBusinessHours] = useState(false);
+  const [storeEnabled, setStoreEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return !!localStorage.getItem("kf_onboarding_dismissed");
   });
   const [expanded, setExpanded] = useState(true);
+
+  useEffect(() => {
+    const biz = getStoredBusinessId();
+    if (!biz) { setLoading(false); return; }
+    const load = async () => {
+      try {
+        const res = await apiGet<SetupStatus>(`/onboarding-concierge/businesses/${biz}/status`);
+        const s = res.data;
+        setHasServices(!!s?.products);
+        setHasContacts(!!s?.contacts);
+        setHasBusinessHours(!!s?.businessHours);
+        setStoreEnabled(!!s?.storefront);
+      } catch {
+        // Silently fail — checklist defaults to unchecked
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
 
   const handleDismiss = () => {
     setDismissed(true);
@@ -92,6 +122,7 @@ export function GettingStartedChecklist({
   const completedCount = items.filter((i) => i.done).length;
   const allDone = completedCount === items.length;
 
+  if (loading) return null;
   if (dismissed || allDone) return null;
 
   return (

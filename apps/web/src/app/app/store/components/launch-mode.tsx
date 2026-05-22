@@ -2,12 +2,14 @@
 
 import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Rocket, Link2, Eye, Monitor, Smartphone, ExternalLink, Globe, Send, Megaphone, UserPlus, Loader2, CheckCircle2, ShieldCheck, Tag } from "lucide-react";
+import { Rocket, Link2, Eye, Monitor, Smartphone, ExternalLink, Globe, Send, Megaphone, UserPlus, Loader2, CheckCircle2, ShieldCheck, Tag, Code } from "lucide-react";
 import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/workspace-metric-strip";
 import { SectionCard } from "@/components/ui/section-card";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { LaunchAdvisor } from "./launch-advisor";
 import { StoreSettings } from "./store-settings";
+import { CustomDomainPanel } from "./custom-domain-panel";
+import { WidgetEmbedPanel } from "./widget-embed-panel";
 import { TrustConversionChecklist } from "./trust-conversion-checklist";
 import { PublishChangelog } from "./publish-changelog";
 import { createCampaign } from "@/lib/client";
@@ -337,6 +339,29 @@ export function LaunchMode({
               onSlugChange={onSlugChange}
               onSaveSlug={onSaveSlug}
               slugSaving={slugSaving}
+            />
+          </AccordionSection>
+          <AccordionSection
+            title="Custom Domain"
+            subtitle="Connect your own domain"
+            icon={Globe}
+            accentColor={pc}
+          >
+            <CustomDomainPanel
+              businessId={businessId}
+              domain={_storefrontConfig?.customDomain || ""}
+              onChange={() => {}}
+            />
+          </AccordionSection>
+          <AccordionSection
+            title="Embed Widgets"
+            subtitle="Add booking, cart & payment forms to any website"
+            icon={Code}
+            accentColor={pc}
+          >
+            <WidgetEmbedPanel
+              slug={slug || currentSlug || ""}
+              primaryColor={businessData?.primaryColor || "#f97316"}
             />
           </AccordionSection>
           <AccordionSection

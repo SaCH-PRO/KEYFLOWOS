@@ -1,5 +1,6 @@
 "use client";
 
+import { AddonPackGate } from "@/components/addon-pack-gate";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Brain,
@@ -203,7 +204,26 @@ function CompletenessBar({ value }: { value: number }) {
   );
 }
 
-export default function BlueprintPage() {
+export default function Page() {
+  return (
+    <AddonPackGate
+      pack="blueprintPostOnboard"
+      title="Blueprint"
+      description="Your business operating model is set. Blueprint is tucked away to keep your workspace focused. You can re-enable it anytime from Settings."
+      features={[
+        "Business identity, brand, and customer model",
+        "Financial constraints and operating model",
+        "Goals, workflow model, and AI preferences",
+        "Exportable business plan document",
+        "Intelligence dashboard for strategic insights",
+      ]}
+    >
+      <BlueprintPage />
+    </AddonPackGate>
+  );
+}
+
+function BlueprintPage() {
   // Lazy initializer hydrates the businessId synchronously from localStorage on
   // first client render so we no longer need a follow-up effect to set it
   // (which previously required a `react-hooks/set-state-in-effect` disable).

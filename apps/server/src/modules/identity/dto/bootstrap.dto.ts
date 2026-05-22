@@ -40,4 +40,9 @@ export class BootstrapDto {
   @IsOptional()
   @MaxLength(200)
   company?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(32)
+  referralCode?: string;
 }

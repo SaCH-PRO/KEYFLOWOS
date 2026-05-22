@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppController } from './whatsapp.controller';
+import { WhatsAppNotificationsListener } from './whatsapp-notifications.listener';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Module({
-  providers: [WhatsAppService, PrismaService],
+  providers: [WhatsAppService, WhatsAppNotificationsListener, PrismaService],
   controllers: [WhatsAppController],
   exports: [WhatsAppService],
 })

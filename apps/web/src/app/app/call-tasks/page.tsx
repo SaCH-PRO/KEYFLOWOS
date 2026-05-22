@@ -1,6 +1,8 @@
 "use client";
 
+import { AddonPackGate } from "@/components/addon-pack-gate";
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Phone,
@@ -15,6 +17,9 @@ import {
   User,
   Mic,
   FileText,
+  Eye,
+  Copy,
+  Sparkles,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import {
@@ -24,6 +29,7 @@ import {
   createCallTask,
   completeCallTask,
   deleteCallTask,
+  generateCallScript,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
@@ -45,7 +51,8 @@ const OUTCOME_COLORS: Record<string, string> = {
   not_interested: "bg-slate-100 text-slate-700",
 };
 
-export default function CallTasksPage() {
+function CallTasksPage() {
+  const router = useRouter();
   const [calls, setCalls] = useState<CallLog[]>([]);
   const [scheduled, setScheduled] = useState<CallLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +65,14 @@ export default function CallTasksPage() {
   const [outcome, setOutcome] = useState("reached");
   const [duration, setDuration] = useState("");
   const [notes, setNotes] = useState("");
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [scriptModal, setScriptModal] = useState<{
+    greeting: string;
+    talkingPoints: string[];
+    ask: string;
+    close: string;
+    durationEstimate: number;
+  } | null>(null);
 
   const businessId = getStoredBusinessId();
 
@@ -150,6 +165,27 @@ export default function CallTasksPage() {
     } catch {
       toast.error("Failed to delete");
     }
+  };
+
+  const handleGenerateScript = async (call: CallLog) => {
+    if (!businessId) return;
+    setGeneratingId(call.id);
+    try {
+      const script = await generateCallScript(businessId, call.id);
+      setScriptModal(script);
+      toast.success("Script generated");
+      load();
+    } catch {
+      toast.error("Failed to generate script");
+    } finally {
+      setGeneratingId(null);
+    }
+  };
+
+  const copyScriptToClipboard = (script: NonNullable<typeof scriptModal>) => {
+    const text = `${script.greeting}\n\nTalking points:\n${script.talkingPoints.map((p) => `- ${p}`).join("\n")}\n\nAsk: ${script.ask}\n\nClose: ${script.close}\n\nEstimated duration: ${script.durationEstimate} min`;
+    navigator.clipboard.writeText(text);
+    toast.success("Copied to clipboard");
   };
 
   return (
@@ -261,14 +297,34 @@ export default function CallTasksPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => router.push(`/app/call-tasks/${c.id}`)}
+                          className="p-1.5 rounded hover:bg-muted transition-colors"
+                        >
+                          <Eye className="w-4 h-4 text-muted-foreground" />
+                        </button>
                         {!c.outcome && (
-                          <button
-                            onClick={() => setShowComplete(c.id)}
-                            className="inline-flex items-center gap-1 px-3 py-1 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90"
-                          >
-                            <CheckCircle2 className="w-3 h-3" />
-                            Log
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleGenerateScript(c)}
+                              disabled={generatingId === c.id}
+                              className="inline-flex items-center gap-1 px-3 py-1 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 transition-colors disabled:opacity-50"
+                            >
+                              {generatingId === c.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Sparkles className="w-3 h-3" />
+                              )}
+                              Script
+                            </button>
+                            <button
+                              onClick={() => setShowComplete(c.id)}
+                              className="inline-flex items-center gap-1 px-3 py-1 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90"
+                            >
+                              <CheckCircle2 className="w-3 h-3" />
+                              Log
+                            </button>
+                          </>
                         )}
                         <button
                           onClick={() => handleDelete(c.id)}
@@ -323,6 +379,56 @@ export default function CallTasksPage() {
         </div>
       )}
 
+      {/* Script modal */}
+      {scriptModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-background rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-amber-500" />
+                AI Call Script
+              </h2>
+              <button onClick={() => setScriptModal(null)} className="p-1 rounded hover:bg-muted"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-1">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Greeting</span>
+                <p className="text-sm bg-muted/50 rounded-lg p-3">{scriptModal.greeting}</p>
+              </div>
+              <div className="space-y-2">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Talking Points</span>
+                <ul className="space-y-2">
+                  {scriptModal.talkingPoints.map((point, i) => (
+                    <li key={i} className="text-sm bg-muted/50 rounded-lg p-3 flex items-start gap-2">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-medium shrink-0 mt-0.5">{i + 1}</span>
+                      {point}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Ask</span>
+                <p className="text-sm bg-muted/50 rounded-lg p-3">{scriptModal.ask}</p>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Close</span>
+                <p className="text-sm bg-muted/50 rounded-lg p-3">{scriptModal.close}</p>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Estimated duration: {scriptModal.durationEstimate} min</span>
+                <button
+                  onClick={() => copyScriptToClipboard(scriptModal)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors text-sm"
+                >
+                  <Copy className="w-4 h-4" />
+                  Copy to clipboard
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Complete modal */}
       {showComplete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -364,5 +470,24 @@ export default function CallTasksPage() {
         </div>
       )}
     </WorkspaceShell>
+  );
+}
+
+export default function Page() {
+  return (
+    <AddonPackGate
+      pack="salesPack"
+      title="Sales Pack"
+      description="Call task management, AI-generated call scripts, outcome tracking, and scheduled follow-ups for high-touch sales teams."
+      features={[
+        "Call task queue with priority and scheduling",
+        "AI-generated call scripts based on contact context",
+        "Outcome logging (reached, voicemail, callback, etc.)",
+        "Scheduled call reminders and follow-up tracking",
+        "Call-to-CRM linking with contact history",
+      ]}
+    >
+      <CallTasksPage />
+    </AddonPackGate>
   );
 }

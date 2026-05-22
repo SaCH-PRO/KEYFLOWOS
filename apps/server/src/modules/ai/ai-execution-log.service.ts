@@ -19,6 +19,7 @@ export interface LogEntry {
   planId?: string;
   planStepId?: string;
   role?: string;
+  idempotencyKey?: string;
 }
 
 export interface LogFilter {
@@ -59,6 +60,7 @@ export class AiExecutionLogService {
           planId: entry.planId ?? null,
           planStepId: entry.planStepId ?? null,
           role: entry.role ?? null,
+          idempotencyKey: entry.idempotencyKey ?? null,
         },
       });
       return record.id;
@@ -75,7 +77,7 @@ export class AiExecutionLogService {
     result: any,
     success: boolean,
     durationMs: number,
-    opts?: { mode?: string; rationale?: string; planId?: string; planStepId?: string; riskTier?: number; role?: string },
+    opts?: { mode?: string; rationale?: string; planId?: string; planStepId?: string; riskTier?: number; role?: string; idempotencyKey?: string },
   ): Promise<string> {
     const module = this.inferModule(toolName);
     return this.log({
@@ -95,6 +97,7 @@ export class AiExecutionLogService {
       planId: opts?.planId,
       planStepId: opts?.planStepId,
       role: opts?.role,
+      idempotencyKey: opts?.idempotencyKey,
     });
   }
 

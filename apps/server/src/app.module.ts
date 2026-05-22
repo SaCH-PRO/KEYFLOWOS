@@ -24,7 +24,6 @@ import { SiteModule } from './modules/site/site.module';
 import { AiModule } from './modules/ai/ai.module';
 import { FlowModule } from './modules/flow/flow.module';
 import { TimelineModule } from './modules/timeline/timeline.module';
-import { GamificationModule } from './modules/gamification/gamification.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { AuthMiddleware } from './core/auth/auth.middleware';
@@ -35,6 +34,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
 import { AutopilotModule } from './modules/autopilot/autopilot.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { ConversionModule } from './modules/conversion/conversion.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
@@ -74,6 +74,10 @@ import { DirectoryModule } from './modules/directory/directory.module';
 import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
 import { AssetModule } from './modules/assets/asset.module';
 import { CallTaskModule } from './modules/call-tasks/call-task.module';
+import { TimeTrackingModule } from './modules/time-tracking/time-tracking.module';
+import { RetainerModule } from './modules/retainers/retainer.module';
+import { PortalModule } from './modules/portal/portal.module';
+import { ChangeOrderModule } from './modules/change-orders/change-order.module';
 
 @Module({
   imports: [
@@ -102,7 +106,6 @@ import { CallTaskModule } from './modules/call-tasks/call-task.module';
     AiModule,
     FlowModule,
     TimelineModule,
-    GamificationModule,
     WebhooksModule,
     ApiKeysModule,
     ActionsModule,
@@ -110,6 +113,7 @@ import { CallTaskModule } from './modules/call-tasks/call-task.module';
     AutopilotModule,
     NotificationsModule,
     PaymentsModule,
+    ConversionModule,
     SubscriptionsModule,
     ProjectsModule,
     HelpdeskModule,
@@ -148,6 +152,10 @@ import { CallTaskModule } from './modules/call-tasks/call-task.module';
     AdminAuthModule,
     AssetModule,
     CallTaskModule,
+    TimeTrackingModule,
+    RetainerModule,
+    PortalModule,
+    ChangeOrderModule,
   ],
   controllers: [AppController],
   providers: [

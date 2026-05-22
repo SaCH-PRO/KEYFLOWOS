@@ -943,10 +943,10 @@ export const FLOW_TOOLS: FlowTool[] = [
   // ================================================================
   {
     name: 'bookings_create_booking',
-    description: 'Create a new booking/appointment for a contact.',
+    description: 'Create a new booking/appointment for a contact. Requires confirmation before execution.',
     family: 'crud',
-    riskLevel: 'low',
-    riskTier: 1 as RiskTier,
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
     manualEquivalentRoute: '/app/bookings',
     changedEntities: ['booking'],
     parameters: {
@@ -1886,6 +1886,34 @@ export const FLOW_TOOLS: FlowTool[] = [
     outputSchema: { type: 'object', description: 'Outcome logged', fields: { callLogId: { type: 'string', description: 'Call log ID' }, outcome: { type: 'string', description: 'Recorded outcome' } } },
   },
   {
+    name: 'call_generate_script',
+    description: 'Generate an AI-powered call script for a contact/call log based on their deals, invoices, bookings, and recent activity.',
+    family: 'draft',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/call-tasks',
+    changedEntities: ['callLog'],
+    parameters: {
+      type: 'object',
+      properties: {
+        callLogId: { type: 'string', description: 'Call log ID to attach the script to' },
+        contactId: { type: 'string', description: 'Contact ID to generate the script for' },
+      },
+      required: ['callLogId', 'contactId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Generated call script',
+      fields: {
+        greeting: { type: 'string', description: 'Opening greeting' },
+        talkingPoints: { type: 'array', description: 'Key talking points' },
+        ask: { type: 'string', description: 'The ask/question' },
+        close: { type: 'string', description: 'Closing statement' },
+        durationEstimate: { type: 'number', description: 'Estimated call duration in minutes' },
+      },
+    },
+  },
+  {
     name: 'call_schedule_followup',
     description: 'Create a follow-up task from a completed call (e.g. callback_requested → schedule new call).',
     family: 'organize',
@@ -2069,6 +2097,403 @@ export const FLOW_TOOLS: FlowTool[] = [
     },
     outputSchema: { type: 'object', description: 'Created document', fields: { documentId: { type: 'string', description: 'Drive document ID' }, title: { type: 'string', description: 'Document title' } } },
   },
+
+  // ================================================================
+  //  CALENDAR FAMILY — L1 Read / L2 Organize: Calendar events
+  // ================================================================
+  {
+    name: 'calendar_list_events',
+    description: 'List calendar events for the business with optional date range, module, and status filters.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/calendar',
+    parameters: {
+      type: 'object',
+      properties: {
+        startDate: { type: 'string', description: 'ISO start date (e.g. 2024-01-01)' },
+        endDate: { type: 'string', description: 'ISO end date (e.g. 2024-01-31)' },
+        module: { type: 'string', description: 'Filter by module: BOOKINGS, REVENUE, PROJECTS, MARKETING' },
+        status: { type: 'string', description: 'Filter by status: SCHEDULED, CONFIRMED, COMPLETED, CANCELLED' },
+        limit: { type: 'number', description: 'Max results (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Calendar events', fields: { events: { type: 'array', description: 'Event rows' }, count: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'calendar_create_event',
+    description: 'Create a general calendar event (meeting, reminder, milestone, etc.).',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/calendar',
+    changedEntities: ['calendarEvent'],
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Event title' },
+        description: { type: 'string', description: 'Event description' },
+        startAt: { type: 'string', description: 'ISO start datetime' },
+        endAt: { type: 'string', description: 'ISO end datetime' },
+        allDay: { type: 'boolean', description: 'All-day event' },
+        type: { type: 'string', description: 'Event type: MEETING, REMINDER, MILESTONE, DEADLINE, OTHER', enum: ['MEETING', 'REMINDER', 'MILESTONE', 'DEADLINE', 'OTHER'] },
+        priority: { type: 'string', description: 'Priority: LOW, NORMAL, HIGH, URGENT', enum: ['LOW', 'NORMAL', 'HIGH', 'URGENT'] },
+        color: { type: 'string', description: 'Optional color hex' },
+      },
+      required: ['title', 'startAt', 'type'],
+    },
+    outputSchema: { type: 'object', description: 'Created event', fields: { id: { type: 'string', description: 'Event ID' }, title: { type: 'string', description: 'Event title' }, startAt: { type: 'string', description: 'Start time' } } },
+  },
+  {
+    name: 'calendar_check_conflicts',
+    description: 'Check for scheduling conflicts in a given time range. Returns overlapping events if any.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/calendar',
+    parameters: {
+      type: 'object',
+      properties: {
+        startAt: { type: 'string', description: 'ISO start datetime to check' },
+        endAt: { type: 'string', description: 'ISO end datetime to check' },
+      },
+      required: ['startAt', 'endAt'],
+    },
+    outputSchema: { type: 'object', description: 'Conflict check result', fields: { hasConflict: { type: 'boolean', description: 'Whether there is a conflict' }, conflicts: { type: 'array', description: 'Overlapping events' } } },
+  },
+
+  // ================================================================
+  //  TIME TRACKING FAMILY — L2 Organize / L3 Execute
+  // ================================================================
+  {
+    name: 'time_start_timer',
+    description: 'Start a time tracking timer for a task or project. Creates an open time entry.',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
+    changedEntities: ['timeEntry'],
+    parameters: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'What is being worked on' },
+        projectId: { type: 'string', description: 'Optional project ID' },
+        taskId: { type: 'string', description: 'Optional project task ID' },
+        hourlyRate: { type: 'number', description: 'Optional hourly rate' },
+      },
+      required: ['description'],
+    },
+    outputSchema: { type: 'object', description: 'Started timer', fields: { id: { type: 'string', description: 'Time entry ID' }, startTime: { type: 'string', description: 'Start timestamp' } } },
+  },
+  {
+    name: 'time_stop_timer',
+    description: 'Stop the currently running timer and record the duration.',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
+    changedEntities: ['timeEntry'],
+    parameters: {
+      type: 'object',
+      properties: {
+        timeEntryId: { type: 'string', description: 'Time entry ID to stop' },
+      },
+      required: ['timeEntryId'],
+    },
+    outputSchema: { type: 'object', description: 'Stopped timer', fields: { id: { type: 'string', description: 'Time entry ID' }, durationMinutes: { type: 'number', description: 'Recorded duration in minutes' } } },
+  },
+  {
+    name: 'time_log_entry',
+    description: 'Log a completed time entry manually (e.g. after-the-fact logging).',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
+    changedEntities: ['timeEntry'],
+    parameters: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'What was worked on' },
+        startTime: { type: 'string', description: 'ISO start datetime' },
+        endTime: { type: 'string', description: 'ISO end datetime' },
+        durationMinutes: { type: 'number', description: 'Duration in minutes (optional, computed from start/end if omitted)' },
+        projectId: { type: 'string', description: 'Optional project ID' },
+        taskId: { type: 'string', description: 'Optional project task ID' },
+        hourlyRate: { type: 'number', description: 'Optional hourly rate' },
+        billable: { type: 'boolean', description: 'Whether billable (default true)' },
+      },
+      required: ['description', 'startTime', 'endTime'],
+    },
+    outputSchema: { type: 'object', description: 'Logged entry', fields: { id: { type: 'string', description: 'Time entry ID' }, durationMinutes: { type: 'number', description: 'Duration in minutes' } } },
+  },
+
+  // ================================================================
+  //  HELPDESK FAMILY — L2 Organize / L3 Execute
+  // ================================================================
+  {
+    name: 'helpdesk_list_tickets',
+    description: 'List support tickets with optional status and priority filters.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/support',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status: OPEN, IN_PROGRESS, WAITING, RESOLVED, CLOSED' },
+        priority: { type: 'string', description: 'Filter by priority: LOW, NORMAL, HIGH, URGENT' },
+        limit: { type: 'number', description: 'Max results (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Support tickets', fields: { tickets: { type: 'array', description: 'Ticket rows' }, count: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'helpdesk_create_ticket',
+    description: 'Create a support ticket for a contact or general issue.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/support',
+    changedEntities: ['supportTicket'],
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Ticket title' },
+        description: { type: 'string', description: 'Ticket description' },
+        contactId: { type: 'string', description: 'Optional contact ID' },
+        priority: { type: 'string', description: 'Priority: LOW, NORMAL, HIGH, URGENT', enum: ['LOW', 'NORMAL', 'HIGH', 'URGENT'] },
+        source: { type: 'string', description: 'Source: MANUAL, EMAIL, PORTAL, WHATSAPP', enum: ['MANUAL', 'EMAIL', 'PORTAL', 'WHATSAPP'] },
+      },
+      required: ['title'],
+    },
+    outputSchema: { type: 'object', description: 'Created ticket', fields: { id: { type: 'string', description: 'Ticket ID' }, title: { type: 'string', description: 'Ticket title' }, status: { type: 'string', description: 'Initial status' } } },
+  },
+  {
+    name: 'helpdesk_update_ticket',
+    description: 'Update a support ticket status, priority, or assignment.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/support',
+    changedEntities: ['supportTicket'],
+    parameters: {
+      type: 'object',
+      properties: {
+        ticketId: { type: 'string', description: 'Ticket ID' },
+        status: { type: 'string', description: 'New status: OPEN, IN_PROGRESS, WAITING, RESOLVED, CLOSED' },
+        priority: { type: 'string', description: 'New priority: LOW, NORMAL, HIGH, URGENT' },
+        assignedToId: { type: 'string', description: 'User ID to assign' },
+      },
+      required: ['ticketId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated ticket', fields: { id: { type: 'string', description: 'Ticket ID' }, status: { type: 'string', description: 'Updated status' } } },
+  },
+
+  // ================================================================
+  //  FINANCE FAMILY — L1 Read / L2 Organize
+  // ================================================================
+  {
+    name: 'finance_view_receivables',
+    description: 'View accounts receivable aging report — outstanding invoices grouped by overdue buckets.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: {
+      type: 'object',
+      properties: {
+        asOfDate: { type: 'string', description: 'Optional ISO date to calculate aging (default today)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'AR aging report', fields: { totalOutstanding: { type: 'number', description: 'Total outstanding amount' }, current: { type: 'number', description: 'Not yet due' }, overdue1_30: { type: 'number', description: '1-30 days overdue' }, overdue31_60: { type: 'number', description: '31-60 days overdue' }, overdue61_90: { type: 'number', description: '61-90 days overdue' }, overdue90plus: { type: 'number', description: '90+ days overdue' }, invoices: { type: 'array', description: 'Invoice list' } } },
+  },
+  {
+    name: 'finance_customer_balance',
+    description: 'Get the balance for a specific customer (total paid, total invoiced, outstanding).',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
+    parameters: {
+      type: 'object',
+      properties: {
+        contactId: { type: 'string', description: 'Contact ID' },
+      },
+      required: ['contactId'],
+    },
+    outputSchema: { type: 'object', description: 'Customer balance', fields: { contactId: { type: 'string', description: 'Contact ID' }, totalInvoiced: { type: 'number', description: 'Total invoiced' }, totalPaid: { type: 'number', description: 'Total paid' }, outstanding: { type: 'number', description: 'Outstanding balance' }, invoiceCount: { type: 'number', description: 'Number of invoices' } } },
+  },
+  {
+    name: 'finance_list_action_items',
+    description: 'List finance action items (AI-detected anomalies, cashflow risks, missing receipts, etc.).',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: {
+      type: 'object',
+      properties: {
+        severity: { type: 'string', description: 'Filter by severity: INFO, WARNING, CRITICAL' },
+        limit: { type: 'number', description: 'Max results (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Finance action items', fields: { items: { type: 'array', description: 'Action item rows' }, total: { type: 'number', description: 'Total count' } } },
+  },
+
+  // ================================================================
+  //  PROJECT UPDATE/DELETE — L2 Organize / L3 Execute
+  // ================================================================
+  {
+    name: 'projects_update_task',
+    description: 'Update a project task title, due date, priority, or completion status.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
+    changedEntities: ['projectTask'],
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Task ID' },
+        title: { type: 'string', description: 'New title' },
+        dueDate: { type: 'string', description: 'New due date (ISO)' },
+        priority: { type: 'string', description: 'Priority: LOW, NORMAL, HIGH, URGENT' },
+        isCompleted: { type: 'boolean', description: 'Mark as completed' },
+      },
+      required: ['taskId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated task', fields: { id: { type: 'string', description: 'Task ID' }, title: { type: 'string', description: 'Task title' } } },
+  },
+  {
+    name: 'projects_delete_task',
+    description: 'Soft-delete a project task.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
+    changedEntities: ['projectTask'],
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Task ID to delete' },
+      },
+      required: ['taskId'],
+    },
+    outputSchema: { type: 'object', description: 'Deleted task', fields: { success: { type: 'boolean', description: 'Success flag' }, deletedId: { type: 'string', description: 'Deleted task ID' } } },
+  },
+
+  // ================================================================
+  //  COMMERCE UPDATE/DELETE — L2 Organize / L3 Execute
+  // ================================================================
+  {
+    name: 'commerce_update_invoice',
+    description: 'Update an existing invoice (status, due date, notes). Does NOT modify line items.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/invoices',
+    changedEntities: ['invoice'],
+    parameters: {
+      type: 'object',
+      properties: {
+        invoiceId: { type: 'string', description: 'Invoice ID' },
+        status: { type: 'string', description: 'New status: DRAFT, SENT, PAID, OVERDUE, CANCELLED' },
+        dueDate: { type: 'string', description: 'New due date (ISO)' },
+        notes: { type: 'string', description: 'New notes' },
+      },
+      required: ['invoiceId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated invoice', fields: { id: { type: 'string', description: 'Invoice ID' }, status: { type: 'string', description: 'Updated status' } } },
+  },
+  {
+    name: 'commerce_update_product',
+    description: 'Update a product name, price, description, category, or active status.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/catalog',
+    changedEntities: ['product'],
+    parameters: {
+      type: 'object',
+      properties: {
+        productId: { type: 'string', description: 'Product ID' },
+        name: { type: 'string', description: 'New name' },
+        price: { type: 'number', description: 'New price' },
+        description: { type: 'string', description: 'New description' },
+        category: { type: 'string', description: 'New category' },
+        isActive: { type: 'boolean', description: 'Active status' },
+      },
+      required: ['productId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated product', fields: { id: { type: 'string', description: 'Product ID' }, name: { type: 'string', description: 'Product name' }, fieldsUpdated: { type: 'array', description: 'Fields that were changed' } } },
+  },
+  {
+    name: 'commerce_send_invoice',
+    description: 'Send an invoice to the customer via email (marks status as SENT).',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/invoices',
+    changedEntities: ['invoice'],
+    parameters: {
+      type: 'object',
+      properties: {
+        invoiceId: { type: 'string', description: 'Invoice ID' },
+        message: { type: 'string', description: 'Optional custom message' },
+      },
+      required: ['invoiceId'],
+    },
+    outputSchema: { type: 'object', description: 'Sent invoice', fields: { id: { type: 'string', description: 'Invoice ID' }, status: { type: 'string', description: 'Updated status' } } },
+  },
+
+  // ================================================================
+  //  MARKETING/SOCIAL UPDATES — L2 Organize / L3 Execute
+  // ================================================================
+  {
+    name: 'marketing_update_campaign',
+    description: 'Update an email campaign name, subject, body, or scheduled send date.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
+    changedEntities: ['emailCampaign'],
+    parameters: {
+      type: 'object',
+      properties: {
+        campaignId: { type: 'string', description: 'Campaign ID' },
+        name: { type: 'string', description: 'New name' },
+        subject: { type: 'string', description: 'New subject' },
+        body: { type: 'string', description: 'New body' },
+        scheduledAt: { type: 'string', description: 'New scheduled send date (ISO)' },
+      },
+      required: ['campaignId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated campaign', fields: { id: { type: 'string', description: 'Campaign ID' }, name: { type: 'string', description: 'Campaign name' } } },
+  },
+  {
+    name: 'social_update_post',
+    description: 'Update a social post content or scheduled time.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
+    changedEntities: ['socialPost'],
+    parameters: {
+      type: 'object',
+      properties: {
+        postId: { type: 'string', description: 'Post ID' },
+        content: { type: 'string', description: 'New content' },
+        scheduledFor: { type: 'string', description: 'New scheduled date (ISO)' },
+      },
+      required: ['postId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated post', fields: { id: { type: 'string', description: 'Post ID' }, status: { type: 'string', description: 'Post status' } } },
+  },
+
 ];
 
 export function getOpenAiToolDefinitions() {

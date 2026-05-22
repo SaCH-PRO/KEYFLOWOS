@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Shield, ContactRound, Layers } from "lucide-react";
+import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Shield, ContactRound, Layers, Zap, Gift } from "lucide-react";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 
 const navItems = [
   { href: "/app/settings/billing", label: "Billing", icon: Crown, description: "Subscription & usage" },
+  { href: "/app/settings/invite", label: "Invite & Earn", icon: Gift, description: "Refer friends, earn credits" },
   { href: "/app/settings/business", label: "Payment Gateways", icon: CreditCard, description: "Customer payment methods" },
   { href: "/app/settings/catalog", label: "Catalog", icon: Layers, description: "Products & services" },
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
@@ -20,6 +21,7 @@ const navItems = [
   { href: "/app/settings/output-templates", label: "AI Output", icon: Sparkles, description: "AI style" },
   { href: "/app/settings/developers", label: "Developers", icon: Code2, description: "API & extensions" },
   { href: "/app/settings/ai-control", label: "AI Control", icon: Brain, description: "AI governance" },
+  { href: "/app/settings/ai", label: "L4 AI", icon: Zap, description: "Capacity & authority" },
   { href: "/app/settings/privacy", label: "Privacy", icon: Shield, description: "GDPR & forget" },
 ];
 

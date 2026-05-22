@@ -113,6 +113,68 @@ export class ProjectsController {
     return this.projects.deleteTask(businessId, taskId);
   }
 
+  @Patch('businesses/:businessId/tasks/:taskId/status')
+  updateTaskStatus(
+    @Param('businessId') businessId: string,
+    @Param('taskId') taskId: string,
+    @Body() body: { status: string; position?: number },
+  ) {
+    return this.projects.updateTaskStatus(businessId, taskId, body.status, body.position);
+  }
+
+  @Post('businesses/:businessId/projects/:projectId/tasks/reorder')
+  reorderTasks(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+    @Body() body: { updates: { taskId: string; status: string; position: number }[] },
+  ) {
+    return this.projects.reorderTasks(businessId, projectId, body.updates);
+  }
+
+  @Get('businesses/:businessId/projects/:projectId/budget')
+  getProjectBudget(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.projects.getProjectBudget(projectId, businessId);
+  }
+
+  @Get('businesses/:businessId/projects/:projectId/timeline')
+  getProjectTimeline(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.projects.getProjectTimeline(projectId, businessId);
+  }
+
+  @Post('businesses/:businessId/projects/:projectId/milestones')
+  createMilestone(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+    @Body() body: { title: string; description?: string; amount?: number; dueDate?: string },
+  ) {
+    return this.projects.createMilestone(projectId, businessId, body);
+  }
+
+  @Patch('businesses/:businessId/projects/:projectId/milestones/:milestoneId')
+  updateMilestone(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+    @Param('milestoneId') milestoneId: string,
+    @Body() body: { title?: string; description?: string; amount?: number; dueDate?: string | null; completedAt?: string | null; invoiceId?: string | null },
+  ) {
+    return this.projects.updateMilestone(milestoneId, projectId, businessId, body);
+  }
+
+  @Delete('businesses/:businessId/projects/:projectId/milestones/:milestoneId')
+  deleteMilestone(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+    @Param('milestoneId') milestoneId: string,
+  ) {
+    return this.projects.deleteMilestone(milestoneId, projectId, businessId);
+  }
+
   @Get('businesses/:businessId/templates')
   listTemplates(@Param('businessId') businessId: string) {
     return this.projects.listTemplates(businessId);

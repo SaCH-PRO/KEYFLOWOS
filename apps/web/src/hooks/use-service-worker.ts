@@ -59,22 +59,47 @@ export function useServiceWorker() {
     if (typeof window === 'undefined') return;
     if (!('serviceWorker' in navigator)) return;
 
-    const isDev = process.env.NODE_ENV === 'development';
+    const isLocalhost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.endsWith('.local');
 
-    /* In dev, unregister any existing SW to avoid stale interceptors */
-    if (isDev) {
-      navigator.serviceWorker.getRegistrations().then((regs) => {
-        regs.forEach((reg) => {
-          reg.unregister().then(() => {
-            console.log('[SW] Unregistered in dev mode');
-          });
-        });
+    /* In dev or localhost, unregister any existing SW to avoid stale interceptors
+     * and wipe caches so Turbopack chunks never get stuck. */
+    if (isLocalhost) {
+      navigator.serviceWorker.getRegistrations().then(async (regs) => {
+        for (const reg of regs) {
+          await reg.unregister();
+          console.log('[SW] Unregistered in dev/localhost mode');
+        }
+        /* Wipe all caches so old chunk references don't survive */
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            await caches.delete(key);
+            console.log('[SW] Cleared cache:', key);
+          }
+        }
+        /* Also wipe IndexedDB used by the old SW */
+        if ('indexedDB' in window) {
+          const dbs = await indexedDB.databases?.().catch(() => []);
+          for (const db of dbs) {
+            if (db.name && db.name.startsWith('kf-')) {
+              await new Promise((res, rej) => {
+                const req = indexedDB.deleteDatabase(db.name!);
+                req.onsuccess = res;
+                req.onerror = rej;
+              });
+              console.log('[SW] Cleared IndexedDB:', db.name);
+            }
+          }
+        }
       });
       return;
     }
 
     navigator.serviceWorker
-      .register('/sw.js')
+      .register('/sw.js', { updateViaCache: 'none' })
       .then((reg) => {
         setIsRegistered(true);
         console.log('[SW] Registered:', reg.scope);
