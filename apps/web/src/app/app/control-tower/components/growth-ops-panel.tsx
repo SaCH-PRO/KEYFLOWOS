@@ -41,7 +41,7 @@ function buildGrowthInsights(dashboard: StrategicDashboard, modules: ControlTowe
       title: `Re-engage ${dashboard.staleLeads} Dormant Leads`,
       description: "These leads went cold but could be re-activated with a timely check-in.",
       actionLabel: "View Leads",
-      actionRoute: "/app/crm/pipeline",
+      actionRoute: "/app/network/contacts",
     });
   }
 

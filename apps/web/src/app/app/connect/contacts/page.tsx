@@ -238,7 +238,7 @@ export default function ConnectContactsPage() {
         rightSlot={
           <div className="flex items-center gap-2">
             <Link
-              href="/app/crm/pipeline?view=table"
+              href="/app/network/contacts?view=table"
               className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border/50 px-2 py-1 rounded-lg"
             >
               <ExternalLink className="h-3 w-3" />

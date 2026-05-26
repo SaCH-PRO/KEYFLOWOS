@@ -138,7 +138,7 @@ export default function DuplicatesPage() {
     <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Link href="/app/crm/pipeline" className="p-2 rounded-lg hover:bg-muted/40" aria-label="Back to CRM">
+          <Link href="/app/network/contacts" className="p-2 rounded-lg hover:bg-muted/40" aria-label="Back to CRM">
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div>

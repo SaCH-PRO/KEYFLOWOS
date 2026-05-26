@@ -43,7 +43,7 @@ async function generateTowerSuggestions(context: ModuleContext): Promise<AiSugge
       description: `${data.staleLeads} leads have gone cold. A simple check-in could re-activate them.`,
       priority: "medium",
       actionLabel: "View leads",
-      actionKey: "navigate:/app/crm/pipeline",
+      actionKey: "navigate:/app/network/contacts",
     });
   }
 

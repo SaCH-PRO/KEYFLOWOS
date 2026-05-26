@@ -124,12 +124,11 @@ export const operateSections: NavSection[] = [
     ],
   },
   {
-    id: "people",
-    label: "People",
+    id: "network",
+    label: "Network",
     icon: Users,
     items: [
-      { label: "Directory", href: "/app/crm/pipeline", icon: Contact },
-      { label: "Pipeline", href: "/app/crm/pipeline", icon: Filter },
+      { label: "Contacts", href: "/app/network/contacts", icon: Contact },
       { label: "Sequences", href: "/app/crm/sequences", icon: Send },
       { label: "Intelligence", href: "/app/crm/intelligence", icon: Brain },
       { label: "Service", href: "/app/helpdesk", icon: Headset },

@@ -22,7 +22,7 @@ export function NewEntityMenu({ onClose }: { onClose: () => void }) {
   const [focusIdx, setFocusIdx] = useState(-1);
   const items = useMemo(() => {
     const base = [
-      { label: "Contact", icon: Users, href: "/app/crm/pipeline", shortcut: "⌘⇧C" },
+      { label: "Contact", icon: Users, href: "/app/network/contacts", shortcut: "⌘⇧C" },
       { label: "Invoice", icon: Receipt, href: "/app/commerce/invoices/new", shortcut: "⌘⇧I" },
       { label: "Quote", icon: FileText, href: "/app/commerce?tab=quotes" },
       { label: "Booking", icon: Calendar, href: "/app/bookings", shortcut: "⌘⇧B" },

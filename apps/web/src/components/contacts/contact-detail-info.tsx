@@ -151,11 +151,11 @@ export function ContactDetailInfo({
 
   const handleLifecycleClick = () => {
     if (!contact.lifecycleStage) return;
-    router.push(`/app/crm/pipeline?lifecycle=${encodeURIComponent(contact.lifecycleStage)}`);
+    router.push(`/app/network/contacts?lifecycle=${encodeURIComponent(contact.lifecycleStage)}`);
   };
   const handleSegmentClick = () => {
     if (!contact.segment) return;
-    router.push(`/app/crm/pipeline?segment=${encodeURIComponent(contact.segment)}`);
+    router.push(`/app/network/contacts?segment=${encodeURIComponent(contact.segment)}`);
   };
   const handleReferredByClick = () => {
     if (!referredBy && !referredById) return;
@@ -164,7 +164,7 @@ export function ContactDetailInfo({
       return;
     }
     if (referredById) {
-      router.push(`/app/crm/pipeline?contactId=${encodeURIComponent(referredById)}`);
+      router.push(`/app/network/contacts?contactId=${encodeURIComponent(referredById)}`);
       return;
     }
     const match = relatedContacts?.find((rc) => {
@@ -174,7 +174,7 @@ export function ContactDetailInfo({
     if (match && onSelectRelatedContact) {
       onSelectRelatedContact(match.id);
     } else if (referredBy) {
-      router.push(`/app/crm/pipeline?search=${encodeURIComponent(referredBy)}`);
+      router.push(`/app/network/contacts?search=${encodeURIComponent(referredBy)}`);
     }
   };
   const handleScheduleInteractionTask = async () => {

@@ -69,7 +69,7 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
           formula="Total Revenue - Total Expenses"
           goodValue="Aim for 20%+ profit margin."
         />
-        <Link href="/app/crm/pipeline">
+        <Link href="/app/network/contacts">
           <MetricCard
             label={c ? "New Contacts" : "Total Contacts"}
             value={c ? (c.clients.newContacts ?? 0).toString() : m.clients.totalContacts.toString()}

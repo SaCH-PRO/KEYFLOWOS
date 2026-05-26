@@ -90,7 +90,7 @@ export default function CrmDashboardPage() {
     [
       { key: "lead", label: "Leads", tone: "info" },
       { key: "prospect", label: "Prospects", tone: "default" },
-      { key: "client", label: "Clients", tone: "success" },
+      { key: "client", label: "Contacts", tone: "success" },
       { key: "lost", label: "Lost", tone: "warning" },
       { key: "unpaid", label: "Unpaid", tone: "danger" },
       { key: "stale", label: "Stale", tone: "warning" },
@@ -124,7 +124,7 @@ export default function CrmDashboardPage() {
             <Button variant="outline" size="sm" onClick={() => setInsightsOpen(true)}>
               Insights
             </Button>
-            <Link href="/app/crm/pipeline">
+            <Link href="/app/network/contacts">
               <Button variant="outline" size="sm">
                 Go to pipeline
               </Button>

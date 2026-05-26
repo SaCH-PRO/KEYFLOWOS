@@ -86,7 +86,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   commerce: "/app/commerce",
   marketing: "/app/marketing",
   expenses: "/app/expenses",
-  contacts: "/app/crm/pipeline",
+  contacts: "/app/network/contacts",
   store: "/app/store",
   documents: "/app/profile?tab=documents",
   reports: "/app/reports",
@@ -105,13 +105,13 @@ export const TAB_QUICK_LINKS: Record<string, QuickLink[]> = {
   ],
   canvas: [
     { label: "Commerce", path: "/app/commerce", icon: DollarSign, colorVar: "--kf-accent1" },
-    { label: "Contacts", path: "/app/crm/pipeline", icon: Users, colorVar: "--kf-accent2" },
+    { label: "Contacts", path: "/app/network/contacts", icon: Users, colorVar: "--kf-accent2" },
     { label: "Store", path: "/app/store", icon: ShoppingBag, colorVar: "--kf-info" },
     { label: "Marketing", path: "/app/marketing", icon: Megaphone, colorVar: "--kf-success" },
   ],
   swot: [
     { label: "Marketing", path: "/app/marketing", icon: Megaphone, colorVar: "--kf-accent1" },
-    { label: "Contacts", path: "/app/crm/pipeline", icon: Users, colorVar: "--kf-accent2" },
+    { label: "Contacts", path: "/app/network/contacts", icon: Users, colorVar: "--kf-accent2" },
     { label: "Reports", path: "/app/reports", icon: BarChart3, colorVar: "--kf-info" },
   ],
   financials: [
@@ -221,7 +221,7 @@ export const PROGRESS_PHASES: Phase[] = [
     id: "execute", label: "Execute", tagline: "Launch and start serving customers", icon: Rocket, colorVar: "--kf-accent1",
     actions: [
       { label: "Go Live", description: "Publish your storefront to the world", icon: Zap, route: "/app/store", doneKey: "storeEnabled" },
-      { label: "First Contact", description: "Add or import your first customers", icon: Users, route: "/app/crm/pipeline", doneKey: "hasContacts" },
+      { label: "First Contact", description: "Add or import your first customers", icon: Users, route: "/app/network/contacts", doneKey: "hasContacts" },
       { label: "First Booking", description: "Accept your first appointment or order", icon: Calendar, route: "/app/bookings", doneKey: "hasBookings" },
       { label: "Payment Setup", description: "Configure how you get paid", icon: DollarSign, route: "/app/commerce", doneKey: "hasInvoices" },
     ],

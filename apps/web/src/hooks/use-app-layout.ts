@@ -104,7 +104,7 @@ export function useAppLayout(): AppLayoutState {
 
   const copilotModule = useMemo((): CopilotModule => {
     if (pathname === "/app") return "cockpit";
-    if (pathname.startsWith("/app/crm") || pathname.startsWith("/app/people")) return "crm";
+    if (pathname.startsWith("/app/crm") || pathname.startsWith("/app/network")) return "crm";
     if (pathname.startsWith("/app/commerce") || pathname.startsWith("/app/money")) return "revenue";
     if (pathname.startsWith("/app/payments")) return "revenue";
     if (pathname.startsWith("/app/bookings") || pathname.startsWith("/app/schedule")) return "calendar";
@@ -230,7 +230,7 @@ export function useAppLayout(): AppLayoutState {
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
           app: "KEYFLOW",
-          crm: "People", pipeline: "People", people: "People",
+          crm: "Network", pipeline: "Network", people: "Network", network: "Network",
           commerce: "Money", money: "Money",
           bookings: "Schedule", schedule: "Schedule",
           marketing: "Communicate", communicate: "Communicate",

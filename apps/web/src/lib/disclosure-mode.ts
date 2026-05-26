@@ -22,8 +22,8 @@ const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
     "/app/keyflow-command",   // Cockpit
     "/app/money",             // Money
     "/app/money/revenue",     // Revenue
-    "/app/people",            // People
-    "/app/people/pipeline",   // Pipeline
+    "/app/network/contacts",            // People
+    "/app/network/contacts",   // Pipeline
     "/app/schedule",          // Schedule
     "/app/schedule/bookings", // Bookings
     "/app/build",             // Build
@@ -38,8 +38,8 @@ const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
     "/app/money",             // Money
     "/app/money/revenue",     // Revenue
     "/app/money/expenses",    // Expenses
-    "/app/people",            // People
-    "/app/people/pipeline",   // Pipeline
+    "/app/network/contacts",            // People
+    "/app/network/contacts",   // Pipeline
     "/app/work",              // Work
     "/app/work/projects",     // Projects
     "/app/schedule",          // Schedule

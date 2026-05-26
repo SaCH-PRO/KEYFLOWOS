@@ -106,7 +106,7 @@ export function GettingStartedChecklist({
       label: "Add a contact",
       description: "Your first customer or lead",
       icon: Sparkles,
-      href: "/app/crm/pipeline?action=new",
+      href: "/app/network/contacts?action=new",
       done: hasContacts,
     },
     {

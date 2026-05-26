@@ -89,6 +89,7 @@ const LABEL_MAP: Record<string, string> = {
   money: "Overview",
 
   // N
+  network: "Network",
   notes: "Notes",
   notifications: "Notifications",
 
@@ -101,7 +102,7 @@ const LABEL_MAP: Record<string, string> = {
   // P
   payments: "Payments",
   performance: "Performance",
-  pipeline: "Clients",
+  pipeline: "Contacts",
   procurement: "Procurement",
   products: "Products",
   profile: "Profile",
@@ -148,7 +149,7 @@ const LABEL_MAP: Record<string, string> = {
 
   // Misc
   "change-orders": "Change Orders",
-  contacts: "Clients",
+  contacts: "Contacts",
   crm: "CRM",
   "time-tracking": "Time",
   inbox: "Inbox",
@@ -161,7 +162,8 @@ const LABEL_MAP: Record<string, string> = {
  * to their actual list / index pages.
  * ──────────────────────────────────────────────────────────────── */
 const ROUTE_ALIASES: Record<string, string> = {
-  "/app/crm/contacts": "/app/crm/pipeline",
+  "/app/network": "/app/network/contacts",
+  "/app/crm/contacts": "/app/network/contacts",
   "/app/crm/deals": "/app/crm/deals",
   "/app/money/books": "/app/finance",
   "/app/money/revenue": "/app/commerce",

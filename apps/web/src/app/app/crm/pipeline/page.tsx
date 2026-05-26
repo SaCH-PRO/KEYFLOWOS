@@ -71,12 +71,12 @@ export default function ContactsPage() {
 
   const crmShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
-      groupName: "Network Navigation",
+      groupName: "Contacts Navigation",
       shortcuts: [
         { key: "n", description: "New contact", action: () => { if (typeof window !== "undefined") window.dispatchEvent(new Event("kf:open-quick-add-contact")); } },
-        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search network"]'); el?.focus(); } },
-        { key: "1", description: "Network tab", action: () => setCrmViewTab("contacts") },
-        { key: "r", description: "Refresh network", action: () => { void loadContacts(); void loadFlowData(); } },
+        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search contacts"]'); el?.focus(); } },
+        { key: "1", description: "Contacts tab", action: () => setCrmViewTab("contacts") },
+        { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
         { key: "b", description: "Open broadcast", action: () => setShowBroadcast(true) },
       ],
     },
@@ -94,7 +94,7 @@ export default function ContactsPage() {
     if (googleSuccess) {
       googleHandled.current = true;
       toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
-      router.replace("/app/crm/pipeline");
+      router.replace("/app/network/contacts");
       loadContacts();
       loadFlowData();
     } else if (googleError) {
@@ -104,13 +104,13 @@ export default function ContactsPage() {
         : googleError === "import_failed" ? "Google import failed — please try again"
         : "Something went wrong with Google import";
       toast.error(`Google import failed: ${msg}`);
-      router.replace("/app/crm/pipeline");
+      router.replace("/app/network/contacts");
     } else if (action === "new") {
       googleHandled.current = true;
       if (typeof window !== "undefined") {
         setTimeout(() => window.dispatchEvent(new Event("kf:open-quick-add-contact")), 0);
       }
-      router.replace("/app/crm/pipeline");
+      router.replace("/app/network/contacts");
     }
   }, [router, loadContacts, loadFlowData]);
 
@@ -192,12 +192,12 @@ export default function ContactsPage() {
       pageTitle="Contacts & Pipeline"
       availableActions={["Add contact", "Send broadcast", "Import contacts", "Move pipeline stage"]}
     >
-    <div className="space-y-4" aria-label="Network Workspace">
+    <div className="space-y-4" aria-label="Contacts Workspace">
       <ResumePrompt module="crm" />
       
       <PageHeader
         icon={Users}
-        title="Network"
+        title="Contacts"
         subtitle="Your people are assets. Leverage relationships to drive revenue, unlock opportunities, and build momentum."
         titleExtra={<NotesTrigger pageKey="crm" variant="header" />}
       />
