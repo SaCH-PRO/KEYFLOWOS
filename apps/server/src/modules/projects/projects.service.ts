@@ -20,6 +20,7 @@ export class ProjectsService {
       where: { businessId, deletedAt: null },
       include: {
         tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } },
+        goal: { select: { id: true, title: true, category: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -30,6 +31,7 @@ export class ProjectsService {
       where: { id: projectId, businessId, deletedAt: null },
       include: {
         tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } },
+        goal: true,
       },
     });
   }
@@ -45,6 +47,7 @@ export class ProjectsService {
     bookingId?: string;
     dueDate?: string;
     hourlyRate?: number;
+    goalId?: string;
   }) {
     const project = await this.prisma.client.project.create({
       data: {
@@ -59,8 +62,9 @@ export class ProjectsService {
         invoiceId: body.invoiceId,
         bookingId: body.bookingId,
         dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+        goalId: body.goalId,
       },
-      include: { tasks: true },
+      include: { tasks: true, goal: true },
     });
     this.events.emit('project.created', { project, businessId });
     await this.timeline.recordEvent({
@@ -83,6 +87,7 @@ export class ProjectsService {
     description?: string;
     status?: string;
     priority?: string;
+    goalId?: string | null;
     color?: string;
     contactId?: string;
     invoiceId?: string;
@@ -495,5 +500,44 @@ export class ProjectsService {
     });
     this.events.emit('project.created', { project, businessId });
     return project;
+  }
+
+  async updatePlanEvent(
+    businessId: string,
+    planId: string,
+    eventId: string,
+    body: {
+      title?: string;
+      description?: string;
+      executionContext?: 'IN_APP' | 'OUT_APP';
+      autoExecute?: boolean;
+      estimatedHours?: number;
+      estimatedStart?: string;
+      estimatedEnd?: string;
+      dependsOn?: string[];
+      requiredRoles?: string[];
+      estimatedCost?: number;
+    },
+  ) {
+    const event = await this.prisma.client.projectPlanEvent.findFirst({
+      where: { id: eventId, planId, plan: { businessId } },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    const data: any = { ...body };
+    if (body.estimatedStart !== undefined) {
+      data.estimatedStart = body.estimatedStart ? new Date(body.estimatedStart) : null;
+    }
+    if (body.estimatedEnd !== undefined) {
+      data.estimatedEnd = body.estimatedEnd ? new Date(body.estimatedEnd) : null;
+    }
+
+    return this.prisma.client.projectPlanEvent.update({
+      where: { id: eventId },
+      data,
+    });
   }
 }

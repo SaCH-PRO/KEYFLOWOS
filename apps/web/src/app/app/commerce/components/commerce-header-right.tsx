@@ -12,7 +12,9 @@ interface CommerceHeaderRightProps {
 export function CommerceHeaderRight({ revenuePulse }: CommerceHeaderRightProps) {
   return (
     <div className="flex items-center gap-2">
-      <ServiceLinkWidget compact />
+      <div className="hidden md:block">
+        <ServiceLinkWidget compact />
+      </div>
       <NotesTrigger pageKey="commerce" variant="header" />
       <RichTooltip
         title="Revenue Pulse"
@@ -20,17 +22,14 @@ export function CommerceHeaderRight({ revenuePulse }: CommerceHeaderRightProps) 
         side="bottom"
       >
         <div
-          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 kf-radius-md cursor-help kf-text-body"
-          style={{ border: "1px solid hsl(var(--kf-border) / 0.5)", background: "hsl(var(--kf-muted) / 0.12)" }}
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg cursor-help text-xs"
+          style={{ border: "1px solid hsl(var(--kf-border) / 0.4)", background: "hsl(var(--kf-muted) / 0.08)" }}
         >
           <DollarSign className="w-3.5 h-3.5 shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
-          <span
-            className="font-semibold kf-text-caption"
-            style={{ color: "hsl(var(--kf-success))" }}
-          >
+          <span className="font-semibold text-xs" style={{ color: "hsl(var(--kf-success))" }}>
             {revenuePulse}
           </span>
-          <span className="kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
             collected
           </span>
         </div>

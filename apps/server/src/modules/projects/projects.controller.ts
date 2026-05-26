@@ -2,11 +2,20 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } 
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ProjectsService } from './projects.service';
+import { ProjectPlannerService } from './project-planner.service';
+import { ProjectPlanExecutorService } from './project-plan-executor.service';
+import { GeneratePlanDto, UpdatePlanEventDto, ReorderEventsDto, AnalyzeImpactDto } from './dto/generate-plan.dto';
 
 @Controller('projects')
 @UseGuards(AuthGuard, BusinessGuard)
 export class ProjectsController {
-  constructor(@Inject(ProjectsService) private readonly projects: ProjectsService) {}
+  constructor(
+    @Inject(ProjectsService) private readonly projects: ProjectsService,
+    @Inject(ProjectPlannerService) private readonly planner: ProjectPlannerService,
+    @Inject(ProjectPlanExecutorService) private readonly executor: ProjectPlanExecutorService,
+  ) {}
+
+  // --- Existing Project Endpoints ---
 
   @Get('businesses/:businessId')
   listProjects(@Param('businessId') businessId: string) {
@@ -35,6 +44,7 @@ export class ProjectsController {
       invoiceId?: string;
       bookingId?: string;
       dueDate?: string;
+      goalId?: string;
     },
   ) {
     return this.projects.createProject(businessId, body);
@@ -55,6 +65,7 @@ export class ProjectsController {
       invoiceId?: string;
       bookingId?: string;
       dueDate?: string | null;
+      goalId?: string | null;
     },
   ) {
     return this.projects.updateProject(businessId, projectId, body);
@@ -203,5 +214,118 @@ export class ProjectsController {
     @Body() body: { name?: string; contactId?: string; invoiceId?: string; bookingId?: string },
   ) {
     return this.projects.createFromTemplate(businessId, templateId, body);
+  }
+
+  // --- Smart Project Planner Endpoints ---
+
+  @Post('businesses/:businessId/plans')
+  async generatePlan(
+    @Param('businessId') businessId: string,
+    @Body() body: GeneratePlanDto,
+  ) {
+    return this.planner.generatePlan(businessId, body.userIdea, body.goalId, body.options);
+  }
+
+  @Get('businesses/:businessId/plans')
+  listPlans(@Param('businessId') businessId: string) {
+    return this.planner.listPlans(businessId);
+  }
+
+  @Get('businesses/:businessId/plans/:planId')
+  getPlan(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+  ) {
+    return this.planner.getPlan(businessId, planId);
+  }
+
+  @Patch('businesses/:businessId/plans/:planId')
+  updatePlan(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+    @Body() body: {
+      status?: string;
+      strategySummary?: string;
+      estimatedTotalHours?: number;
+      estimatedBudget?: number;
+      estimatedPeople?: number;
+      estimatedDurationDays?: number;
+      riskAnalysis?: Record<string, unknown>;
+      swotAnalysis?: Record<string, unknown>;
+    },
+  ) {
+    return this.planner.updatePlan(businessId, planId, body);
+  }
+
+  @Post('businesses/:businessId/plans/:planId/approve')
+  async approvePlan(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+  ) {
+    await this.planner.updatePlan(businessId, planId, { status: 'approved' });
+    return this.executor.materializePlan(businessId, planId);
+  }
+
+  @Post('businesses/:businessId/plans/:planId/reject')
+  rejectPlan(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+  ) {
+    return this.planner.updatePlan(businessId, planId, { status: 'rejected' });
+  }
+
+  @Delete('businesses/:businessId/plans/:planId')
+  deletePlan(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+  ) {
+    return this.planner.deletePlan(businessId, planId);
+  }
+
+  @Patch('businesses/:businessId/plans/:planId/events/:eventId')
+  updatePlanEvent(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+    @Param('eventId') eventId: string,
+    @Body() body: UpdatePlanEventDto,
+  ) {
+    // Delegate to a generic update on the event
+    return this.projects.updatePlanEvent(businessId, planId, eventId, body);
+  }
+
+  @Post('businesses/:businessId/plans/:planId/events/reorder')
+  reorderEvents(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+    @Body() body: ReorderEventsDto,
+  ) {
+    return this.planner.reorderEvents(businessId, planId, body.updates);
+  }
+
+  @Post('businesses/:businessId/plans/:planId/events/:eventId/analyze-impact')
+  analyzeImpact(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+    @Param('eventId') eventId: string,
+    @Body() body: AnalyzeImpactDto,
+  ) {
+    return this.planner.analyzeRearrangement(businessId, planId, eventId, body.newSortOrder);
+  }
+
+  @Post('businesses/:businessId/plans/:planId/events/:eventId/execute')
+  executeInAppEvent(
+    @Param('businessId') businessId: string,
+    @Param('eventId') eventId: string,
+  ) {
+    return this.executor.executeInAppEvent(businessId, eventId);
+  }
+
+  @Post('businesses/:businessId/plans/:planId/events/:eventId/complete')
+  completeOutAppEvent(
+    @Param('businessId') businessId: string,
+    @Param('eventId') eventId: string,
+    @Body() body: { evidence?: string },
+  ) {
+    return this.executor.completeOutAppEvent(businessId, eventId, body.evidence);
   }
 }

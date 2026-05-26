@@ -1,17 +1,22 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject, Req, Logger } from '@nestjs/common';
 import { AutopilotService } from './autopilot.service';
 import { AutopilotAiService } from './autopilot-ai.service';
 import { DelegationLoopService } from './delegation-loop.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { AiUsageService } from '../ai/ai-usage.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller('autopilot/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class AutopilotController {
+  private readonly logger = new Logger(AutopilotController.name);
   constructor(
     @Inject(AutopilotService) private autopilotService: AutopilotService,
     @Inject(AutopilotAiService) private autopilotAiService: AutopilotAiService,
     @Inject(DelegationLoopService) private delegationLoopService: DelegationLoopService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get('tasks/today')
@@ -193,5 +198,180 @@ export class AutopilotController {
     @Query('limit') limit?: string,
   ) {
     return this.delegationLoopService.getRunHistory(businessId, loopId, limit ? parseInt(limit, 10) : 20);
+  }
+
+  /* ---------- KEY Talk Pipeline for Autopilot Delegations ---------- */
+
+  @Post('key/interpret')
+  async keyInterpretDelegation(
+    @Param('businessId') businessId: string,
+    @Body() body: { intent: string },
+  ) {
+    if (!body.intent?.trim()) {
+      return { success: false, error: 'Intent is required' };
+    }
+    try {
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'key_delegation_interpret',
+        {
+          messages: [
+            {
+              role: 'system',
+              content: `You are KEY, the AI delegation designer for KeyFlowOS, a Caribbean business platform.
+
+The user is describing an autopilot delegation they want in plain English. Your job is to:
+1. Interpret what they REALLY want
+2. Recommend the best delegation loop type and configuration
+3. Provide confidence score and alternatives
+
+Available delegation loop types:
+- payment_recovery: Find overdue invoices and create escalating reminder tasks (config: graceDays, escalationDays)
+- lead_reactivation: Find stale leads and create re-engagement tasks (config: staleDays)
+- post_purchase: After a sale, create thank-you, review-request, and cross-sell tasks (config: thankYouDelayHours, reviewDelayDays, crossSellDelayDays)
+- booking_prep: Before/after bookings, create reminder and follow-up tasks (config: reminderHours, followUpHours)
+- weekly_hygiene: Weekly cleanup — stale drafts, overdue invoices, incomplete profiles (config: enabledChecks)
+
+Return ONLY valid JSON in this exact format:
+{
+  "interpretation": "What the user wants",
+  "recommendation": "Why this loop type is best",
+  "confidence": 0.92,
+  "recommendedLoopType": "payment_recovery",
+  "proposedConfig": { "graceDays": 3, "escalationDays": [7, 14] },
+  "alternatives": [
+    {"label": "Brief label", "loopType": "...", "description": "Why this alternative"}
+  ]
+}`,
+            },
+            { role: 'user', content: body.intent },
+          ],
+          maxTokens: 1200,
+          temperature: 0.3,
+        },
+      );
+      const content = response.content?.trim() ?? '';
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return { success: false, error: 'Could not parse AI interpretation' };
+      }
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        success: true,
+        interpretation: parsed.interpretation || '',
+        recommendation: parsed.recommendation || '',
+        confidence: parsed.confidence ?? 0,
+        recommendedLoopType: parsed.recommendedLoopType || '',
+        proposedConfig: parsed.proposedConfig || {},
+        alternatives: Array.isArray(parsed.alternatives) ? parsed.alternatives : [],
+      };
+    } catch (err: any) {
+      this.logger.error('KEY delegation interpretation failed', err);
+      return { success: false, error: err?.message || 'Interpretation failed' };
+    }
+  }
+
+  @Post('key/build')
+  async keyBuildDelegation(
+    @Param('businessId') businessId: string,
+    @Body() body: { recommendedLoopType: string; proposedConfig?: Record<string, unknown>; enabled?: boolean },
+  ) {
+    try {
+      const loop = await this.prisma.client.delegationLoop.findFirst({
+        where: { businessId, loopType: body.recommendedLoopType },
+      });
+      if (!loop) {
+        return { success: false, error: `Delegation loop type "${body.recommendedLoopType}" not found` };
+      }
+
+      const updated = await this.prisma.client.delegationLoop.update({
+        where: { id: loop.id },
+        data: {
+          config: (body.proposedConfig as any) ?? loop.config,
+          enabled: body.enabled ?? true,
+        },
+      });
+
+      return {
+        success: true,
+        loopId: updated.id,
+        loop: {
+          id: updated.id,
+          loopType: updated.loopType,
+          name: updated.name,
+          enabled: updated.enabled,
+          config: updated.config,
+          intervalMin: updated.intervalMin,
+          riskTier: updated.riskTier,
+        },
+      };
+    } catch (err: any) {
+      this.logger.error('KEY delegation build failed', err);
+      return { success: false, error: err?.message || 'Build failed' };
+    }
+  }
+
+  @Post('key/execute')
+  async keyExecuteDelegation(
+    @Param('businessId') businessId: string,
+    @Body() body: { loopId: string },
+  ) {
+    try {
+      const result = await this.delegationLoopService.runLoop(businessId, body.loopId);
+
+      const runHistory = await this.delegationLoopService.getRunHistory(businessId, body.loopId, 5);
+      const recentTasks = await this.prisma.client.autopilotTask.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      });
+
+      return {
+        success: true,
+        result,
+        proof: {
+          runHistory,
+          recentTasks,
+        },
+      };
+    } catch (err: any) {
+      this.logger.error('KEY delegation execution failed', err);
+      return { success: false, error: err?.message || 'Execution failed' };
+    }
+  }
+
+  @Post('key/talk')
+  async keyTalkDelegation(
+    @Param('businessId') businessId: string,
+    @Body() body: { intent: string; autoExecute?: boolean },
+  ) {
+    const interpretResult = await this.keyInterpretDelegation(businessId, body);
+    if (!interpretResult.success || !interpretResult.recommendedLoopType) {
+      return interpretResult;
+    }
+
+    const buildResult = await this.keyBuildDelegation(businessId, {
+      recommendedLoopType: interpretResult.recommendedLoopType,
+      proposedConfig: interpretResult.proposedConfig,
+      enabled: true,
+    });
+    if (!buildResult.success) {
+      return { ...interpretResult, buildError: buildResult.error };
+    }
+
+    let executionResult = null;
+    if (body.autoExecute && buildResult.loopId) {
+      executionResult = await this.keyExecuteDelegation(businessId, { loopId: buildResult.loopId });
+    }
+
+    return {
+      success: true,
+      interpretation: interpretResult.interpretation,
+      recommendation: interpretResult.recommendation,
+      confidence: interpretResult.confidence,
+      loop: buildResult.loop,
+      executionProof: executionResult,
+    };
   }
 }

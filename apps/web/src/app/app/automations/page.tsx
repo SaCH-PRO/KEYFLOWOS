@@ -27,6 +27,7 @@ import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 import { AutopilotLoops } from "./components/autopilot-loops";
 
+
 const TABS = [
   { key: "flows", label: "My Flows", icon: Workflow, tooltip: "Active flows and playbooks running in your business." },
   { key: "autopilot", label: "Autopilot", icon: Bot, tooltip: "Delegation loops that continuously scan and act on your behalf." },
@@ -300,6 +301,8 @@ export default function FlowsPage() {
           <ExecutionLog businessId={businessId} onExecutionStatsChange={handleExecutionStatsChange} />
         )}
       </div>
+
+
 
     </WorkspaceShell>
   );

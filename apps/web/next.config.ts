@@ -130,6 +130,48 @@ const nextConfig: NextConfig = {
         destination: "/app/commerce?tab=payments",
         permanent: true,
       },
+      // Financial Flow unification: old finance cockpit sub-routes now live
+      // under their own top-level Financial Flow pages.
+      {
+        source: "/app/finance/revenue",
+        destination: "/app/commerce",
+        permanent: true,
+      },
+      {
+        source: "/app/finance/revenue/:path*",
+        destination: "/app/commerce",
+        permanent: true,
+      },
+      {
+        source: "/app/finance/expenses",
+        destination: "/app/expenses",
+        permanent: true,
+      },
+      {
+        source: "/app/finance/expenses/:path*",
+        destination: "/app/expenses",
+        permanent: true,
+      },
+      {
+        source: "/app/finance/reports",
+        destination: "/app/reports",
+        permanent: true,
+      },
+      {
+        source: "/app/finance/reports/:path*",
+        destination: "/app/reports",
+        permanent: true,
+      },
+      {
+        source: "/app/finance/actions",
+        destination: "/app/money",
+        permanent: true,
+      },
+      {
+        source: "/app/finance/actions/:path*",
+        destination: "/app/money",
+        permanent: true,
+      },
     ];
   },
   async rewrites() {

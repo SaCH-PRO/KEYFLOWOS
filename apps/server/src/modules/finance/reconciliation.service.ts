@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { LedgerBalanceService } from './ledger-balance.service';
@@ -40,9 +40,9 @@ export interface CreateReconciliationInput {
 @Injectable()
 export class ReconciliationService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly ledgerBalance: LedgerBalanceService,
-    private readonly audit: FinanceAuditService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(LedgerBalanceService) private readonly ledgerBalance: LedgerBalanceService,
+    @Inject(FinanceAuditService) private readonly audit: FinanceAuditService,
   ) {}
 
   /** Compute the system balance for a bank account = net(debit-credit) on its COA up to and including `asOf`. */

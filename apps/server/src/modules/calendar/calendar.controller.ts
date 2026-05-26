@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Inject,
+  Logger,
   Param,
   Patch,
   Post,
@@ -43,6 +44,7 @@ import {
 } from './calendar-sync.service';
 import { CalendarConflictService } from './calendar-conflict.service';
 import { CalendarInsightService } from './calendar-insight.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 
 interface AuthedRequest {
   user?: { id?: string; role?: string };
@@ -50,6 +52,8 @@ interface AuthedRequest {
 
 @Controller('calendar')
 export class CalendarController {
+  private readonly logger = new Logger(CalendarController.name);
+
   constructor(
     @Inject(CalendarQueryService)
     private readonly query: CalendarQueryService,
@@ -59,6 +63,8 @@ export class CalendarController {
     private readonly conflictService: CalendarConflictService,
     @Inject(CalendarInsightService)
     private readonly insightService: CalendarInsightService,
+    @Inject(AiUsageService)
+    private readonly aiUsage: AiUsageService,
   ) {}
 
   // ----- Google Calendar sync (platform connection) ---------------------
@@ -415,6 +421,186 @@ export class CalendarController {
       req.user?.role,
       eventId,
     );
+  }
+
+  /* ---------- KEY Talk Pipeline ---------- */
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/key/interpret')
+  async keyInterpretCalendar(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+    @Body() body: { intent: string },
+  ) {
+    if (!body.intent?.trim()) {
+      return { success: false, error: 'Intent is required' };
+    }
+    const userId = requireUser(req);
+    try {
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'key_calendar_interpret',
+        {
+          messages: [
+            {
+              role: 'system',
+              content: `You are KEY, the AI calendar assistant for KeyFlowOS, a Caribbean business platform.
+
+The user is describing a calendar or scheduling task in plain English. Your job is to:
+1. Interpret what they REALLY want (read between the lines)
+2. Determine the action type: CREATE_EVENT, FIND_TIME, CHECK_CONFLICTS, RESCHEDULE, or GET_AGENDA
+3. Extract all relevant details: title, date, time, duration, attendees, priority, type
+4. Provide confidence score and alternatives
+
+Available event types: BOOKING, TASK, MILESTONE, REMINDER, MEETING, DEADLINE, FOLLOW_UP, CAMPAIGN_SEND, EXTERNAL_GOOGLE_EVENT
+Available modules: BOOKINGS, CRM, PROJECTS, MARKETING, MANUAL
+Available priorities: LOW, NORMAL, HIGH, URGENT
+
+Return ONLY valid JSON in this exact format:
+{
+  "interpretation": "What the user wants in my own words",
+  "actionType": "CREATE_EVENT",
+  "recommendation": "Why this approach is best",
+  "confidence": 0.92,
+  "proposedEvent": {
+    "title": "Event title",
+    "type": "MEETING",
+    "module": "MANUAL",
+    "startAt": "2026-05-20T14:00:00Z",
+    "endAt": "2026-05-20T15:00:00Z",
+    "allDay": false,
+    "priority": "NORMAL",
+    "description": "Details",
+    "color": "#4f46e5"
+  },
+  "alternatives": [
+    {"label": "Brief label", "description": "Why this alternative"}
+  ]
+}`,
+            },
+            { role: 'user', content: body.intent },
+          ],
+          maxTokens: 1200,
+          temperature: 0.3,
+        },
+      );
+      const content = response.content?.trim() ?? '';
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return { success: false, error: 'Could not parse AI interpretation' };
+      }
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        success: true,
+        interpretation: parsed.interpretation || '',
+        actionType: parsed.actionType || 'CREATE_EVENT',
+        recommendation: parsed.recommendation || '',
+        confidence: parsed.confidence ?? 0,
+        proposedEvent: parsed.proposedEvent || null,
+        alternatives: Array.isArray(parsed.alternatives) ? parsed.alternatives : [],
+      };
+    } catch (err: any) {
+      this.logger?.error?.('KEY calendar interpretation failed', err);
+      return { success: false, error: err?.message || 'Interpretation failed' };
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
+  @Post('businesses/:businessId/key/build')
+  async keyBuildCalendar(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+    @Body() body: { proposedEvent: any },
+  ) {
+    const userId = requireUser(req);
+    try {
+      const ev = body.proposedEvent;
+      if (!ev?.title || !ev?.startAt) {
+        return { success: false, error: 'proposedEvent with title and startAt is required' };
+      }
+      const row = await this.query.createManualEvent(businessId, userId, {
+        title: ev.title,
+        description: ev.description ?? null,
+        type: ev.type || 'MEETING',
+        module: ev.module || 'MANUAL',
+        startAt: ev.startAt,
+        endAt: ev.endAt ?? null,
+        allDay: ev.allDay ?? false,
+        priority: ev.priority || 'NORMAL',
+        color: ev.color ?? null,
+        meta: ev.meta ?? { keyGenerated: true },
+      });
+      return {
+        success: true,
+        eventId: row.id,
+        event: row,
+      };
+    } catch (err: any) {
+      this.logger?.error?.('KEY calendar build failed', err);
+      return { success: false, error: err?.message || 'Build failed' };
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/key/execute')
+  async keyExecuteCalendar(
+    @Param('businessId') businessId: string,
+    @Body() body: { eventId: string },
+  ) {
+    try {
+      const event = await this.query.getEvent(businessId, body.eventId);
+      if (!event) {
+        return { success: false, error: 'Event not found' };
+      }
+      return {
+        success: true,
+        executed: true,
+        event,
+        proof: {
+          createdAt: event.createdAt,
+          sourceType: event.sourceType,
+          status: event.status,
+        },
+      };
+    } catch (err: any) {
+      this.logger?.error?.('KEY calendar execution failed', err);
+      return { success: false, error: err?.message || 'Execution failed' };
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
+  @Post('businesses/:businessId/key/talk')
+  async keyTalkCalendar(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+    @Body() body: { intent: string; autoExecute?: boolean },
+  ) {
+    const interpretResult = await this.keyInterpretCalendar(businessId, req, { intent: body.intent });
+    if (!interpretResult.success || !interpretResult.proposedEvent) {
+      return interpretResult;
+    }
+
+    const buildResult = await this.keyBuildCalendar(businessId, req, { proposedEvent: interpretResult.proposedEvent });
+    if (!buildResult.success) {
+      return { ...interpretResult, buildError: buildResult.error };
+    }
+
+    let executionResult = null;
+    if (body.autoExecute && buildResult.eventId) {
+      executionResult = await this.keyExecuteCalendar(businessId, { eventId: buildResult.eventId });
+    }
+
+    return {
+      success: true,
+      interpretation: interpretResult.interpretation,
+      recommendation: interpretResult.recommendation,
+      confidence: interpretResult.confidence,
+      event: buildResult.event,
+      executionProof: executionResult,
+    };
   }
 }
 

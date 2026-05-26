@@ -514,6 +514,179 @@ export class GoogleDriveService {
     return res.json();
   }
 
+  /**
+   * Find a folder by name under a parent, or create it if it doesn't exist.
+   */
+  async findOrCreateFolder(
+    businessId: string,
+    name: string,
+    parentId?: string,
+  ): Promise<{ id: string; name: string }> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const queryParts = [
+      `mimeType = 'application/vnd.google-apps.folder'`,
+      `name = '${name.replace(/'/g, "\\'")}'`,
+      'trashed = false',
+    ];
+    if (parentId) queryParts.push(`'${parentId}' in parents`);
+
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(queryParts.join(' and '))}&fields=files(id,name)`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!searchRes.ok) throw new BadRequestException(`Drive folder search failed: ${searchRes.status}`);
+    const searchData = await searchRes.json();
+    if (searchData.files?.length > 0) {
+      return { id: searchData.files[0].id, name: searchData.files[0].name };
+    }
+    return this.createFolder(businessId, name, parentId);
+  }
+
+  /**
+   * Ensure the full KeyflowOS document folder hierarchy exists for a business.
+   * Returns the root folder ID.
+   */
+  async ensureBusinessDocumentFolders(businessId: string): Promise<{ rootId: string; revenueId: string; expensesId: string; booksId: string }> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { name: true },
+    });
+    const businessName = business?.name || 'Business';
+
+    const root = await this.findOrCreateFolder(businessId, `KeyflowOS — ${businessName}`);
+    const revenue = await this.findOrCreateFolder(businessId, 'Revenue', root.id);
+    const expenses = await this.findOrCreateFolder(businessId, 'Expenses', root.id);
+    const books = await this.findOrCreateFolder(businessId, 'Books', root.id);
+
+    // Sub-folders
+    await this.findOrCreateFolder(businessId, 'Invoices', revenue.id);
+    await this.findOrCreateFolder(businessId, 'Quotes', revenue.id);
+    await this.findOrCreateFolder(businessId, 'Receipts', revenue.id);
+    await this.findOrCreateFolder(businessId, 'Receipts', expenses.id);
+    await this.findOrCreateFolder(businessId, 'Journal', books.id);
+
+    return { rootId: root.id, revenueId: revenue.id, expensesId: expenses.id, booksId: books.id };
+  }
+
+  /**
+   * Upload a binary file (e.g. PDF, image) to Google Drive.
+   */
+  async uploadFileToDrive(
+    businessId: string,
+    filename: string,
+    mimeType: string,
+    buffer: Buffer,
+    parentId?: string,
+  ): Promise<{ fileId: string; webViewLink: string; webContentLink: string }> {
+    const accessToken = await this.getValidAccessToken(businessId);
+
+    const metadata = {
+      name: filename,
+      mimeType,
+      ...(parentId ? { parents: [parentId] } : {}),
+    };
+
+    const boundary = '-----keyflowos_file_boundary';
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`),
+      Buffer.from(`--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
+      buffer,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+
+    const res = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,webContentLink',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+      },
+    );
+
+    if (!res.ok) {
+      const err = await res.text();
+      this.logger.error('Failed to upload file to Drive', err);
+      throw new BadRequestException('Failed to upload file to Google Drive');
+    }
+
+    const file = await res.json();
+    this.logger.log(`File "${filename}" uploaded to Drive as ${file.id}`);
+
+    this.driveConnector?.emitFileUploaded(businessId, {
+      fileName: filename,
+      mimeType,
+      url: file.webViewLink,
+      externalId: file.id,
+    }).catch((e) => this.logger.warn(`Drive connector event emission failed: ${e.message}`));
+
+    return { fileId: file.id, webViewLink: file.webViewLink, webContentLink: file.webContentLink };
+  }
+
+  /**
+   * Save an arbitrary HTML document as a Google Doc in Drive.
+   * Useful for invoices, quotes, and other rendered HTML documents.
+   */
+  async saveHtmlDocumentToDrive(
+    businessId: string,
+    filename: string,
+    htmlContent: string,
+    parentId?: string,
+  ): Promise<{ fileId: string; webViewLink: string }> {
+    const accessToken = await this.getValidAccessToken(businessId);
+
+    const metadata = {
+      name: filename,
+      mimeType: 'application/vnd.google-apps.document',
+      ...(parentId ? { parents: [parentId] } : {}),
+    };
+
+    const boundary = '-----keyflowos_multipart_boundary';
+    const body = [
+      `--${boundary}`,
+      'Content-Type: application/json; charset=UTF-8',
+      '',
+      JSON.stringify(metadata),
+      `--${boundary}`,
+      'Content-Type: text/html; charset=UTF-8',
+      '',
+      htmlContent,
+      `--${boundary}--`,
+    ].join('\r\n');
+
+    const res = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+      },
+    );
+
+    if (!res.ok) {
+      const err = await res.text();
+      this.logger.error('Failed to save HTML document to Drive', err);
+      throw new BadRequestException('Failed to save document to Google Drive');
+    }
+
+    const file = await res.json();
+    this.logger.log(`HTML document "${filename}" saved to Drive as ${file.id}`);
+
+    this.driveConnector?.emitFileUploaded(businessId, {
+      fileName: filename,
+      mimeType: 'application/vnd.google-apps.document',
+      url: file.webViewLink,
+      externalId: file.id,
+    }).catch((e) => this.logger.warn(`Drive connector event emission failed: ${e.message}`));
+
+    return { fileId: file.id, webViewLink: file.webViewLink };
+  }
+
   async saveDocumentToDrive(
     businessId: string,
     document: {
@@ -630,6 +803,31 @@ export class GoogleDriveService {
    * download via alt=media. For .docx (Word) files we download the binary
    * via alt=media and convert to HTML with `mammoth`.
    */
+  /**
+   * Download a binary file (PDF, image, etc.) from Drive and return as base64.
+   */
+  async downloadBinary(
+    businessId: string,
+    fileId: string,
+  ): Promise<{ base64: string; mimeType: string; name: string }> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const meta = await this.getFile(businessId, fileId);
+
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) {
+      const err = await res.text();
+      this.logger.error('Failed to download Drive binary', err);
+      throw new BadRequestException('Failed to download file from Drive');
+    }
+    const arrayBuf = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+    const base64 = buffer.toString('base64');
+    return { base64, mimeType: meta.mimeType, name: meta.name };
+  }
+
   async getFileContent(
     businessId: string,
     fileId: string,

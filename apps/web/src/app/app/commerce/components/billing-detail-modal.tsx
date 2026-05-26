@@ -12,15 +12,10 @@ import {
   Phone,
   MessageCircle,
   Hash,
-  Package,
-  StickyNote,
   ChevronRight,
-  Eye,
   Printer,
   User,
   Brain,
-  Sparkles,
-  Send,
   Shield,
   DollarSign,
   TrendingUp,
@@ -41,6 +36,11 @@ import { InvoiceTimeline } from "./invoice-timeline";
 import { TimeLogWidget } from "./time-log-widget";
 import { AttributionEditor } from "./attribution-editor";
 import { LeverageMetricsSection } from "./leverage-metrics-section";
+import { DetailDateGrid } from "./detail-parts/detail-date-grid";
+import { DetailAIActions } from "./detail-parts/detail-ai-actions";
+import { DetailLineItems } from "./detail-parts/detail-line-items";
+import { DetailNotes } from "./detail-parts/detail-notes";
+import { DetailViewPrint } from "./detail-parts/detail-view-print";
 
 export interface BusinessDataForPreview {
   name: string;
@@ -584,156 +584,40 @@ export function BillingDetailModal({
               );
             })()}
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-border/40">
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <Calendar
-                    className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.85 }}
-                  />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {dateLabel1}
-                  </p>
-                </div>
-                <p className="text-sm font-semibold">
-                  {dateValue1
-                    ? new Date(dateValue1).toLocaleDateString("en-TT", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })
-                    : "—"}
-                </p>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-border/40">
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <Calendar
-                    className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.85 }}
-                  />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {dateLabel2}
-                  </p>
-                </div>
-                <p className="text-sm font-semibold">
-                  {dateValue2
-                    ? new Date(dateValue2).toLocaleDateString("en-TT", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })
-                    : "—"}
-                </p>
-                {dateExtra}
-              </div>
-            </div>
+            <DetailDateGrid
+              dateLabel1={dateLabel1}
+              dateValue1={dateValue1}
+              dateLabel2={dateLabel2}
+              dateValue2={dateValue2}
+              dateExtra={dateExtra}
+              accentColor={theme.accentColor}
+            />
 
             {alerts}
 
-            {(onViewClientIntel || onAiDraftReminder) && contactId && (
-              <div className="flex items-center gap-2">
-                {onViewClientIntel && (
-                  <button
-                    onClick={() => onViewClientIntel(contactId)}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20 transition-colors text-xs font-medium"
-                    title="AI Analyze — client payment intelligence"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    AI Analyze
-                  </button>
-                )}
-                {onAiDraftReminder && type === "invoice" && (status === "OVERDUE" || status === "SENT") && (
-                  <button
-                    onClick={() => onAiDraftReminder(number)}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 border border-[hsl(var(--kf-accent1))]/20 transition-colors text-xs font-medium"
-                    title="AI Draft Reminder"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    AI Draft Reminder
-                  </button>
-                )}
-              </div>
-            )}
+            <DetailAIActions
+              contactId={contactId}
+              type={type}
+              status={status}
+              number={number}
+              onViewClientIntel={onViewClientIntel}
+              onAiDraftReminder={onAiDraftReminder}
+            />
 
-            {items.length > 0 && (
-              <div className="rounded-2xl bg-white/[0.03] border border-border/40 overflow-hidden">
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-border/30">
-                  <Package
-                    className="w-4 h-4"
-                    style={{ color: theme.accentColor, opacity: 0.85 }}
-                  />
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Line Items
-                  </h4>
-                </div>
-                <div className="divide-y divide-border/20">
-                  {items.map((item, idx) => (
-                    <div
-                      key={item.id ?? idx}
-                      className="px-4 py-3 flex items-start justify-between gap-3 hover:bg-white/[0.02] transition-colors"
-                    >
-                      <div className="flex-1 min-w-0">
-                        {item.productId && onSelectProduct ? (
-                          <button
-                            onClick={() => onSelectProduct(item.productId!)}
-                            className="text-sm font-medium truncate text-[hsl(var(--kf-accent1))] hover:underline underline-offset-2 text-left block max-w-full"
-                            title="View product details"
-                          >
-                            {item.description || "Unnamed item"}
-                          </button>
-                        ) : (
-                          <p className="text-sm font-medium truncate">
-                            {item.description || "Unnamed item"}
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {item.quantity} x{" "}
-                          {formatAmount(item.unitPrice ?? 0, currency)}
-                        </p>
-                      </div>
-                      <p className="text-sm font-semibold shrink-0">
-                        {formatAmount(item.total ?? 0, currency)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="border-t border-border/30 px-4 py-3 space-y-2 bg-white/[0.02]">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Subtotal</span>
-                    <span>{formatAmount(subtotal, currency)}</span>
-                  </div>
-                  {(taxRate || 0) > 0 && (
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">Tax ({taxRate}%) <InfoBadge title="Tax Calculation" body="Tax is applied to the subtotal after any discounts. The rate is set per invoice or in Settings > Payments. Trinidad default: 12.5% VAT." side="left" iconSize={10} /></span>
-                      <span>{formatAmount(taxAmount, currency)}</span>
-                    </div>
-                  )}
-                  {discountAmount > 0 && (
-                    <div className="flex justify-between text-xs text-emerald-400">
-                      <span>
-                        Discount{" "}
-                        {discountType === "PERCENT"
-                          ? `(${discountValue}%)`
-                          : ""}
-                      </span>
-                      <span>-{formatAmount(discountAmount, currency)}</span>
-                    </div>
-                  )}
-                  <div
-                    className="flex justify-between items-center pt-2 border-t border-border/30"
-                  >
-                    <span className="text-sm font-bold">Total</span>
-                    <span
-                      className="text-lg font-extrabold"
-                      style={{ color: theme.accentColor }}
-                    >
-                      {formatAmount(total, currency)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
+            <DetailLineItems
+              items={items}
+              currency={currency}
+              accentColor={theme.accentColor}
+              subtotal={subtotal}
+              taxRate={taxRate}
+              taxAmount={taxAmount}
+              discountAmount={discountAmount}
+              discountType={discountType}
+              discountValue={discountValue}
+              total={total}
+              onSelectProduct={onSelectProduct}
+              showBreakdown
+            />
 
             {type === "invoice" && itemId && businessIdForTimeline && (
               <InvoiceTimeline
@@ -770,43 +654,14 @@ export function BillingDetailModal({
               />
             )}
 
-            {notes && (
-              <div className="rounded-2xl bg-white/[0.03] border border-border/40 overflow-hidden">
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-border/30">
-                  <StickyNote
-                    className="w-4 h-4"
-                    style={{ color: theme.accentColor, opacity: 0.85 }}
-                  />
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Notes
-                  </h4>
-                </div>
-                <div className="px-4 py-3">
-                  <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
-                    {notes}
-                  </p>
-                </div>
-              </div>
-            )}
+            <DetailNotes notes={notes} accentColor={theme.accentColor} />
 
             {businessData && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowTemplatePreview(true)}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
-                >
-                  <Eye className="w-4 h-4" style={{ color: theme.accentColor }} />
-                  View as Customer
-                </button>
-                <button
-                  onClick={handlePrint}
-                  className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
-                  title="Print / Save as PDF"
-                >
-                  <Printer className="w-4 h-4" style={{ color: theme.accentColor }} />
-                  Print
-                </button>
-              </div>
+              <DetailViewPrint
+                onPreview={() => setShowTemplatePreview(true)}
+                onPrint={handlePrint}
+                accentColor={theme.accentColor}
+              />
             )}
           </div>
         </div>
@@ -943,167 +798,51 @@ export function BillingDetailModal({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 rounded-2xl bg-white/[0.03] border border-border/40">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Calendar
-                    className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.85 }}
-                  />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {dateLabel1}
-                  </p>
-                </div>
-                <p className="text-sm font-semibold">
-                  {dateValue1
-                    ? new Date(dateValue1).toLocaleDateString("en-TT", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })
-                    : "—"}
-                </p>
-              </div>
-              <div className="p-3 rounded-2xl bg-white/[0.03] border border-border/40">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Calendar
-                    className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.85 }}
-                  />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {dateLabel2}
-                  </p>
-                </div>
-                <p className="text-sm font-semibold">
-                  {dateValue2
-                    ? new Date(dateValue2).toLocaleDateString("en-TT", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })
-                    : "—"}
-                </p>
-                {dateExtra}
-              </div>
-            </div>
+            <DetailDateGrid
+              dateLabel1={dateLabel1}
+              dateValue1={dateValue1}
+              dateLabel2={dateLabel2}
+              dateValue2={dateValue2}
+              dateExtra={dateExtra}
+              accentColor={theme.accentColor}
+              compact
+            />
 
             {alerts}
 
-            {(onViewClientIntel || onAiDraftReminder) && contactId && (
-              <div className="flex items-center gap-2">
-                {onViewClientIntel && (
-                  <button
-                    onClick={() => onViewClientIntel(contactId)}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20 transition-colors text-xs font-medium"
-                    title="AI Analyze — client payment intelligence"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    AI Analyze
-                  </button>
-                )}
-                {onAiDraftReminder && type === "invoice" && (status === "OVERDUE" || status === "SENT") && (
-                  <button
-                    onClick={() => onAiDraftReminder(number)}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 border border-[hsl(var(--kf-accent1))]/20 transition-colors text-xs font-medium"
-                    title="AI Draft Reminder"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    AI Draft Reminder
-                  </button>
-                )}
-              </div>
-            )}
+            <DetailAIActions
+              contactId={contactId}
+              type={type}
+              status={status}
+              number={number}
+              onViewClientIntel={onViewClientIntel}
+              onAiDraftReminder={onAiDraftReminder}
+            />
 
-            {items.length > 0 && (
-              <div className="rounded-2xl bg-white/[0.03] border border-border/40 overflow-hidden">
-                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/30">
-                  <Package
-                    className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.85 }}
-                  />
-                  <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Line Items
-                  </h4>
-                </div>
-                <div className="divide-y divide-border/20">
-                  {items.map((item, idx) => (
-                    <div
-                      key={item.id ?? idx}
-                      className="px-4 py-2.5 flex items-center justify-between gap-2"
-                    >
-                      <div className="flex-1 min-w-0">
-                        {item.productId && onSelectProduct ? (
-                          <button
-                            onClick={() => onSelectProduct(item.productId!)}
-                            className="text-sm font-medium truncate text-[hsl(var(--kf-accent1))] hover:underline underline-offset-2 text-left block max-w-full"
-                            title="View product details"
-                          >
-                            {item.description || "Unnamed item"}
-                          </button>
-                        ) : (
-                          <p className="text-sm font-medium truncate">
-                            {item.description || "Unnamed item"}
-                          </p>
-                        )}
-                        <p className="text-[10px] text-muted-foreground">
-                          {item.quantity} x{" "}
-                          {formatAmount(item.unitPrice ?? 0, currency)}
-                        </p>
-                      </div>
-                      <p className="text-sm font-semibold shrink-0">
-                        {formatAmount(item.total ?? 0, currency)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                <div className="border-t border-border/30 px-4 py-2.5 bg-white/[0.02]">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-bold">Total</span>
-                    <span
-                      className="text-base font-extrabold"
-                      style={{ color: theme.accentColor }}
-                    >
-                      {formatAmount(total, currency)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
+            <DetailLineItems
+              items={items}
+              currency={currency}
+              accentColor={theme.accentColor}
+              subtotal={subtotal}
+              taxRate={taxRate}
+              taxAmount={taxAmount}
+              discountAmount={discountAmount}
+              discountType={discountType}
+              discountValue={discountValue}
+              total={total}
+              onSelectProduct={onSelectProduct}
+              compact
+            />
 
-            {notes && (
-              <div className="p-3 rounded-2xl bg-white/[0.03] border border-border/40">
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <StickyNote
-                    className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.85 }}
-                  />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Notes
-                  </p>
-                </div>
-                <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
-                  {notes}
-                </p>
-              </div>
-            )}
+            <DetailNotes notes={notes} accentColor={theme.accentColor} compact />
 
             {businessData && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowTemplatePreview(true)}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
-                >
-                  <Eye className="w-4 h-4" style={{ color: theme.accentColor }} />
-                  Preview
-                </button>
-                <button
-                  onClick={handlePrint}
-                  className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
-                  title="Print / Save as PDF"
-                >
-                  <Printer className="w-4 h-4" style={{ color: theme.accentColor }} />
-                </button>
-              </div>
+              <DetailViewPrint
+                onPreview={() => setShowTemplatePreview(true)}
+                onPrint={handlePrint}
+                accentColor={theme.accentColor}
+                compact
+              />
             )}
           </div>
         </div>

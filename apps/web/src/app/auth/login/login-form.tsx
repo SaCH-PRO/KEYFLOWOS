@@ -38,7 +38,11 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefin
 
 function signInWithGoogle() {
   if (!SUPABASE_URL) return;
-  const redirectTo = `${SITE_URL.replace(/\/$/, "")}/auth/callback`;
+  // Use current origin for localhost dev, otherwise use configured SITE_URL
+  const origin = typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? window.location.origin
+    : SITE_URL;
+  const redirectTo = `${origin.replace(/\/$/, "")}/auth/callback`;
   window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
 }
 

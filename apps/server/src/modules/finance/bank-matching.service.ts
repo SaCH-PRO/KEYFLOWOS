@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinanceAuditService } from './finance-audit.service';
@@ -70,8 +70,8 @@ export interface AutoMatchResult {
 @Injectable()
 export class BankMatchingService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly audit: FinanceAuditService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(FinanceAuditService) private readonly audit: FinanceAuditService,
   ) {}
 
   /** Resolve the ChartOfAccount.id this FinancialAccount posts against. */

@@ -1,82 +1,8 @@
 "use client";
 
-import {
-  Calendar,
-  DollarSign,
-  Users,
-  ShieldCheck,
-  Activity,
-} from "lucide-react";
 import { motion } from "framer-motion";
-
-function formatTTD(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}k`;
-  return `$${n.toFixed(0)}`;
-}
-
-function MiniSparkline({ color }: { color: string }) {
-  const heights = [40, 65, 45, 80, 55];
-  return (
-    <div className="flex items-end gap-[3px] h-8">
-      {heights.map((h, i) => (
-        <div
-          key={i}
-          className="w-1 rounded-sm opacity-30"
-          style={{ height: `${h}%`, background: color }}
-        />
-      ))}
-    </div>
-  );
-}
-
-interface StatCardProps {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-  detail: string;
-  accentColor: string;
-  delay?: number;
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  accentColor,
-  delay = 0,
-}: StatCardProps) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay, ease: "easeOut" }}
-      className="kf-card p-4 flex items-start justify-between hover:border-[hsl(var(--kf-border)/1.5)] transition-colors cursor-default"
-    >
-      <div className="space-y-2.5 min-w-0">
-        <div className="flex items-center gap-2">
-          <div
-            className="p-1.5 rounded-md"
-            style={{ background: `${accentColor}15` }}
-          >
-            <Icon className="w-3.5 h-3.5" style={{ color: accentColor }} />
-          </div>
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-            {label}
-          </span>
-        </div>
-        <div>
-          <p className="text-2xl font-bold tracking-tight">{value}</p>
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-            {detail}
-          </p>
-        </div>
-      </div>
-      <MiniSparkline color={accentColor} />
-    </motion.div>
-  );
-}
+import { Calendar, AlertTriangle, Users, CheckCircle2, TrendingUp } from "lucide-react";
+import { SparkLine } from "@/components/illustrations/key-illustrations";
 
 interface CockpitStatsRowProps {
   upcomingBookings: number;
@@ -87,6 +13,74 @@ interface CockpitStatsRowProps {
   momentumScore: number;
 }
 
+function AnimatedCounter({ value, prefix = "", suffix = "" }: { value: number; prefix?: string; suffix?: string }) {
+  return (
+    <motion.span
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="text-2xl font-bold tracking-tight"
+    >
+      {prefix}{value.toLocaleString()}{suffix}
+    </motion.span>
+  );
+}
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  subtext,
+  color,
+  sparkData,
+  delay,
+  onClick,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: React.ReactNode;
+  subtext?: string;
+  color: string;
+  sparkData?: number[];
+  delay: number;
+  onClick?: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay }}
+      whileHover={{ y: -2 }}
+      onClick={onClick}
+      className="kf-card-depth p-4 cursor-pointer group"
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{ background: `${color}15` }}
+        >
+          <Icon className="w-4 h-4" style={{ color }} />
+        </div>
+        {sparkData && (
+          <SparkLine data={sparkData} color="mixed" className="opacity-60 group-hover:opacity-100 transition-opacity" />
+        )}
+      </div>
+      <div className="space-y-1">
+        <div className="text-2xl font-bold tracking-tight">{value}</div>
+        <p className="text-xs text-muted-foreground">{label}</p>
+        {subtext && (
+          <p className="text-[10px] text-muted-foreground/70">{subtext}</p>
+        )}
+      </div>
+      {/* Bottom accent line */}
+      <div
+        className="absolute bottom-0 left-4 right-4 h-[2px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{ background: color }}
+      />
+    </motion.div>
+  );
+}
+
 export function CockpitStatsRow({
   upcomingBookings,
   overdueAmount,
@@ -95,74 +89,76 @@ export function CockpitStatsRow({
   pendingApprovals,
   momentumScore,
 }: CockpitStatsRowProps) {
+  const stats = [
+    {
+      icon: Calendar,
+      label: "Upcoming bookings",
+      value: <AnimatedCounter value={upcomingBookings} />,
+      color: "hsl(var(--kf-accent2))",
+      sparkData: [3, 5, 4, 7, 6, 8, upcomingBookings || 5],
+    },
+    {
+      icon: AlertTriangle,
+      label: "Overdue",
+      value: (
+        <span className="text-2xl font-bold tracking-tight">
+          ${(overdueAmount / 100).toFixed(0)}
+        </span>
+      ),
+      subtext: overdueInvoices > 0 ? `${overdueInvoices} invoice${overdueInvoices !== 1 ? "s" : ""}` : undefined,
+      color: "hsl(var(--kf-warning))",
+      sparkData: [2, 3, 1, 4, 2, 3, overdueInvoices || 0],
+    },
+    {
+      icon: Users,
+      label: "Stale leads",
+      value: <AnimatedCounter value={staleLeads} />,
+      color: "hsl(var(--kf-info))",
+      sparkData: [5, 3, 4, 2, 3, 1, staleLeads || 0],
+    },
+    {
+      icon: CheckCircle2,
+      label: "Pending approvals",
+      value: <AnimatedCounter value={pendingApprovals} />,
+      color: "hsl(var(--kf-success))",
+      sparkData: [1, 2, 1, 3, 2, 1, pendingApprovals || 0],
+    },
+  ];
+
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-      <StatCard
-        icon={Calendar}
-        label="Today's Schedule"
-        value={String(upcomingBookings)}
-        detail={
-          upcomingBookings === 0
-            ? "Nothing scheduled"
-            : upcomingBookings === 1
-              ? "1 booking"
-              : `${upcomingBookings} bookings`
-        }
-        accentColor="hsl(var(--kf-accent2))"
-        delay={0.05}
-      />
-      <StatCard
-        icon={DollarSign}
-        label="Revenue Waiting"
-        value={formatTTD(overdueAmount)}
-        detail={`${overdueInvoices} invoice${overdueInvoices !== 1 ? "s" : ""} overdue`}
-        accentColor="hsl(var(--kf-warning))"
-        delay={0.1}
-      />
-      <StatCard
-        icon={Users}
-        label="Client Follow-ups"
-        value={String(staleLeads)}
-        detail={
-          staleLeads === 0
-            ? "All caught up"
-            : staleLeads === 1
-              ? "1 person to reach out"
-              : `${staleLeads} people to reach out`
-        }
-        accentColor="hsl(var(--kf-info))"
-        delay={0.15}
-      />
-      <StatCard
-        icon={ShieldCheck}
-        label="Approvals"
-        value={String(pendingApprovals)}
-        detail={
-          pendingApprovals === 0
-            ? "Nothing pending"
-            : pendingApprovals === 1
-              ? "1 waiting for you"
-              : `${pendingApprovals} waiting for you`
-        }
-        accentColor="hsl(var(--kf-accent1))"
-        delay={0.2}
-      />
-      <StatCard
-        icon={Activity}
-        label="Business Health"
-        value={`${momentumScore}`}
-        detail={
-          momentumScore >= 80
-            ? "Strong — Keep it going!"
-            : momentumScore >= 50
-              ? "Steady"
-              : momentumScore >= 30
-                ? "Needs attention"
-                : "Critical — act now"
-        }
-        accentColor="hsl(var(--kf-success))"
-        delay={0.25}
-      />
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {stats.map((stat, i) => (
+          <StatCard key={stat.label} {...stat} delay={0.3 + i * 0.08} />
+        ))}
+      </div>
+
+      {/* Momentum Bar */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.7 }}
+        className="kf-card-key p-4"
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+            <span className="text-sm font-medium">Momentum Score</span>
+          </div>
+          <span className="text-sm font-bold text-gradient-key">{momentumScore}%</span>
+        </div>
+        <div className="kf-momentum-bar">
+          <motion.div
+            className="kf-momentum-fill-animated"
+            initial={{ width: 0 }}
+            animate={{ width: `${momentumScore}%` }}
+            transition={{ duration: 1, ease: "easeOut", delay: 0.8 }}
+          />
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-2">
+          Based on your activity across revenue, clients, and completions this week.
+        </p>
+      </motion.div>
     </div>
   );
 }

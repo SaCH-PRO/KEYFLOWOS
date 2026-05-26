@@ -22,6 +22,7 @@ import {
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { KeyflowUnifiedShell } from "@/components/guide/keyflow-unified-shell";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { MobileActionSheet, type MobileActionSheetItem } from "@/components/ui/mobile-action-sheet";
@@ -39,8 +40,8 @@ import { useBillingWorkspace } from "./hooks/use-billing-workspace";
 import { useCommerceOverview } from "./hooks/use-commerce-overview";
 import { useFinancialSummary } from "./hooks/use-financial-summary";
 import { useActionQueue } from "./hooks/use-action-queue";
-import InvoicesPanel from "./invoices/invoices-panel";
-import QuotesPanel from "./quotes/quotes-panel";
+import { FinancePipeline } from "../finance/components/finance-pipeline";
+import { RevenueComposer } from "../finance/components/revenue-composer";
 import RecurringPanel from "./recurring/recurring-panel";
 import PaymentsTab from "./payments/payments-tab";
 import { CommerceOverviewTab } from "./components/commerce-overview-tab";
@@ -48,14 +49,14 @@ import { TabFrame } from "./components/tab-frame";
 import { RevenueRecordDrawer } from "./components/revenue-record-drawer";
 import { CommerceBanners } from "./components/commerce-banners";
 import { CommerceHeaderRight } from "./components/commerce-header-right";
+import { RevenueActionMenu } from "./components/revenue-action-menu";
+import { StandalonePaymentRecorder } from "./components/standalone-payment-recorder";
 
-type RevenueTabKey = "overview" | "quotes" | "invoices" | "payments" | "recurring";
+type RevenueTabKey = "snapshot" | "pipeline" | "recurring";
 
 const REVENUE_TABS: { key: RevenueTabKey; label: string; icon: React.ElementType; tooltip?: string }[] = [
-  { key: "overview", label: "Overview", icon: LayoutDashboard, tooltip: "Cashflow snapshot and key metrics" },
-  { key: "quotes", label: "Quotes", icon: FileText, tooltip: "Drafts, sent, accepted quotes" },
-  { key: "invoices", label: "Invoices", icon: Receipt, tooltip: "Drafts, sent, overdue, paid" },
-  { key: "payments", label: "Payments", icon: DollarSign, tooltip: "Collected and pending payments" },
+  { key: "snapshot", label: "Snapshot", icon: LayoutDashboard, tooltip: "Cashflow snapshot and key metrics" },
+  { key: "pipeline", label: "Pipeline", icon: TrendingUp, tooltip: "Quotes, invoices, collections, and revenue flow" },
   { key: "recurring", label: "Recurring", icon: Repeat, tooltip: "Subscriptions and scheduled invoices" },
 ];
 
@@ -74,9 +75,10 @@ export default function CommercePage() {
 
   const { businessId, businessCurrency, invoices, quotes } = shell;
 
-  const [activeTab, setActiveTab] = useState<RevenueTabKey>("overview");
+  const [activeTab, setActiveTab] = useState<RevenueTabKey>("snapshot");
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [recordDrawer, setRecordDrawer] = useState<{ entity: RecordDetailEntity; id: string } | null>(null);
+  const [paymentRecorderOpen, setPaymentRecorderOpen] = useState(false);
 
   const closeRecordDrawer = useCallback(() => {
     setRecordDrawer(null);
@@ -100,7 +102,7 @@ export default function CommercePage() {
 
   const handleTabChange = useCallback(
     (key: string) => {
-      const next = (VALID_TABS.has(key as RevenueTabKey) ? key : "overview") as RevenueTabKey;
+      const next = (VALID_TABS.has(key as RevenueTabKey) ? key : "snapshot") as RevenueTabKey;
       setActiveTab(next);
       overview.handleTabChange(next);
       const url = new URL(window.location.href);
@@ -117,7 +119,13 @@ export default function CommercePage() {
     if (VALID_TABS.has(paramTab as RevenueTabKey)) {
       setActiveTab(paramTab as RevenueTabKey);
     } else if (["products", "billing", "insights"].includes(paramTab)) {
-      setActiveTab("overview");
+      setActiveTab("snapshot");
+    } else if (["quotes", "invoices", "payments"].includes(paramTab)) {
+      // Redirect old tabs to pipeline
+      setActiveTab("pipeline");
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", "pipeline");
+      window.history.replaceState({}, "", url.toString());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time read of the URL `tab` param
   }, []);
@@ -133,9 +141,7 @@ export default function CommercePage() {
 
   useEffect(() => {
     if (billing.pendingPrefill?.targetSegment) {
-      const target: RevenueTabKey =
-        billing.pendingPrefill.targetSegment === "quotes" ? "quotes" : "invoices";
-      if (activeTab !== target) handleTabChange(target);
+      if (activeTab !== "pipeline") handleTabChange("pipeline");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to new prefill arrivals
   }, [billing.pendingPrefill]);
@@ -147,7 +153,7 @@ export default function CommercePage() {
         const { contactId, items } = event.data ?? {};
         if (contactId) {
           billing.prefillForContact(contactId, "quotes", items);
-          handleTabChange("quotes");
+          handleTabChange("pipeline");
           toast.success("Opening quote builder for contact...");
         }
       },
@@ -162,7 +168,7 @@ export default function CommercePage() {
         const { contactId, items } = event.data ?? {};
         if (contactId) {
           billing.prefillForContact(contactId, "invoices", items);
-          handleTabChange("invoices");
+          handleTabChange("pipeline");
           toast.success("Opening invoice builder for contact...");
         }
       },
@@ -182,7 +188,7 @@ export default function CommercePage() {
         icon: Receipt,
         tone: "primary",
         onSelect: () => {
-          handleTabChange("invoices");
+          handleTabChange("pipeline");
           billing.setTriggerNewInvoice((n: number) => n + 1);
         },
       },
@@ -192,17 +198,17 @@ export default function CommercePage() {
         description: "Draft a proposal for a prospect",
         icon: FileText,
         onSelect: () => {
-          handleTabChange("quotes");
+          handleTabChange("pipeline");
           billing.setTriggerNewQuote((n: number) => n + 1);
         },
       },
       {
         key: "record-payment",
         label: "Record a payment",
-        description: "Log a payment received outside the platform",
+        description: "Upload evidence and match to an invoice",
         icon: DollarSign,
         onSelect: () => {
-          handleTabChange("payments");
+          setPaymentRecorderOpen(true);
         },
       },
       {
@@ -211,7 +217,7 @@ export default function CommercePage() {
         description: "Pick an accepted quote to bill",
         icon: Send,
         onSelect: () => {
-          handleTabChange("quotes");
+          handleTabChange("pipeline");
         },
       },
       {
@@ -234,12 +240,10 @@ export default function CommercePage() {
       return;
     }
     let target: RevenueTabKey;
-    if (activeTab === "quotes") target = "quotes";
-    else if (activeTab === "recurring") target = "recurring";
-    else target = "invoices";
+    if (activeTab === "recurring") target = "recurring";
+    else target = "pipeline";
     if (activeTab !== target) handleTabChange(target);
-    if (target === "quotes") billing.setTriggerNewQuote((n: number) => n + 1);
-    else if (target === "recurring") billing.setTriggerNewSchedule((n: number) => n + 1);
+    if (target === "recurring") billing.setTriggerNewSchedule((n: number) => n + 1);
     else billing.setTriggerNewInvoice((n: number) => n + 1);
   }, [activeTab, handleTabChange, billing]);
 
@@ -248,17 +252,13 @@ export default function CommercePage() {
       {
         groupName: "Revenue Navigation",
         shortcuts: [
-          { key: "n", description: "New", action: handlePrimaryAction },
-          { key: "1", description: "Overview", action: () => handleTabChange("overview") },
-          { key: "2", description: "Quotes", action: () => handleTabChange("quotes") },
-          { key: "3", description: "Invoices", action: () => handleTabChange("invoices") },
-          { key: "4", description: "Payments", action: () => handleTabChange("payments") },
-          { key: "5", description: "Recurring", action: () => handleTabChange("recurring") },
-          { key: "6", description: "Actions", action: () => handleTabChange("actions") },
+          { key: "1", description: "Snapshot", action: () => handleTabChange("snapshot") },
+          { key: "2", description: "Pipeline", action: () => handleTabChange("pipeline") },
+          { key: "3", description: "Recurring", action: () => handleTabChange("recurring") },
         ],
       },
     ],
-    [handlePrimaryAction, handleTabChange],
+    [handleTabChange],
   );
 
   useKeyboardShortcuts(commerceShortcuts, !shell.workspaceLoading);
@@ -278,29 +278,35 @@ export default function CommercePage() {
     label: t.label,
     icon: t.icon,
     tooltip: t.tooltip,
-    count:
-      t.key === "quotes"
-        ? quotes.length || undefined
-        : t.key === "invoices"
-        ? invoices.length || undefined
-        : undefined,
+    count: undefined,
   }));
 
   return (
+    <KeyflowUnifiedShell
+      module="revenue"
+      pageTitle="Revenue"
+      availableActions={["Create invoice", "Send quote", "Record payment", "Set up recurring billing"]}
+    >
     <WorkspaceShell
       icon={TrendingUp}
-      title="Revenue Intelligence"
-      subtitle="Quotes, invoices, payments, and cashflow actions."
+      title="Revenue"
+      subtitle="Quotes, invoices, collections, and cashflow actions."
       tabs={tabsForShell}
       activeTab={activeTab}
       onTabChange={(k) => handleTabChange(k)}
       tabLayoutId="revenue-tabs"
       /* AI centralized in Cockpit */
-      actionLabel="+ New"
-      actionIcon={Plus}
-      onAction={handlePrimaryAction}
-      actionDataAttr="commerce-new"
-      headerRight={<CommerceHeaderRight revenuePulse={overview.revenuePulse} />}
+      headerRight={
+        <div className="flex items-center gap-2">
+          <CommerceHeaderRight revenuePulse={overview.revenuePulse} />
+          <RevenueActionMenu
+            onNewInvoice={() => { handleTabChange("pipeline"); billing.setTriggerNewInvoice((n: number) => n + 1); }}
+            onNewQuote={() => { handleTabChange("pipeline"); billing.setTriggerNewQuote((n: number) => n + 1); }}
+            onNewRecurring={() => { handleTabChange("recurring"); billing.setTriggerNewSchedule((n: number) => n + 1); }}
+            onRecordPayment={() => setPaymentRecorderOpen(true)}
+          />
+        </div>
+      }
       banners={
         <CommerceBanners
           showCrossModuleBanner={!!showCrossModuleBanner}
@@ -313,32 +319,25 @@ export default function CommercePage() {
         />
       }
       metricStrip={
-        <div className="flex items-center gap-4 text-sm" data-walkthrough="commerce-kpi">
-          <span className="text-muted-foreground">
-            Outstanding: <span className={cn("font-semibold", financialSummary.outstanding > 0 ? "text-amber-400" : "text-muted-foreground")}>{formatCurrencyCompact(financialSummary.outstanding, businessCurrency)}</span>
-          </span>
-          <span className="text-muted-foreground">·</span>
-          <span className="text-muted-foreground">
-            Overdue: <span className={cn("font-semibold", financialSummary.overdue > 0 ? "text-red-400" : "text-muted-foreground")}>{formatCurrencyCompact(financialSummary.overdue, businessCurrency)}</span>
-          </span>
-          <span className="text-muted-foreground">·</span>
-          <span className="text-muted-foreground">
-            Collected: <span className="font-semibold text-emerald-400">{formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency)}</span>
-          </span>
-          <span className="text-muted-foreground">·</span>
-          <span className="text-muted-foreground">
-            Drafts: <span className={cn("font-semibold", financialSummary.draftCount > 0 ? "text-foreground" : "text-muted-foreground")}>{financialSummary.draftCount}</span>
-          </span>
-          <span className="text-muted-foreground">·</span>
-          <span className="text-muted-foreground">
-            Quotes: <span className={cn("font-semibold", financialSummary.pendingQuotes > 0 ? "text-foreground" : "text-muted-foreground")}>{financialSummary.pendingQuotes}</span>
-          </span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" data-walkthrough="commerce-kpi">
+          {[
+            { label: "Outstanding", value: formatCurrencyCompact(financialSummary.outstanding, businessCurrency), color: financialSummary.outstanding > 0 ? "text-amber-400" : "text-muted-foreground" },
+            { label: "Overdue", value: formatCurrencyCompact(financialSummary.overdue, businessCurrency), color: financialSummary.overdue > 0 ? "text-red-400" : "text-muted-foreground" },
+            { label: "Collected", value: formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency), color: "text-emerald-400" },
+            { label: "Drafts", value: String(financialSummary.draftCount), color: financialSummary.draftCount > 0 ? "text-foreground" : "text-muted-foreground" },
+            { label: "Quotes", value: String(financialSummary.pendingQuotes), color: financialSummary.pendingQuotes > 0 ? "text-foreground" : "text-muted-foreground" },
+          ].map((stat, i) => (
+            <span key={stat.label} className="flex items-center gap-1.5 text-muted-foreground">
+              <span className="text-xs">{stat.label}:</span>
+              <span className={cn("text-xs font-semibold", stat.color)}>{stat.value}</span>
+            </span>
+          ))}
         </div>
       }
     >
       {/* AI insights centralized in Cockpit */}
 
-      {activeTab === "overview" && (
+      {activeTab === "snapshot" && (
         <TabFrame loading={shell.loading} error={shell.error}>
           <div className="space-y-4">
             <CommerceOverviewTab
@@ -355,67 +354,21 @@ export default function CommercePage() {
         </TabFrame>
       )}
 
-      {activeTab === "quotes" && (
-        <TabFrame
-          loading={shell.loading}
-          error={shell.error}
-          isEmpty={false}
-        >
-          <QuotesPanel
+      {activeTab === "pipeline" && (
+        <TabFrame loading={shell.loading} error={shell.error}>
+          <FinancePipeline
+            businessId={businessId}
             quotes={quotes}
-            contacts={shell.contacts}
-            products={shell.products}
-            businessId={businessId}
-            loading={shell.loading}
-            gmailStatus={shell.integrations.gmailStatus}
-            setProducts={shell.setProducts}
-            setQuotes={shell.setQuotes}
-            setInvoices={shell.setInvoices}
-            triggerNew={billing.triggerNewQuote}
-            onSwitchToInvoices={() => handleTabChange("invoices")}
-            currency={businessCurrency}
-            prefillContactId={billing.pendingPrefill?.contactId}
-            prefillItems={billing.pendingPrefill?.items}
-            prefillToken={billing.pendingPrefill?._token}
-            onPrefillApplied={billing.clearPrefill}
-            renderTimelineBadge={renderTimelineBadge}
-            
-          />
-        </TabFrame>
-      )}
-
-      {activeTab === "invoices" && (
-        <TabFrame loading={shell.loading} error={shell.error}>
-          <InvoicesPanel
             invoices={invoices}
-            contacts={shell.contacts}
-            products={shell.products}
-            businessId={businessId}
             loading={shell.loading}
-            triggerNew={billing.triggerNewInvoice}
-            setProducts={shell.setProducts}
-            setInvoices={shell.setInvoices}
-            gmailStatus={shell.integrations.gmailStatus}
             currency={businessCurrency}
-            prefillContactId={billing.pendingPrefill?.contactId}
-            prefillItems={billing.pendingPrefill?.items}
-            prefillToken={billing.pendingPrefill?._token}
-            onPrefillApplied={billing.clearPrefill}
-            renderTimelineBadge={renderTimelineBadge}
-            
-          />
-        </TabFrame>
-      )}
-
-      {activeTab === "payments" && (
-        <TabFrame loading={shell.loading} error={shell.error}>
-          <PaymentsTab
-            invoices={invoices}
-            currency={businessCurrency}
-            businessId={businessId}
             contacts={shell.contacts}
             setInvoices={shell.setInvoices}
-            onNavigateToInvoices={() => handleTabChange("invoices")}
+            onViewRecord={(record) => {
+              if (record.type === "quote") openRecordDrawer("quote", record.id);
+              else if (record.type === "invoice") openRecordDrawer("invoice", record.id);
+            }}
+
           />
         </TabFrame>
       )}
@@ -434,6 +387,18 @@ export default function CommercePage() {
 
       {/* Actions merged into Overview. Inventory moved to Studio > Products. */}
 
+      <RevenueComposer
+        businessId={businessId}
+        contacts={shell.contacts}
+        products={shell.products}
+        currency={businessCurrency}
+        setQuotes={shell.setQuotes}
+        setInvoices={shell.setInvoices}
+        setProducts={shell.setProducts}
+        triggerNewQuote={billing.triggerNewQuote}
+        triggerNewInvoice={billing.triggerNewInvoice}
+      />
+
       <MobileActionSheet
         open={mobileSheetOpen}
         onClose={() => setMobileSheetOpen(false)}
@@ -448,16 +413,21 @@ export default function CommercePage() {
         currency={businessCurrency}
         onClose={closeRecordDrawer}
         onOpenFullEditor={(entity) => {
-          if (entity === "quote") handleTabChange("quotes");
-          else if (entity === "invoice") handleTabChange("invoices");
-          else if (entity === "payment") handleTabChange("payments");
+          if (entity === "quote" || entity === "invoice" || entity === "payment") handleTabChange("pipeline");
           else if (entity === "recurring") handleTabChange("recurring");
           closeRecordDrawer();
         }}
       />
 
+      <StandalonePaymentRecorder
+        businessId={businessId ?? ""}
+        open={paymentRecorderOpen}
+        onClose={() => setPaymentRecorderOpen(false)}
+      />
+
       {/* Progressive prompts centralized in Cockpit */}
     </WorkspaceShell>
+    </KeyflowUnifiedShell>
   );
 }
 

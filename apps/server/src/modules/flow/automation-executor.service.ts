@@ -727,4 +727,54 @@ export class AutomationExecutorService {
       tone: 'success',
     });
   }
+
+  /* ---------- Public test execution for KEY Talk pipeline ---------- */
+
+  async runPlaybookTest(
+    businessId: string,
+    playbookId: string,
+    context: Record<string, any>,
+  ): Promise<{ success: boolean; executed: boolean; actionsRun: string[]; error?: string }> {
+    const playbook = await this.prisma.client.automation.findFirst({
+      where: { id: playbookId, businessId, deletedAt: null },
+    });
+    if (!playbook) {
+      return { success: false, executed: false, actionsRun: [], error: 'Playbook not found' };
+    }
+
+    const conditionMet = await this.evaluateCondition(playbook.condition, businessId, context);
+    if (!conditionMet) {
+      return { success: true, executed: false, actionsRun: [], error: 'Condition not met' };
+    }
+
+    const actions = Array.isArray(playbook.actionData)
+      ? playbook.actionData
+      : playbook.actionData
+        ? [playbook.actionData]
+        : [];
+
+    const actionsRun: string[] = [];
+    for (const action of actions) {
+      if (!action || typeof action !== 'object') continue;
+      try {
+        await this.executeAction(businessId, playbook.name, action as Record<string, unknown>, context);
+        actionsRun.push((action as any).type || (action as any).actionType || 'unknown');
+      } catch (e) {
+        this.logger.warn(`Test execution action failed: ${(e as Error).message}`);
+        return {
+          success: false,
+          executed: true,
+          actionsRun,
+          error: `Action failed: ${(e as Error).message}`,
+        };
+      }
+    }
+
+    await this.prisma.client.automation.update({
+      where: { id: playbookId },
+      data: { lastRunAt: new Date(), runCount: { increment: 1 } },
+    });
+
+    return { success: true, executed: true, actionsRun };
+  }
 }

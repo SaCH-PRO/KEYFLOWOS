@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Delete, Patch, Param, Query, Body, Req, Res, UseGuards, Inject } from '@nestjs/common';
 import { Response } from 'express';
 import { GoogleDriveService } from './google-drive.service';
+import { GeneratedDocumentService } from './generated-document.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -10,6 +11,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 export class GoogleDriveController {
   constructor(
     @Inject(GoogleDriveService) private readonly driveService: GoogleDriveService,
+    @Inject(GeneratedDocumentService) private readonly generatedDocService: GeneratedDocumentService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
@@ -291,6 +293,51 @@ export class GoogleDriveController {
   @Get('businesses/:businessId/inventory-sheet/diff')
   generateInventorySheetDiff(@Param('businessId') businessId: string) {
     return this.driveService.generateInventorySheetDiff(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/generated-documents')
+  async uploadGeneratedDocument(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      entityType: string;
+      entityId: string;
+      fileName: string;
+      mimeType: string;
+      contentBase64: string;
+      contentFormat: 'binary' | 'html';
+    },
+  ) {
+    const content = body.contentFormat === 'binary'
+      ? Buffer.from(body.contentBase64, 'base64')
+      : body.contentBase64;
+
+    return this.generatedDocService.uploadAndTrack({
+      businessId,
+      entityType: body.entityType as any,
+      entityId: body.entityId,
+      fileName: body.fileName,
+      mimeType: body.mimeType,
+      content,
+      contentFormat: body.contentFormat,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/generated-documents')
+  async listGeneratedDocuments(
+    @Param('businessId') businessId: string,
+    @Query('entityType') entityType?: string,
+    @Query('entityId') entityId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.generatedDocService.list(businessId, {
+      entityType,
+      entityId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

@@ -125,13 +125,16 @@ export function TemplatePicker({
 }: TemplatePickerProps) {
   const [previewing, setPreviewing] = useState<TemplateId | null>(null);
 
+  // Static sample dates to prevent hydration mismatches
+  const sampleIssueDate = "2024-01-15T00:00:00.000Z";
+  const sampleDueDate = "2024-02-14T00:00:00.000Z";
+
   const sampleData: InvoiceTemplateData = {
     type: "invoice",
     number: "INV-001",
     status: "SENT",
-    issueDate: new Date().toISOString(),
-    // eslint-disable-next-line react-hooks/purity -- audited: sample preview data with future due date
-    dueDate: new Date(Date.now() + 30 * 86400000).toISOString(),
+    issueDate: sampleIssueDate,
+    dueDate: sampleDueDate,
     contact: {
       firstName: "Jane",
       lastName: "Smith",
@@ -174,10 +177,10 @@ export function TemplatePicker({
           const isSelected = selected === id;
 
           return (
-            <button
+            <div
               key={id}
               onClick={() => onChange(id)}
-              className="group relative rounded-xl border-2 p-2 transition-all hover:scale-[1.02]"
+              className="group relative rounded-xl border-2 p-2 transition-all hover:scale-[1.02] cursor-pointer"
               style={{
                 borderColor: isSelected ? primaryColor : "rgba(255,255,255,0.08)",
                 backgroundColor: isSelected ? `${primaryColor}08` : "transparent",
@@ -199,26 +202,17 @@ export function TemplatePicker({
                 <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">{meta.description}</p>
               </div>
 
-              <div
-                role="button"
-                tabIndex={0}
+              <button
                 onClick={(e) => {
                   e.stopPropagation();
                   setPreviewing(id);
                 }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    setPreviewing(id);
-                  }
-                }}
-                className="absolute top-3 right-3 p-1 rounded-md bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                className="absolute top-3 right-3 p-1 rounded-md bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity"
                 title="Preview"
               >
                 <Eye className="w-3 h-3" />
-              </div>
-            </button>
+              </button>
+            </div>
           );
         })}
       </div>

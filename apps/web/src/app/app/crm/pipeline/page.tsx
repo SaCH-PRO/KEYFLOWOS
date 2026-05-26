@@ -25,6 +25,7 @@ import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { PipelineTabContent } from "./pipeline-tab-content";
 import { ClientsMetricsStrip } from "./clients-metrics-strip";
 import { useContactsPipeline } from "./use-contacts-pipeline";
+import { KeyflowUnifiedShell } from "@/components/guide/keyflow-unified-shell";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
@@ -184,6 +185,11 @@ export default function ContactsPage() {
   if (workspaceError) return <WorkspaceError />;
 
   return (
+    <KeyflowUnifiedShell
+      module="crm"
+      pageTitle="Contacts & Pipeline"
+      availableActions={["Add contact", "Send broadcast", "Import contacts", "Move pipeline stage"]}
+    >
     <div className="space-y-4" aria-label="Network Workspace">
       <ResumePrompt module="crm" />
       
@@ -290,5 +296,6 @@ export default function ContactsPage() {
         onCancel={handleCancelConfirm}
       />
     </div>
+    </KeyflowUnifiedShell>
   );
 }

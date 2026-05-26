@@ -58,9 +58,12 @@ export function KeyNoticedStream({ businessId, limit = 6 }: KeyNoticedStreamProp
 
   return (
     <section
-      className="rounded-2xl border border-border/40 bg-card overflow-hidden"
+      className="rounded-2xl border border-border/40 bg-card/80 overflow-hidden relative"
+      style={{ backdropFilter: "blur(12px)" }}
       aria-label="What KEY noticed"
     >
+      {/* Subtle gradient top border */}
+      <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[hsl(var(--kf-accent1))] via-[hsl(var(--kf-accent2))] to-transparent opacity-40" />
       <header className="flex items-center justify-between px-4 py-3 border-b border-border/30">
         <div className="flex items-center gap-2">
           <div
@@ -107,7 +110,7 @@ export function KeyNoticedStream({ businessId, limit = 6 }: KeyNoticedStreamProp
               >
                 <div
                   className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                  style={{ background: `${color}15` }}
+                  style={{ background: `${color}15`, boxShadow: `0 0 12px ${color}20` }}
                 >
                   <Icon className="w-3.5 h-3.5" style={{ color }} />
                 </div>

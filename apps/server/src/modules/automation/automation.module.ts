@@ -6,9 +6,10 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import { ActivityService } from '../flow/activity.service';
 import { AiModule } from '../ai/ai.module';
+import { FlowModule } from '../flow/flow.module';
 
 @Module({
-  imports: [forwardRef(() => CrmModule), SubscriptionsModule, AiModule],
+  imports: [forwardRef(() => CrmModule), SubscriptionsModule, AiModule, FlowModule],
   controllers: [AutomationController],
   providers: [AutomationService, PlanLimitGuard, ActivityService],
   exports: [AutomationService],

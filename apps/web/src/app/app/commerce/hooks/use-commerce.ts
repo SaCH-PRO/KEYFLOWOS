@@ -77,7 +77,7 @@ export function useCommerce() {
     if (urlTab && validTabs.includes(urlTab as Tab)) setTab(urlTab as Tab);
     if (urlTab === "schedules") setTab("recurring");
     if (urlTab === "billing") setTab("invoices");
-    if (urlTab === "catalog" || urlTab === "insights" || urlTab === "overview") setTab("invoices");
+    if (urlTab === "catalog" || urlTab === "insights" || urlTab === "snapshot") setTab("invoices");
 
     if (urlContactId) {
       const items: InvoiceLineItem[] = urlProductIds

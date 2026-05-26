@@ -2,7 +2,8 @@
 
 import type { ReactNode, ElementType } from "react";
 import { MoreHorizontal } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { useMounted } from "@/hooks/use-mounted";
 import { getStatusBadge } from "./commerce-types";
 import { formatAmount, formatRelativeDate, getStatusAccentColor, getItemsSummary } from "../utils/commerce-utils";
 
@@ -203,39 +204,36 @@ export function RecordRowCard({
     ? `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || contact.email || "\u2014"
     : "\u2014";
 
-  const urgency = (() => {
-    if (status === "OVERDUE") return "overdue";
-    if (status === "SENT" && dueDate) {
-      // eslint-disable-next-line react-hooks/purity -- audited: time-relative urgency badge
-      const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-      if (daysLeft < 0) return "overdue";
-      if (daysLeft <= 3) return "due-soon";
-    }
-    return null;
-  })();
+  const mounted = useMounted();
 
-  const dueLabel = (() => {
-    if (!dueDate) return null;
-    // eslint-disable-next-line react-hooks/purity -- audited: time-relative due date label
-    const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    if (daysLeft < 0) return `${Math.abs(daysLeft)}d overdue`;
-    if (daysLeft === 0) return "Due today";
-    if (daysLeft <= 7) return `Due in ${daysLeft}d`;
-    return null;
-  })();
+  const { urgency, dueLabel } = useMemo(() => {
+    // Only compute time-relative labels on client to avoid hydration mismatch
+    if (!mounted) return { urgency: null as string | null, dueLabel: null as string | null };
+
+    let urgency: string | null = null;
+    let dueLabel: string | null = null;
+
+    if (status === "OVERDUE") {
+      urgency = "overdue";
+    } else if (status === "SENT" && dueDate) {
+      const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      if (daysLeft < 0) urgency = "overdue";
+      else if (daysLeft <= 3) urgency = "due-soon";
+    }
+
+    if (dueDate) {
+      const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      if (daysLeft < 0) dueLabel = `${Math.abs(daysLeft)}d overdue`;
+      else if (daysLeft === 0) dueLabel = "Due today";
+      else if (daysLeft <= 7) dueLabel = `Due in ${daysLeft}d`;
+    }
+
+    return { urgency, dueLabel };
+  }, [status, dueDate, mounted]);
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-      className={`group relative rounded-xl border cursor-pointer transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring overflow-hidden ${
+      className={`group relative rounded-xl border transition-all duration-200 overflow-hidden ${
         selected
           ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/[0.04]"
           : "border-border/30 hover:border-border/50 bg-white/[0.015] hover:bg-white/[0.04]"
@@ -246,7 +244,7 @@ export function RecordRowCard({
         style={{ backgroundColor: getStatusAccentColor(status) }}
       />
 
-      <div className="pl-4 pr-3 py-3">
+      <div className="pl-4 pr-3 py-3 cursor-pointer" onClick={onClick}>
         <div className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">

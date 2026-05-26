@@ -46,6 +46,7 @@ import {
   generateItemId,
 } from "../components/commerce-types";
 import { useModuleEmit } from "@/hooks/use-module-events";
+import { SideSheet } from "../components/side-sheet";
 import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE, type DateRange } from "../components/date-range-filter";
 import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
 
@@ -384,164 +385,166 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
       exit={{ opacity: 0, y: -10 }}
       className="space-y-4"
     >
-      <AnimatePresence>
-        {showBuilder && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="rounded-2xl border border-primary/30 bg-card/80 backdrop-blur-sm p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold flex items-center gap-2">
-                  <RefreshCw className="w-5 h-5 text-primary" />
-                  {editingId ? "Edit Schedule" : "New Recurring Invoice"}
-                </h3>
-                <button onClick={() => { setShowBuilder(false); resetForm(); }} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted transition-colors">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {error && <div className="text-xs text-amber-400 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2">{error}</div>}
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Schedule Name *</label>
-                  <input
-                    type="text"
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    value={form.name}
-                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                    placeholder="e.g. Monthly Retainer, Weekly Service"
-                  />
-                </div>
-                <ContactSelect
-                  value={form.contactId}
-                  onChange={(id) => setForm((f) => ({ ...f, contactId: id }))}
-                  contacts={contacts}
-                  label="Contact"
-                  required
-                />
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 inline-flex items-center gap-1">Frequency * <InfoBadge title="Recurring Frequency" body="How often this invoice is auto-generated and sent. Monthly is most common for retainers. The system creates a new invoice each cycle and optionally sends it to the client." side="right" iconSize={10} /></label>
-                  <select
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    value={form.frequency}
-                    onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))}
-                  >
-                    {FREQUENCIES.map((fr) => (
-                      <option key={fr.value} value={fr.value}>{fr.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="Next Invoice Date"
-                  type="date"
-                  value={form.nextRunDate}
-                  onChange={(e) => setForm((f) => ({ ...f, nextRunDate: e.target.value }))}
-                />
-                <Input
-                  label="End Date (optional)"
-                  type="date"
-                  value={form.endDate}
-                  onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
-                />
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium">Line Items</label>
-                  <Button variant="outline" onClick={addItem} className="text-xs gap-1 px-2 py-1">
-                    <Plus className="w-3 h-3" /> Add Item
-                  </Button>
-                </div>
-                {form.items.map((item) => (
-                  <div key={item.id} className="p-3 rounded-xl bg-muted/30 border border-border/40">
-                    <div className="grid grid-cols-12 gap-2 items-end">
-                      <div className="col-span-12 md:col-span-3">
-                        <label className="text-xs text-muted-foreground mb-1 block">Product/Service</label>
-                        <select
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
-                          value={item.productId}
-                          onChange={(e) => selectProduct(item.id, e.target.value)}
-                        >
-                          <option value="">Select or type below...</option>
-                          {products.filter((p) => p.isActive !== false).map((p) => (
-                            <option key={p.id} value={p.id}>{p.name} - {p.currency} {Number(p.price).toLocaleString()}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="col-span-12 md:col-span-4">
-                        <label className="text-xs text-muted-foreground mb-1 block">Description</label>
-                        <input
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
-                          value={item.description}
-                          onChange={(e) => updateItem(item.id, "description", e.target.value)}
-                          placeholder="Item description"
-                        />
-                      </div>
-                      <div className="col-span-4 md:col-span-2">
-                        <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
-                        <input className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm" type="number" min="1" value={item.quantity} onChange={(e) => updateItem(item.id, "quantity", e.target.value)} />
-                      </div>
-                      <div className="col-span-6 md:col-span-2">
-                        <label className="text-xs text-muted-foreground mb-1 block">Price ({currency})</label>
-                        <input className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm" type="number" step="0.01" value={item.unitPrice} onChange={(e) => updateItem(item.id, "unitPrice", e.target.value)} placeholder="0.00" />
-                      </div>
-                      <div className="col-span-2 md:col-span-1 flex justify-center">
-                        {form.items.length > 1 && (
-                          <button onClick={() => removeItem(item.id)} className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors">
-                            <Minus className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 rounded-xl bg-muted/20 border border-border/40">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Tax Rate (%)</label>
-                  <input type="number" step="0.01" min="0" max="100" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.taxRate} onChange={(e) => setForm((f) => ({ ...f, taxRate: e.target.value }))} placeholder="12.5" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Discount Type</label>
-                  <select className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.discountType} onChange={(e) => setForm((f) => ({ ...f, discountType: e.target.value as "PERCENT" | "FIXED" }))}>
-                    <option value="PERCENT">Percentage (%)</option>
-                    <option value="FIXED">Fixed ({currency})</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Discount {form.discountType === "PERCENT" ? "(%)" : `(${currency})`}</label>
-                  <input type="number" step="0.01" min="0" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.discountValue} onChange={(e) => setForm((f) => ({ ...f, discountValue: e.target.value }))} placeholder="0" />
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-muted/30 border border-border/40 space-y-1 max-w-xs ml-auto">
-                <div className="flex justify-between text-sm text-muted-foreground"><span>Subtotal:</span><span>{currency} {totals.subtotal.toFixed(2)}</span></div>
-                {totals.tax > 0 && <div className="flex justify-between text-sm text-muted-foreground"><span>Tax:</span><span>{currency} {totals.tax.toFixed(2)}</span></div>}
-                {totals.discount > 0 && <div className="flex justify-between text-sm text-emerald-400"><span>Discount:</span><span>-{currency} {totals.discount.toFixed(2)}</span></div>}
-                <div className="flex justify-between text-sm font-bold text-primary border-t border-border/40 pt-1"><span>Per Invoice:</span><span>{currency} {totals.total.toFixed(2)}</span></div>
-              </div>
-
-              <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</label>
-                <input type="text" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Internal notes for this schedule..." />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <Button variant="outline" onClick={() => { setShowBuilder(false); resetForm(); }}>Cancel</Button>
-                <Button onClick={handleSave}>{editingId ? "Update Schedule" : "Create Schedule"}</Button>
-              </div>
+      <SideSheet
+        open={showBuilder}
+        onClose={() => { setShowBuilder(false); resetForm(); }}
+        title={editingId ? "Edit Schedule" : "New Recurring Schedule"}
+        subtitle="Set up automated billing for retainers, subscriptions, or services"
+        width="lg"
+        icon={
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-violet-500/15 border border-violet-500/30">
+            <RefreshCw className="w-5 h-5 text-violet-400" />
+          </div>
+        }
+        footer={
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs text-muted-foreground">
+              <span className="block">Per Invoice</span>
+              <span className="font-semibold text-violet-400">{currency} {totals.total.toFixed(2)}</span>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setShowBuilder(false); resetForm(); }}
+                className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.05] transition-colors border border-border/40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="px-4 py-2.5 rounded-xl text-xs font-medium bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors border border-violet-500/30"
+              >
+                {editingId ? "Update Schedule" : "Create Schedule"}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          {error && <div className="text-xs text-amber-400 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2">{error}</div>}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Schedule Name *</label>
+              <input
+                type="text"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. Monthly Retainer, Weekly Service"
+              />
+            </div>
+            <ContactSelect
+              value={form.contactId}
+              onChange={(id) => setForm((f) => ({ ...f, contactId: id }))}
+              contacts={contacts}
+              label="Contact"
+              required
+            />
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 inline-flex items-center gap-1">Frequency * <InfoBadge title="Recurring Frequency" body="How often this invoice is auto-generated and sent. Monthly is most common for retainers. The system creates a new invoice each cycle and optionally sends it to the client." side="right" iconSize={10} /></label>
+              <select
+                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                value={form.frequency}
+                onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))}
+              >
+                {FREQUENCIES.map((fr) => (
+                  <option key={fr.value} value={fr.value}>{fr.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Next Invoice Date"
+              type="date"
+              value={form.nextRunDate}
+              onChange={(e) => setForm((f) => ({ ...f, nextRunDate: e.target.value }))}
+            />
+            <Input
+              label="End Date (optional)"
+              type="date"
+              value={form.endDate}
+              onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+            />
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Line Items</label>
+              <Button variant="outline" onClick={addItem} className="text-xs gap-1 px-2 py-1">
+                <Plus className="w-3 h-3" /> Add Item
+              </Button>
+            </div>
+            {form.items.map((item) => (
+              <div key={item.id} className="p-3 rounded-xl bg-muted/30 border border-border/40">
+                <div className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-12 md:col-span-3">
+                    <label className="text-xs text-muted-foreground mb-1 block">Product/Service</label>
+                    <select
+                      className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
+                      value={item.productId}
+                      onChange={(e) => selectProduct(item.id, e.target.value)}
+                    >
+                      <option value="">Select or type below...</option>
+                      {products.filter((p) => p.isActive !== false).map((p) => (
+                        <option key={p.id} value={p.id}>{p.name} - {p.currency} {Number(p.price).toLocaleString()}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-span-12 md:col-span-4">
+                    <label className="text-xs text-muted-foreground mb-1 block">Description</label>
+                    <input
+                      className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
+                      value={item.description}
+                      onChange={(e) => updateItem(item.id, "description", e.target.value)}
+                      placeholder="Item description"
+                    />
+                  </div>
+                  <div className="col-span-4 md:col-span-2">
+                    <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
+                    <input className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm" type="number" min="1" value={item.quantity} onChange={(e) => updateItem(item.id, "quantity", e.target.value)} />
+                  </div>
+                  <div className="col-span-6 md:col-span-2">
+                    <label className="text-xs text-muted-foreground mb-1 block">Price ({currency})</label>
+                    <input className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm" type="number" step="0.01" value={item.unitPrice} onChange={(e) => updateItem(item.id, "unitPrice", e.target.value)} placeholder="0.00" />
+                  </div>
+                  <div className="col-span-2 md:col-span-1 flex justify-center">
+                    {form.items.length > 1 && (
+                      <button onClick={() => removeItem(item.id)} className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors">
+                        <Minus className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 rounded-xl bg-muted/20 border border-border/40">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Tax Rate (%)</label>
+              <input type="number" step="0.01" min="0" max="100" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.taxRate} onChange={(e) => setForm((f) => ({ ...f, taxRate: e.target.value }))} placeholder="12.5" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Discount Type</label>
+              <select className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.discountType} onChange={(e) => setForm((f) => ({ ...f, discountType: e.target.value as "PERCENT" | "FIXED" }))}>
+                <option value="PERCENT">Percentage (%)</option>
+                <option value="FIXED">Fixed ({currency})</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Discount {form.discountType === "PERCENT" ? "(%)" : `(${currency})`}</label>
+              <input type="number" step="0.01" min="0" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.discountValue} onChange={(e) => setForm((f) => ({ ...f, discountValue: e.target.value }))} placeholder="0" />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</label>
+            <input type="text" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Internal notes for this schedule..." />
+          </div>
+        </div>
+      </SideSheet>
 
       {recurring.length > 0 && (() => {
         const active = recurring.filter((r) => r.status === 'ACTIVE');
@@ -631,9 +634,9 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
               </div>
             ))}
           </div>
-          <Button onClick={() => { resetForm(); setShowBuilder(true); }} className="gap-2">
-            <Plus className="w-4 h-4" /> Create Your First Schedule
-          </Button>
+          <p className="text-[11px] text-muted-foreground/50">
+            Use the <span className="font-medium text-foreground">+ New</span> button in the header to create a schedule.
+          </p>
         </div>
       ) : dateFiltered.length === 0 ? (
         <div className="py-10 text-center text-muted-foreground text-sm">

@@ -16,6 +16,6 @@ import { CommunicationsModule } from '../communications/communications.module';
   imports: [BookingsModule, forwardRef(() => CrmModule), forwardRef(() => CommerceModule), NotificationsModule, CommunicationsModule],
   controllers: [FlowController],
   providers: [FlowListener, FlowService, ActivityService, ActivityEventListener, AutomationExecutorService, CrossModuleAgentService],
-  exports: [FlowService, ActivityService, CrossModuleAgentService],
+  exports: [FlowService, ActivityService, CrossModuleAgentService, AutomationExecutorService],
 })
 export class FlowModule {}

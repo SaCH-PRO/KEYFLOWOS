@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -10,18 +12,19 @@ import {
   X,
   Lock,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 import { primaryNav } from "@/lib/nav-config";
-import type { NavItem, PrimaryNavItem } from "@/lib/nav-config";
+import type { NavItem, NavSection, PrimaryNavItem, DrawerSurface } from "@/lib/nav-config";
 
 interface DesktopSidebarProps {
-  drawerSurface: "workspaces" | "studio" | "public" | null;
-  setDrawerSurface: React.Dispatch<React.SetStateAction<"workspaces" | "studio" | "public" | null>>;
+  drawerSurface: DrawerSurface;
+  setDrawerSurface: React.Dispatch<React.SetStateAction<DrawerSurface>>;
   isPrimaryActive: (item: PrimaryNavItem) => boolean;
-  visibleWorkspacesNav: NavItem[];
-  visibleStudioNav: NavItem[];
-  visiblePublicNav: NavItem[];
-  visibleComingSoonNav: NavItem[];
+  visibleOperateSections: NavSection[];
+  visibleBuildSections: NavSection[];
+  visibleMoreNav: NavItem[];
+  meNav: NavItem[];
   isSecondaryActive: (item: NavItem) => boolean;
   isFeatureLocked: (item: NavItem) => boolean;
   connectorAlertCount: number;
@@ -29,38 +32,256 @@ interface DesktopSidebarProps {
   setKfStoreOpen: (v: boolean) => void;
 }
 
+/* ─── Flow Connector SVG ─── */
+function FlowConnector({ active }: { active: boolean }) {
+  return (
+    <svg
+      className={cn("absolute -right-[1px] top-1/2 -translate-y-1/2 w-3 h-8 transition-opacity duration-300", active ? "opacity-100" : "opacity-0")}
+      viewBox="0 0 12 32"
+      fill="none"
+    >
+      <path
+        d="M0 16 Q6 12, 12 8"
+        stroke="url(#flowLine)"
+        strokeWidth="1.5"
+        fill="none"
+        className={active ? "animate-flow-line" : ""}
+      />
+      <path
+        d="M0 16 Q6 20, 12 24"
+        stroke="url(#flowLine)"
+        strokeWidth="1.5"
+        fill="none"
+        className={active ? "animate-flow-line" : ""}
+        style={{ animationDelay: "0.5s" }}
+      />
+      <defs>
+        <linearGradient id="flowLine" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="hsl(var(--kf-accent1))" />
+          <stop offset="100%" stopColor="hsl(var(--kf-accent2))" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
+/* ─── Rail Active Indicator ─── */
+function RailIndicator({ active }: { active: boolean }) {
+  return (
+    <motion.div
+      layoutId="rail-indicator"
+      className={cn(
+        "absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r-full",
+        active ? "opacity-100" : "opacity-0"
+      )}
+      style={{
+        background: "linear-gradient(180deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+        boxShadow: "0 0 8px hsl(var(--kf-accent1) / 0.5)",
+      }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+    />
+  );
+}
+
+function DrawerSection({
+  section,
+  isSecondaryActive,
+  isFeatureLocked,
+  connectorAlertCount,
+}: {
+  section: NavSection;
+  isSecondaryActive: (item: NavItem) => boolean;
+  isFeatureLocked: (item: NavItem) => boolean;
+  connectorAlertCount: number;
+}) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-center gap-2 px-2 mb-1.5">
+        <div className="w-3 h-[2px] rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent2))] to-transparent" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+          {section.label}
+        </span>
+      </div>
+      <div className="flex flex-col gap-px">
+        {section.items.map((item) => {
+          const Icon = item.icon;
+          const active = isSecondaryActive(item);
+          const showConnectorBadge =
+            item.href === "/app/build/connect" && connectorAlertCount > 0;
+          const isLocked = isFeatureLocked(item);
+          if (isLocked) {
+            return (
+              <button
+                key={item.href + item.label}
+                type="button"
+                aria-disabled="true"
+                title="Unlock with upgrade"
+                onClick={(e) => e.preventDefault()}
+                className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground/40 cursor-not-allowed opacity-50 hover:opacity-70 transition-opacity group"
+              >
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                <span>{item.label}</span>
+                <Lock className="w-3 h-3 ml-auto text-muted-foreground/40" />
+              </button>
+            );
+          }
+          return (
+            <Link
+              key={item.href + item.label}
+              href={item.href}
+              className={cn(
+                "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all relative group",
+                active
+                  ? "bg-gradient-to-r from-[hsl(var(--kf-accent1))]/8 to-[hsl(var(--kf-accent2))]/4 text-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+              )}
+            >
+              {active && (
+                <div
+                  className="absolute left-0 top-0.5 bottom-0.5 w-[3px] rounded-r-full"
+                  style={{
+                    background: "linear-gradient(180deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                    boxShadow: "0 0 6px hsl(var(--kf-accent1) / 0.4)",
+                  }}
+                />
+              )}
+              <Icon className={cn("w-4 h-4 flex-shrink-0 transition-transform group-hover:scale-110", active && "text-[hsl(var(--kf-accent1))]")} />
+              <span>{item.label}</span>
+              {showConnectorBadge && (
+                <span
+                  className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white animate-slow-pulse"
+                  style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                  title={`${connectorAlertCount} connector${connectorAlertCount === 1 ? "" : "s"} need${connectorAlertCount === 1 ? "s" : ""} attention`}
+                  aria-label={`${connectorAlertCount} connectors need attention`}
+                >
+                  {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
+                </span>
+              )}
+              {active && !showConnectorBadge && (
+                <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/40" />
+              )}
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MeDrawer({
+  meNav,
+  isSecondaryActive,
+  onClose,
+}: {
+  meNav: NavItem[];
+  isSecondaryActive: (item: NavItem) => boolean;
+  onClose: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ x: -20, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: -20, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      className="w-[220px] border-r border-border h-full flex flex-col overflow-hidden"
+      style={{ background: "hsl(var(--kf-sidebar-bg) / 0.85)" }}
+    >
+      <div className="px-3 py-3 border-b border-border/50 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-1 h-4 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent2))] to-[hsl(var(--kf-accent1))]" />
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Me
+          </h2>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          aria-label="Close menu"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto py-1.5 px-1.5">
+        <div className="flex flex-col gap-px">
+          {meNav.map((item) => {
+            const Icon = item.icon;
+            const active = isSecondaryActive(item);
+            return (
+              <Link
+                key={item.href + item.label}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all relative",
+                  active
+                    ? "bg-gradient-to-r from-[hsl(var(--kf-accent1))]/8 to-[hsl(var(--kf-accent2))]/4 text-foreground font-medium"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                )}
+              >
+                {active && (
+                  <div
+                    className="absolute left-0 top-0.5 bottom-0.5 w-[3px] rounded-r-full"
+                    style={{
+                      background: "linear-gradient(180deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                    }}
+                  />
+                )}
+                <Icon className={cn("w-4 h-4 flex-shrink-0", active && "text-[hsl(var(--kf-accent1))]")} />
+                <span>{item.label}</span>
+                {active && (
+                  <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/40" />
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export function DesktopSidebar({
   drawerSurface,
   setDrawerSurface,
   isPrimaryActive,
-  visibleWorkspacesNav,
-  visibleStudioNav,
-  visiblePublicNav,
-  visibleComingSoonNav,
+  visibleOperateSections,
+  visibleBuildSections,
+  visibleMoreNav,
+  meNav,
   isSecondaryActive,
   isFeatureLocked,
   connectorAlertCount,
   isAdminUser,
   setKfStoreOpen,
 }: DesktopSidebarProps) {
+  const [moreExpanded, setMoreExpanded] = useState(false);
+
   return (
     <aside
       role="navigation"
       aria-label="Main navigation"
       className="hidden md:flex h-full"
     >
+      {/* ─── Primary Rail ─── */}
       <div
-        className="w-[52px] flex flex-col items-center border-r border-border h-full py-3 gap-1 flex-shrink-0"
+        className="w-14 flex flex-col items-center border-r border-border h-full py-3 gap-1 flex-shrink-0 relative"
         style={{ background: "hsl(var(--kf-sidebar-bg))" }}
       >
+        {/* KEY Home Button */}
         <Link
           href="/app/keyflow-command"
-          className="h-10 w-10 min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center flex-shrink-0 mb-3"
-          style={{ background: "hsl(var(--kf-accent1))" }}
-          title="KEYFLOW — home"
+          className="h-11 w-11 min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center flex-shrink-0 mb-3 relative group"
+          style={{
+            background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+            boxShadow: "0 4px 16px hsl(var(--kf-accent1) / 0.3)",
+          }}
+          title="KEYFLOW — Command Center"
         >
-          <Zap className="w-4 h-4 text-white" />
+          <Sparkles className="w-5 h-5 text-white drop-shadow-md" />
+          <div className="absolute inset-0 rounded-xl bg-white/0 group-hover:bg-white/10 transition-colors" />
         </Link>
+
+        {/* Divider with flow accent */}
+        <div className="w-8 h-[1px] bg-gradient-to-r from-transparent via-border to-transparent mb-1" />
 
         {primaryNav.map((item) => {
           const Icon = item.icon;
@@ -73,24 +294,20 @@ export function DesktopSidebar({
             return (
               <button
                 key={item.label}
-                onClick={() => setDrawerSurface(prev => (prev === surfaceId ? null : surfaceId as "workspaces" | "studio" | "public"))}
+                onClick={() => setDrawerSurface(prev => (prev === surfaceId ? null : surfaceId as DrawerSurface))}
                 className={cn(
-                  "w-11 h-11 min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center transition-all relative group",
+                  "w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center transition-all relative group",
                   isSurfaceOpen
-                    ? "text-foreground bg-muted/50"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                    ? "text-foreground bg-gradient-to-br from-muted/60 to-muted/30 shadow-inner"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
                 )}
                 title={item.label}
                 aria-label={item.label}
                 aria-expanded={isSurfaceOpen}
               >
-                {isSurfaceOpen && (
-                  <div
-                    className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[14px] w-[3px] h-5 rounded-r-full"
-                    style={{ background: "hsl(var(--kf-accent1))" }}
-                  />
-                )}
-                <Icon className="w-[18px] h-[18px]" />
+                <RailIndicator active={isSurfaceOpen} />
+                <FlowConnector active={isSurfaceOpen} />
+                <Icon className="w-[18px] h-[18px] transition-transform group-hover:scale-110" />
               </button>
             );
           }
@@ -100,43 +317,41 @@ export function DesktopSidebar({
               key={item.label}
               href={item.href ?? "#"}
               className={cn(
-                "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group",
+                "w-10 h-10 rounded-xl flex items-center justify-center transition-all relative group",
                 isActive
                   ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
               )}
               title={item.label}
               aria-label={item.label}
               onClick={() => setDrawerSurface(null)}
             >
-              {isActive && (
-                <div
-                  className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[14px] w-[3px] h-5 rounded-r-full"
-                  style={{ background: "hsl(var(--kf-accent1))" }}
-                />
-              )}
-              <Icon className="w-[18px] h-[18px]" />
+              <RailIndicator active={isActive} />
+              <Icon className="w-[18px] h-[18px] transition-transform group-hover:scale-110" />
             </Link>
           );
         })}
 
-        <div className="mt-auto flex flex-col items-center gap-1">
+        <div className="mt-auto flex flex-col items-center gap-1 pt-2">
+          {/* Divider */}
+          <div className="w-8 h-[1px] bg-gradient-to-r from-transparent via-border to-transparent mb-1" />
+          
           {isAdminUser && (
             <Link
               href="/admin"
-              className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+              className="w-10 h-10 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all relative group"
               title="Owner Console"
             >
-              <Shield className="w-[18px] h-[18px]" />
+              <Shield className="w-[18px] h-[18px] transition-transform group-hover:scale-110" />
             </Link>
           )}
           <button
             onClick={() => setKfStoreOpen(true)}
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all relative group"
             title="KF Store"
           >
             <div
-              className="w-[18px] h-[18px] rounded flex items-center justify-center"
+              className="w-[20px] h-[20px] rounded-md flex items-center justify-center transition-transform group-hover:scale-110"
               style={{ background: "linear-gradient(135deg, #F97316, #14B8A6)" }}
             >
               <Sparkles className="w-2.5 h-2.5 text-white" />
@@ -146,211 +361,124 @@ export function DesktopSidebar({
         </div>
       </div>
 
-      {drawerSurface !== null && (
-        <div
-          className="w-[208px] border-r border-border h-full flex flex-col overflow-hidden"
-          style={{ background: "hsl(var(--kf-sidebar-bg) / 0.7)" }}
-        >
-          <div className="px-3 py-3 border-b border-border/50 flex items-center justify-between">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {drawerSurface === "workspaces" ? "Workspaces" : drawerSurface === "studio" ? "Studio" : "Public"}
-            </h2>
-            <button
-              onClick={() => setDrawerSurface(null)}
-              className="p-0.5 rounded text-muted-foreground hover:text-foreground"
-              aria-label="Close menu"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto py-1.5 px-1.5">
-            {/* WORKSPACES */}
-            <div className="mb-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 mb-1">
-                Workspaces
-              </div>
-              <div className="flex flex-col gap-px">
-                {visibleWorkspacesNav.map((item) => {
-                  const Icon = item.icon;
-                  const active = isSecondaryActive(item);
-                  const isLocked = isFeatureLocked(item);
-                  if (isLocked) {
-                    return (
-                      <button
-                        key={item.href + item.label}
-                        type="button"
-                        aria-disabled="true"
-                        title="future keyflow"
-                        onClick={(e) => e.preventDefault()}
-                        className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground/50 cursor-not-allowed opacity-60"
-                      >
-                        <Icon className="w-4 h-4 flex-shrink-0" />
-                        <span>{item.label}</span>
-                        <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
-                      </button>
-                    );
-                  }
-                  return (
-                    <Link
-                      key={item.href + item.label}
-                      href={item.href}
-                      className={cn(
-                        "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all",
-                        active
-                          ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      )}
-                    >
-                      <Icon className="w-4 h-4 flex-shrink-0" />
-                      <span>{item.label}</span>
-                      {active && (
-                        <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/50" />
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
+      {/* ─── ME DRAWER ─── */}
+      <AnimatePresence>
+        {drawerSurface === "me" && (
+          <MeDrawer
+            meNav={meNav}
+            isSecondaryActive={isSecondaryActive}
+            onClose={() => setDrawerSurface(null)}
+          />
+        )}
+      </AnimatePresence>
 
-            {/* STUDIO */}
-            <div className="mb-3 pt-3 border-t border-border/40">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 mb-1">
-                Studio
+      {/* ─── OPERATE / BUILD DRAWER ─── */}
+      <AnimatePresence>
+        {(drawerSurface === "operate" || drawerSurface === "build") && (
+          <motion.div
+            initial={{ x: -20, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: -20, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="w-[220px] border-r border-border h-full flex flex-col overflow-hidden"
+            style={{ background: "hsl(var(--kf-sidebar-bg) / 0.85)" }}
+          >
+            {/* Header with flow line */}
+            <div className="px-3 py-3 border-b border-border/50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-4 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent2))] to-[hsl(var(--kf-accent1))]" />
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {drawerSurface === "operate" ? "Operate" : "Build"}
+                </h2>
               </div>
-              <div className="flex flex-col gap-px">
-                {visibleStudioNav.map((item) => {
-                  const Icon = item.icon;
-                  const active = isSecondaryActive(item);
-                  const showConnectorBadge =
-                    item.href === "/app/connect" && connectorAlertCount > 0;
-                  const isLocked = isFeatureLocked(item);
-                  if (isLocked) {
-                    return (
-                      <button
-                        key={item.href + item.label}
-                        type="button"
-                        aria-disabled="true"
-                        title="future keyflow"
-                        onClick={(e) => e.preventDefault()}
-                        className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground/50 cursor-not-allowed opacity-60"
-                      >
-                        <Icon className="w-4 h-4 flex-shrink-0" />
-                        <span>{item.label}</span>
-                        <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
-                      </button>
-                    );
-                  }
-                  return (
-                    <Link
-                      key={item.href + item.label}
-                      href={item.href}
-                      className={cn(
-                        "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all",
-                        active
-                          ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      )}
-                    >
-                      <Icon className="w-4 h-4 flex-shrink-0" />
-                      <span>{item.label}</span>
-                      {showConnectorBadge && (
-                        <span
-                          className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
-                          style={{ background: "hsl(var(--kf-accent1))" }}
-                          title={`${connectorAlertCount} connector${connectorAlertCount === 1 ? "" : "s"} need${connectorAlertCount === 1 ? "s" : ""} attention`}
-                          aria-label={`${connectorAlertCount} connectors need attention`}
-                        >
-                          {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
-                        </span>
-                      )}
-                      {active && !showConnectorBadge && (
-                        <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/50" />
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
+              <button
+                onClick={() => setDrawerSurface(null)}
+                className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                aria-label="Close menu"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
+            
+            <div className="flex-1 overflow-y-auto py-2 px-1.5">
+              {drawerSurface === "operate" && visibleOperateSections.map((section) => (
+                <DrawerSection
+                  key={section.id}
+                  section={section}
+                  isSecondaryActive={isSecondaryActive}
+                  isFeatureLocked={isFeatureLocked}
+                  connectorAlertCount={connectorAlertCount}
+                />
+              ))}
 
-            {/* PUBLIC */}
-            <div className="mb-3 pt-3 border-t border-border/40">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 mb-1">
-                Public
-              </div>
-              <div className="flex flex-col gap-px">
-                {visiblePublicNav.map((item) => {
-                  const Icon = item.icon;
-                  const active = isSecondaryActive(item);
-                  const isLocked = isFeatureLocked(item);
-                  if (isLocked) {
-                    return (
+              {drawerSurface === "build" && (
+                <>
+                  {visibleBuildSections.map((section) => (
+                    <DrawerSection
+                      key={section.id}
+                      section={section}
+                      isSecondaryActive={isSecondaryActive}
+                      isFeatureLocked={isFeatureLocked}
+                      connectorAlertCount={connectorAlertCount}
+                    />
+                  ))}
+
+                  {/* More — collapsible dormant modules */}
+                  {visibleMoreNav.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-border/40">
                       <button
-                        key={item.href + item.label}
-                        type="button"
-                        aria-disabled="true"
-                        title="future keyflow"
-                        onClick={(e) => e.preventDefault()}
-                        className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground/50 cursor-not-allowed opacity-60"
+                        onClick={() => setMoreExpanded((v) => !v)}
+                        className="w-full flex items-center justify-between px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-muted-foreground transition-colors"
                       >
-                        <Icon className="w-4 h-4 flex-shrink-0" />
-                        <span>{item.label}</span>
-                        <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
+                        <span>More</span>
+                        <ChevronDown
+                          className={cn(
+                            "w-3 h-3 transition-transform",
+                            moreExpanded && "rotate-180"
+                          )}
+                        />
                       </button>
-                    );
-                  }
-                  return (
-                    <Link
-                      key={item.href + item.label}
-                      href={item.href}
-                      className={cn(
-                        "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all",
-                        active
-                          ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      )}
-                    >
-                      <Icon className="w-4 h-4 flex-shrink-0" />
-                      <span>{item.label}</span>
-                      {active && (
-                        <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/50" />
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-
-            {visibleComingSoonNav.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-border/40">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 mb-1">
-                  Coming soon
-                </div>
-                <div className="flex flex-col gap-px">
-                  {visibleComingSoonNav.map((item) => {
-                    const Icon = item.icon;
-                    const active = isSecondaryActive(item);
-                    return (
-                      <Link
-                        key={item.href + item.label}
-                        href={item.href}
-                        className={cn(
-                          "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all opacity-70",
-                          active
-                            ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                      <AnimatePresence>
+                        {moreExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="flex flex-col gap-px mt-1">
+                              {visibleMoreNav.map((item) => {
+                                const Icon = item.icon;
+                                const active = isSecondaryActive(item);
+                                return (
+                                  <Link
+                                    key={item.href + item.label}
+                                    href={item.href}
+                                    className={cn(
+                                      "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all opacity-70 hover:opacity-100",
+                                      active
+                                        ? "bg-gradient-to-r from-[hsl(var(--kf-accent1))]/8 to-[hsl(var(--kf-accent2))]/4 text-foreground font-medium opacity-100"
+                                        : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                                    )}
+                                  >
+                                    <Icon className="w-4 h-4 flex-shrink-0" />
+                                    <span>{item.label}</span>
+                                  </Link>
+                                );
+                              })}
+                            </div>
+                          </motion.div>
                         )}
-                      >
-                        <Icon className="w-4 h-4 flex-shrink-0" />
-                        <span>{item.label}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+                      </AnimatePresence>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </aside>
   );
 }

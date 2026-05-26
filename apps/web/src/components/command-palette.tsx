@@ -366,7 +366,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="w-full max-w-2xl rounded-2xl border border-border/80 bg-slate-950/95 shadow-2xl shadow-primary/20"
+        className="w-full max-w-2xl rounded-2xl border border-border/60 bg-card/95 shadow-2xl shadow-primary/20 relative overflow-hidden"
+        style={{ backdropFilter: "blur(24px)" }}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
@@ -412,8 +413,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                           data-idx={idx}
                           onClick={() => handleNavigate(section.getHref(item), section.getTitle(item))}
                           className={cn(
-                            "w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors text-sm group",
-                            selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                            "w-full text-left px-4 py-2.5 flex items-center gap-3 transition-all text-sm group rounded-lg mx-2",
+                            selectedIdx === idx ? "bg-gradient-to-r from-orange-500/10 to-teal-500/5 border border-orange-500/10 shadow-sm" : "hover:bg-muted/40"
                           )}
                         >
                           <div
@@ -455,7 +456,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                     onClick={() => handleNavigate(item.href, item.label)}
                     className={cn(
                       "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
-                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                      selectedIdx === idx ? "bg-gradient-to-r from-orange-500/10 to-teal-500/5 border border-orange-500/10 shadow-sm rounded-lg mx-2" : "hover:bg-muted/40 rounded-lg mx-2"
                     )}
                   >
                     <div className="flex items-center gap-2.5">
@@ -488,7 +489,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                     }}
                     className={cn(
                       "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
-                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                      selectedIdx === idx ? "bg-gradient-to-r from-orange-500/10 to-teal-500/5 border border-orange-500/10 shadow-sm rounded-lg mx-2" : "hover:bg-muted/40 rounded-lg mx-2"
                     )}
                   >
                     <div className="flex items-center gap-2.5">
@@ -529,7 +530,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                     }}
                     className={cn(
                       "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
-                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                      selectedIdx === idx ? "bg-gradient-to-r from-orange-500/10 to-teal-500/5 border border-orange-500/10 shadow-sm rounded-lg mx-2" : "hover:bg-muted/40 rounded-lg mx-2"
                     )}
                   >
                     <div className="flex items-center gap-2.5">
@@ -570,7 +571,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                     }}
                     className={cn(
                       "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
-                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                      selectedIdx === idx ? "bg-gradient-to-r from-orange-500/10 to-teal-500/5 border border-orange-500/10 shadow-sm rounded-lg mx-2" : "hover:bg-muted/40 rounded-lg mx-2"
                     )}
                   >
                     <div className="flex items-center gap-2.5">
@@ -606,7 +607,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                     }}
                     className={cn(
                       "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
-                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                      selectedIdx === idx ? "bg-gradient-to-r from-orange-500/10 to-teal-500/5 border border-orange-500/10 shadow-sm rounded-lg mx-2" : "hover:bg-muted/40 rounded-lg mx-2"
                     )}
                   >
                     <div className="flex items-center gap-2.5">

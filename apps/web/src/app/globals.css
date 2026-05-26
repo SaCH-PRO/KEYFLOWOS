@@ -46,6 +46,16 @@
     --kf-elevation-2: 0 2px 8px -2px rgb(0 0 0 / 0.06);
     --kf-elevation-3: 0 8px 24px -4px rgb(0 0 0 / 0.08);
 
+    /* ─── NEW: KEY Design System Tokens ─── */
+    --kf-key-glow: 24 100% 50% / 0.2;
+    --kf-flow-gradient: linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)));
+    --kf-depth-1: 0 4px 12px -2px rgb(0 0 0 / 0.15), 0 2px 4px -1px rgb(0 0 0 / 0.08);
+    --kf-depth-2: 0 12px 32px -4px rgb(0 0 0 / 0.2), 0 4px 8px -2px rgb(0 0 0 / 0.1);
+    --kf-depth-3: 0 24px 48px -8px rgb(0 0 0 / 0.25), 0 8px 16px -4px rgb(0 0 0 / 0.15);
+    --kf-glass-highlight: linear-gradient(180deg, hsl(var(--kf-foreground) / 0.06) 0%, transparent 100%);
+    --kf-unlock-gold: 45 90% 55%;
+    --kf-violet-accent: 260 70% 60%;
+
     --kf-success: 142 76% 36%;
     --kf-success-foreground: 0 0% 100%;
     --kf-warning: 38 92% 50%;
@@ -62,6 +72,7 @@
     --kf-z-modal: 60;
     --kf-z-toast: 80;
     --kf-z-guide: 100;
+    --kf-z-key-presence: 90;
   }
 
   .dark {
@@ -101,6 +112,11 @@
     --kf-elevation-1: 0 1px 2px 0 rgb(0 0 0 / 0.3);
     --kf-elevation-2: 0 2px 8px -2px rgb(0 0 0 / 0.4);
     --kf-elevation-3: 0 8px 24px -4px rgb(0 0 0 / 0.5);
+
+    --kf-key-glow: 24 100% 50% / 0.25;
+    --kf-depth-1: 0 4px 12px -2px rgb(0 0 0 / 0.4), 0 2px 4px -1px rgb(0 0 0 / 0.2);
+    --kf-depth-2: 0 12px 32px -4px rgb(0 0 0 / 0.5), 0 4px 8px -2px rgb(0 0 0 / 0.3);
+    --kf-depth-3: 0 24px 48px -8px rgb(0 0 0 / 0.6), 0 8px 16px -4px rgb(0 0 0 / 0.4);
 
     --kf-success: 142 71% 45%;
     --kf-success-foreground: 0 0% 100%;
@@ -150,6 +166,21 @@
   .border-accent2 {
     border-color: hsl(var(--kf-accent2));
   }
+
+  /* ─── NEW: Gradient text utilities ─── */
+  .text-gradient-key {
+    background: linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-flow {
+    background: linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)), hsl(var(--kf-violet-accent)));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
 }
 
 @layer components {
@@ -182,6 +213,98 @@
     box-shadow: var(--kf-elevation-2);
   }
 
+  /* ─── NEW: Depth card system ─── */
+  .kf-card-depth {
+    background: hsl(var(--kf-card));
+    border: 1px solid hsl(var(--kf-border));
+    border-radius: 0.75rem;
+    box-shadow: var(--kf-depth-1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.15s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .kf-card-depth::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(180deg, hsl(var(--kf-foreground) / 0.05) 0%, transparent 40%);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .kf-card-depth:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--kf-depth-2);
+    border-color: hsl(var(--kf-accent1) / 0.15);
+  }
+
+  .kf-card-depth:hover::before {
+    background: linear-gradient(180deg, hsl(var(--kf-accent1) / 0.08) 0%, transparent 50%);
+  }
+
+  /* ─── NEW: KEY-branded card ─── */
+  .kf-card-key {
+    background: hsl(var(--kf-card));
+    border: 1px solid hsl(var(--kf-border));
+    border-radius: 0.75rem;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .kf-card-key::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)));
+    opacity: 0.6;
+    transition: opacity 0.15s ease, height 0.15s ease;
+  }
+
+  .kf-card-key:hover {
+    border-color: hsl(var(--kf-accent1) / 0.2);
+    box-shadow: var(--kf-elevation-2);
+  }
+
+  .kf-card-key:hover::after {
+    opacity: 1;
+    height: 3px;
+  }
+
+  /* ─── NEW: Glass with gradient border ─── */
+  .kf-glass-key {
+    background: hsl(var(--kf-card) / 0.8);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid hsl(var(--kf-border) / 0.6);
+    border-radius: 0.75rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .kf-glass-key::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.1), transparent 60%);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
   .kf-glass-surface {
     background: hsl(var(--kf-card) / 0.95);
     backdrop-filter: blur(24px);
@@ -210,6 +333,11 @@
   .kf-glow {
     box-shadow: 0 0 40px hsl(var(--kf-glow));
   }
+
+  /* ─── NEW: Key glow variant ─── */
+  .kf-glow-key {
+    box-shadow: 0 0 30px hsl(var(--kf-key-glow)), 0 0 60px hsl(var(--kf-key-glow) / 0.5);
+  }
   
   .kf-btn-primary {
     background: hsl(var(--kf-accent1));
@@ -228,6 +356,45 @@
 
   .kf-btn-primary:active {
     filter: brightness(0.95);
+  }
+
+  /* ─── NEW: Glow button ─── */
+  .kf-btn-glow {
+    background: hsl(var(--kf-accent1));
+    color: white;
+    border-radius: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-weight: 500;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .kf-btn-glow::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    background: linear-gradient(135deg, hsl(var(--kf-accent1) / 0.4), hsl(var(--kf-accent2) / 0.3));
+    border-radius: inherit;
+    filter: blur(8px);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    z-index: -1;
+  }
+
+  .kf-btn-glow:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+  }
+
+  .kf-btn-glow:hover::before {
+    opacity: 1;
+  }
+
+  .kf-btn-glow:active {
+    filter: brightness(0.95);
+    transform: translateY(0);
   }
   
   .kf-btn-secondary {
@@ -329,6 +496,16 @@
     transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
+  /* ─── NEW: Animated momentum fill ─── */
+  .kf-momentum-fill-animated {
+    height: 100%;
+    background: linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)), hsl(var(--kf-accent1)));
+    background-size: 200% 100%;
+    border-radius: 9999px;
+    transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: flow-horizontal 3s linear infinite;
+  }
+
   .kf-nav-item {
     display: flex;
     align-items: center;
@@ -367,6 +544,42 @@
     color: hsl(var(--kf-accent1));
   }
 
+  /* ─── NEW: Nav glow active indicator ─── */
+  .kf-nav-glow {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.4375rem 0.75rem;
+    border-radius: 0.5rem;
+    color: hsl(var(--kf-muted-foreground));
+    transition: all 0.2s ease;
+    position: relative;
+    font-size: 0.8125rem;
+  }
+
+  .kf-nav-glow:hover {
+    background: hsl(var(--kf-muted));
+    color: hsl(var(--kf-foreground));
+  }
+
+  .kf-nav-glow.active {
+    background: linear-gradient(90deg, hsl(var(--kf-accent1) / 0.08), hsl(var(--kf-accent2) / 0.04));
+    color: hsl(var(--kf-foreground));
+    font-weight: 500;
+  }
+
+  .kf-nav-glow.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.25rem;
+    bottom: 0.25rem;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: linear-gradient(180deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)));
+    box-shadow: 0 0 8px hsl(var(--kf-accent1) / 0.4);
+  }
+
   .kf-glass {
     background: hsl(var(--kf-card) / 0.8);
     backdrop-filter: blur(16px);
@@ -386,7 +599,8 @@ html {
 
 @media (max-width: 767px) {
   .kf-btn-primary,
-  .kf-btn-secondary {
+  .kf-btn-secondary,
+  .kf-btn-glow {
     min-height: 44px;
     min-width: 44px;
   }
@@ -473,6 +687,21 @@ html {
   animation: flow 8s ease infinite;
 }
 
+/* ─── NEW: Horizontal flow animation ─── */
+@keyframes flow-horizontal {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.animate-flow-horizontal {
+  background-size: 200% 100%;
+  animation: flow-horizontal 3s linear infinite;
+}
+
 @keyframes shimmer {
   0% {
     transform: translateX(-100%);
@@ -498,6 +727,32 @@ html {
   animation: shimmer 2s infinite;
 }
 
+/* ─── NEW: Gold shimmer ─── */
+@keyframes shimmer-gold {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.kf-shimmer-gold {
+  position: relative;
+  overflow: hidden;
+}
+
+.kf-shimmer-gold::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, hsl(var(--kf-unlock-gold) / 0.1), transparent);
+  animation: shimmer-gold 2.5s infinite;
+}
+
 @keyframes notif-pulse {
   0%, 100% {
     box-shadow: 0 0 0 0 hsl(var(--kf-accent1) / 0.3);
@@ -509,6 +764,104 @@ html {
 
 .kf-notif-pulse {
   animation: notif-pulse 2s ease-in-out infinite;
+}
+
+/* ─── NEW: KEY glow pulse ─── */
+@keyframes key-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 20px hsl(var(--kf-accent2) / 0.2), 0 0 40px hsl(var(--kf-accent1) / 0.1);
+  }
+  50% {
+    box-shadow: 0 0 30px hsl(var(--kf-accent2) / 0.35), 0 0 60px hsl(var(--kf-accent1) / 0.2);
+  }
+}
+
+.animate-key-glow-pulse {
+  animation: key-glow-pulse 3s ease-in-out infinite;
+}
+
+/* ─── NEW: Flow line animation for SVG paths ─── */
+@keyframes flow-line {
+  0% {
+    stroke-dashoffset: 1000;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animate-flow-line {
+  stroke-dasharray: 20 10;
+  animation: flow-line 2s linear infinite;
+}
+
+/* ─── NEW: Unlock reveal ─── */
+@keyframes unlock-reveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-unlock-reveal {
+  animation: unlock-reveal 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ─── NEW: Orbit rotation ─── */
+@keyframes orbit {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-orbit {
+  animation: orbit 20s linear infinite;
+}
+
+.animate-orbit-slow {
+  animation: orbit 40s linear infinite;
+}
+
+/* ─── NEW: Keyhole spin ─── */
+@keyframes keyhole-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-keyhole-spin {
+  animation: keyhole-spin 8s ease-in-out infinite;
+}
+
+/* ─── NEW: Mesh gradient background shift ─── */
+@keyframes mesh-shift {
+  0%, 100% {
+    background-position: 0% 0%;
+  }
+  25% {
+    background-position: 100% 0%;
+  }
+  50% {
+    background-position: 100% 100%;
+  }
+  75% {
+    background-position: 0% 100%;
+  }
+}
+
+.animate-mesh-shift {
+  background-size: 200% 200%;
+  animation: mesh-shift 20s ease infinite;
 }
 
 @keyframes dialog-enter {
@@ -669,6 +1022,14 @@ html {
 .animate-kf-delay-5 { animation-delay: 0.5s; opacity: 0; }
 .animate-kf-delay-6 { animation-delay: 0.6s; opacity: 0; }
 
+/* ─── NEW: Staggered unlock delays ─── */
+.animate-unlock-delay-1 { animation-delay: 0.08s; }
+.animate-unlock-delay-2 { animation-delay: 0.16s; }
+.animate-unlock-delay-3 { animation-delay: 0.24s; }
+.animate-unlock-delay-4 { animation-delay: 0.32s; }
+.animate-unlock-delay-5 { animation-delay: 0.4s; }
+.animate-unlock-delay-6 { animation-delay: 0.48s; }
+
 .kf-form-transition {
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
@@ -684,4 +1045,27 @@ html {
   pointer-events: none;
   position: absolute;
   width: 100%;
+}
+
+/* ─── NEW: Reduced motion respect ─── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-slow-pulse,
+  .animate-flow,
+  .animate-flow-horizontal,
+  .animate-key-glow-pulse,
+  .animate-flow-line,
+  .animate-unlock-reveal,
+  .animate-orbit,
+  .animate-orbit-slow,
+  .animate-keyhole-spin,
+  .animate-mesh-shift,
+  .kf-shimmer::after,
+  .kf-shimmer-gold::after {
+    animation: none !important;
+  }
+  
+  .animate-unlock-reveal {
+    opacity: 1;
+    transform: none;
+  }
 }

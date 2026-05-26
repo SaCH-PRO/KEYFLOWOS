@@ -2,13 +2,14 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
-import { FolderKanban, Send, LayoutGrid, List, FileStack, Zap } from "lucide-react";
+import { FolderKanban, Send, LayoutGrid, List, FileStack, Zap, Sparkles } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useSearchParams, useRouter } from "next/navigation";
 import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { AiBadge } from "@/components/ui/ai-badge";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { KeyflowUnifiedShell } from "@/components/guide/keyflow-unified-shell";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { fetchProjects, Project } from "@/lib/client";
 import { ProjectBoard } from "./components/project-board";
@@ -18,6 +19,8 @@ import { PlaybookPanel } from "./components/playbook-panel";
 import { ProjectExecutionStrip } from "./components/project-execution-strip";
 import { ProjectDetail } from "./components/project-detail";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
+import { PlanGenerator } from "./components/plan-generator";
+import { useProjectPlans } from "./hooks/use-project-plans";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
@@ -28,6 +31,7 @@ import { KanbanSkeleton } from "@/components/ui/skeleton";
 const TABS = [
   { key: "board", label: "Board", icon: LayoutGrid, tooltip: "Kanban board view grouped by delivery stage." },
   { key: "list", label: "List", icon: List, tooltip: "Table view of all projects with sortable columns." },
+  { key: "plans", label: "Plans", icon: Sparkles, tooltip: "AI-generated strategic plans from your ideas." },
   { key: "templates", label: "Templates", icon: FileStack, tooltip: "Reusable project blueprints with pre-defined tasks." },
   { key: "playbooks", label: "Playbooks", icon: Zap, tooltip: "Trigger-based event playbooks for automation." },
 ];
@@ -39,7 +43,14 @@ export default function ProjectsPage() {
   const [showContactPicker, setShowContactPicker] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("board");
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get("tab");
+      if (tab && TABS.some((t) => t.key === tab)) return tab;
+    }
+    return "board";
+  });
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [prefillContactId, setPrefillContactId] = useState<string | undefined>(undefined);
   const projectTaskIdRef = useRef<string | null>(null);
@@ -50,7 +61,7 @@ export default function ProjectsPage() {
   const handleProjectsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
       const tab = actionKey.replace("switch_tab:", "");
-      if (["board", "list", "templates", "playbooks"].includes(tab)) setActiveTab(tab);
+      if (["board", "list", "plans", "templates", "playbooks"].includes(tab)) setActiveTab(tab);
     } else if (actionKey === "new_project") {
       setActiveTab("board");
     }
@@ -174,6 +185,11 @@ export default function ProjectsPage() {
   const showCrossModuleBanner = !!prefillContactId && originWorkspace && originWorkspace !== "Projects";
 
   return (
+    <KeyflowUnifiedShell
+      module="projects"
+      pageTitle="Projects"
+      availableActions={["Create project", "Add task", "Apply template", "Generate plan"]}
+    >
     <WorkspaceShell
       icon={FolderKanban}
       title="Projects"
@@ -267,6 +283,10 @@ export default function ProjectsPage() {
           <TemplateManager businessId={businessId} onProjectCreated={loadProjects} />
         )}
 
+        {activeTab === "plans" && (
+          <PlanGenerator businessId={businessId || ""} goals={[]} />
+        )}
+
         {activeTab === "playbooks" && (
           <PlaybookPanel />
         )}
@@ -275,5 +295,6 @@ export default function ProjectsPage() {
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
 
     </WorkspaceShell>
+    </KeyflowUnifiedShell>
   );
 }

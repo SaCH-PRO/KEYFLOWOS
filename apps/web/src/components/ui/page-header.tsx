@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { Plus } from "lucide-react";
 
 interface PageHeaderProps {
@@ -33,32 +34,36 @@ export function PageHeader({
   const bgColor = `color-mix(in srgb, ${color} 10%, transparent)`;
 
   return (
-    <div className="mb-5">
-      {breadcrumbs && <div className="mb-2">{breadcrumbs}</div>}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
+    <div className="mb-6">
+      {breadcrumbs && <div className="mb-3">{breadcrumbs}</div>}
+
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+        {/* Left: icon + title + subtitle */}
+        <div className="flex items-start gap-3 min-w-0 flex-1">
           <div
-            className="w-8 h-8 kf-radius-md flex items-center justify-center flex-shrink-0"
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
             style={{ background: bgColor }}
           >
-            <Icon className="w-4 h-4" style={{ color }} />
+            <Icon className="w-[18px] h-[18px]" style={{ color }} />
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="kf-text-title font-semibold tracking-tight truncate">{title}</h1>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-lg font-semibold tracking-tight text-foreground truncate">{title}</h1>
               {titleExtra}
             </div>
             {subtitle && (
-              <p className="kf-text-caption" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{subtitle}</p>
+              <p className="text-sm text-muted-foreground mt-1 leading-relaxed max-w-xl">{subtitle}</p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+
+        {/* Right: actions */}
+        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
           {rightSlot}
           {actionLabel && onAction && (
             <button
               onClick={onAction}
-              className="kf-btn-primary inline-flex items-center gap-1.5 kf-text-caption !py-1.5 !px-3"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity"
               {...(actionDataAttr ? { "data-walkthrough": actionDataAttr } : {})}
             >
               <ActionIcon className="w-3.5 h-3.5" />

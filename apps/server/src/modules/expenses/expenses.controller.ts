@@ -28,6 +28,7 @@ export class ExpensesController {
     @Query('paymentMethod') paymentMethod?: string,
     @Query('tag') tag?: string,
     @Query('isRecurring') isRecurring?: string,
+    @Query('status') status?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -41,6 +42,7 @@ export class ExpensesController {
       paymentMethod,
       tag,
       isRecurring: isRecurring !== undefined ? isRecurring === 'true' : undefined,
+      status,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });

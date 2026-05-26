@@ -531,6 +531,12 @@ export class CalendarQueryService {
    * matches the behaviour of the read endpoints — staff who can't see an
    * event also can't mutate it by guessing its id.
    */
+  async getEvent(businessId: string, eventId: string) {
+    return this.prisma.client.calendarEvent.findFirst({
+      where: { businessId, id: eventId, deletedAt: null },
+    });
+  }
+
   private async requireVisibleEvent(
     businessId: string,
     userId: string,

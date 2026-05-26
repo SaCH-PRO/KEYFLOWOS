@@ -31,6 +31,7 @@ import {
   BarChart3,
   Target,
   Layers,
+  Footprints,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -63,6 +64,8 @@ import {
 } from "@/lib/client";
 import { VerificationCardCompact } from "./verification-card";
 import { useAiContext } from "@/contexts/ai-context";
+import { useGuide } from "@/contexts/guide-context";
+import { findGuideByIntent, type GuideDefinition } from "@/lib/guides";
 
 type Tab = "chat" | "queue" | "activity";
 
@@ -122,6 +125,7 @@ interface ChatMessage {
   pendingConfirmations?: FlowPendingConfirmation[];
   toolResults?: FlowToolResult[];
   requiresConfirmation?: boolean;
+  guide?: GuideDefinition;
 }
 
 const MODULE_LABELS: Record<string, { label: string; icon: typeof Sparkles; color: string }> = {
@@ -446,6 +450,7 @@ function getTimeAgo(dateStr: string): string {
 
 export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onInitialPromptConsumed, pageContext }: CopilotPanelProps) {
   const aiContext = useAiContext();
+  const guide = useGuide();
   const [tab, setTab] = useState<Tab>("chat");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -685,11 +690,12 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     }
   }, [open, initialPrompt, sending, onInitialPromptConsumed]);
 
-  const processFlowResponse = useCallback((res: FlowChatResponse): ChatMessage => {
+  const processFlowResponse = useCallback((res: FlowChatResponse, matchedGuide?: GuideDefinition): ChatMessage => {
     const msg: ChatMessage = {
       role: "assistant",
       content: res.reply,
       timestamp: Date.now(),
+      guide: matchedGuide,
     };
 
     if (res.pendingConfirmations && res.pendingConfirmations.length > 0) {
@@ -759,7 +765,8 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     if (!biz) return;
 
     setInput("");
-    const userMsg: ChatMessage = { role: "user", content: msg, timestamp: Date.now() };
+    const detectedGuide = findGuideByIntent(msg);
+    const userMsg: ChatMessage = { role: "user", content: msg, timestamp: Date.now(), guide: detectedGuide };
     setMessages((prev) => [...prev, userMsg]);
     setSending(true);
 
@@ -777,7 +784,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     try {
       const res = await sendFlowChat(biz, enrichedMessage, history, undefined, flowPageContext);
       if (res.data) {
-        const assistantMsg = processFlowResponse(res.data);
+        const assistantMsg = processFlowResponse(res.data, detectedGuide);
         setMessages((prev) => [...prev, assistantMsg]);
 
         if (res.data.toolResults?.length) {
@@ -1010,15 +1017,23 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
             exit={{ x: "100%", opacity: 0 }}
             transition={{ type: "spring", damping: 30, stiffness: 300 }}
             className="fixed top-0 right-0 bottom-0 z-[91] w-[420px] max-w-[90vw] flex flex-col border-l border-border/40"
-            style={{ background: "hsl(var(--kf-sidebar-bg))" }}
+            style={{
+              background: "hsl(var(--kf-sidebar-bg) / 0.95)",
+              backdropFilter: "blur(24px)",
+              WebkitBackdropFilter: "blur(24px)",
+            }}
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
               <div className="flex items-center gap-2.5">
                 <div
-                  className="w-8 h-8 rounded-xl flex items-center justify-center"
-                  style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                  className="w-8 h-8 rounded-xl flex items-center justify-center relative"
+                  style={{
+                    background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                    boxShadow: "0 2px 12px hsl(var(--kf-accent1) / 0.3)",
+                  }}
                 >
                   <Brain className="w-4 h-4 text-white" />
+                  <div className="absolute inset-0 rounded-xl bg-white/0 hover:bg-white/10 transition-colors" />
                 </div>
                 <div>
                   <h2 className="text-sm font-semibold text-foreground/90">AI Command Center</h2>
@@ -1159,7 +1174,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                     onSubmit={(e) => { e.preventDefault(); if (input.trim() && !profileSending) { handleProfileSend(input.trim()); setInput(""); } }}
                     className="p-3 border-t border-border/20"
                   >
-                    <div className="flex items-center gap-2 bg-muted/20 border border-border/30 rounded-xl px-3 py-2">
+                    <div className="flex items-center gap-2 bg-gradient-to-r from-muted/30 to-muted/10 border border-border/40 rounded-xl px-3 py-2 focus-within:border-[hsl(var(--kf-accent1))]/30 focus-within:shadow-[0_0_12px_hsl(var(--kf-accent1)/0.06)] transition-all">
                       <input
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -1378,7 +1393,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                                   className={`flex items-center gap-2 p-2.5 rounded-xl text-xs text-left transition-all ${
                                     sevConfig
                                       ? `${sevConfig.bg} border ${sevConfig.border} ${sevConfig.color} hover:opacity-80`
-                                      : "text-muted-foreground/70 bg-muted/20 border border-border/30 hover:bg-muted/30 hover:text-foreground/80"
+                                      : "text-muted-foreground/70 bg-gradient-to-r from-muted/20 to-muted/10 border border-border/30 hover:border-orange-500/20 hover:bg-gradient-to-r hover:from-orange-500/5 hover:to-teal-500/5 hover:text-foreground/80 transition-all shadow-sm hover:shadow-md"
                                   }`}
                                 >
                                   {sevConfig ? (
@@ -1399,15 +1414,30 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                       <div key={i} className="space-y-2">
                         <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                           <div
-                            className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                            className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed relative overflow-hidden ${
                               msg.role === "user"
-                                ? "bg-[hsl(var(--kf-accent1))] text-white rounded-br-md"
-                                : "bg-muted/30 text-foreground/85 border border-border/20 rounded-bl-md"
+                                ? "bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent1)/0.9)] text-white rounded-br-md shadow-lg shadow-orange-500/10"
+                                : "bg-card/80 text-foreground/85 border border-border/30 rounded-bl-md"
                             }`}
                           >
                             {msg.content}
                           </div>
                         </div>
+
+                        {msg.role === "assistant" && msg.guide && (
+                          <div className="flex justify-start">
+                            <button
+                              onClick={() => {
+                                guide.startGuide(msg.guide!.steps);
+                                onClose();
+                              }}
+                              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))] text-xs font-medium hover:bg-[hsl(var(--kf-accent1))]/20 transition-all"
+                            >
+                              <Footprints className="w-3.5 h-3.5" />
+                              Walk me through: {msg.guide.title}
+                            </button>
+                          </div>
+                        )}
 
                         {msg.plan && msg.plan.length > 0 && (
                           <div className="ml-2 space-y-2">
@@ -1537,11 +1567,11 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                   {stats ? (
                     <>
                       <div className="grid grid-cols-3 gap-2">
-                        <div className="p-2.5 rounded-xl border border-border/30 bg-card/50">
+                        <div className="p-2.5 rounded-xl border border-border/30 bg-gradient-to-br from-card/80 to-muted/20 shadow-sm">
                           <div className="text-[9px] text-muted-foreground/50 uppercase tracking-wider mb-0.5">Actions (7d)</div>
                           <div className="text-lg font-bold text-foreground/90">{stats.totalActions}</div>
                         </div>
-                        <div className="p-2.5 rounded-xl border border-border/30 bg-card/50">
+                        <div className="p-2.5 rounded-xl border border-border/30 bg-gradient-to-br from-card/80 to-muted/20 shadow-sm">
                           <div className="text-[9px] text-muted-foreground/50 uppercase tracking-wider mb-0.5">Success</div>
                           <div className={`text-lg font-bold ${stats.successRate >= 90 ? "text-emerald-400" : stats.successRate >= 70 ? "text-amber-400" : "text-red-400"}`}>
                             {stats.successRate}%

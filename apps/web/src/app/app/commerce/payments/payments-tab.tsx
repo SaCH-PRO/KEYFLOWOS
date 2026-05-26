@@ -14,24 +14,13 @@ import {
   ChevronDown,
   Search,
   X,
-  Settings,
-  ArrowRight,
-  RefreshCw,
-  Mail,
-  Receipt,
-  Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { Invoice, Contact, BusinessPayment, PaymentFilters } from "@/lib/client";
+import type { Invoice, Contact } from "@/lib/client";
 import {
   markInvoicePaid,
   updateInvoiceStatus,
-  fetchBusinessPayments,
-  retryPayment as retryPaymentApi,
-  refundPayment as refundPaymentApi,
-  resendReceipt as resendReceiptApi,
 } from "@/lib/client";
-import { moduleEvents } from "@/lib/module-events";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import { getStatusBadge } from "../components/commerce-types";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -57,9 +46,7 @@ interface PaymentsTabProps {
   invoices: Invoice[];
   currency: string;
   businessId: string | null;
-  contacts: Contact[];
   setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
-  onNavigateToInvoices?: () => void;
 }
 
 type PaymentView = "all" | "received" | "pending" | "overdue";
@@ -75,9 +62,7 @@ export default function PaymentsTab({
   invoices,
   currency,
   businessId,
-  contacts,
   setInvoices,
-  onNavigateToInvoices,
 }: PaymentsTabProps) {
   const [activeView, setActiveView] = useState<PaymentView>("all");
   const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
@@ -86,173 +71,7 @@ export default function PaymentsTab({
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Real Payment-row activity (separate from the invoice-based summary above).
-  const [payments, setPayments] = useState<BusinessPayment[]>([]);
-  const [paymentsLoading, setPaymentsLoading] = useState(false);
-  const [paymentFilters, setPaymentFilters] = useState<PaymentFilters>({});
-  const [paymentSelected, setPaymentSelected] = useState<Set<string>>(new Set());
 
-  const reloadPayments = useCallback(async () => {
-    if (!businessId) return;
-    setPaymentsLoading(true);
-    const res = await fetchBusinessPayments(businessId, paymentFilters);
-    setPaymentsLoading(false);
-    if (res.data) setPayments(res.data);
-  }, [businessId, paymentFilters]);
-
-  useEffect(() => {
-    reloadPayments();
-  }, [reloadPayments]);
-
-  // Surface failed-payment events into the canonical taxonomy for #427 listeners.
-  useEffect(() => {
-    for (const p of payments) {
-      if (p.status === "FAILED") {
-        moduleEvents.emit("commerce:payment_failed", "commerce", {
-          paymentId: p.id,
-          invoiceId: p.invoiceId,
-          amount: p.amount,
-          provider: p.provider,
-        });
-      }
-    }
-  }, [payments]);
-
-  const handleRetryPayment = useCallback(async (paymentId: string) => {
-    if (!businessId) return;
-    setActionLoading((prev) => ({ ...prev, [paymentId]: "retry" }));
-    try {
-      const res = await retryPaymentApi(businessId, paymentId);
-      if (res.data) {
-        setPayments((prev) => prev.map((p) => (p.id === paymentId ? { ...p, status: res.data!.status } : p)));
-        moduleEvents.emit("commerce:payment_retry_initiated", "commerce", { paymentId });
-        toast.success("Payment marked for retry");
-      } else {
-        toast.error(res.error || "Retry failed");
-      }
-    } finally {
-      setActionLoading((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
-    }
-  }, [businessId]);
-
-  const handleRefundPayment = useCallback(async (paymentId: string) => {
-    if (!businessId) return;
-    const reason = window.prompt("Reason for refund (optional)?") ?? undefined;
-    setActionLoading((prev) => ({ ...prev, [paymentId]: "refund" }));
-    try {
-      const res = await refundPaymentApi(businessId, paymentId, reason || undefined);
-      if (res.data) {
-        setPayments((prev) => prev.map((p) => (p.id === paymentId ? { ...p, status: res.data!.status } : p)));
-        moduleEvents.emit("commerce:payment_refunded", "commerce", { paymentId, reason });
-        toast.success("Payment refunded");
-      } else {
-        toast.error(res.error || "Refund failed");
-      }
-    } finally {
-      setActionLoading((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
-    }
-  }, [businessId]);
-
-  const handleResendReceipt = useCallback(async (invoiceId: string, paymentId: string) => {
-    if (!businessId || !invoiceId) {
-      toast.error("Receipt requires an invoice");
-      return;
-    }
-    setActionLoading((prev) => ({ ...prev, [paymentId]: "receipt" }));
-    try {
-      const res = await resendReceiptApi(businessId, invoiceId);
-      if (res.data) {
-        setPayments((prev) =>
-          prev.map((p) =>
-            p.invoiceId === invoiceId && p.invoice
-              ? { ...p, invoice: { ...p.invoice, receiptSentAt: res.data!.receiptSentAt } }
-              : p,
-          ),
-        );
-        moduleEvents.emit("commerce:receipt_resent", "commerce", { invoiceId, paymentId });
-        toast.success("Receipt resent");
-      } else {
-        toast.error(res.error || "Failed to resend receipt");
-      }
-    } finally {
-      setActionLoading((prev) => { const n = { ...prev }; delete n[paymentId]; return n; });
-    }
-  }, [businessId]);
-
-  const handleNotifyFailedCustomer = useCallback(async (payment: BusinessPayment) => {
-    if (!businessId) return;
-    const contactEmail = payment.invoice?.contact?.email;
-    if (!contactEmail) {
-      toast.error("Customer has no email on file");
-      return;
-    }
-    // Mailto fallback so the user can compose immediately; canonical event still fires.
-    const subject = encodeURIComponent(`Payment issue on invoice ${payment.invoice?.invoiceNumber ?? ""}`);
-    const body = encodeURIComponent(
-      `Hi,\n\nWe noticed your recent payment of ${payment.currency} ${payment.amount} did not go through. Please try again at your convenience.\n\nThank you.`,
-    );
-    window.open(`mailto:${contactEmail}?subject=${subject}&body=${body}`, "_blank");
-    moduleEvents.emit("commerce:payment_failed", "commerce", {
-      paymentId: payment.id,
-      invoiceId: payment.invoiceId,
-      action: "notify_customer",
-    });
-  }, [businessId]);
-
-  const handlePaymentExportCsv = useCallback(() => {
-    const items = payments.filter((p) => paymentSelected.size === 0 || paymentSelected.has(p.id));
-    if (items.length === 0) {
-      toast.info("No payments to export");
-      return;
-    }
-    exportToCsv(
-      items.map((p) => ({
-        id: p.id,
-        invoice: p.invoice?.invoiceNumber ?? "",
-        contact: p.invoice?.contact ? `${p.invoice.contact.firstName ?? ""} ${p.invoice.contact.lastName ?? ""}`.trim() : "",
-        email: p.invoice?.contact?.email ?? "",
-        amount: p.amount,
-        currency: p.currency,
-        status: p.status,
-        method: p.method ?? "",
-        provider: p.provider,
-        reference: p.reference ?? "",
-        createdAt: p.createdAt,
-      })) as unknown as Record<string, unknown>[],
-      [
-        { key: "id", header: "Payment ID" },
-        { key: "invoice", header: "Invoice" },
-        { key: "contact", header: "Customer" },
-        { key: "email", header: "Email" },
-        { key: "amount", header: "Amount", format: (v) => Number(v).toFixed(2) },
-        { key: "currency", header: "Currency" },
-        { key: "status", header: "Status" },
-        { key: "method", header: "Method" },
-        { key: "provider", header: "Provider" },
-        { key: "reference", header: "Reference" },
-        { key: "createdAt", header: "Date", format: (v) => (v ? new Date(v as string).toISOString() : "") },
-      ],
-      `payment-activity-${new Date().toISOString().slice(0, 10)}`,
-    );
-    toast.success(`${items.length} payment(s) exported`);
-  }, [payments, paymentSelected]);
-
-  const filteredPayments = useMemo(() => {
-    if (!searchQuery.trim()) return payments;
-    const q = searchQuery.toLowerCase();
-    return payments.filter((p) => {
-      const contact = p.invoice?.contact;
-      const name = contact ? `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.toLowerCase() : "";
-      return (
-        (p.invoice?.invoiceNumber ?? "").toLowerCase().includes(q) ||
-        (p.reference ?? "").toLowerCase().includes(q) ||
-        (p.providerPaymentId ?? "").toLowerCase().includes(q) ||
-        name.includes(q) ||
-        (contact?.email ?? "").toLowerCase().includes(q) ||
-        String(p.amount).includes(q)
-      );
-    });
-  }, [payments, searchQuery]);
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -495,62 +314,24 @@ export default function PaymentsTab({
       animate={{ opacity: 1, y: 0 }}
       className="space-y-4"
     >
-      <div className="flex items-start gap-2 rounded-xl border border-border/30 bg-muted/5 px-3 py-2">
-        <DollarSign className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-400" />
-        <p className="text-[11px] text-muted-foreground">
-          <span className="font-semibold text-foreground">Collections</span> — payments from <span className="font-medium text-foreground">your customers</span> on invoices, quotes, and your storefront.
-          Your own KeyflowOS plan billing lives in <span className="font-medium text-foreground">Settings → Business → Billing</span>.
-        </p>
-      </div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
-          <div className="flex items-center gap-1.5 mb-1">
-            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">
-              Received
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        {[
+          { label: "Received", value: stats.totalReceived, count: stats.paidCount, color: "text-emerald-400", icon: CheckCircle2 },
+          { label: "This Month", value: stats.receivedThisMonth, count: null, color: "text-blue-400", icon: TrendingUp },
+          { label: "Pending", value: stats.totalPending, count: stats.pendingCount, color: "text-amber-400", icon: Clock },
+          { label: "Overdue", value: stats.totalOverdue, count: stats.overdueCount, color: "text-red-400", icon: AlertTriangle },
+        ].map((item) => (
+          <div key={item.label} className="flex items-center gap-1.5">
+            <item.icon className={`w-3.5 h-3.5 ${item.color}`} />
+            <span className={`text-sm font-bold ${item.color}`}>
+              {item.value > 0 ? formatCurrencyCompact(item.value, currency) : "—"}
             </span>
+            <span className="text-[10px] text-muted-foreground/50">{item.label}</span>
+            {item.count != null && item.count > 0 && (
+              <span className="text-[10px] text-muted-foreground/40">· {item.count}</span>
+            )}
           </div>
-          <p className="text-lg font-bold text-emerald-400">
-            {formatCurrencyCompact(stats.totalReceived, currency)}
-          </p>
-          <p className="text-[10px] text-muted-foreground/50">{stats.paidCount} paid</p>
-        </div>
-        <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
-          <div className="flex items-center gap-1.5 mb-1">
-            <TrendingUp className="w-3 h-3 text-blue-400" />
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">
-              This Month
-            </span>
-          </div>
-          <p className="text-lg font-bold text-blue-400">
-            {formatCurrencyCompact(stats.receivedThisMonth, currency)}
-          </p>
-          <p className="text-[10px] text-muted-foreground/50">collected</p>
-        </div>
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Clock className="w-3 h-3 text-amber-400" />
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">
-              Pending
-            </span>
-          </div>
-          <p className="text-lg font-bold text-amber-400">
-            {formatCurrencyCompact(stats.totalPending, currency)}
-          </p>
-          <p className="text-[10px] text-muted-foreground/50">{stats.pendingCount} awaiting</p>
-        </div>
-        <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
-          <div className="flex items-center gap-1.5 mb-1">
-            <AlertTriangle className="w-3 h-3 text-red-400" />
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">
-              Overdue
-            </span>
-          </div>
-          <p className="text-lg font-bold text-red-400">
-            {formatCurrencyCompact(stats.totalOverdue, currency)}
-          </p>
-          <p className="text-[10px] text-muted-foreground/50">{stats.overdueCount} overdue</p>
-        </div>
+        ))}
       </div>
 
       <CashFlowSummary
@@ -717,29 +498,21 @@ export default function PaymentsTab({
           <DateRangeFilter value={dateRange} onChange={setDateRange} />
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5 mb-3">
+        <div className="flex items-stretch gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
           {VIEW_FILTERS.map((f) => {
             const count = viewCounts[f.key];
             return (
               <button
                 key={f.key}
                 onClick={() => setActiveView(f.key)}
-                className={`px-2.5 py-1.5 text-[11px] rounded-lg transition-all inline-flex items-center gap-1.5 font-medium whitespace-nowrap shrink-0 ${
+                className={`flex flex-col items-center gap-0.5 min-w-[72px] sm:min-w-[88px] py-2 px-2 rounded-xl border transition-all ${
                   activeView === f.key
-                    ? "bg-white/[0.08] border border-border/60 text-foreground"
-                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05] hover:text-muted-foreground"
+                    ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10"
+                    : "border-border/30 bg-card hover:border-border/50"
                 }`}
               >
-                {f.label}
-                <span
-                  className={`text-[10px] font-mono px-1 py-0.5 rounded ${
-                    activeView === f.key
-                      ? "bg-white/10"
-                      : "bg-white/[0.04] text-muted-foreground/50"
-                  }`}
-                >
-                  {count}
-                </span>
+                <span className="text-sm font-bold">{count}</span>
+                <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">{f.label}</span>
               </button>
             );
           })}
@@ -762,8 +535,7 @@ export default function PaymentsTab({
                 ? "All payments are current — great job!"
                 : "Payment activity will appear here as invoices are created and paid."
             }
-            actionLabel={activeView === "all" ? "Create Invoice" : undefined}
-            onAction={activeView === "all" ? onNavigateToInvoices : undefined}
+
             tip="Payments are tracked automatically from your invoices."
           />
         ) : (
@@ -897,245 +669,7 @@ export default function PaymentsTab({
         entityLabel="payments"
       />
 
-      <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4" data-testid="payment-activity">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2">
-            <Receipt className="w-3.5 h-3.5 text-muted-foreground/60" />
-            <span className="text-xs font-semibold">Payment Activity</span>
-            <span className="text-[10px] text-muted-foreground/50">{filteredPayments.length} rows</span>
-          </div>
-          <button
-            onClick={reloadPayments}
-            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/30 text-muted-foreground/70"
-            title="Refresh"
-            aria-label="Refresh payment activity"
-          >
-            {paymentsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-          </button>
-        </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
-          <select
-            data-testid="payment-filter-status"
-            value={paymentFilters.status ?? ""}
-            onChange={(e) => setPaymentFilters((f) => ({ ...f, status: e.target.value || undefined }))}
-            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
-          >
-            <option value="">All statuses</option>
-            <option value="SUCCESSFUL">Successful</option>
-            <option value="PENDING">Pending</option>
-            <option value="FAILED">Failed</option>
-            <option value="REFUNDED">Refunded</option>
-          </select>
-          <select
-            data-testid="payment-filter-method"
-            value={paymentFilters.method ?? ""}
-            onChange={(e) => setPaymentFilters((f) => ({ ...f, method: e.target.value || undefined }))}
-            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
-          >
-            <option value="">All methods</option>
-            <option value="CARD">Card</option>
-            <option value="BANK_TRANSFER">Bank transfer</option>
-            <option value="CASH">Cash</option>
-            <option value="OTHER">Other</option>
-          </select>
-          <input
-            data-testid="payment-filter-provider"
-            placeholder="Provider"
-            value={paymentFilters.provider ?? ""}
-            onChange={(e) => setPaymentFilters((f) => ({ ...f, provider: e.target.value || undefined }))}
-            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
-          />
-          <select
-            data-testid="payment-filter-contact"
-            value={paymentFilters.contactId ?? ""}
-            onChange={(e) => setPaymentFilters((f) => ({ ...f, contactId: e.target.value || undefined }))}
-            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
-          >
-            <option value="">All customers</option>
-            {contacts.map((c) => (
-              <option key={c.id} value={c.id}>
-                {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.email || c.id.slice(0, 8)}
-              </option>
-            ))}
-          </select>
-          <input
-            data-testid="payment-filter-min-amount"
-            type="number"
-            placeholder="Min amount"
-            value={paymentFilters.minAmount ?? ""}
-            onChange={(e) => setPaymentFilters((f) => ({ ...f, minAmount: e.target.value ? Number(e.target.value) : undefined }))}
-            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
-          />
-          <input
-            data-testid="payment-filter-max-amount"
-            type="number"
-            placeholder="Max amount"
-            value={paymentFilters.maxAmount ?? ""}
-            onChange={(e) => setPaymentFilters((f) => ({ ...f, maxAmount: e.target.value ? Number(e.target.value) : undefined }))}
-            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
-          />
-          <input
-            data-testid="payment-filter-from"
-            type="date"
-            value={paymentFilters.from ?? ""}
-            onChange={(e) => setPaymentFilters((f) => ({ ...f, from: e.target.value || undefined }))}
-            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
-          />
-          <input
-            data-testid="payment-filter-to"
-            type="date"
-            value={paymentFilters.to ?? ""}
-            onChange={(e) => setPaymentFilters((f) => ({ ...f, to: e.target.value || undefined }))}
-            className="px-2 py-1.5 text-xs bg-white/[0.03] border border-border/40 rounded-lg"
-          />
-        </div>
-
-        {filteredPayments.length === 0 ? (
-          <p className="text-xs text-muted-foreground/60 px-1 py-6 text-center">
-            {paymentsLoading ? "Loading payments…" : "No payment activity yet."}
-          </p>
-        ) : (
-          <div className="space-y-1">
-            {filteredPayments.map((p) => {
-              const loading = actionLoading[p.id];
-              const isFailed = p.status === "FAILED";
-              const isSuccess = p.status === "SUCCESSFUL";
-              const isRefunded = p.status === "REFUNDED";
-              const contactName = p.invoice?.contact
-                ? `${p.invoice.contact.firstName ?? ""} ${p.invoice.contact.lastName ?? ""}`.trim() || "—"
-                : "—";
-              return (
-                <div
-                  key={p.id}
-                  data-testid={`payment-row-${p.id}`}
-                  className={`flex items-center gap-2 p-2.5 rounded-lg transition-colors ${
-                    isFailed ? "bg-red-500/[0.05] hover:bg-red-500/[0.08]" : isSuccess ? "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.06]" : isRefunded ? "bg-orange-500/[0.05]" : "bg-white/[0.02] hover:bg-white/[0.04]"
-                  } ${paymentSelected.has(p.id) ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
-                >
-                  <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={paymentSelected.has(p.id)}
-                      onChange={() => setPaymentSelected((prev) => {
-                        const n = new Set(prev);
-                        if (n.has(p.id)) n.delete(p.id); else n.add(p.id);
-                        return n;
-                      })}
-                      className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
-                    />
-                  </label>
-                  <div
-                    className={`p-1.5 rounded-lg shrink-0 ${
-                      isFailed ? "bg-red-500/15" : isSuccess ? "bg-emerald-500/15" : isRefunded ? "bg-orange-500/15" : "bg-amber-500/15"
-                    }`}
-                  >
-                    <CreditCard className={`w-3.5 h-3.5 ${isFailed ? "text-red-400" : isSuccess ? "text-emerald-400" : isRefunded ? "text-orange-400" : "text-amber-400"}`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs font-medium truncate">
-                        {p.invoice?.invoiceNumber ?? p.providerPaymentId.slice(0, 12)}
-                      </span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
-                        isSuccess ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40"
-                        : isFailed ? "bg-red-500/15 text-red-300 border-red-500/40"
-                        : isRefunded ? "bg-orange-500/15 text-orange-300 border-orange-500/40"
-                        : "bg-amber-500/15 text-amber-300 border-amber-500/40"
-                      }`}>{p.status}</span>
-                      <span className="text-[10px] text-muted-foreground/60">{p.provider}{p.method ? ` · ${p.method}` : ""}</span>
-                      {p.invoice?.receiptSentAt && (
-                        <span className="text-[10px] text-muted-foreground/50">receipt sent</span>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-muted-foreground/60 block mt-0.5 truncate">
-                      {contactName} · {new Date(p.createdAt).toLocaleString()}
-                      {(p.reference || p.providerPaymentId) && (
-                        <span className="ml-1 text-muted-foreground/40">
-                          · ref {p.reference || p.providerPaymentId.slice(0, 12)}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <span className={`text-xs font-bold shrink-0 ${isRefunded ? "line-through text-orange-300" : ""}`}>
-                    {formatCurrency(Number(p.amount), p.currency)}
-                  </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {isFailed && (
-                      <>
-                        <button
-                          onClick={() => handleRetryPayment(p.id)}
-                          disabled={!!loading}
-                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 disabled:opacity-50"
-                          title="Retry payment"
-                          data-testid={`payment-retry-${p.id}`}
-                        >
-                          {loading === "retry" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                        </button>
-                        <button
-                          onClick={() => handleNotifyFailedCustomer(p)}
-                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
-                          title="Notify customer"
-                          data-testid={`payment-notify-${p.id}`}
-                        >
-                          <Mail className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
-                    {isSuccess && p.invoiceId && (
-                      <>
-                        <button
-                          onClick={() => handleResendReceipt(p.invoiceId, p.id)}
-                          disabled={!!loading}
-                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50"
-                          title="Resend receipt"
-                          data-testid={`payment-receipt-${p.id}`}
-                        >
-                          {loading === "receipt" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Receipt className="w-3.5 h-3.5" />}
-                        </button>
-                        <button
-                          onClick={() => handleRefundPayment(p.id)}
-                          disabled={!!loading}
-                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 disabled:opacity-50"
-                          title="Mark refunded"
-                          data-testid={`payment-refund-${p.id}`}
-                        >
-                          {loading === "refund" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <BulkActionBar
-          selectedCount={paymentSelected.size}
-          totalCount={filteredPayments.length}
-          onSelectAll={() => setPaymentSelected(new Set(filteredPayments.map((p) => p.id)))}
-          onClearSelection={() => setPaymentSelected(new Set())}
-          onExportCsv={handlePaymentExportCsv}
-          entityLabel="payment-rows"
-        />
-      </div>
-
-      <button
-        onClick={() => { window.location.href = "/app/settings/business?tab=payments"; }}
-        className="flex items-center justify-between p-3 rounded-xl border border-border/40 bg-muted/5 hover:bg-muted/10 transition-colors group w-full text-left"
-      >
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-lg bg-muted/20">
-            <Settings className="w-3.5 h-3.5 text-muted-foreground" />
-          </div>
-          <div>
-            <p className="text-xs font-medium">Payment Settings</p>
-            <p className="text-[10px] text-muted-foreground/60">Configure payment gateways, methods & preferences</p>
-          </div>
-        </div>
-        <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
-      </button>
     </motion.div>
   );
 }

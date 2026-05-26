@@ -4,6 +4,7 @@ import { Response } from 'express';
 import { CommerceService } from './commerce.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
+import { PaymentEvidenceService } from './payment-evidence.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -38,6 +39,7 @@ export class CommerceController {
     @Inject(CommerceVisionService) private readonly vision: CommerceVisionService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(StoreReadinessService) private readonly storeReadiness: StoreReadinessService,
+    @Inject(PaymentEvidenceService) private readonly paymentEvidence: PaymentEvidenceService,
   ) {}
 
   private async verifyBusinessAccess(userId: string, businessId: string) {
@@ -1169,9 +1171,121 @@ export class CommerceController {
       method: string;
       reference?: string;
       notes?: string;
+      evidenceUrl?: string;
+      evidenceMimeType?: string;
     },
   ) {
     return this.commerce.recordPayment(invoiceId, businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/invoices/:invoiceId/payments/from-evidence')
+  recordPaymentFromEvidence(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: {
+      evidenceUrl: string;
+      evidenceMimeType: string;
+      filename: string;
+      source: 'drive' | 'upload';
+      driveFileId?: string;
+    },
+  ) {
+    return this.paymentEvidence.processEvidence({
+      businessId,
+      invoiceId,
+      ...body,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/payments/extract-evidence')
+  async extractPaymentEvidence(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      evidenceUrl: string;
+      evidenceMimeType: string;
+      filename: string;
+      source: 'drive' | 'upload';
+      driveFileId?: string;
+    },
+  ) {
+    const { extracted, raw } = await this.paymentEvidence.extractEvidence({
+      businessId,
+      ...body,
+    });
+
+    // Fetch unpaid invoices as candidates
+    const invoices = await this.prisma.client.invoice.findMany({
+      where: {
+        businessId,
+        status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] },
+      },
+      include: {
+        contact: true,
+        payments: true,
+      },
+      orderBy: { dueDate: 'asc' },
+      take: 50,
+    });
+
+    // Compute remaining balance for each invoice
+    const candidates = invoices.map((inv) => {
+      const paid = (inv.payments ?? [])
+        .filter((p: any) => p.status === 'SUCCESSFUL')
+        .reduce((s: number, p: any) => s + (p.amount ?? 0), 0);
+      const remaining = Math.max(0, Number(inv.total) - paid);
+      return {
+        id: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        total: Number(inv.total),
+        remaining,
+        currency: inv.currency,
+        status: inv.status,
+        contactName: inv.contact
+          ? `${inv.contact.firstName ?? ''} ${inv.contact.lastName ?? ''}`.trim() || 'Unknown'
+          : 'Unknown',
+        dueDate: inv.dueDate,
+      };
+    });
+
+    // Sort candidates by match score (amount proximity + name match)
+    if (extracted) {
+      candidates.sort((a, b) => {
+        const scoreA = this.candidateScore(a, extracted);
+        const scoreB = this.candidateScore(b, extracted);
+        return scoreB - scoreA;
+      });
+    }
+
+    return {
+      extracted,
+      candidates: candidates.slice(0, 10),
+      raw,
+    };
+  }
+
+  private candidateScore(
+    candidate: { remaining: number; contactName: string },
+    extracted: { amount: number; payer?: string },
+  ): number {
+    let score = 0;
+    // Amount proximity: exact match = 100, within 10% = 50, within 50% = 20
+    const amtDiff = Math.abs(candidate.remaining - extracted.amount);
+    if (amtDiff < 0.01) score += 100;
+    else if (amtDiff / Math.max(candidate.remaining, extracted.amount) < 0.1) score += 50;
+    else if (amtDiff / Math.max(candidate.remaining, extracted.amount) < 0.5) score += 20;
+
+    // Name match
+    if (extracted.payer && candidate.contactName !== 'Unknown') {
+      const payerLower = extracted.payer.toLowerCase();
+      const nameLower = candidate.contactName.toLowerCase();
+      if (nameLower.includes(payerLower) || payerLower.includes(nameLower)) score += 30;
+    }
+
+    return score;
   }
 
   // ========== CAMPAIGN REVENUE ==========

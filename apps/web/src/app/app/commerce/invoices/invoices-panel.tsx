@@ -28,6 +28,7 @@ import {
   DollarSign,
   CreditCard,
   Receipt,
+  Paperclip,
   Sparkles,
 } from "lucide-react";
 import nextDynamic from "next/dynamic";
@@ -69,10 +70,13 @@ import {
 } from "../components/commerce-types";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
+import { InvoiceDriveUploader, buildTemplateData } from "../components/invoice-drive-uploader";
 import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/standardized-cards";
 import { getInvoiceSmartCTA } from "../utils/smart-cta";
 import { useInvoiceForm } from "../hooks/use-invoice-form";
 import { useBusinessPreview } from "../hooks/use-business-preview";
+import { useBulkSelection } from "../hooks/use-bulk-selection";
+import { useLineItemHandlers } from "../hooks/use-line-item-handlers";
 import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../components/date-range-filter";
 import type { DateRange } from "../components/date-range-filter";
 import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
@@ -234,16 +238,7 @@ export default function InvoicesPanel({
   const [mobileSheetFor, setMobileSheetFor] = useState<Invoice | null>(null);
   const [timelineRefreshTick, setTimelineRefreshTick] = useState(0);
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  const toggleSelected = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const { selectedIds, toggleSelected, selectAll, clearSelection } = useBulkSelection();
 
   const handleBulkStatusChange = useCallback(async (status: string) => {
     if (!businessId || selectedIds.size === 0) return;
@@ -251,7 +246,7 @@ export default function InvoicesPanel({
     const { data, error } = await bulkUpdateInvoices(businessId, Array.from(selectedIds), action as "send" | "void" | "delete");
     if (data) {
       toast.success(`${data.updated} invoice(s) updated`);
-      setSelectedIds(new Set());
+      clearSelection();
       if (data.updated > 0) {
         const eligibleStatuses: Record<string, string[]> = {
           send: ["DRAFT"],
@@ -346,83 +341,10 @@ export default function InvoicesPanel({
     invoiceSearch,
   );
 
-  function addInvoiceItem() {
-    setInvoiceForm((f) => ({
-      ...f,
-      items: [...f.items, { id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
-    }));
-  }
-
-  function removeInvoiceItem(itemId: string) {
-    setInvoiceForm((f) => ({
-      ...f,
-      items: f.items.filter((item: InvoiceLineItem) => item.id !== itemId),
-    }));
-  }
-
-  function updateInvoiceItem(itemId: string, field: keyof InvoiceLineItem, value: string | boolean) {
-    setInvoiceForm((f) => ({
-      ...f,
-      items: f.items.map((item: InvoiceLineItem) =>
-        item.id === itemId ? { ...item, [field]: value } : item
-      ),
-    }));
-  }
-
-  function selectProductForItem(itemId: string, productId: string) {
-    if (productId === "__NEW__") {
-      setInvoiceForm((f) => ({
-        ...f,
-        items: f.items.map((item: InvoiceLineItem) =>
-          item.id === itemId
-            ? {
-                ...item,
-                productId: "__NEW__",
-                isNewItem: true,
-                newItemName: "",
-                newItemCategory: "SERVICE",
-                description: "",
-                unitPrice: "",
-                addToCatalog: false,
-              }
-            : item
-        ),
-      }));
-      return;
-    }
-    const product = products.find((p) => p.id === productId);
-    if (product) {
-      setInvoiceForm((f) => ({
-        ...f,
-        items: f.items.map((item: InvoiceLineItem) =>
-          item.id === itemId
-            ? {
-                ...item,
-                productId,
-                description: product.name,
-                unitPrice: String(product.price),
-                isNewItem: false,
-                addToCatalog: false,
-              }
-            : item
-        ),
-      }));
-    } else {
-      setInvoiceForm((f) => ({
-        ...f,
-        items: f.items.map((item: InvoiceLineItem) =>
-          item.id === itemId
-            ? {
-                ...item,
-                productId: "",
-                isNewItem: false,
-                addToCatalog: false,
-              }
-            : item
-        ),
-      }));
-    }
-  }
+  const { addItem: addInvoiceItem, removeItem: removeInvoiceItem, updateItem: updateInvoiceItem, selectProduct: selectProductForItem } = useLineItemHandlers(
+    (updater) => setInvoiceForm((f) => ({ ...f, items: updater(f.items) })),
+    products,
+  );
 
   // Builds the canonical public invoice URL via the server payment-link
   // endpoint so the same token works across email/WhatsApp/copy. Falls back
@@ -568,6 +490,10 @@ export default function InvoicesPanel({
         setShowInvoiceBuilder(false);
         toast.success("Invoice created");
         emitEvent("commerce:invoice_created", "commerce", { invoiceId: data.id });
+
+        // Queue Drive upload for the new invoice
+        const templateId = (businessData?.invoiceTemplate as string) || "classic";
+        setPendingDriveUpload({ invoiceId: data.id, templateId });
       }
     }
   }
@@ -826,6 +752,7 @@ export default function InvoicesPanel({
         onPaymentTermsChange={applyPaymentTerms}
         originLabel={crossModuleOriginLabel}
         originRoute={crossModuleOriginRoute}
+        businessId={businessId}
       />
 
       {invoiceError && (
@@ -976,7 +903,7 @@ export default function InvoicesPanel({
                   checked={filteredInvoices.length > 0 && filteredInvoices.every((i) => selectedIds.has(i.id))}
                   onChange={() => {
                     const allSelected = filteredInvoices.every((i) => selectedIds.has(i.id));
-                    setSelectedIds(allSelected ? new Set() : new Set(filteredInvoices.map((i) => i.id)));
+                    allSelected ? clearSelection() : selectAll(filteredInvoices.map((i) => i.id));
                   }}
                   className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
                   aria-label="Select all visible invoices"
@@ -1163,8 +1090,8 @@ export default function InvoicesPanel({
       <BulkActionBar
         selectedCount={selectedIds.size}
         totalCount={filteredInvoices.length}
-        onSelectAll={() => setSelectedIds(new Set(filteredInvoices.map((i) => i.id)))}
-        onClearSelection={() => setSelectedIds(new Set())}
+        onSelectAll={() => selectAll(filteredInvoices.map((i) => i.id))}
+        onClearSelection={clearSelection}
         onExportCsv={handleExportCsv}
         onBulkDelete={handleBulkDelete}
         statusOptions={[
@@ -1462,6 +1389,18 @@ export default function InvoicesPanel({
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[11px] font-medium">{formatAmount(p.amount, p.currency)}</span>
                         <span className="text-[10px] text-muted-foreground/40">{new Date(p.createdAt).toLocaleDateString()}</span>
+                        {p.evidenceUrl && (
+                          <a
+                            href={p.evidenceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="View payment evidence"
+                            className="text-[10px] text-amber-400 hover:underline flex items-center gap-0.5"
+                          >
+                            <Paperclip className="w-3 h-3" />
+                            Evidence
+                          </a>
+                        )}
                         {p.providerPaymentId && (
                           <a
                             href={`/app/payments?tab=transactions&tx=${encodeURIComponent(p.providerPaymentId)}`}
@@ -1518,6 +1457,47 @@ export default function InvoicesPanel({
           </div>
         </div>
       )}
+
+      {/* Upload created invoice to Google Drive */}
+      {pendingDriveUpload && businessData && (() => {
+        const inv = invoices.find((i) => i.id === pendingDriveUpload.invoiceId);
+        if (!inv) return null;
+        const templateData = buildTemplateData("invoice", {
+          id: inv.id,
+          number: inv.invoiceNumber ?? inv.id.slice(0, 8),
+          status: inv.status,
+          issueDate: inv.issueDate ?? new Date().toISOString().split("T")[0],
+          dueDate: inv.dueDate,
+          contact: inv.contact ?? null,
+          items: (inv.items ?? []).map((item) => ({
+            id: item.id,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            total: item.total,
+          })),
+          subtotal: inv.subtotal ?? 0,
+          taxRate: inv.taxRate ?? 0,
+          taxAmount: inv.taxAmount ?? 0,
+          discountType: inv.discountType,
+          discountValue: inv.discountValue,
+          discountAmount: inv.discountAmount ?? 0,
+          total: typeof inv.total === "string" ? parseFloat(inv.total) : (inv.total ?? 0),
+          currency: inv.currency,
+          notes: inv.notes,
+        }, businessData);
+        return (
+          <InvoiceDriveUploader
+            businessId={businessId ?? ""}
+            invoiceId={inv.id}
+            docType="invoice"
+            templateId={pendingDriveUpload.templateId as any}
+            templateData={templateData}
+            fileName={`Invoice-${inv.invoiceNumber ?? inv.id.slice(0, 8)}-${inv.contact?.lastName ?? "Client"}-${new Date().toISOString().split("T")[0]}`}
+            onComplete={() => setPendingDriveUpload(null)}
+          />
+        );
+      })()}
     </motion.div>
   );
 }

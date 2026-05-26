@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { parse } from 'csv-parse/sync';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -170,8 +170,8 @@ export function parseBankCsv(content: string): { rows: ParsedBankRow[]; errors: 
 @Injectable()
 export class BankImportService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly audit: FinanceAuditService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(FinanceAuditService) private readonly audit: FinanceAuditService,
   ) {}
 
   async importCsv(

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Target, Plus, TrendingUp, Calendar, Loader2, Zap, Trash2, RefreshCw } from "lucide-react";
+import { Target, Plus, TrendingUp, Calendar, Loader2, Zap, Trash2, RefreshCw, FolderKanban, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple, apiDelete } from "@/lib/api";
+import { fetchProjects } from "@/lib/client";
 
 interface Goal {
   id: string;
@@ -29,6 +30,13 @@ interface Goal {
   };
 }
 
+interface LinkedProject {
+  id: string;
+  name: string;
+  status: string;
+  tasks: Array<{ isCompleted: boolean }>;
+}
+
 const ROLE_COLORS: Record<string, string> = {
   sales: "bg-rose-500/10 text-rose-400 border-rose-500/20",
   finance: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
@@ -49,6 +57,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 export default function GoalsPage() {
   const businessId = getStoredBusinessId();
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [projects, setProjects] = useState<LinkedProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   // Auto-map category to role so users don't have to choose
@@ -75,9 +84,14 @@ export default function GoalsPage() {
 
   const load = useCallback(async () => {
     if (!businessId) return;
+    setLoading(true);
     try {
-      const res = await apiGet<Goal[]>(`/ai/businesses/${businessId}/goals`);
-      setGoals(Array.isArray(res.data) ? res.data : []);
+      const [goalsRes, projectsRes] = await Promise.all([
+        apiGet<Goal[]>(`/ai/businesses/${businessId}/goals`),
+        fetchProjects(businessId),
+      ]);
+      setGoals(Array.isArray(goalsRes.data) ? goalsRes.data : []);
+      setProjects(Array.isArray(projectsRes.data) ? projectsRes.data : []);
     } catch {
       toast.error("Failed to load goals");
     } finally {
@@ -282,6 +296,39 @@ export default function GoalsPage() {
                   </div>
                   <h3 className="text-sm font-semibold text-foreground/80">{goal.title}</h3>
                   {goal.description && <p className="text-xs text-muted-foreground/50 mt-0.5">{goal.description}</p>}
+
+                  {/* Linked Projects */}
+                  {(() => {
+                    const linked = projects.filter((p) => (p as any).goalId === goal.id);
+                    if (linked.length === 0) return null;
+                    const totalTasks = linked.reduce((sum, p) => sum + p.tasks.length, 0);
+                    const completedTasks = linked.reduce((sum, p) => sum + p.tasks.filter((t) => t.isCompleted).length, 0);
+                    const pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+                    return (
+                      <div className="mt-2 flex items-center gap-2">
+                        <FolderKanban className="w-3 h-3 text-muted-foreground/40" />
+                        <span className="text-[10px] text-muted-foreground/50">
+                          {linked.length} project{linked.length > 1 ? "s" : ""} · {completedTasks}/{totalTasks} tasks
+                        </span>
+                        <div className="w-16 h-1.5 rounded-full bg-muted/30 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-emerald-400/60"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Create Project from Goal */}
+                  <div className="mt-2">
+                    <button
+                      onClick={() => window.location.href = `/app/projects?tab=plans`}
+                      className="text-[10px] text-[hsl(var(--kf-accent1))] hover:underline flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" /> Create project plan from this goal
+                    </button>
+                  </div>
 
                   {/* Progress Bar */}
                   {goal.progress && (

@@ -48,6 +48,7 @@ export function useExpensesData() {
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [filterCategory, setFilterCategory] = useState("");
   const [filterPayment, setFilterPayment] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -61,7 +62,7 @@ export function useExpensesData() {
   }, [searchQuery]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
-  useEffect(() => { setPage(1); }, [period, filterCategory, filterPayment, debouncedSearch]);
+  useEffect(() => { setPage(1); }, [period, filterCategory, filterPayment, filterStatus, debouncedSearch]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -94,7 +95,7 @@ export function useExpensesData() {
     try {
       const useCustom = period === "custom" && customStart && customEnd;
       const [expRes, catRes, sumRes, venRes, budRes, margRes, recRes] = await Promise.all([
-        fetchExpenses(businessId, { search: debouncedSearch || undefined, categoryId: filterCategory || undefined, paymentMethod: filterPayment || undefined, period: useCustom ? undefined : period, startDate: useCustom ? customStart : undefined, endDate: useCustom ? customEnd : undefined, page, limit: pageSize }),
+        fetchExpenses(businessId, { search: debouncedSearch || undefined, categoryId: filterCategory || undefined, paymentMethod: filterPayment || undefined, status: filterStatus || undefined, period: useCustom ? undefined : period, startDate: useCustom ? customStart : undefined, endDate: useCustom ? customEnd : undefined, page, limit: pageSize }),
         fetchExpenseCategories(businessId),
         fetchExpenseSummary(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchVendorAnalytics(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
@@ -111,7 +112,7 @@ export function useExpensesData() {
       if (recRes.data) setRecurringCandidates(recRes.data.candidates);
     } catch {}
     setLoading(false);
-  }, [businessId, period, debouncedSearch, filterCategory, filterPayment, customStart, customEnd, page, pageSize]);
+  }, [businessId, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
@@ -125,7 +126,7 @@ export function useExpensesData() {
     projects, services, contacts,
     period, setPeriod, customStart, setCustomStart, customEnd, setCustomEnd,
     searchQuery, setSearchQuery,
-    filterCategory, setFilterCategory, filterPayment, setFilterPayment,
+    filterCategory, setFilterCategory, filterPayment, setFilterPayment, filterStatus, setFilterStatus,
     page, setPage, pageSize, setPageSize,
     overBudgetCount, nearAlertCount,
   };

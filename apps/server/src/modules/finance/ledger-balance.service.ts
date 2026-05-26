@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -18,7 +18,7 @@ const ZERO = new D(0);
 
 @Injectable()
 export class LedgerBalanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   /** Net balance of one ChartOfAccount, optionally as-of a date. */
   async getAccountBalance(accountId: string, asOf?: Date): Promise<Prisma.Decimal> {

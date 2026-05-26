@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -109,7 +109,7 @@ export function validatePosting(input: PostingInput): void {
  */
 @Injectable()
 export class PostingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async post(input: PostingInput, txClient?: Prisma.TransactionClient): Promise<PostingResult> {
     validatePosting(input);

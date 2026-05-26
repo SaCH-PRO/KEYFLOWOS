@@ -31,6 +31,7 @@ import { QuoteNotificationsListener } from './quote-notifications.listener';
 import { InvoiceReceiptListener } from './invoice-receipt.listener';
 import { RevenueActionService } from './revenue-action.service';
 import { RevenueActionController } from './revenue-action.controller';
+import { PaymentEvidenceService } from './payment-evidence.service';
 import { RevenueReportingService } from './revenue-reporting.service';
 import { RevenueReportingController } from './revenue-reporting.controller';
 import { RevenueReportingRollupScheduler } from './revenue-reporting-rollup.scheduler';
@@ -99,6 +100,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     QuoteNotificationsListener,
     InvoiceReceiptListener,
     RevenueActionService,
+    PaymentEvidenceService,
     RevenueReportingService,
     RevenueReportingRollupScheduler,
     RevenueForecastService,

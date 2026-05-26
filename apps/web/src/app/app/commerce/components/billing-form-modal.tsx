@@ -1,34 +1,36 @@
 "use client";
 
 import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  FileText,
   CreditCard,
-  User,
-  Calendar,
   ChevronDown,
-  Plus,
-  Minus,
-  MessageSquare,
-  Percent,
-  Tag,
   Loader2,
   Receipt,
+  Eye,
+  X,
+  Monitor,
+  Smartphone,
+  Printer,
+  Check,
 } from "lucide-react";
 import { SideSheet } from "./side-sheet";
-import { ContactSelect } from "@/components/contacts";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import type { Contact, Product } from "@/lib/client";
-import {
-  InvoiceLineItem,
-  PAYMENT_TERMS,
-  CATEGORIES,
-} from "./commerce-types";
+import { InvoiceLineItem } from "./commerce-types";
 import { formatAmount } from "../utils/commerce-utils";
 import { fetchDocumentTemplates, setDocumentTemplate } from "@/lib/client";
 import { toast } from "sonner";
+import { FormDetailsSection } from "./form-sections/form-details-section";
+import { FormLineItemsSection } from "./form-sections/form-line-items-section";
+import { FormTaxDiscountSection } from "./form-sections/form-tax-discount-section";
+import { FormNotesSection } from "./form-sections/form-notes-section";
+import { FormTemplateSection } from "./form-sections/form-template-section";
+import { useBusinessPreview } from "../hooks/use-business-preview";
+import { InvoiceTemplateRenderer } from "./invoice-templates/template-renderer";
+import type { TemplateId, InvoiceTemplateData } from "./invoice-templates/template-types";
+import { TEMPLATE_META } from "./invoice-templates/template-types";
 
 type DocType = "invoice" | "quote";
 
@@ -64,6 +66,7 @@ interface BillingFormModalProps {
   originLabel?: string | null;
   originRoute?: string | null;
   onReturn?: () => void;
+  businessId?: string | null;
 }
 
 const THEME = {
@@ -85,7 +88,7 @@ const THEME = {
   },
 };
 
-function SectionHeader({ label, icon: Icon, open, onToggle, accentColor }: {
+export function SectionHeader({ label, icon: Icon, open, onToggle, accentColor }: {
   label: string;
   icon: React.ElementType;
   open: boolean;
@@ -137,9 +140,11 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   originLabel,
   originRoute,
   onReturn,
+  businessId,
 }: BillingFormModalProps) {
   const theme = THEME[docType];
   const ThemeIcon = theme.icon;
+  const { businessData } = useBusinessPreview();
 
   const [sections, setSections] = useState({
     details: true,
@@ -151,21 +156,29 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; type: string; isDefault: boolean }> | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewTemplate, setPreviewTemplate] = useState<TemplateId>("classic");
+  const [previewView, setPreviewView] = useState<"desktop" | "mobile" | "print">("desktop");
   const toggle = (key: keyof typeof sections) =>
     setSections((s) => ({ ...s, [key]: !s[key] }));
 
   useEffect(() => {
-    if (!open) return;
-    fetchDocumentTemplates().then((res) => {
+    if (!open) {
+      setShowPreview(false);
+      return;
+    }
+    fetchDocumentTemplates(businessId ?? undefined).then((res) => {
       if (res.data) {
         const type = docType === "invoice" ? "invoice" : "quote";
         const typeTemplates = res.data.templates.filter((t) => t.type === type);
         setTemplates(typeTemplates);
         const def = typeTemplates.find((t) => t.isDefault);
-        if (def) setSelectedTemplate(def.id);
+        const defaultId = def?.id ?? (docType === "invoice" ? res.data.branding?.invoiceTemplate : res.data.branding?.quoteTemplate) ?? "classic";
+        setSelectedTemplate(defaultId);
+        setPreviewTemplate(defaultId as TemplateId);
       }
     });
-  }, [open, docType]);
+  }, [open, docType, businessId]);
 
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
 
@@ -202,6 +215,88 @@ export const BillingFormModal = React.memo(function BillingFormModal({
     () => products.filter((p) => p.isActive !== false),
     [products],
   );
+
+  const handleSelectTemplate = useCallback(async (templateId: string) => {
+    if (savingTemplate || selectedTemplate === templateId) return;
+    setSavingTemplate(true);
+    try {
+      const body = docType === "invoice"
+        ? { invoiceTemplate: templateId as 'classic' | 'modern' | 'minimal' }
+        : { quoteTemplate: templateId as 'classic' | 'modern' | 'minimal' };
+      const res = await setDocumentTemplate(body, businessId ?? undefined);
+      if (res.data) {
+        setSelectedTemplate(templateId);
+        setPreviewTemplate(templateId as TemplateId);
+        toast.success("Template updated");
+      } else {
+        toast.error("Failed to update template");
+      }
+    } catch {
+      toast.error("Failed to update template");
+    } finally {
+      setSavingTemplate(false);
+    }
+  }, [savingTemplate, selectedTemplate, docType, businessId]);
+
+  // Build preview data from current form state
+  const previewData: InvoiceTemplateData | null = useMemo(() => {
+    if (!businessData) return null;
+    const contact = contacts.find((c) => c.id === contactId) ?? null;
+    const subtotal = totals.subtotal;
+    const taxAmount = totals.tax;
+    const discountAmount = totals.discount;
+    const total = totals.total;
+
+    return {
+      type: docType,
+      number: isEditing ? "EDIT-001" : "PREVIEW",
+      status: docType === "invoice" ? "SENT" : "SENT",
+      issueDate: new Date().toISOString().split("T")[0],
+      dueDate: docType === "invoice" ? dateValue || null : null,
+      expiryDate: docType === "quote" ? dateValue || null : null,
+      contact: contact ? {
+        firstName: contact.firstName,
+        lastName: contact.lastName,
+        email: contact.email,
+        phone: contact.phone,
+      } : null,
+      items: items
+        .filter((i) => i.description || i.unitPrice)
+        .map((i) => ({
+          id: i.id,
+          description: i.description,
+          quantity: parseFloat(i.quantity) || 0,
+          unitPrice: parseFloat(i.unitPrice) || 0,
+          total: (parseFloat(i.quantity) || 0) * (parseFloat(i.unitPrice) || 0),
+        })),
+      subtotal,
+      taxRate: parseFloat(taxRate) || 0,
+      taxAmount,
+      discountType: discountType || null,
+      discountValue: discountValue ? parseFloat(discountValue) : null,
+      discountAmount,
+      total,
+      currency,
+      notes: notes || null,
+      business: {
+        name: businessData.name,
+        logoUrl: businessData.logoUrl || null,
+        address: businessData.address,
+        city: businessData.city,
+        country: businessData.country,
+        phone: businessData.phone,
+        email: businessData.email,
+        website: businessData.website,
+        tagline: businessData.tagline,
+        primaryColor: businessData.primaryColor,
+        secondaryColor: businessData.secondaryColor,
+      },
+    };
+  }, [businessData, contacts, contactId, docType, isEditing, dateValue, items, totals, taxRate, discountType, discountValue, currency, notes]);
+
+  const hasContentForPreview = contactId || items.some((i) => i.description || i.unitPrice);
+
+  const previewWidth = previewView === "desktop" ? 800 : previewView === "print" ? 794 : 375;
 
   if (!open) return null;
 
@@ -258,6 +353,15 @@ export const BillingFormModal = React.memo(function BillingFormModal({
               </button>
               <button
                 type="button"
+                onClick={() => setShowPreview(true)}
+                disabled={!hasContentForPreview}
+                className="px-4 py-2.5 text-sm font-medium rounded-xl border border-border/50 bg-white/[0.03] hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-all disabled:opacity-40 inline-flex items-center gap-1.5"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Preview
+              </button>
+              <button
+                type="button"
                 onClick={onSubmit}
                 disabled={saving}
                 className="px-5 py-2.5 text-sm font-semibold rounded-xl text-white transition-all flex items-center gap-2 disabled:opacity-50"
@@ -298,371 +402,132 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                   </motion.div>
                 )}
 
-                <SectionHeader
-                  label={`${theme.label} Details`}
-                  icon={User}
+                <FormDetailsSection
                   open={sections.details}
                   onToggle={() => toggle("details")}
                   accentColor={theme.accent}
+                  docType={docType}
+                  contactId={contactId}
+                  onContactChange={onContactChange}
+                  contacts={contacts}
+                  dateValue={dateValue}
+                  onDateChange={onDateChange}
+                  dateLabel={theme.dateLabel}
+                  label={theme.label}
+                  onPaymentTermsChange={onPaymentTermsChange}
                 />
-                {sections.details && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="space-y-4 pb-3"
-                  >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <ContactSelect
-                        value={contactId}
-                        onChange={onContactChange}
-                        contacts={contacts}
-                        label={docType === "invoice" ? "Client (optional)" : "Client"}
-                        required={docType === "quote"}
-                      />
-                      <div className="space-y-1.5">
-                        <label className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Calendar className="w-3 h-3" /> {theme.dateLabel}
-                        </label>
-                        <input
-                          type="date"
-                          value={dateValue}
-                          onChange={(e) => onDateChange(e.target.value)}
-                          className="kf-input w-full"
-                        />
-                      </div>
-                    </div>
 
-                    {docType === "invoice" && onPaymentTermsChange && (
-                      <div className="space-y-1.5">
-                        <label className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Calendar className="w-3 h-3" /> Payment Terms
-                        </label>
-                        <div className="flex flex-wrap gap-2">
-                          {PAYMENT_TERMS.map((t) => (
-                            <button
-                              key={t.value}
-                              type="button"
-                              onClick={() => onPaymentTermsChange(t.value)}
-                              className="px-3 min-h-[44px] text-xs rounded-lg border border-border/50 bg-white/[0.03] hover:bg-white/[0.08] text-muted-foreground hover:text-foreground transition-all"
-                            >
-                              {t.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-
-                <SectionHeader
-                  label="Line Items"
-                  icon={FileText}
+                <FormLineItemsSection
                   open={sections.items}
                   onToggle={() => toggle("items")}
                   accentColor={theme.accent}
+                  items={items}
+                  currency={currency}
+                  activeProducts={activeProducts}
+                  onAddItem={onAddItem}
+                  onRemoveItem={onRemoveItem}
+                  onUpdateItem={onUpdateItem}
+                  onSelectProduct={onSelectProduct}
                 />
-                {sections.items && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="space-y-3 pb-3"
-                  >
-                    {items.map((lineItem, idx) => (
-                      <div
-                        key={lineItem.id}
-                        className="rounded-xl border border-border/40 bg-white/[0.02] p-3.5 space-y-3"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] text-muted-foreground/60 font-medium">
-                            Item {idx + 1}
-                          </span>
-                          {items.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => onRemoveItem(lineItem.id)}
-                              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_80px_90px] gap-3">
-                          <div className="space-y-1">
-                            <label className="text-[11px] text-muted-foreground">Product</label>
-                            <select
-                              value={lineItem.productId}
-                              onChange={(e) => onSelectProduct(lineItem.id, e.target.value)}
-                              className="kf-input w-full text-sm"
-                            >
-                              <option value="">Select product...</option>
-                              {activeProducts.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} — {formatAmount(p.price, currency)}
-                                </option>
-                              ))}
-                              <option value="__NEW__">+ New Item</option>
-                            </select>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[11px] text-muted-foreground">Description</label>
-                            <input
-                              type="text"
-                              value={lineItem.description}
-                              onChange={(e) => onUpdateItem(lineItem.id, "description", e.target.value)}
-                              placeholder="Item description"
-                              className="kf-input w-full text-sm"
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[11px] text-muted-foreground">Qty</label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={lineItem.quantity}
-                              onChange={(e) => onUpdateItem(lineItem.id, "quantity", e.target.value)}
-                              className="kf-input w-full text-sm text-center"
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[11px] text-muted-foreground">Unit Price</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={lineItem.unitPrice}
-                              onChange={(e) => onUpdateItem(lineItem.id, "unitPrice", e.target.value)}
-                              placeholder="0.00"
-                              className="kf-input w-full text-sm"
-                            />
-                          </div>
-                        </div>
-
-                        {lineItem.isNewItem && (
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-border/20">
-                            <div className="space-y-1">
-                              <label className="text-[11px] text-muted-foreground">Item Name</label>
-                              <input
-                                type="text"
-                                value={lineItem.newItemName || ""}
-                                onChange={(e) => onUpdateItem(lineItem.id, "newItemName", e.target.value)}
-                                placeholder="New item name"
-                                className="kf-input w-full text-sm"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-[11px] text-muted-foreground">Category</label>
-                              <select
-                                value={lineItem.newItemCategory || "SERVICE"}
-                                onChange={(e) => onUpdateItem(lineItem.id, "newItemCategory", e.target.value)}
-                                className="kf-input w-full text-sm"
-                              >
-                                {CATEGORIES.map((c) => (
-                                  <option key={c.value} value={c.value}>{c.label}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="flex items-end pb-0.5">
-                              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={lineItem.addToCatalog || false}
-                                  onChange={(e) => onUpdateItem(lineItem.id, "addToCatalog", e.target.checked)}
-                                  className="rounded border-border"
-                                />
-                                Add to catalog
-                              </label>
-                            </div>
-                          </div>
-                        )}
-
-                        {lineItem.unitPrice && lineItem.quantity && (
-                          <div className="text-right">
-                            <span className="text-xs text-muted-foreground">
-                              Subtotal:{" "}
-                              <span className="text-foreground font-medium">
-                                {formatAmount(
-                                  (parseFloat(lineItem.quantity) || 0) * (parseFloat(lineItem.unitPrice) || 0),
-                                  currency,
-                                )}
-                              </span>
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-
-                    <button
-                      type="button"
-                      onClick={onAddItem}
-                      className="w-full min-h-[44px] rounded-xl border border-dashed border-border/50 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-border hover:bg-white/[0.03] transition-all flex items-center justify-center gap-1.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Add Line Item
-                    </button>
-                  </motion.div>
-                )}
-
-                <SectionHeader
-                  label="Tax & Discount"
-                  icon={Percent}
+                <FormTaxDiscountSection
                   open={sections.financials}
                   onToggle={() => toggle("financials")}
                   accentColor={theme.accent}
+                  taxRate={taxRate}
+                  onTaxRateChange={onTaxRateChange}
+                  discountType={discountType}
+                  onDiscountTypeChange={onDiscountTypeChange}
+                  discountValue={discountValue}
+                  onDiscountValueChange={onDiscountValueChange}
                 />
-                {sections.financials && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="space-y-4 pb-3"
-                  >
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Percent className="w-3 h-3" /> Tax Rate (%)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max="100"
-                          value={taxRate}
-                          onChange={(e) => onTaxRateChange(e.target.value)}
-                          placeholder="12.5"
-                          className="kf-input w-full"
-                        />
-                      </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Tag className="w-3 h-3" /> Discount Type
-                        </label>
-                        <div className="flex rounded-lg border border-border/50 overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => onDiscountTypeChange("PERCENT")}
-                            className={`flex-1 min-h-[44px] text-xs font-medium transition-all ${
-                              discountType === "PERCENT"
-                                ? "bg-white/[0.1] text-foreground"
-                                : "text-muted-foreground hover:bg-white/[0.04]"
-                            }`}
-                          >
-                            Percent
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onDiscountTypeChange("FIXED")}
-                            className={`flex-1 min-h-[44px] text-xs font-medium transition-all ${
-                              discountType === "FIXED"
-                                ? "bg-white/[0.1] text-foreground"
-                                : "text-muted-foreground hover:bg-white/[0.04]"
-                            }`}
-                          >
-                            Fixed
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Tag className="w-3 h-3" /> Discount Value
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={discountValue}
-                          onChange={(e) => onDiscountValueChange(e.target.value)}
-                          placeholder={discountType === "PERCENT" ? "10" : "50.00"}
-                          className="kf-input w-full"
-                        />
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                <SectionHeader
-                  label="Notes"
-                  icon={MessageSquare}
+                <FormNotesSection
                   open={sections.notes}
                   onToggle={() => toggle("notes")}
                   accentColor={theme.accent}
+                  notes={notes}
+                  onNotesChange={onNotesChange}
+                  placeholder={`Add notes to this ${theme.label.toLowerCase()}...`}
                 />
-                {sections.notes && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="pb-3"
-                  >
-                    <textarea
-                      value={notes}
-                      onChange={(e) => onNotesChange(e.target.value)}
-                      placeholder={`Add notes to this ${theme.label.toLowerCase()}...`}
-                      rows={3}
-                      className="kf-input w-full resize-none text-sm"
-                    />
-                  </motion.div>
-                )}
 
-                <SectionHeader
-                  label="Document Template"
-                  icon={FileText}
+                <FormTemplateSection
                   open={sections.template}
                   onToggle={() => toggle("template")}
                   accentColor={theme.accent}
+                  templates={templates}
+                  selectedTemplate={selectedTemplate}
+                  savingTemplate={savingTemplate}
+                  onSelectTemplate={handleSelectTemplate}
                 />
-                {sections.template && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="pb-3 space-y-2"
-                  >
-                    <div className="grid grid-cols-3 gap-2">
-                      {(templates ?? []).map((t) => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={async () => {
-                            if (savingTemplate || selectedTemplate === t.id) return;
-                            setSavingTemplate(true);
-                            try {
-                              const body = docType === "invoice" ? { invoiceTemplate: t.id as 'classic' | 'modern' | 'minimal' } : { quoteTemplate: t.id as 'classic' | 'modern' | 'minimal' };
-                              const res = await setDocumentTemplate(body);
-                              if (res.data) {
-                                setSelectedTemplate(t.id);
-                                toast.success(`${t.name} template selected`);
-                              } else {
-                                toast.error("Failed to update template");
-                              }
-                            } catch {
-                              toast.error("Failed to update template");
-                            } finally {
-                              setSavingTemplate(false);
-                            }
-                          }}
-                          disabled={savingTemplate}
-                          className={`rounded-lg border px-2 py-1.5 text-[10px] font-medium transition-all ${
-                            selectedTemplate === t.id
-                              ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
-                              : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
-                          } disabled:opacity-50`}
-                        >
-                          {t.name}
-                        </button>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
               </div>
       </SideSheet>
+
+      {/* Preview Overlay */}
+      <AnimatePresence>
+        {showPreview && previewData && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 bg-card border-b border-border/40">
+              <div className="flex items-center gap-3">
+                <Eye className="w-4 h-4 text-muted-foreground" />
+                <div>
+                  <h3 className="text-sm font-semibold">Preview {theme.label}</h3>
+                  <p className="text-[10px] text-muted-foreground">See how your client will see it</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* View mode toggles */}
+                <div className="flex items-center rounded-lg border border-border/40 overflow-hidden">
+                  <PreviewViewButton icon={Monitor} active={previewView === "desktop"} onClick={() => setPreviewView("desktop")} />
+                  <PreviewViewButton icon={Smartphone} active={previewView === "mobile"} onClick={() => setPreviewView("mobile")} />
+                  <PreviewViewButton icon={Printer} active={previewView === "print"} onClick={() => setPreviewView("print")} />
+                </div>
+                <button
+                  onClick={() => setShowPreview(false)}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-white/[0.05] rounded-xl transition-colors"
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+            </div>
+
+            {/* Toolbar */}
+            <div className="flex items-center justify-center gap-2 px-4 py-2 bg-card/50 border-b border-border/30">
+              {(["classic", "modern", "minimal"] as TemplateId[]).map((tid) => (
+                <button
+                  key={tid}
+                  onClick={() => setPreviewTemplate(tid)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all ${
+                    previewTemplate === tid
+                      ? "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30"
+                      : "text-muted-foreground hover:text-foreground border border-transparent hover:border-border/40"
+                  }`}
+                >
+                  {previewTemplate === tid && <Check className="w-3 h-3" />}
+                  {TEMPLATE_META[tid].name}
+                </button>
+              ))}
+            </div>
+
+            {/* Preview canvas */}
+            <div className="flex-1 overflow-auto flex items-start justify-center p-6">
+              <motion.div
+                animate={{ width: previewWidth }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="bg-white rounded-xl shadow-2xl overflow-hidden"
+              >
+                <InvoiceTemplateRenderer templateId={previewTemplate} data={previewData} />
+              </motion.div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <ConfirmDialog
         open={showDiscardDialog}
@@ -677,3 +542,24 @@ export const BillingFormModal = React.memo(function BillingFormModal({
     </>
   );
 });
+
+function PreviewViewButton({
+  icon: Icon,
+  active,
+  onClick,
+}: {
+  icon: React.ElementType;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-2.5 py-1.5 transition-colors ${
+        active ? "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      <Icon className="w-3.5 h-3.5" />
+    </button>
+  );
+}

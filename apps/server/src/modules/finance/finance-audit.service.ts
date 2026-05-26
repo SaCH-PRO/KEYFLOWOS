@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -41,7 +41,7 @@ export interface FinanceAuditInput {
 @Injectable()
 export class FinanceAuditService {
   private readonly logger = new Logger(FinanceAuditService.name);
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async log(input: FinanceAuditInput): Promise<void> {
     try {

@@ -1264,6 +1264,8 @@ export class CommerceService {
     method: string;
     reference?: string;
     notes?: string;
+    evidenceUrl?: string;
+    evidenceMimeType?: string;
   }) {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
@@ -1306,6 +1308,8 @@ export class CommerceService {
           providerPaymentId: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           reference: input.reference ?? null,
           notes: input.notes ?? null,
+          evidenceUrl: input.evidenceUrl ?? null,
+          evidenceMimeType: input.evidenceMimeType ?? null,
           businessId,
           invoiceId,
         },

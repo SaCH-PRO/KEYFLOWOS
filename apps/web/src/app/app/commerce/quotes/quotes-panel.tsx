@@ -65,10 +65,13 @@ import {
 } from "../components/commerce-types";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
+import { InvoiceDriveUploader, buildTemplateData } from "../components/invoice-drive-uploader";
 import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/standardized-cards";
 import { getQuoteSmartCTA } from "../utils/smart-cta";
 import { useQuoteForm } from "../hooks/use-quote-form";
 import { useBusinessPreview } from "../hooks/use-business-preview";
+import { useBulkSelection } from "../hooks/use-bulk-selection";
+import { useLineItemHandlers } from "../hooks/use-line-item-handlers";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -227,16 +230,7 @@ export default function QuotesPanel({
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  const toggleSelected = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const { selectedIds, toggleSelected, selectAll, clearSelection } = useBulkSelection();
 
   const handleBulkStatusChange = useCallback(async (status: string) => {
     if (!businessId || selectedIds.size === 0) return;
@@ -244,7 +238,7 @@ export default function QuotesPanel({
     const { data, error } = await bulkUpdateQuotes(businessId, Array.from(selectedIds), action as "send" | "reject" | "delete");
     if (data) {
       toast.success(`${data.updated} quote(s) updated`);
-      setSelectedIds(new Set());
+      clearSelection();
       if (data.updated > 0) {
         const eligibleStatuses: Record<string, string[]> = {
           send: ["DRAFT"],
@@ -295,90 +289,17 @@ export default function QuotesPanel({
     toast.success(`Exported ${toExport.length} quote(s)`);
   }, [quotes, selectedIds]);
 
-  const [autoConvertToInvoice, setAutoConvertToInvoice] = useState(() => {
+  const [autoConvertToInvoice, setAutoConvertToInvoice] = useState(false);
+  useEffect(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("kf_auto_convert_quote") === "true";
+      setAutoConvertToInvoice(localStorage.getItem("kf_auto_convert_quote") === "true");
     }
-    return false;
-  });
+  }, []);
 
-  function addQuoteItem() {
-    setQuoteForm((f) => ({
-      ...f,
-      items: [...f.items, { id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
-    }));
-  }
-
-  function removeQuoteItem(itemId: string) {
-    setQuoteForm((f) => ({
-      ...f,
-      items: f.items.filter((item: InvoiceLineItem) => item.id !== itemId),
-    }));
-  }
-
-  function updateQuoteItem(itemId: string, field: keyof InvoiceLineItem, value: string | boolean) {
-    setQuoteForm((f) => ({
-      ...f,
-      items: f.items.map((item: InvoiceLineItem) =>
-        item.id === itemId ? { ...item, [field]: value } : item
-      ),
-    }));
-  }
-
-  function selectProductForQuoteItem(itemId: string, productId: string) {
-    if (productId === "__NEW__") {
-      setQuoteForm((f) => ({
-        ...f,
-        items: f.items.map((item: InvoiceLineItem) =>
-          item.id === itemId
-            ? {
-                ...item,
-                productId: "__NEW__",
-                isNewItem: true,
-                newItemName: "",
-                newItemCategory: "SERVICE",
-                description: "",
-                unitPrice: "",
-                addToCatalog: false,
-              }
-            : item
-        ),
-      }));
-      return;
-    }
-    const product = products.find((p) => p.id === productId);
-    if (product) {
-      setQuoteForm((f) => ({
-        ...f,
-        items: f.items.map((item: InvoiceLineItem) =>
-          item.id === itemId
-            ? {
-                ...item,
-                productId,
-                description: product.name,
-                unitPrice: String(product.price),
-                isNewItem: false,
-                addToCatalog: false,
-              }
-            : item
-        ),
-      }));
-    } else {
-      setQuoteForm((f) => ({
-        ...f,
-        items: f.items.map((item: InvoiceLineItem) =>
-          item.id === itemId
-            ? {
-                ...item,
-                productId: "",
-                isNewItem: false,
-                addToCatalog: false,
-              }
-            : item
-        ),
-      }));
-    }
-  }
+  const { addItem: addQuoteItem, removeItem: removeQuoteItem, updateItem: updateQuoteItem, selectProduct: selectProductForQuoteItem } = useLineItemHandlers(
+    (updater) => setQuoteForm((f) => ({ ...f, items: updater(f.items) })),
+    products,
+  );
 
   function isQuoteExpired(quote: Quote): boolean {
     if (!quote.expiryDate) return false;
@@ -550,6 +471,10 @@ export default function QuotesPanel({
         setQuotes((q) => [res.data!, ...q]);
         toast.success("Quote created");
         emitEvent("commerce:quote_created", "commerce", { quoteId: res.data.id });
+
+        // Queue Drive upload for the new quote
+        const templateId = (businessData?.quoteTemplate as string) || "classic";
+        setPendingDriveUpload({ quoteId: res.data.id, templateId });
       } else if (res.error) {
         toast.error("Failed to create quote");
       }
@@ -776,6 +701,7 @@ export default function QuotesPanel({
         onNotesChange={(v) => setQuoteForm((f) => ({ ...f, notes: v }))}
         originLabel={crossModuleOriginLabel}
         originRoute={crossModuleOriginRoute}
+        businessId={businessId}
       />
 
       <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4">
@@ -930,7 +856,7 @@ export default function QuotesPanel({
                   checked={filteredQuotes.length > 0 && filteredQuotes.every((q) => selectedIds.has(q.id))}
                   onChange={() => {
                     const allSelected = filteredQuotes.every((q) => selectedIds.has(q.id));
-                    setSelectedIds(allSelected ? new Set() : new Set(filteredQuotes.map((q) => q.id)));
+                    allSelected ? clearSelection() : selectAll(filteredQuotes.map((q) => q.id));
                   }}
                   className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
                   aria-label="Select all visible quotes"
@@ -1104,8 +1030,8 @@ export default function QuotesPanel({
       <BulkActionBar
         selectedCount={selectedIds.size}
         totalCount={filteredQuotes.length}
-        onSelectAll={() => setSelectedIds(new Set(filteredQuotes.map((q) => q.id)))}
-        onClearSelection={() => setSelectedIds(new Set())}
+        onSelectAll={() => selectAll(filteredQuotes.map((q) => q.id))}
+        onClearSelection={clearSelection}
         onExportCsv={handleExportCsv}
         onBulkDelete={handleBulkDelete}
         statusOptions={[

@@ -165,7 +165,7 @@ export function WorkspaceShell({
 
       {banners && <div className="space-y-2 mb-4">{banners}</div>}
 
-      {metricStrip && <div className="mb-4">{metricStrip}</div>}
+      {metricStrip && <div className="mb-5">{metricStrip}</div>}
 
       {tabs && tabs.length > 0 && activeTab && onTabChange && (
         <TabNav

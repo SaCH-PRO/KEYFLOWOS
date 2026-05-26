@@ -12,6 +12,7 @@ import {
   CheckCircle,
   Clock,
   Receipt,
+  Paperclip,
 } from "lucide-react";
 import { fetchInvoices, fetchExpensesByProject, type Expense, type Invoice } from "@/lib/client";
 
@@ -319,7 +320,20 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
             <div className="space-y-1.5">
               {linkedInvoice.payments.map((p, i) => (
                 <div key={i} className="flex items-center justify-between text-xs rounded-lg px-2.5 py-1.5" style={{ background: "hsl(var(--kf-success) / 0.06)" }}>
-                  <span className="text-muted-foreground">{p.provider || "Payment"}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-muted-foreground">{p.provider || "Payment"}</span>
+                    {p.evidenceUrl && (
+                      <a
+                        href={p.evidenceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="View payment evidence"
+                        className="text-amber-400 hover:underline"
+                      >
+                        <Paperclip className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
                   <span className="font-medium" style={{ color: "hsl(var(--kf-success))" }}>
                     TTD ${Number(p.amount).toLocaleString("en-TT", { minimumFractionDigits: 2 })}
                   </span>

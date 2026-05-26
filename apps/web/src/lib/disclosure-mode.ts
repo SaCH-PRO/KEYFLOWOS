@@ -20,28 +20,44 @@ const DEFAULT_MODE: DisclosureMode = "startup";
 const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
   startup: new Set([
     "/app/keyflow-command",   // Cockpit
-    "/app/commerce",          // Revenue
-    "/app/crm/pipeline",      // Contacts
-    "/app/bookings",          // Bookings
-    "/app/store",             // Storefront
+    "/app/money",             // Money
+    "/app/money/revenue",     // Revenue
+    "/app/people",            // People
+    "/app/people/pipeline",   // Pipeline
+    "/app/schedule",          // Schedule
+    "/app/schedule/bookings", // Bookings
+    "/app/build",             // Build
+    "/app/build/business",    // Business
+    "/app/build/business/store", // Storefront
+    "/app/build/system",      // System
+    "/app/build/system/workspace", // Workspace settings
     "/app/profile",           // Profile
-    "/app/settings",          // Settings
   ]),
   growth: new Set([
     "/app/keyflow-command",   // Cockpit
-    "/app/commerce",          // Revenue
-    "/app/crm/pipeline",      // Contacts
-    "/app/bookings",          // Bookings
-    "/app/automations",       // Flows
-    "/app/projects",          // Projects
+    "/app/money",             // Money
+    "/app/money/revenue",     // Revenue
+    "/app/money/expenses",    // Expenses
+    "/app/people",            // People
+    "/app/people/pipeline",   // Pipeline
+    "/app/work",              // Work
+    "/app/work/projects",     // Projects
+    "/app/schedule",          // Schedule
+    "/app/schedule/bookings", // Bookings
+    "/app/schedule/calendar", // Calendar
     "/app/inbox",             // Inbox
-    "/app/marketing",         // Content
-    "/app/reports",           // Reports
-    "/app/expenses",          // Expenses
-    "/app/finance",           // Finance
-    "/app/store",             // Storefront
+    "/app/communicate",       // Communicate
+    "/app/communicate/campaigns", // Campaigns
+    "/app/intelligence",      // Intelligence
+    "/app/intelligence/reports", // Reports
+    "/app/build",             // Build
+    "/app/build/business",    // Business
+    "/app/build/business/store", // Storefront
+    "/app/build/system",      // System
+    "/app/build/system/workspace", // Workspace
+    "/app/build/automate",    // Automate
+    "/app/build/automate/flows", // Flows
     "/app/profile",           // Profile
-    "/app/settings",          // Settings
   ]),
   enterprise: new Set([
     // All routes — every path starting with /app is visible
@@ -49,22 +65,45 @@ const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
   ]),
 };
 
-/** Which workspace nav items are shown per mode.
- *  These labels must match the `label` field in workspacesNav exactly.
+/** Which Operate nav items are shown per mode.
+ *  These labels must match the `label` field in operateNav exactly.
  */
-export const MODE_WORKSPACE_ITEMS: Record<DisclosureMode, string[]> = {
-  startup: ["Revenue", "Contacts", "Bookings"],
-  growth: ["Revenue", "Contacts", "Bookings", "Flows", "Projects", "Inbox", "Content", "Reports", "Expenses", "Finance", "Helpdesk", "Structure"],
-  enterprise: ["Revenue", "Contacts", "Bookings", "Flows", "Projects", "Inbox", "Content", "Reports", "Expenses", "Finance", "Helpdesk", "Structure"],
+export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
+  startup: ["Overview", "Revenue", "Directory", "Pipeline", "Calendar", "Bookings"],
+  growth: [
+    "Overview", "Revenue", "Expenses",
+    "Directory", "Pipeline",
+    "Projects", "Time",
+    "Calendar", "Bookings",
+    "Inbox", "Campaigns",
+    "Reports", "Goals",
+  ],
+  enterprise: [
+    "Overview", "Revenue", "Expenses", "Accounting", "Cash Flow",
+    "Directory", "Pipeline", "Sequences", "Intelligence", "Service",
+    "Projects", "Time", "Agreements", "Tasks",
+    "Calendar", "Bookings", "Calls",
+    "Inbox", "Campaigns", "Content", "Social",
+    "Reports", "Goals", "Operations", "Compliance",
+  ],
 };
 
-/** Which studio nav items are shown per mode.
- *  Both modes show Storefront + Settings.
+/** Which Build nav items are shown per mode.
+ *  These labels must match the `label` field in buildNav exactly.
  */
-export const MODE_STUDIO_ITEMS: Record<DisclosureMode, string[]> = {
-  startup: ["Storefront", "Settings"],
-  growth: ["Storefront", "Settings"],
-  enterprise: ["Storefront", "Settings"],
+export const MODE_BUILD_ITEMS: Record<DisclosureMode, string[]> = {
+  startup: ["Blueprint", "Storefront", "Presence", "Account", "Workspace"],
+  growth: [
+    "Blueprint", "Storefront", "Presence", "Templates",
+    "Account", "Workspace", "Connections", "AI",
+    "Overview", "Flows",
+  ],
+  enterprise: [
+    "Blueprint", "Storefront", "Presence", "Templates",
+    "Account", "Workspace", "Connections", "AI", "Compliance", "Developers",
+    "Overview", "Google", "Microsoft", "Payments", "Accounting", "Marketing", "Social", "Forms", "WhatsApp",
+    "Flows", "Workflows",
+  ],
 };
 
 /** Human-readable labels. */
@@ -118,3 +157,13 @@ export function hasChosenMode(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(STORAGE_KEY) !== null;
 }
+
+// ============================================================================
+// BACKWARD COMPATIBILITY — Legacy exports
+// ============================================================================
+
+/** @deprecated Use MODE_OPERATE_ITEMS instead */
+export const MODE_WORKSPACE_ITEMS = MODE_OPERATE_ITEMS;
+
+/** @deprecated Use MODE_BUILD_ITEMS instead */
+export const MODE_STUDIO_ITEMS = MODE_BUILD_ITEMS;

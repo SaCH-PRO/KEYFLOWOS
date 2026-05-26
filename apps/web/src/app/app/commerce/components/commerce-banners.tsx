@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowRight } from "lucide-react";
-import { FinanceBanner } from "../../finance/components/finance-banner";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 
 interface LimitCheck {
@@ -97,6 +96,6 @@ export function CommerceBanners({
     );
   }
 
-  // P5 — Finance info banner (lowest priority, dismissible)
-  return <FinanceBanner from="commerce" />;
+  // P5 — no more banners
+  return null;
 }

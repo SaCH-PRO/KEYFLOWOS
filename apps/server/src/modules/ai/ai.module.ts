@@ -92,6 +92,7 @@ import { AiIntelligenceController } from './ai-intelligence.controller';
     KeyCommandService,
     AutopilotRulesService,
     PlanExecutorService,
+    WorkloadAggregatorService,
     FeedbackLoopService,
     ActionDispatcherService,
     ProactiveSuggestionService,

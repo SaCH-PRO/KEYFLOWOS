@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   fetchProducts,
   fetchInvoices,
@@ -32,6 +32,13 @@ export function useCommerceShell() {
   const [cachedImages, setCachedImages] = useState<Record<string, string>>({});
 
   const integrations = useCommerceIntegrations(businessId);
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -47,8 +54,10 @@ export function useCommerceShell() {
 
   useEffect(() => {
     if (!businessId) return;
+    const currentRequestId = ++requestIdRef.current;
     const load = async () => {
       setLoading(true);
+      setError(null);
       try {
         const [productsRes, invoicesRes, contactsRes, quotesRes, gmailRes, bizRes] = await Promise.all([
           fetchProducts(businessId),
@@ -58,18 +67,19 @@ export function useCommerceShell() {
           getGmailStatus(businessId),
           apiGet<{ metaData: Record<string, unknown> }>(`/identity/businesses/${businessId}`),
         ]);
+        // Ignore stale responses
+        if (currentRequestId !== requestIdRef.current || !mountedRef.current) return;
+
         setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
         setInvoices(invoicesRes.data ?? []);
         setContacts(contactsRes.data?.contacts ?? []);
         setQuotes(quotesRes.data ?? []);
         if (gmailRes.data) integrations.setGmailStatus(gmailRes.data);
         if (bizRes.data) {
-
           const biz = bizRes.data as Record<string, unknown>;
           if (typeof biz.currency === "string" && biz.currency) {
             setBusinessCurrency(biz.currency);
           }
-
           const meta = biz.metaData as Record<string, unknown> | undefined;
           if (meta) {
             integrations.setPaymentGateways({
@@ -79,24 +89,43 @@ export function useCommerceShell() {
           }
         }
         if (productsRes.error) setError(productsRes.error);
-        try { const imgs = await getAllProductImages(); setCachedImages(imgs); } catch {}
+        if (invoicesRes.error && !productsRes.error) setError(invoicesRes.error);
+        if (contactsRes.error && !productsRes.error && !invoicesRes.error) setError(contactsRes.error);
+        if (quotesRes.error && !productsRes.error && !invoicesRes.error && !contactsRes.error) setError(quotesRes.error);
+        try {
+          const imgs = await getAllProductImages();
+          if (currentRequestId === requestIdRef.current && mountedRef.current) {
+            setCachedImages(imgs);
+          }
+        } catch {
+          // silently ignore image fetch failures
+        }
       } catch (err) {
+        if (currentRequestId !== requestIdRef.current || !mountedRef.current) return;
         setError(err instanceof Error ? err.message : "Failed to load data");
       } finally {
-        setLoading(false);
+        if (currentRequestId === requestIdRef.current && mountedRef.current) {
+          setLoading(false);
+        }
       }
     };
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `integrations` is a setter bag from useIntegrations() that is recreated each render; including it would re-fetch all commerce data on every render. Only re-run when the businessId itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId]);
 
   useEffect(() => {
     if (!businessId) return;
     const handleVisibility = () => {
-      if (document.visibilityState === "visible" && businessId) {
+      if (document.visibilityState === "visible" && businessId && mountedRef.current) {
         const reload = async () => {
-          const productsRes = await fetchProducts(businessId);
-          setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
+          try {
+            const productsRes = await fetchProducts(businessId);
+            if (mountedRef.current) {
+              setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
+            }
+          } catch {
+            // ignore visibility reload errors
+          }
         };
         void reload();
       }
@@ -107,8 +136,14 @@ export function useCommerceShell() {
 
   const refreshProducts = useCallback(async () => {
     if (!businessId) return;
-    const res = await fetchProducts(businessId);
-    setProducts((res.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
+    try {
+      const res = await fetchProducts(businessId);
+      if (mountedRef.current) {
+        setProducts((res.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
+      }
+    } catch {
+      // ignore refresh errors
+    }
   }, [businessId]);
 
   return {

@@ -1,22 +1,20 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
-  Zap,
   X,
   ChevronDown,
-  LayoutGrid,
-  Wrench,
-  Globe,
   Lock,
   Shield,
   Sparkles,
   LogOut,
 } from "lucide-react";
-import type { NavItem } from "@/lib/nav-config";
+import type { NavItem, NavSection } from "@/lib/nav-config";
 
 interface MobileDrawerProps {
   mobileDrawerOpen: boolean;
@@ -25,16 +23,104 @@ interface MobileDrawerProps {
   displayName: string;
   initials: string;
   avatarUrl: string | null;
-  visibleWorkspacesNav: NavItem[];
-  visibleStudioNav: NavItem[];
-  visiblePublicNav: NavItem[];
-  visibleComingSoonNav: NavItem[];
+  visibleOperateSections: NavSection[];
+  visibleBuildSections: NavSection[];
+  visibleMoreNav: NavItem[];
+  meNav: NavItem[];
   isSecondaryActive: (item: NavItem) => boolean;
   isFeatureLocked: (item: NavItem) => boolean;
   connectorAlertCount: number;
   isAdminUser: boolean;
   setKfStoreOpen: React.Dispatch<React.SetStateAction<boolean>>;
   handleLogout: () => void;
+}
+
+function MobileSection({
+  section,
+  isSecondaryActive,
+  isFeatureLocked,
+  connectorAlertCount,
+  onNavigate,
+}: {
+  section: NavSection;
+  isSecondaryActive: (item: NavItem) => boolean;
+  isFeatureLocked: (item: NavItem) => boolean;
+  connectorAlertCount: number;
+  onNavigate: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="mt-2"
+    >
+      <div className="flex items-center gap-2 px-2 mb-1">
+        <div className="w-3 h-[2px] rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent2))] to-transparent" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+          {section.label}
+        </span>
+      </div>
+      <div className="flex flex-col gap-px">
+        {section.items.map((item) => {
+          const Icon = item.icon;
+          const active = isSecondaryActive(item);
+          const showConnectorBadge =
+            item.href === "/app/build/connect" && connectorAlertCount > 0;
+          const isLocked = isFeatureLocked(item);
+          if (isLocked) {
+            return (
+              <button
+                key={item.href + item.label}
+                type="button"
+                aria-disabled="true"
+                title="Unlock with upgrade"
+                onClick={(e) => e.preventDefault()}
+                className="flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-[13px] text-muted-foreground/40 cursor-not-allowed opacity-50"
+              >
+                <Icon className="w-[18px] h-[18px] flex-shrink-0" />
+                <span>{item.label}</span>
+                <Lock className="w-3 h-3 ml-auto text-muted-foreground/40" />
+              </button>
+            );
+          }
+          return (
+            <Link
+              key={item.href + item.label}
+              href={item.href}
+              onClick={onNavigate}
+              className={cn(
+                "flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-[13px] transition-all relative active:scale-[0.98]",
+                active
+                  ? "bg-gradient-to-r from-[hsl(var(--kf-accent1))]/8 to-[hsl(var(--kf-accent2))]/4 text-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+              )}
+            >
+              {active && (
+                <div
+                  className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full"
+                  style={{
+                    background: "linear-gradient(180deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                  }}
+                />
+              )}
+              <Icon className={cn("w-[18px] h-[18px] flex-shrink-0", active && "text-[hsl(var(--kf-accent1))]")} />
+              <span>{item.label}</span>
+              {showConnectorBadge && (
+                <span
+                  className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white animate-slow-pulse"
+                  style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                  aria-label={`${connectorAlertCount} connectors need attention`}
+                >
+                  {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
+                </span>
+              )}
+            </Link>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
 }
 
 export function MobileDrawer({
@@ -44,10 +130,10 @@ export function MobileDrawer({
   displayName,
   initials,
   avatarUrl,
-  visibleWorkspacesNav,
-  visibleStudioNav,
-  visiblePublicNav,
-  visibleComingSoonNav,
+  visibleOperateSections,
+  visibleBuildSections,
+  visibleMoreNav,
+  meNav,
   isSecondaryActive,
   isFeatureLocked,
   connectorAlertCount,
@@ -55,29 +141,50 @@ export function MobileDrawer({
   setKfStoreOpen,
   handleLogout,
 }: MobileDrawerProps) {
+  const [moreExpanded, setMoreExpanded] = useState(false);
+
   if (!mobileDrawerOpen) return null;
+
+  const closeDrawer = () => setMobileDrawerOpen(false);
 
   return (
     <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Navigation menu">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setMobileDrawerOpen(false)} />
-      <div
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={closeDrawer}
+      />
+      <motion.div
+        initial={{ x: "-100%" }}
+        animate={{ x: 0 }}
+        exit={{ x: "-100%" }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
         className="absolute left-0 top-0 bottom-0 w-72 border-r border-border flex flex-col overflow-y-auto"
         role="navigation"
         aria-label="Main navigation"
-        style={{ background: "hsl(var(--kf-sidebar-bg))" }}
+        style={{ background: "hsl(var(--kf-sidebar-bg) / 0.95)" }}
       >
+        {/* Header with KEY branding */}
         <div className="flex items-center justify-between px-3 py-3 border-b border-border">
           <div className="flex items-center gap-2.5">
             <div
-              className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0"
-              style={{ background: "hsl(var(--kf-accent1))" }}
+              className="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{
+                background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                boxShadow: "0 2px 8px hsl(var(--kf-accent1) / 0.3)",
+              }}
             >
-              <Zap className="w-3.5 h-3.5 text-white" />
+              <Sparkles className="w-[18px] h-[18px] text-white" />
             </div>
-            <h1 className="text-sm font-bold tracking-tight">KEYFLOWOS</h1>
+            <div>
+              <h1 className="text-sm font-bold tracking-tight">KEYFLOWOS</h1>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Command Center</p>
+            </div>
           </div>
           <button
-            onClick={() => setMobileDrawerOpen(false)}
+            onClick={closeDrawer}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             <X className="w-4 h-4" />
@@ -87,7 +194,7 @@ export function MobileDrawer({
         {displayName && (
           <Link
             href="/app/profile"
-            onClick={() => setMobileDrawerOpen(false)}
+            onClick={closeDrawer}
             className="px-3 py-2.5 border-b border-border flex items-center gap-2.5 hover:bg-muted transition-colors min-h-[44px]"
           >
             {avatarUrl ? (
@@ -95,7 +202,7 @@ export function MobileDrawer({
             ) : (
               <div
                 className="h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-white flex-shrink-0"
-                style={{ background: "hsl(var(--kf-accent1))" }}
+                style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
               >
                 {initials}
               </div>
@@ -109,189 +216,128 @@ export function MobileDrawer({
         )}
 
         <div className="flex-1 py-2 px-2">
+          {/* Cockpit link */}
           <Link
             href="/app/keyflow-command"
-            onClick={() => setMobileDrawerOpen(false)}
+            onClick={closeDrawer}
             className={cn(
-              "kf-nav-item py-2.5 active:scale-[0.98] mb-2",
+              "flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-[13px] transition-all relative active:scale-[0.98] mb-2",
               (pathname === "/app" ||
                 pathname.startsWith("/app/keyflow-command") ||
                 pathname.startsWith("/app/control-tower")) &&
-                "active"
+                "bg-gradient-to-r from-[hsl(var(--kf-accent1))]/8 to-[hsl(var(--kf-accent2))]/4 text-foreground font-medium"
             )}
           >
-            <Zap className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+            {(pathname === "/app" ||
+              pathname.startsWith("/app/keyflow-command") ||
+              pathname.startsWith("/app/control-tower")) && (
+              <div
+                className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full"
+                style={{
+                  background: "linear-gradient(180deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                }}
+              />
+            )}
+            <Sparkles className="w-[18px] h-[18px] text-white flex-shrink-0" />
             <span>Cockpit</span>
           </Link>
 
-          {/* WORKSPACES */}
-          <div className="mt-2">
-            <div className="kf-section-label flex items-center gap-1.5">
-              <LayoutGrid className="w-3 h-3" />
-              Workspaces
-            </div>
-            <div className="flex flex-col gap-px">
-              {visibleWorkspacesNav.map((item) => {
-                const Icon = item.icon;
-                const active = isSecondaryActive(item);
-                const isLocked = isFeatureLocked(item);
-                if (isLocked) {
-                  return (
-                    <button
-                      key={item.href + item.label}
-                      type="button"
-                      aria-disabled="true"
-                      title="future keyflow"
-                      onClick={(e) => e.preventDefault()}
-                      className="kf-nav-item py-2.5 w-full text-left opacity-60 cursor-not-allowed"
-                    >
-                      <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                      <span>{item.label}</span>
-                      <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
-                    </button>
-                  );
-                }
-                return (
-                  <Link
-                    key={item.href + item.label}
-                    href={item.href}
-                    onClick={() => setMobileDrawerOpen(false)}
-                    className={cn("kf-nav-item py-2.5 active:scale-[0.98]", active && "active")}
-                  >
-                    <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
+          {/* OPERATE */}
+          <AnimatePresence>
+            {visibleOperateSections.map((section, i) => (
+              <motion.div
+                key={section.id}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.05 }}
+              >
+                <MobileSection
+                  section={section}
+                  isSecondaryActive={isSecondaryActive}
+                  isFeatureLocked={isFeatureLocked}
+                  connectorAlertCount={connectorAlertCount}
+                  onNavigate={closeDrawer}
+                />
+              </motion.div>
+            ))}
+          </AnimatePresence>
 
-          {/* STUDIO */}
-          <div className="mt-2">
-            <div className="kf-section-label flex items-center gap-1.5">
-              <Wrench className="w-3 h-3" />
-              Studio
-            </div>
-            <div className="flex flex-col gap-px">
-              {visibleStudioNav.map((item) => {
-                const Icon = item.icon;
-                const active = isSecondaryActive(item);
-                const showConnectorBadge =
-                  item.href === "/app/connect" && connectorAlertCount > 0;
-                const isLocked = isFeatureLocked(item);
-                if (isLocked) {
-                  return (
-                    <button
-                      key={item.href + item.label}
-                      type="button"
-                      aria-disabled="true"
-                      title="future keyflow"
-                      onClick={(e) => e.preventDefault()}
-                      className="kf-nav-item py-2.5 w-full text-left opacity-60 cursor-not-allowed"
-                    >
-                      <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                      <span>{item.label}</span>
-                      <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
-                    </button>
-                  );
-                }
-                return (
-                  <Link
-                    key={item.href + item.label}
-                    href={item.href}
-                    onClick={() => setMobileDrawerOpen(false)}
-                    className={cn("kf-nav-item py-2.5 active:scale-[0.98]", active && "active")}
-                  >
-                    <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                    <span>{item.label}</span>
-                    {showConnectorBadge && (
-                      <span
-                        className="ml-auto h-4 min-w-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
-                        style={{ background: "hsl(var(--kf-accent1))" }}
-                        aria-label={`${connectorAlertCount} connectors need attention`}
-                      >
-                        {connectorAlertCount > 9 ? "9+" : connectorAlertCount}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
+          {/* BUILD */}
+          <AnimatePresence>
+            {visibleBuildSections.map((section, i) => (
+              <motion.div
+                key={section.id}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: (visibleOperateSections.length + i) * 0.05 }}
+              >
+                <MobileSection
+                  section={section}
+                  isSecondaryActive={isSecondaryActive}
+                  isFeatureLocked={isFeatureLocked}
+                  connectorAlertCount={connectorAlertCount}
+                  onNavigate={closeDrawer}
+                />
+              </motion.div>
+            ))}
+          </AnimatePresence>
 
-          {/* PUBLIC */}
-          <div className="mt-2">
-            <div className="kf-section-label flex items-center gap-1.5">
-              <Globe className="w-3 h-3" />
-              Public
-            </div>
-            <div className="flex flex-col gap-px">
-              {visiblePublicNav.map((item) => {
-                const Icon = item.icon;
-                const active = isSecondaryActive(item);
-                const isLocked = isFeatureLocked(item);
-                if (isLocked) {
-                  return (
-                    <button
-                      key={item.href + item.label}
-                      type="button"
-                      aria-disabled="true"
-                      title="future keyflow"
-                      onClick={(e) => e.preventDefault()}
-                      className="kf-nav-item py-2.5 w-full text-left opacity-60 cursor-not-allowed"
-                    >
-                      <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                      <span>{item.label}</span>
-                      <Lock className="w-3 h-3 ml-auto text-muted-foreground/60" />
-                    </button>
-                  );
-                }
-                return (
-                  <Link
-                    key={item.href + item.label}
-                    href={item.href}
-                    onClick={() => setMobileDrawerOpen(false)}
-                    className={cn("kf-nav-item py-2.5 active:scale-[0.98]", active && "active")}
-                  >
-                    <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-
-          {visibleComingSoonNav.length > 0 && (
+          {/* MORE — dormant modules */}
+          {visibleMoreNav.length > 0 && (
             <div className="mt-2">
-              <div className="kf-section-label flex items-center gap-1.5">
-                <Lock className="w-3 h-3" />
-                Coming soon
-              </div>
-              <div className="flex flex-col gap-px">
-                {visibleComingSoonNav.map((item) => {
-                  const Icon = item.icon;
-                  const active = isSecondaryActive(item);
-                  return (
-                    <Link
-                      key={item.href + item.label}
-                      href={item.href}
-                      onClick={() => setMobileDrawerOpen(false)}
-                      className={cn("kf-nav-item py-2.5 active:scale-[0.98] opacity-70", active && "active")}
-                    >
-                      <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                      <span>{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
+              <button
+                onClick={() => setMoreExpanded((v) => !v)}
+                className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-muted-foreground transition-colors w-full"
+              >
+                <div className="w-3 h-[2px] rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent2))] to-transparent" />
+                <span>More</span>
+                <ChevronDown
+                  className={cn(
+                    "w-3 h-3 ml-auto transition-transform",
+                    moreExpanded && "rotate-180"
+                  )}
+                />
+              </button>
+              <AnimatePresence>
+                {moreExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex flex-col gap-px mt-1">
+                      {visibleMoreNav.map((item) => {
+                        const Icon = item.icon;
+                        const active = isSecondaryActive(item);
+                        return (
+                          <Link
+                            key={item.href + item.label}
+                            href={item.href}
+                            onClick={closeDrawer}
+                            className={cn(
+                              "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all opacity-70 hover:opacity-100 active:scale-[0.98]",
+                              active && "opacity-100 bg-gradient-to-r from-[hsl(var(--kf-accent1))]/8 to-[hsl(var(--kf-accent2))]/4 text-foreground font-medium"
+                            )}
+                          >
+                            <Icon className="w-[18px] h-[18px] flex-shrink-0" />
+                            <span>{item.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
 
-          <div className="kf-divider my-2" />
+          <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent my-2" />
 
           <button
-            onClick={() => { setMobileDrawerOpen(false); setKfStoreOpen(true); }}
-            className="kf-nav-item py-2.5 active:scale-[0.98] w-full"
+            onClick={() => { closeDrawer(); setKfStoreOpen(true); }}
+            className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all active:scale-[0.98] w-full"
           >
             <div
               className="w-[18px] h-[18px] rounded flex items-center justify-center flex-shrink-0"
@@ -305,10 +351,10 @@ export function MobileDrawer({
           {isAdminUser && (
             <Link
               href="/admin"
-              onClick={() => setMobileDrawerOpen(false)}
-              className="kf-nav-item py-2.5 active:scale-[0.98]"
+              onClick={closeDrawer}
+              className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all active:scale-[0.98]"
             >
-              <Shield className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+              <Shield className="w-[18px] h-[18px] flex-shrink-0" />
               <span>Owner Console</span>
             </Link>
           )}
@@ -320,13 +366,13 @@ export function MobileDrawer({
           </div>
           <button
             onClick={handleLogout}
-            className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-muted transition-all w-full active:scale-[0.98]"
+            className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted-foreground hover:text-foreground hover:bg-muted transition-all w-full active:scale-[0.98]"
           >
             <LogOut className="w-4 h-4" />
             Log Out
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

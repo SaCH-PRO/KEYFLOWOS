@@ -11,7 +11,9 @@ import {
   Calendar,
   DollarSign,
   Bell,
+  Radio,
 } from "lucide-react";
+import { Bot } from "lucide-react";
 import type { EnrichedPriority } from "../../control-tower/components/use-control-tower-data";
 
 const ACTION_ICONS = [
@@ -58,23 +60,29 @@ export function CockpitKeyPanel({
 
   return (
     <div className="space-y-4">
-      {/* KEY Card */}
+      {/* KEY Card — enhanced */}
       <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.5, delay: 0.2 }}
-        className="rounded-xl border border-[hsl(var(--kf-border))] bg-gradient-to-b from-[hsl(var(--kf-card))] to-[hsl(var(--kf-muted)/0.2)] overflow-hidden"
+        className="kf-card-key overflow-hidden"
       >
         {/* Header */}
         <div className="p-4 border-b border-[hsl(var(--kf-border))] flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[hsl(var(--kf-accent1))]/10 flex items-center justify-center">
-            <Sparkles className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-500 to-teal-500 flex items-center justify-center shadow-md">
+            <Bot className="w-5 h-5 text-white" />
           </div>
           <div>
             <h3 className="text-sm font-semibold">KEY</h3>
             <p className="text-[10px] text-muted-foreground">
               Your calm command partner
             </p>
+          </div>
+          <div className="ml-auto">
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-gradient-to-r from-orange-500/10 to-teal-500/10 border border-orange-500/10">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[9px] text-muted-foreground">Online</span>
+            </div>
           </div>
         </div>
 
@@ -89,7 +97,10 @@ export function CockpitKeyPanel({
           {preparedActions.length > 0 && (
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold">KEY Prepared</span>
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-[hsl(var(--kf-accent1))]" />
+                  <span className="text-xs font-semibold">KEY Prepared</span>
+                </div>
                 <span className="text-[10px] text-muted-foreground">
                   {preparedActions.length} ready for review
                 </span>
@@ -104,7 +115,7 @@ export function CockpitKeyPanel({
                       initial={{ opacity: 0, x: 10 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: 0.4 + i * 0.08 }}
-                      className="flex items-start gap-2.5 p-2.5 rounded-lg bg-[hsl(var(--kf-background))] border border-[hsl(var(--kf-border))] hover:border-[hsl(var(--kf-border)/1.5)] transition-colors group cursor-pointer"
+                      className="kf-card-depth p-2.5 group cursor-pointer"
                       onClick={() => {
                         const primaryAction = action.actions.find(
                           (a) => a.variant === "primary"
@@ -114,24 +125,26 @@ export function CockpitKeyPanel({
                         }
                       }}
                     >
-                      <div
-                        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5"
-                        style={{ background: `${meta.color}15` }}
-                      >
-                        <meta.icon
-                          className="w-3.5 h-3.5"
-                          style={{ color: meta.color }}
-                        />
+                      <div className="flex items-start gap-2.5">
+                        <div
+                          className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5"
+                          style={{ background: `${meta.color}15` }}
+                        >
+                          <meta.icon
+                            className="w-3.5 h-3.5"
+                            style={{ color: meta.color }}
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">
+                            {action.title}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            {preparedLabel}
+                          </p>
+                        </div>
+                        <ArrowRight className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity shrink-0 mt-1.5" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">
-                          {action.title}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground truncate">
-                          {preparedLabel}
-                        </p>
-                      </div>
-                      <ArrowRight className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity shrink-0 mt-1.5" />
                     </motion.div>
                   );
                 })}
@@ -147,7 +160,7 @@ export function CockpitKeyPanel({
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 onClick={() => router.push("/app/keyflow-command")}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] text-white text-sm font-medium hover:opacity-90 transition-opacity"
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl kf-btn-glow"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 Review & Approve ({pendingApprovals})
@@ -160,7 +173,7 @@ export function CockpitKeyPanel({
             <input
               type="text"
               placeholder="Ask KEY anything..."
-              className="w-full pl-3 pr-10 py-2.5 rounded-lg bg-[hsl(var(--kf-background))] border border-[hsl(var(--kf-border))] text-sm placeholder:text-muted-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]/30 transition-colors"
+              className="w-full pl-3 pr-10 py-2.5 rounded-xl bg-[hsl(var(--kf-background))] border border-[hsl(var(--kf-border))] text-sm placeholder:text-muted-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]/30 transition-colors"
               onFocus={() =>
                 window.dispatchEvent(
                   new CustomEvent("kf:open-key", { detail: { mode: "chat" } })
@@ -169,7 +182,7 @@ export function CockpitKeyPanel({
               readOnly
             />
             <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-[hsl(var(--kf-accent1))] text-white hover:brightness-110 transition-all"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] text-white hover:brightness-110 transition-all shadow-lg"
               onClick={() =>
                 window.dispatchEvent(
                   new CustomEvent("kf:open-key", { detail: { mode: "chat" } })
@@ -196,7 +209,7 @@ export function CockpitKeyPanel({
                     })
                   )
                 }
-                className="px-2.5 py-1 rounded-full text-[10px] bg-[hsl(var(--kf-muted))] text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--kf-muted-foreground)/0.1)] transition-colors"
+                className="px-2.5 py-1 rounded-full text-[10px] bg-gradient-to-r from-orange-500/5 to-teal-500/5 border border-orange-500/10 text-muted-foreground hover:text-foreground hover:border-orange-500/25 transition-colors"
               >
                 {chip}
               </button>
@@ -205,15 +218,18 @@ export function CockpitKeyPanel({
         </div>
       </motion.div>
 
-      {/* Activity Feed */}
+      {/* Activity Feed — enhanced */}
       <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.5, delay: 0.4 }}
-        className="rounded-xl border border-[hsl(var(--kf-border))] p-4"
+        className="kf-card-key p-4"
       >
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-semibold">Activity Feed</h3>
+          <div className="flex items-center gap-1.5">
+            <Radio className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
+            <h3 className="text-xs font-semibold">Activity Feed</h3>
+          </div>
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--kf-success))] opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-[hsl(var(--kf-success))]" />
@@ -224,15 +240,21 @@ export function CockpitKeyPanel({
             preparedActions.slice(0, 4).map((action, i) => {
               const times = ["Just now", "3m ago", "12m ago", "18m ago"];
               return (
-                <div key={action.id} className="flex items-start gap-2.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent1))] mt-1.5 shrink-0" />
+                <motion.div
+                  key={action.id}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.5 + i * 0.08 }}
+                  className="flex items-start gap-2.5"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] mt-1.5 shrink-0" />
                   <div className="min-w-0">
                     <p className="text-xs truncate">{action.title}</p>
                     <p className="text-[10px] text-muted-foreground">
                       {times[i] ?? `${(i + 1) * 5}m ago`}
                     </p>
                   </div>
-                </div>
+                </motion.div>
               );
             })
           ) : (

@@ -19,20 +19,22 @@ import { apiGet, apiPatch } from "@/lib/api";
 import {
   getDisclosureMode,
   setDisclosureMode as persistDisclosureMode,
-  MODE_WORKSPACE_ITEMS,
-  MODE_STUDIO_ITEMS,
+  MODE_OPERATE_ITEMS,
+  MODE_BUILD_ITEMS,
   type DisclosureMode,
 } from "@/lib/disclosure-mode";
 import { featureFlags as dormantFeatureFlags } from "@/lib/feature-flags";
 import type { AppNotification } from "@/lib/notifications";
 import type { ResolvedFeatureFlag } from "@/lib/nav-config";
 import {
-  workspacesNav,
-  studioNav,
-  publicNav,
-  comingSoonNav,
+  operateSections,
+  buildSections,
+  moreNav,
+  meNav,
   type NavItem,
+  type NavSection,
   type PrimaryNavItem,
+  type DrawerSurface,
 } from "@/lib/nav-config";
 import type { CopilotModule } from "@/components/ai/copilot-panel";
 
@@ -41,8 +43,8 @@ export interface AppLayoutState {
   searchParams: URLSearchParams;
   copilotModule: CopilotModule;
 
-  drawerSurface: "workspaces" | "studio" | "public" | null;
-  setDrawerSurface: React.Dispatch<React.SetStateAction<"workspaces" | "studio" | "public" | null>>;
+  drawerSurface: DrawerSurface;
+  setDrawerSurface: React.Dispatch<React.SetStateAction<DrawerSurface>>;
 
   notifications: AppNotification[];
   unreadCount: number;
@@ -65,10 +67,10 @@ export interface AppLayoutState {
   disclosureMode: DisclosureMode;
   setDisclosureMode: (mode: DisclosureMode) => void;
 
-  visibleWorkspacesNav: NavItem[];
-  visibleStudioNav: NavItem[];
-  visiblePublicNav: NavItem[];
-  visibleComingSoonNav: NavItem[];
+  visibleOperateSections: NavSection[];
+  visibleBuildSections: NavSection[];
+  visibleMoreNav: NavItem[];
+  meNav: NavItem[];
 
   isSecondaryActive: (item: NavItem) => boolean;
   isPrimaryActive: (item: PrimaryNavItem) => boolean;
@@ -104,22 +106,22 @@ export function useAppLayout(): AppLayoutState {
 
   const copilotModule = useMemo((): CopilotModule => {
     if (pathname === "/app") return "cockpit";
-    if (pathname.startsWith("/app/crm")) return "crm";
-    if (pathname.startsWith("/app/commerce")) return "revenue";
+    if (pathname.startsWith("/app/crm") || pathname.startsWith("/app/people")) return "crm";
+    if (pathname.startsWith("/app/commerce") || pathname.startsWith("/app/money")) return "revenue";
     if (pathname.startsWith("/app/payments")) return "revenue";
-    if (pathname.startsWith("/app/bookings")) return "calendar";
-    if (pathname.startsWith("/app/social") || pathname.startsWith("/app/marketing")) return "content";
-    if (pathname.startsWith("/app/projects")) return "projects";
+    if (pathname.startsWith("/app/bookings") || pathname.startsWith("/app/schedule")) return "calendar";
+    if (pathname.startsWith("/app/social") || pathname.startsWith("/app/marketing") || pathname.startsWith("/app/communicate")) return "content";
+    if (pathname.startsWith("/app/projects") || pathname.startsWith("/app/work")) return "projects";
     if (pathname.startsWith("/app/expenses")) return "expenses";
-    if (pathname.startsWith("/app/automations")) return "flows";
-    if (pathname.startsWith("/app/settings")) return "settings";
-    if (pathname.startsWith("/app/store")) return "store";
+    if (pathname.startsWith("/app/automations") || pathname.startsWith("/app/build/automate")) return "flows";
+    if (pathname.startsWith("/app/settings") || pathname.startsWith("/app/build/system")) return "settings";
+    if (pathname.startsWith("/app/store") || pathname.startsWith("/app/build/business/store")) return "store";
     if (pathname.startsWith("/app/profile")) return "profile";
     if (pathname.startsWith("/app/structure")) return "flows";
     return "cockpit";
   }, [pathname]);
 
-  const [drawerSurface, setDrawerSurface] = useState<"workspaces" | "studio" | "public" | null>(null);
+  const [drawerSurface, setDrawerSurface] = useState<DrawerSurface>(null);
 
   useEffect(() => {
     setDrawerSurface(null);
@@ -171,31 +173,32 @@ export function useAppLayout(): AppLayoutState {
 
   const [disclosureMode, setDisclosureModeState] = useState<DisclosureMode>(getDisclosureMode);
 
-  const visibleWorkspacesNav = useMemo(
-    () => workspacesNav.filter((i) => {
-      if (isItemHiddenByDormantFlag(i)) return false;
-      if (disclosureMode === "enterprise") return true;
-      return MODE_WORKSPACE_ITEMS[disclosureMode].includes(i.label);
-    }),
+  const visibleOperateSections = useMemo(
+    () => operateSections.map((section) => ({
+      ...section,
+      items: section.items.filter((i) => {
+        if (isItemHiddenByDormantFlag(i)) return false;
+        if (disclosureMode === "enterprise") return true;
+        return MODE_OPERATE_ITEMS[disclosureMode].includes(i.label);
+      }),
+    })).filter((s) => s.items.length > 0),
     [isItemHiddenByDormantFlag, disclosureMode],
   );
 
-  const visibleStudioNav = useMemo(
-    () => studioNav.filter((i) => {
-      if (isItemHiddenByDormantFlag(i)) return false;
-      if (disclosureMode === "enterprise") return true;
-      return MODE_STUDIO_ITEMS[disclosureMode].includes(i.label);
-    }),
+  const visibleBuildSections = useMemo(
+    () => buildSections.map((section) => ({
+      ...section,
+      items: section.items.filter((i) => {
+        if (isItemHiddenByDormantFlag(i)) return false;
+        if (disclosureMode === "enterprise") return true;
+        return MODE_BUILD_ITEMS[disclosureMode].includes(i.label);
+      }),
+    })).filter((s) => s.items.length > 0),
     [isItemHiddenByDormantFlag, disclosureMode],
   );
 
-  const visiblePublicNav = useMemo(
-    () => publicNav.filter((i) => !isItemHiddenByDormantFlag(i)),
-    [isItemHiddenByDormantFlag],
-  );
-
-  const visibleComingSoonNav = useMemo(
-    () => comingSoonNav.filter((i) => !isItemHiddenByDormantFlag(i)),
+  const visibleMoreNav = useMemo(
+    () => moreNav.filter((i) => !isItemHiddenByDormantFlag(i)),
     [isItemHiddenByDormantFlag],
   );
 
@@ -221,18 +224,26 @@ export function useAppLayout(): AppLayoutState {
         const isUuid = /^[0-9a-f-]{20,}$/i.test(last || "");
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
-          app: "KEYFLOW", crm: "Contacts", pipeline: "Contacts", commerce: "Revenue",
-          bookings: "Bookings", marketing: "Content", expenses: "Studio",
-          projects: "Projects", documents: "Documents", automations: "Flows", reports: "Reports",
-          store: "Storefront", settings: "Studio", learn: "Learn",
+          app: "KEYFLOW",
+          crm: "People", pipeline: "People", people: "People",
+          commerce: "Money", money: "Money",
+          bookings: "Schedule", schedule: "Schedule",
+          marketing: "Communicate", communicate: "Communicate",
+          expenses: "Money",
+          projects: "Work", work: "Work",
+          documents: "Documents",
+          automations: "Automate", "build": "Build",
+          reports: "Intelligence", intelligence: "Intelligence",
+          store: "Storefront", settings: "System",
+          learn: "Learn",
           community: "Community", marketplace: "Marketplace",
           "control-tower": "Cockpit",
           "keyflow-command": "Cockpit",
-          structure: "Studio",
+          structure: "Operations",
           inbox: "Inbox",
-          calendar: "Calendar",
-          presence: "Public",
-          connect: "Integrations",
+          calendar: "Schedule",
+          presence: "Presence",
+          connect: "Connect",
         };
         const label = labelMap[labelSegment || ""] || (labelSegment ? labelSegment.charAt(0).toUpperCase() + labelSegment.slice(1) : "");
         if (label) {
@@ -401,10 +412,10 @@ export function useAppLayout(): AppLayoutState {
     isItemHiddenByDormantFlag,
     disclosureMode,
     setDisclosureMode,
-    visibleWorkspacesNav,
-    visibleStudioNav,
-    visiblePublicNav,
-    visibleComingSoonNav,
+    visibleOperateSections,
+    visibleBuildSections,
+    visibleMoreNav,
+    meNav,
     isSecondaryActive,
     isPrimaryActive,
     addMenuOpen,

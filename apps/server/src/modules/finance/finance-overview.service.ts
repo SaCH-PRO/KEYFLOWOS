@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 
@@ -68,14 +68,16 @@ export interface FinanceOverview {
 @Injectable()
 export class FinanceOverviewService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly accountSeeder: FinancialAccountSeederService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Optional() @Inject(FinancialAccountSeederService) private readonly accountSeeder: FinancialAccountSeederService | null,
   ) {}
 
   async getOverview(businessId: string): Promise<FinanceOverview> {
     // First read of the surface seeds the default Cash + Bank accounts +
     // system COA so the numbers below are never zero on a clean install.
-    await this.accountSeeder.ensureDefaults(businessId);
+    if (this.accountSeeder) {
+      await this.accountSeeder.ensureDefaults(businessId);
+    }
 
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },

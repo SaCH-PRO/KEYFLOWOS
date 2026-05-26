@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
 
@@ -25,8 +25,8 @@ const PROCESSOR_LABELS: Record<string, string> = {
 @Injectable()
 export class FinancialAccountSeederService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly coaSeeder: ChartOfAccountsSeederService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ChartOfAccountsSeederService) private readonly coaSeeder: ChartOfAccountsSeederService,
   ) {}
 
   /**

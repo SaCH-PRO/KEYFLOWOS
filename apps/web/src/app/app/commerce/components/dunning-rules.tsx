@@ -72,27 +72,34 @@ export function DunningRulesPanel({ businessId }: DunningRulesPanelProps) {
 
   return (
     <div className="rounded-xl border border-border/50 bg-card overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-4 py-3 hover:bg-white/[0.02] transition-colors"
-      >
-        <Bell className="w-3.5 h-3.5 text-amber-400" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-          Auto-Reminders (Dunning)
-        </span>
+      <div className="w-full flex items-center gap-2 px-4 py-3">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-2 flex-1 hover:text-foreground transition-colors text-left"
+        >
+          <Bell className="w-3.5 h-3.5 text-amber-400" />
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+            Auto-Reminders (Dunning)
+          </span>
+        </button>
         <InfoBadge
           title="Dunning Rules"
           body="Automatically send payment reminders to clients when invoices become overdue. Configure how many days after the due date each reminder is sent."
           side="right"
           iconSize={10}
         />
-        <span className="text-[10px] text-muted-foreground/50 ml-auto mr-2">
-          {enabledCount} active rule{enabledCount !== 1 ? "s" : ""}
-        </span>
-        <ChevronDown
-          className={`w-3.5 h-3.5 text-muted-foreground/40 transition-transform ${expanded ? "rotate-180" : ""}`}
-        />
-      </button>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-2 hover:text-foreground transition-colors"
+        >
+          <span className="text-[10px] text-muted-foreground/50 mr-2">
+            {enabledCount} active rule{enabledCount !== 1 ? "s" : ""}
+          </span>
+          <ChevronDown
+            className={`w-3.5 h-3.5 text-muted-foreground/40 transition-transform ${expanded ? "rotate-180" : ""}`}
+          />
+        </button>
+      </div>
 
       <AnimatePresence>
         {expanded && (

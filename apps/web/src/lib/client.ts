@@ -274,6 +274,8 @@ export type PaymentRecord = {
   createdAt: string;
   businessId: string;
   invoiceId: string;
+  evidenceUrl?: string | null;
+  evidenceMimeType?: string | null;
 };
 
 export type Invoice = {
@@ -547,7 +549,7 @@ export async function fetchBookings(businessId: string = DEFAULT_BUSINESS_ID, or
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(businessId)}${qs}`,
     z.array(bookingSchema),
-    fallbackBookings,
+    process.env.NODE_ENV === "development" ? fallbackBookings : undefined,
   );
 }
 
@@ -616,7 +618,7 @@ export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
     `/commerce/businesses/${encodeURIComponent(businessId)}/invoices`,
     envelopeSchema,
   );
-  return { data: res.data?.data ?? fallbackInvoices, error: res.error };
+  return { data: res.data?.data ?? (process.env.NODE_ENV === "development" ? fallbackInvoices : []), error: res.error };
 }
 
 export async function createContact(input: {
@@ -2028,9 +2030,68 @@ export async function recordInvoicePayment(businessId: string, invoiceId: string
   method: string;
   reference?: string;
   notes?: string;
+  evidenceUrl?: string;
+  evidenceMimeType?: string;
 }): Promise<ApiResult<{ payment: PaymentRecord; invoice: Invoice; paidAmount: number; remaining: number }>> {
   return apiPost({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments`,
+    body: input,
+  });
+}
+
+export async function recordPaymentFromEvidence(businessId: string, invoiceId: string, input: {
+  evidenceUrl: string;
+  evidenceMimeType: string;
+  filename: string;
+  source: 'drive' | 'upload';
+  driveFileId?: string;
+}): Promise<ApiResult<{
+  payment: PaymentRecord;
+  invoiceStatus: string;
+  extracted: {
+    amount: number;
+    method: string;
+    reference?: string;
+    notes?: string;
+    confidence: number;
+  };
+}>> {
+  return apiPost({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments/from-evidence`,
+    body: input,
+  });
+}
+
+export async function extractPaymentEvidence(businessId: string, input: {
+  evidenceUrl: string;
+  evidenceMimeType: string;
+  filename: string;
+  source: 'drive' | 'upload';
+  driveFileId?: string;
+}): Promise<ApiResult<{
+  extracted: {
+    amount: number;
+    method: string;
+    reference?: string;
+    notes?: string;
+    confidence: number;
+    date?: string;
+    payer?: string;
+  } | null;
+  candidates: {
+    id: string;
+    invoiceNumber: string | null;
+    total: number;
+    remaining: number;
+    currency: string;
+    status: string;
+    contactName: string;
+    dueDate: string | null;
+  }[];
+  raw: unknown;
+}>> {
+  return apiPost({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/payments/extract-evidence`,
     body: input,
   });
 }
@@ -3101,6 +3162,72 @@ export async function aiGenerateFlow(input: { businessId?: string; prompt: strin
     path: `/automation/businesses/${encodeURIComponent(businessId)}/ai/generate-flow`,
     body: { prompt: input.prompt },
   });
+}
+
+/* ---------- KEY Talk Pipeline — Flow Automations ---------- */
+
+export async function keyInterpretFlow(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; recommendation?: string; confidence?: number; proposedFlow?: any; alternatives?: any[]; error?: string }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/interpret`, body: { intent: input.intent } });
+}
+
+export async function keyBuildFlow(input: { businessId?: string; proposedFlow: any }): Promise<ApiResult<{ success: boolean; flowId?: string; flow?: any; error?: string }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/build`, body: { proposedFlow: input.proposedFlow } });
+}
+
+export async function keyExecuteFlow(input: { businessId?: string; flowId: string; testContext?: Record<string, any> }): Promise<ApiResult<{ success: boolean; executed?: boolean; actionsRun?: string[]; error?: string; proof?: any }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/execute`, body: { flowId: input.flowId, testContext: input.testContext } });
+}
+
+export async function keyTalkFlow(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<any>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/talk`, body: { intent: input.intent, autoExecute: input.autoExecute } });
+}
+
+/* ---------- KEY Talk Pipeline — Autopilot Delegations ---------- */
+
+export async function keyInterpretDelegation(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; recommendation?: string; confidence?: number; recommendedLoopType?: string; proposedConfig?: any; alternatives?: any[]; error?: string }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/interpret`, body: { intent: input.intent } });
+}
+
+export async function keyBuildDelegation(input: { businessId?: string; recommendedLoopType: string; proposedConfig?: any; enabled?: boolean }): Promise<ApiResult<{ success: boolean; loopId?: string; loop?: any; error?: string }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/build`, body: { recommendedLoopType: input.recommendedLoopType, proposedConfig: input.proposedConfig, enabled: input.enabled } });
+}
+
+export async function keyExecuteDelegation(input: { businessId?: string; loopId: string }): Promise<ApiResult<{ success: boolean; result?: any; proof?: any; error?: string }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/execute`, body: { loopId: input.loopId } });
+}
+
+export async function keyTalkDelegation(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<any>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/talk`, body: { intent: input.intent, autoExecute: input.autoExecute } });
+}
+
+/* ---------- KEY Talk — Calendar ---------- */
+
+export async function keyInterpretCalendar(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; actionType?: string; recommendation?: string; confidence?: number; proposedEvent?: any; alternatives?: any[]; error?: string }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/interpret`, body: { intent: input.intent } });
+}
+
+export async function keyBuildCalendar(input: { businessId?: string; proposedEvent: any }): Promise<ApiResult<{ success: boolean; eventId?: string; event?: any; error?: string }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/build`, body: { proposedEvent: input.proposedEvent } });
+}
+
+export async function keyExecuteCalendar(input: { businessId?: string; eventId: string }): Promise<ApiResult<{ success: boolean; executed?: boolean; event?: any; error?: string; proof?: any }>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/execute`, body: { eventId: input.eventId } });
+}
+
+export async function keyTalkCalendar(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<any>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/talk`, body: { intent: input.intent, autoExecute: input.autoExecute } });
 }
 
 export async function getCalendarAuthUrl(businessId?: string) {
@@ -5004,6 +5131,9 @@ export interface Expense {
   tags?: string[];
   isRecurring: boolean;
   recurringFrequency?: string;
+  status?: string;
+  dueDate?: string;
+  paidAt?: string;
   categoryId?: string | null;
   category?: ExpenseCategory;
   projectId?: string | null;
@@ -5076,7 +5206,7 @@ export const PAYMENT_METHODS = [
   { value: 'linx', label: 'Linx' },
   { value: 'other', label: 'Other' },
 ];
-export async function fetchExpenses(businessId: string, params?: { startDate?: string; endDate?: string; period?: string; categoryId?: string; search?: string; paymentMethod?: string; tag?: string; page?: number; limit?: number }): Promise<ApiResult<{ data: Expense[]; total: number; page: number; limit: number }>> {
+export async function fetchExpenses(businessId: string, params?: { startDate?: string; endDate?: string; period?: string; categoryId?: string; search?: string; paymentMethod?: string; tag?: string; status?: string; page?: number; limit?: number }): Promise<ApiResult<{ data: Expense[]; total: number; page: number; limit: number }>> {
   const q = new URLSearchParams();
   if (params?.startDate) q.set('startDate', params.startDate);
   if (params?.endDate) q.set('endDate', params.endDate);
@@ -5085,6 +5215,7 @@ export async function fetchExpenses(businessId: string, params?: { startDate?: s
   if (params?.search) q.set('search', params.search);
   if (params?.paymentMethod) q.set('paymentMethod', params.paymentMethod);
   if (params?.tag) q.set('tag', params.tag);
+  if (params?.status) q.set('status', params.status);
   if (params?.page) q.set('page', String(params.page));
   if (params?.limit) q.set('limit', String(params.limit));
   return apiGetSimple<{ data: Expense[]; total: number; page: number; limit: number }>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses?${q}`);
@@ -5161,6 +5292,55 @@ export function getExpenseExportUrl(businessId: string, params?: { startDate?: s
   if (params?.endDate) q.set('endDate', params.endDate);
   if (params?.categoryId) q.set('categoryId', params.categoryId);
   return `${API_BASE}/expenses/businesses/${encodeURIComponent(businessId)}/expenses/export?${q}`;
+}
+
+// ---
+// RECURRING EXPENSES
+// ---
+export interface RecurringExpense {
+  id: string;
+  name: string;
+  frequency: string;
+  nextRunDate: string;
+  lastRunDate?: string | null;
+  endDate?: string | null;
+  isActive: boolean;
+  runCount: number;
+  failureCount: number;
+  lastFailureAt?: string | null;
+  lastError?: string | null;
+  cancelledAt?: string | null;
+  description: string;
+  amount: number;
+  currency: string;
+  vendor?: string | null;
+  paymentMethod?: string | null;
+  notes?: string | null;
+  createsBill: boolean;
+  dueOffsetDays?: number | null;
+  categoryId?: string | null;
+  category?: ExpenseCategory | null;
+  projectId?: string | null;
+  contactId?: string | null;
+  serviceId?: string | null;
+  businessId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export async function fetchRecurringExpenses(businessId: string): Promise<ApiResult<RecurringExpense[]>> {
+  return apiGetSimple<RecurringExpense[]>(`/expenses/businesses/${encodeURIComponent(businessId)}/recurring`);
+}
+export async function createRecurringExpense(businessId: string, data: Partial<RecurringExpense>): Promise<ApiResult<RecurringExpense>> {
+  return apiPost<RecurringExpense>({ path: `/expenses/businesses/${encodeURIComponent(businessId)}/recurring`, body: data });
+}
+export async function updateRecurringExpense(businessId: string, id: string, data: Partial<RecurringExpense>): Promise<ApiResult<RecurringExpense>> {
+  return apiPatch<RecurringExpense>(`/expenses/businesses/${encodeURIComponent(businessId)}/recurring/${id}`, data);
+}
+export async function cancelRecurringExpense(businessId: string, id: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/expenses/businesses/${encodeURIComponent(businessId)}/recurring/${id}`);
+}
+export async function runRecurringExpenseNow(businessId: string, id: string): Promise<ApiResult<void>> {
+  return apiPost<void>({ path: `/expenses/businesses/${encodeURIComponent(businessId)}/recurring/${id}/run`, body: {} });
 }
 
 // ---
@@ -13041,7 +13221,7 @@ export async function fetchDocumentTemplates(businessId?: string) {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGetSimple<{
     templates: DocumentTemplate[];
-    branding: { primaryColor?: string; secondaryColor?: string; logoUrl?: string };
+    branding: { primaryColor?: string; secondaryColor?: string; logoUrl?: string; invoiceTemplate?: string; quoteTemplate?: string };
   }>(`/commerce/businesses/${encodeURIComponent(bid)}/document-templates`);
 }
 
@@ -13050,14 +13230,54 @@ export async function setDocumentTemplate(
   businessId?: string,
 ) {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiPost<{
+  return apiPatch<{
     success: boolean;
     invoiceTemplate?: string;
     quoteTemplate?: string;
-  }>({
-    path: `/commerce/businesses/${encodeURIComponent(bid)}/document-templates`,
-    body,
+  }>(`/commerce/businesses/${encodeURIComponent(bid)}/document-templates`, body);
+}
+
+export async function uploadGeneratedDocument(businessId: string, input: {
+  entityType: string;
+  entityId: string;
+  fileName: string;
+  mimeType: string;
+  contentBase64: string;
+  contentFormat: 'binary' | 'html';
+}): Promise<ApiResult<{
+  generatedDocumentId: string;
+  driveFileId: string;
+  webViewLink: string;
+}>> {
+  return apiPost({
+    path: `/drive/businesses/${encodeURIComponent(businessId)}/generated-documents`,
+    body: input,
   });
+}
+
+export async function listGeneratedDocuments(businessId: string, params?: {
+  entityType?: string;
+  entityId?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ApiResult<Array<{
+  id: string;
+  businessId: string;
+  entityType: string;
+  entityId: string;
+  driveFileId: string;
+  fileName: string;
+  mimeType: string;
+  folderPath: string;
+  generatedAt: string;
+}>>>> {
+  const qs = new URLSearchParams();
+  if (params?.entityType) qs.append('entityType', params.entityType);
+  if (params?.entityId) qs.append('entityId', params.entityId);
+  if (params?.limit) qs.append('limit', String(params.limit));
+  if (params?.offset) qs.append('offset', String(params.offset));
+  const query = qs.toString() ? `?${qs.toString()}` : '';
+  return apiGet(`/drive/businesses/${encodeURIComponent(businessId)}/generated-documents${query}`);
 }
 
 

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
 
@@ -22,8 +22,8 @@ export type UpdateCoaInput = Partial<Omit<CreateCoaInput, 'type'>> & { isActive?
 @Injectable()
 export class FinanceCoaService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly seeder: ChartOfAccountsSeederService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ChartOfAccountsSeederService) private readonly seeder: ChartOfAccountsSeederService,
   ) {}
 
   async list(businessId: string) {

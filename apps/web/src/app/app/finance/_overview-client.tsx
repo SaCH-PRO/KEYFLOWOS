@@ -95,7 +95,7 @@ function OverviewBody({ businessId }: { businessId: string }) {
           <div className="rounded-xl border border-border/40 bg-card/40 p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold">Action queue</h2>
-              <Link href="/app/finance/actions" className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+              <Link href="/app/money" className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
                 See all <ArrowRight className="w-3 h-3" />
               </Link>
             </div>

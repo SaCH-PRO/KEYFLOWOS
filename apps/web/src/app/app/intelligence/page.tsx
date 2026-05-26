@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-
-export default function IntelligenceRedirect() {
-  redirect("/app/keyflow-command");
+export default function IntelligenceIndexPage() {
+  redirect("/app/intelligence/reports");
 }

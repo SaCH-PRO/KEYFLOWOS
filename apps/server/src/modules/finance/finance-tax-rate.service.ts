@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface UpsertTaxRateInput {
@@ -15,7 +15,7 @@ export interface UpsertTaxRateInput {
  */
 @Injectable()
 export class FinanceTaxRateService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async list(businessId: string) {
     return this.prisma.client.taxRate.findMany({
